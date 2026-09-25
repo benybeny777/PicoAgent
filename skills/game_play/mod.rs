@@ -153,6 +153,27 @@ struct Observation {
     comment: String,
 }
 
+fn observation_schema(keys: &[String], decision: bool) -> Value {
+    let mut actions = vec![Value::Null];
+    if decision {
+        actions.extend(keys.iter().cloned().map(Value::String));
+    }
+    json!({
+        "type":"object", "additionalProperties":false,
+        "required":["recognized","confidence","scene","hp","hunger","summary","action","comment"],
+        "properties":{
+            "recognized":{"type":"boolean"},
+            "confidence":{"type":"number","minimum":0,"maximum":1},
+            "scene":{"type":"string","enum":["dungeon","menu","other"]},
+            "hp":{"anyOf":[{"type":"integer","minimum":0},{"type":"null"}]},
+            "hunger":{"anyOf":[{"type":"integer","minimum":0},{"type":"null"}]},
+            "summary":{"type":"string","maxLength":1000},
+            "action":{"enum":actions},
+            "comment":{"type":"string","maxLength":300}
+        }
+    })
+}
+
 fn validate(observation: &Observation, keys: &[String], decision: bool) -> Result<(), String> {
     if !observation.recognized
         || !(0.9..=1.0).contains(&observation.confidence)
@@ -265,13 +286,13 @@ async fn recognize(
             vec![format!("data:image/png;base64,{}", STANDARD.encode(png))],
         ),
     ];
-    let response = tokio::time::timeout(Duration::from_secs(60), provider.chat(cfg, &model, &messages, &[]))
+    let schema = observation_schema(&settings.keys, decision);
+    let response = tokio::time::timeout(Duration::from_secs(60), crate::providers::local::chat_structured(cfg, &model, &messages, &schema))
         .await.map_err(|_| "画面認識が60秒以内に完了しないため停止しました。".to_string())?
         .map_err(|_| "ローカルモデルの画面認識に失敗しました。モデルの画像対応とエンジンの状態を確認してください。".to_string())?;
     let content = crate::agent::guard_public_answer(response.content, PROMPT)?;
     let observation: Observation = serde_json::from_str(content.trim())
         .map_err(|_| "画面認識の応答が指定形式ではないため停止しました。".to_string())?;
-    validate(&observation, &settings.keys, decision)?;
     Ok(observation)
 }
 
@@ -279,6 +300,17 @@ fn save_json(path: &SafePath, data: &Value) -> Result<(), String> {
     let _guard = crate::store::lock_state("game_play_record");
     crate::store::write_json_atomic(path.as_path(), data)
         .map_err(|e| format!("ゲーム記録を保存できません: {e}"))
+}
+
+fn record_observation(
+    path: &SafePath,
+    observation: &Observation,
+    keys: &[String],
+    decision: bool,
+) -> Result<(), String> {
+    // 店内・不明・死亡などで拒否する場合も、画像と読み取った短い事実を照合できるよう先に保存する。
+    save_json(path, &json!(observation))?;
+    validate(observation, keys, decision)
 }
 
 async fn step(cfg: &Config, operation: &mut Operation, sequence: usize) -> Result<String, String> {
@@ -313,6 +345,12 @@ async fn step(cfg: &Config, operation: &mut Operation, sequence: usize) -> Resul
     let before = platform::capture(&target)?;
     permissions::fs::write(&before_path, &before)?;
     let chosen = recognize(cfg, &before, &settings, &history, true).await?;
+    record_observation(
+        &SafePath::app_owned(folder.as_path().join("before-observation.json")),
+        &chosen,
+        &settings.keys,
+        true,
+    )?;
     check_cancel(cancel)?;
     if Settings::read(cfg)? != settings || start.elapsed() > Duration::from_secs(60) {
         return Err(
@@ -358,6 +396,12 @@ async fn step(cfg: &Config, operation: &mut Operation, sequence: usize) -> Resul
         false,
     )
     .await?;
+    record_observation(
+        &SafePath::app_owned(folder.as_path().join("after-observation.json")),
+        &observed,
+        &settings.keys,
+        false,
+    )?;
     check_cancel(cancel)?;
     let result = json!({"status":"observed_after_input","input_at":input_at,"observed_at":chrono::Utc::now().to_rfc3339(),
         "action":action,"observation":observed,"after":"after.png","decision":"decision.json"});
@@ -528,6 +572,37 @@ mod tests {
             "hp":12,"hunger":90,"summary":"通路が見える","action":"up","comment":"通路へ移動する"}),
         )
         .unwrap()
+    }
+
+    #[test]
+    fn 認識スキーマは未知を表現でき結果確認からの操作を許可しない() {
+        let keys = vec!["up".into()];
+        let before = observation_schema(&keys, true);
+        assert_eq!(before["additionalProperties"], false);
+        assert_eq!(before["required"].as_array().unwrap().len(), 8);
+        assert_eq!(before["properties"]["action"]["enum"], json!([null, "up"]));
+        let after = observation_schema(&keys, false);
+        assert_eq!(after["properties"]["action"]["enum"], json!([null]));
+        let mut unknown = json!(observation());
+        unknown["internal_reasoning"] = json!("非公開");
+        assert!(serde_json::from_value::<Observation>(unknown).is_err());
+    }
+
+    #[test]
+    fn 操作を拒否した画面の認識結果も保存する() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = SafePath::app_owned(temp.path().join("before-observation.json"));
+        let mut value = observation();
+        value.scene = "menu".into();
+        value.recognized = false;
+        value.action = None;
+        assert!(record_observation(&path, &value, &["up".into()], true).is_err());
+        let saved: Value =
+            serde_json::from_str(&std::fs::read_to_string(path.as_path()).unwrap()).unwrap();
+        assert_eq!(saved, json!(value));
+        assert_eq!(saved["scene"], "menu");
+        assert_eq!(saved["hp"], 12);
+        assert_eq!(saved["hunger"], 90);
     }
 
     #[test]

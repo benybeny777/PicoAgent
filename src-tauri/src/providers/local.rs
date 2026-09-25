@@ -41,6 +41,76 @@ fn validate_image_input(cfg: &Config, messages: &[Message]) -> anyhow::Result<()
 
 pub struct Local;
 
+fn chat_body(model: &str, messages: &[Message], tools: &[Value]) -> Value {
+    let mut body = json!({
+        "model": model, "messages": to_wire(&normalize_for_local(messages)), "temperature": 0.6
+    });
+    if !tools.is_empty() {
+        body["tools"] = json!(tools);
+    }
+    body
+}
+
+fn structured_body(model: &str, messages: &[Message], schema: &Value) -> Value {
+    let mut body = chat_body(model, messages, &[]);
+    body["response_format"] = json!({
+        "type": "json_schema",
+        "json_schema": {"name": "structured_response", "strict": true, "schema": schema}
+    });
+    // 構造化結果には観測・判断の短い説明だけを返し、内部推論を含めない。
+    body["temperature"] = json!(0);
+    body["reasoning_effort"] = json!("none");
+    body["chat_template_kwargs"] = json!({"enable_thinking": false});
+    body
+}
+
+async fn send_chat(cfg: &Config, body: &Value) -> anyhow::Result<Message> {
+    let url = format!("{}/chat/completions", base_url(cfg));
+    let res = crate::tools::http::client()
+        .post(&url)
+        .json(body)
+        .send()
+        .await?;
+    if !res.status().is_success() {
+        let status = res.status();
+        let text = crate::tools::http::response_text(res)
+            .await
+            .map_err(anyhow::Error::msg)?;
+        anyhow::bail!(
+            "{}",
+            crate::tools::http::service_error(
+                "ローカルAIエンジン",
+                "/chat/completions",
+                status,
+                &text
+            )
+        );
+    }
+    let data: Value = res.json().await?;
+    let message = data
+        .get("choices")
+        .and_then(Value::as_array)
+        .and_then(|choices| choices.first())
+        .and_then(|choice| choice.get("message"))
+        .ok_or_else(|| anyhow::anyhow!("local 応答に choices[0].message がありません"))?;
+    Ok(from_wire(message))
+}
+
+/// 画像・テキスト共通のスキーマ制約付き応答。ツールや制約なしの再送は行わない。
+pub async fn chat_structured(
+    cfg: &Config,
+    model: &str,
+    messages: &[Message],
+    schema: &Value,
+) -> anyhow::Result<Message> {
+    validate_image_input(cfg, messages)?;
+    anyhow::ensure!(
+        schema.is_object(),
+        "応答スキーマはJSONオブジェクトで指定してください"
+    );
+    send_chat(cfg, &structured_body(model, messages, schema)).await
+}
+
 pub struct LocalModelPreset {
     pub id: &'static str,
     pub family: &'static str,
@@ -513,49 +583,12 @@ impl Provider for Local {
         tools: &[Value],
     ) -> anyhow::Result<Message> {
         validate_image_input(cfg, messages)?;
-        let url = format!("{}/chat/completions", base_url(cfg));
-        // Gemma 等の「user/assistant 交互・user 始まり」要求に合わせて正規化してから送る。
-        let normalized = normalize_for_local(messages);
-        let wire = to_wire(&normalized);
-
         // tools 付きで送り、失敗しても tools を外して再送しない。外すとツールが使えない
         // ことを誰にも伝えないまま機能だけが落ち、モデルが本文へ `web_search{...}` のような
         // 呼び出しを書いて利用者に見せてしまう。失敗は理由ごと上位へ返す（AGENTS.md の
         // 無言フォールバック禁止）。同梱エンジンは --jinja 起動で、既定の LFM2.5 も Gemma 4 も
         // ツール呼び出しに対応することを実機で確認している。
-        let send = |with_tools: bool| {
-            let mut body = json!({ "model": model, "messages": wire, "temperature": 0.6 });
-            if with_tools && !tools.is_empty() {
-                body["tools"] = json!(tools);
-            }
-            crate::tools::http::client().post(&url).json(&body).send()
-        };
-
-        let res = send(!tools.is_empty()).await?;
-        if !res.status().is_success() {
-            let status = res.status();
-            let text = crate::tools::http::response_text(res)
-                .await
-                .map_err(anyhow::Error::msg)?;
-            anyhow::bail!(
-                "{}",
-                crate::tools::http::service_error(
-                    "ローカルAIエンジン",
-                    "/chat/completions",
-                    status,
-                    &text
-                )
-            );
-        }
-        let data: Value = res.json().await?;
-        let message = data
-            .get("choices")
-            .and_then(|v| v.as_array())
-            .and_then(|arr| arr.first())
-            .and_then(|c| c.get("message"))
-            .cloned()
-            .ok_or_else(|| anyhow::anyhow!("local 応答に choices[0].message がありません"))?;
-        Ok(from_wire(&message))
+        send_chat(cfg, &chat_body(model, messages, tools)).await
     }
 
     /// ストリーミング chat。同梱 llama-server は OpenAI 互換の SSE に対応しているため、
@@ -616,6 +649,34 @@ mod tests {
         RETIRED_MODEL_FILES,
     };
     use crate::message::Message;
+
+    #[test]
+    fn 構造化応答は画像を保持しツールを付けず正しい階層へスキーマを渡す() {
+        let schema = serde_json::json!({"type":"object","additionalProperties":false,
+            "properties":{"label":{"type":"string"}},"required":["label"]});
+        let messages = [
+            Message::new("user", "説明してください"),
+            Message::user_with_images("画像", vec!["data:image/png;base64,AA".into()]),
+        ];
+        let body = super::structured_body("small", &messages, &schema);
+        assert_eq!(body["response_format"]["type"], "json_schema");
+        assert_eq!(body["response_format"]["json_schema"]["schema"], schema);
+        assert_eq!(body["response_format"]["json_schema"]["strict"], true);
+        assert_eq!(
+            body["messages"][0]["content"][1]["image_url"]["url"],
+            "data:image/png;base64,AA"
+        );
+        assert!(body.get("tools").is_none());
+        assert_eq!(body["reasoning_effort"], "none");
+        assert_eq!(body["chat_template_kwargs"]["enable_thinking"], false);
+        let tools = [serde_json::json!({"type":"function","function":{"name":"test"}})];
+        let normal = super::chat_body("small", &messages, &tools);
+        assert_eq!(normal["messages"], body["messages"]);
+        assert_eq!(normal["tools"], serde_json::json!(tools));
+        assert!(normal.get("response_format").is_none());
+        assert!(normal.get("reasoning_effort").is_none());
+        assert!(normal.get("chat_template_kwargs").is_none());
+    }
 
     #[test]
     fn 通常チャットでも画像未準備を拒否しテキストのみは利用できる() {
