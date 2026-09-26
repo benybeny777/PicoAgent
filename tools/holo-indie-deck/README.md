@@ -1,6 +1,6 @@
-# holo Indie 応募企画書 PowerPoint 生成ツール
+# holo Indie 応募説明資料の下書き生成ツール
 
-holo Indie へ応募する作品 PicoAgent の企画書 `docs/HOLO-INDIE-PLAN.pptx`（全9枚）を生成します。応募には企画書と概ね遊べるビルドの両方が必要で、これはその企画書です（VTuber事務所との契約向け提案書 `docs/IP-PROPOSAL-VTUBER.pptx` とは別物です）。
+holo Indie へ応募する作品 PicoAgent の説明資料の下書き `temp/HOLO-INDIE-PLAN.pptx`（全9枚）を生成します。提出物はDrive上の動画付きGoogleスライドです。下書きPPTXはGitにも提出先にも置きません。
 
 **応募作の本体は PicoAgent で、ミニゲーム「人間だとバレるな」はおまけです。** 企画書でもミニゲームは1枚だけで紹介します。
 
@@ -13,7 +13,7 @@ npm install -g pptxgenjs sharp jszip playwright   # 初回だけ。アプリの�
 git lfs pull                                 # docs/images/ の実体が必要
 node tools/holo-indie-deck/capture.mjs       # ミニゲームの結果画面を撮影（ゲーム画面を変えたときだけ）
 node tools/holo-indie-deck/capture-motion.mjs # さくらみこ・ひよりの実描画を録画
-node tools/holo-indie-deck/build.js          # docs/HOLO-INDIE-PLAN.pptx を生成
+node tools/holo-indie-deck/build.js          # temp/HOLO-INDIE-PLAN.pptx を生成
 ```
 
 Playwright をグローバル以外に置いている場合は `PLAYWRIGHT_MODULE=<playwright の index.mjs>`、Chromium を指定する場合は `CHROMIUM_PATH` を渡します。
@@ -22,7 +22,7 @@ Playwright をグローバル以外に置いている場合は `PLAYWRIGHT_MODUL
 
 ## 掲載する画像と動画
 
-本体の画面例はさくらみこ公式MMDモデルで統一します。4枚目には、さくらみこのMMDとひよりのLive2Dを無音MP4として埋め込みます。さくらみこは7秒・30fps、ひよりは6秒・60fpsです。ひよりはLive2Dの動作例として紹介し、ホロライブのキャラクターや審査ビルドへの同梱キャラクターとは区別します。PowerPointのスライドショーで各動画をクリックすると再生します。静止画プレビューやPDFでは動画は動きません。
+本体の画面例はさくらみこ公式MMDモデルで統一します。4枚目には、さくらみこのMMDとひよりのLive2Dを無音MP4として埋め込みます。さくらみこは7秒・30fps、ひよりは6秒・60fpsです。ひよりはLive2Dの動作例として紹介し、ホロライブのキャラクターや審査ビルドへの同梱キャラクターとは区別します。Googleスライドへ変換した後はMP4をDriveへアップロードし、静止画化した箇所をDrive動画へ置き換えます。スライドショーで各動画の▶を押すと再生します。編集画面やPDFでは動きません。この条件をファイル名と資料内に明記します。
 
 | 素材 | 使用箇所 |
 |---|---|
@@ -46,8 +46,8 @@ Playwright をグローバル以外に置いている場合は `PLAYWRIGHT_MODUL
 ## 検証
 
 ```bash
-python3 <pptxスキル>/scripts/office/validate.py docs/HOLO-INDIE-PLAN.pptx
-soffice --headless --convert-to pdf docs/HOLO-INDIE-PLAN.pptx
+python3 <pptxスキル>/scripts/office/validate.py temp/HOLO-INDIE-PLAN.pptx
+soffice --headless --convert-to pdf temp/HOLO-INDIE-PLAN.pptx
 ```
 
 LibreOffice は Meiryo を別フォントへ置き換えるため、文字幅は実際の PowerPoint と完全には一致しません。文字あふれは余裕をもって判定し、送付前に PowerPoint で目視してください。

@@ -1,6 +1,6 @@
 # おまけのミニゲーム「人間だとバレるな」
 
-この文書は、holo Indie応募作PicoAgentに入れる**おまけ**のミニゲームの設計をまとめます。応募作本体の企画は[HOLO-INDIE-PLAN.md](HOLO-INDIE-PLAN.md)、応募用の企画書PowerPointは[`tools/holo-indie-deck/`](../tools/holo-indie-deck/README.md)で生成する`docs/HOLO-INDIE-PLAN.pptx`で、このゲームはその中の1枚で紹介します。実装仕様の正本は[SPEC.md](../SPEC.md)の「人間だとバレるな」節、利用手順は[MANUAL.md](../MANUAL.md)、未完了の受入項目は[TASKS.md](TASKS.md)です。数値は `ui/game.js`（出題・信用度・称号）と `src-tauri/src/game.rs`（採点の配点）に合わせています。
+この文書は、holo Indie応募作PicoAgentに入れる**おまけ**のミニゲームの設計をまとめます。応募作本体の企画は[HOLO-INDIE-PLAN.md](HOLO-INDIE-PLAN.md)、応募用の動画付きGoogleスライドは[`tools/holo-indie-deck/`](../tools/holo-indie-deck/README.md)の下書きからDriveに作成し、このゲームはその中の1枚で紹介します。実装仕様の正本は[SPEC.md](../SPEC.md)の「人間だとバレるな」節、利用手順は[MANUAL.md](../MANUAL.md)、未完了の受入項目は[TASKS.md](TASKS.md)です。数値は `ui/game.js`（出題・信用度・称号）と `src-tauri/src/game.rs`（採点の配点）に合わせています。
 
 ## 0. ゲームの要点
 

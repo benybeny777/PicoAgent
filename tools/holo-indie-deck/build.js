@@ -11,7 +11,7 @@ const JSZip = require("jszip");
 
 const ROOT = path.resolve(__dirname, "..", "..");
 const SRC_IMG = path.join(ROOT, "docs", "images");
-const OUT = path.join(ROOT, "docs", "HOLO-INDIE-PLAN.pptx");
+const OUT = path.join(ROOT, "temp", "HOLO-INDIE-PLAN.pptx");
 
 // pptxgenjs は WebP を埋め込めないため、掲載する画像だけ PNG へ変換して一時領域へ置く。
 fs.mkdirSync(path.join(ROOT, "temp"), { recursive: true });
