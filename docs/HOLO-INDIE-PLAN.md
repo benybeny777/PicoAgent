@@ -1,6 +1,6 @@
 # holo Indie応募企画書 — PicoAgent（ホロライブのキャラクターと過ごすデスクトップAI）
 
-この文書は、holo Indieへ応募する作品の企画の正本です。応募企画書のPowerPoint（`docs/HOLO-INDIE-PLAN.pptx`）は、この文書から[`tools/holo-indie-deck/`](../tools/holo-indie-deck/README.md)で生成します。応募の位置づけと取引条件は[IP-LICENSING-STRATEGY.md](IP-LICENSING-STRATEGY.md)、実装仕様は[SPEC.md](../SPEC.md)、未完了の受入項目は[TASKS.md](TASKS.md)にあります。
+この文書は、holo Indieへ応募する作品の企画の正本です。応募用Googleスライドは、この文書から[`tools/holo-indie-deck/`](../tools/holo-indie-deck/README.md)で下書きを作り、動画を挿入してDriveに保存します。下書きPPTXは`temp/`に生成し、Gitには置きません。応募の位置づけと取引条件は[IP-LICENSING-STRATEGY.md](IP-LICENSING-STRATEGY.md)、実装仕様は[SPEC.md](../SPEC.md)、未完了の受入項目は[TASKS.md](TASKS.md)にあります。
 
 **応募作の本体はPicoAgentです。** ミニゲーム「人間だとバレるな」はPicoAgentの中で遊べるおまけで、詳細は[HOLO-INDIE-MINIGAME.md](HOLO-INDIE-MINIGAME.md)にあります。
 
