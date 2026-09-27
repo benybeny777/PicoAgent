@@ -134,8 +134,11 @@
       engine = new B.Engine(canvas, true, { alpha: true, premultipliedAlpha: false, preserveDrawingBuffer: true, stencil: true });
       // CSS寸法の引き伸ばしではなく、実画面の画素密度でモデルを描き直す。
       let appliedPixelRatio = 0;
+      // 配信形式のようにシーン全体を縮小・拡大して表示する場合は、画面側が実効の画素密度を渡す。
+      let requestedPixelRatio = 0;
+      const currentPixelRatio = () => Math.max(1, requestedPixelRatio || window.devicePixelRatio || 1);
       const resize = () => {
-        appliedPixelRatio = Math.max(1, window.devicePixelRatio || 1);
+        appliedPixelRatio = currentPixelRatio();
         engine.setHardwareScalingLevel(1 / appliedPixelRatio);
         engine.resize();
       };
@@ -208,10 +211,11 @@
       function setFraming(kind = 'bust') {
         if (disposed) return;
         framing = kind;
-        const head = ['head', 'chat', 'bar'].includes(kind);
+        const head = kind === 'head';
         const full = kind === 'full';
-        const visibleHeight = height * (full ? 1.08 : head ? 0.24 : 0.48);
-        camera.setTarget(head ? faceCenter : new B.Vector3(0, high - visibleHeight * (full ? 0.47 : 0.44), 0));
+        const upper = kind === 'upper';
+        const visibleHeight = height * (full ? 1.08 : upper ? 0.72 : head ? 0.24 : 0.48);
+        camera.setTarget(head ? faceCenter : new B.Vector3(0, high - visibleHeight * (full ? 0.47 : upper ? 0.45 : 0.44), 0));
         const aspect = Math.max(0.2, canvas.clientWidth / Math.max(1, canvas.clientHeight));
         camera.radius = visibleHeight / (2 * Math.tan(camera.fov / 2)) * Math.max(1, 0.65 / aspect);
         camera.alpha = -Math.PI / 2;
@@ -294,7 +298,7 @@
         lastFrame = now;
         // CSS寸法が変わらないまま画素密度だけ変わる場合（DPIの違う画面へ移す）は
         // ResizeObserver が動かないため、描画側で追う。
-        if (Math.max(1, window.devicePixelRatio || 1) !== appliedPixelRatio) {
+        if (currentPixelRatio() !== appliedPixelRatio) {
           resize();
           setFraming(framing);
         }
@@ -303,6 +307,12 @@
       });
       const result = {
         setFraming,
+        setPixelRatio(value) {
+          if (disposed) return;
+          requestedPixelRatio = Number.isFinite(Number(value)) && Number(value) > 0 ? Number(value) : 0;
+          resize();
+          setFraming(framing);
+        },
         setExpression(name) { if (!disposed) state = normalizeState(name); },
         setMouthLevel(value) { if (!disposed) mouth = clamp(value); },
         setMotionEnabled(enabled) { if (!disposed) { motion = Boolean(enabled); if (!motion) mouth = 0; } },

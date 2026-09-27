@@ -4,11 +4,14 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+import { mainScript, uiFile } from "./lib/ui-source.mjs";
 
 await import("../../ui/composer-draft.js");
 
 const draftStore = globalThis.PicoComposerDraft;
-const renderer = await readFile(new URL("../../ui/renderer.js", import.meta.url), "utf8");
+const composer = uiFile("chat/composer.js");
+const send = uiFile("chat/send.js");
+const main = uiFile("app/main.js");
 const html = await readFile(new URL("../../ui/index.html", import.meta.url), "utf8");
 
 const NOW = Date.UTC(2026, 8, 12, 9, 0, 0);
@@ -48,55 +51,54 @@ test("極端に長い書きかけは上限で切り、絵文字を割らない",
 
 test("画面は専用モジュールを読み込み、正規化を自前で書かない", () => {
   assert.match(html, /<script src="composer-draft\.js"><\/script>/);
-  assert.match(renderer, /globalThis\.PicoComposerDraft/);
-  assert.match(renderer, /composerDraftStore\.readDraft\(localStorage\.getItem\(COMPOSER_DRAFT_STORAGE_KEY\)\)/);
-  assert.match(renderer, /composerDraftStore\.serializeDraft\(promptDraft\)/);
+  assert.match(composer, /const draftStore = window\.PicoComposerDraft;/);
+  assert.match(composer, /draftStore\.readDraft\(localStorage\.getItem\(DRAFT_KEY\)\)/);
+  assert.match(composer, /draftStore\.serializeDraft\(draft\)/);
+  // 保存キーは旧画面と同じ（書き換えで利用者の書きかけを失わない）。
+  assert.match(composer, /const DRAFT_KEY = "picoagent\.composerDraft\.v1";/);
 });
 
 test("書きかけは終了時にも必ず書き切る", () => {
   // デバウンス待ちのまま閉じると、直前に打った内容だけが消える。
-  const unload = renderer.slice(renderer.indexOf('window.addEventListener("beforeunload"'));
-  const body = unload.slice(0, unload.indexOf("\n});"));
-  assert.match(body, /promptDraft = input\.value;\s*\n\s*persistDraft\(\);/);
+  const unload = main.slice(main.indexOf('window.addEventListener("beforeunload"'));
+  assert.match(unload.slice(0, 200), /composer\.persistDraft\(\);/);
+  const flush = composer.slice(composer.indexOf("    persistDraft() {"));
+  assert.match(flush.slice(0, 120), /draft = input\.value;\s*\n\s*persistDraft\(\);/);
 });
 
 test("入力履歴を第2の保存先へ複製しない", () => {
-  // 入力履歴は起動時に hydrateHistory() が会話履歴から組み直す。別の保存先を作ると
+  // 入力履歴は起動時に hydratePrompts() が会話履歴から組み直す。別の保存先を作ると
   // 同じ状態を二重に書き換えることになる。
-  assert.doesNotMatch(renderer, /localStorage\.(?:get|set)Item\([^)]*[Hh]istory/);
-  assert.match(renderer, /function hydrateHistory[\s\S]{0,200}promptHistory\.length = 0;/);
+  assert.doesNotMatch(mainScript(), /localStorage\.(?:get|set)Item\([^)]*[Hh]istory/);
+  assert.match(composer, /hydratePrompts\(list\) \{\s*\n\s*promptHistory\.length = 0;/);
 });
 
-test("定義の無い入力履歴呼び出しを残さない", () => {
-  // 未定義の関数・変数を参照する行は、押すたびに ReferenceError を投げてアプリログを
-  // 汚すだけで何も起きない。↑↓ の呼び戻しは recallPromptHistory に一本化する。
-  assert.doesNotMatch(renderer, /recallInputHistory|inputHistoryPos/);
-  assert.match(renderer, /event\.key === "ArrowUp"[\s\S]{0,120}recallPromptHistory\(-1\)/);
-  assert.match(renderer, /event\.key === "ArrowDown"[\s\S]{0,160}recallPromptHistory\(1\)/);
+test("↑↓の呼び戻しは1つの関数に一本化する", () => {
+  assert.match(composer, /event\.key === "ArrowUp"[\s\S]{0,120}recall\(-1\)/);
+  assert.match(composer, /event\.key === "ArrowDown"[\s\S]{0,160}recall\(1\)/);
 });
 
 test("やり直しと再生成は添付ごと送り直す", () => {
   // 文面だけ戻すと、見た目は同じ質問なのに添付の無い別の要求が飛ぶ。
-  assert.match(renderer, /lastUserImages = pendingImages;\s*\n\s*lastUserFiles = pendingFiles;/);
-  const restore = renderer.slice(renderer.indexOf("function restoreLastAttachments"));
-  assert.match(restore.slice(0, 400), /attachedImages = \[\.\.\.lastUserImages\];/);
-  assert.match(restore.slice(0, 400), /attachedFiles = \[\.\.\.lastUserFiles\];/);
-  const retry = renderer.slice(renderer.indexOf("function addRetryButton"), renderer.indexOf("function addRetryButton") + 900);
-  assert.match(retry, /restoreLastAttachments\(\);/);
-  // 入力欄を開いてから文面を入れる（逆順だと書きかけの復元に上書きされる）。
-  assert.ok(retry.indexOf("openComposer()") < retry.indexOf("setInputValue(lastUserText)"));
-  const regen = renderer.slice(renderer.indexOf('regenerateReplyButton?.addEventListener("click"'));
-  const regenBody = regen.slice(0, regen.indexOf("\n});"));
-  assert.match(regenBody, /restoreLastAttachments\(\);/);
-  assert.ok(regenBody.indexOf("openComposer()") < regenBody.indexOf("setInputValue(lastUserText)"));
+  assert.match(composer, /const taken = \{ text: input\.value\.trim\(\), images: \[\.\.\.images\], files: \[\.\.\.files\] \};/);
+  const restore = composer.slice(composer.indexOf("restore({ text, images: lastImages, files: lastFiles })"));
+  const body = restore.slice(0, 300);
+  // 入力欄を開いてから文面と添付を入れる（逆順だと書きかけの復元に上書きされる）。
+  assert.ok(body.indexOf("composer.open()") < body.indexOf("setValue(text"));
+  assert.match(body, /images = \[\.\.\.\(lastImages \|\| \[\]\)\];/);
+  assert.match(body, /files = \[\.\.\.\(lastFiles \|\| \[\]\)\];/);
+  // 「もう一度試す」と「再生成」は同じ控え（last）を戻す。
+  assert.equal((send.match(/composer\.restore\(last\);/g) || []).length, 2);
 });
 
 test("添付の控えは新しい会話で捨て、打ちかけのテキストは消さない", () => {
-  const reset = renderer.slice(renderer.indexOf('window.picoagent.on("pet:reset"'));
-  const body = reset.slice(0, reset.indexOf("\n});"));
-  assert.match(body, /lastUserImages = \[\];\s*\n\s*lastUserFiles = \[\];/);
+  const reset = send.slice(send.indexOf("    reset() {"));
+  const body = reset.slice(0, reset.indexOf("\n    },"));
+  assert.match(body, /last = \{ text: "", images: \[\], files: \[\] \};/);
   // 入力欄の中身は利用者が打ったものなので、会話のリセットでは消さない。
-  assert.doesNotMatch(body, /setInputValue\(""\)|input\.value = ""/);
-  // 書きかけの保存し直しは closeComposer() が行う（2か所で書き戻さない）。
-  assert.match(body, /closeComposer\(\);/);
+  assert.doesNotMatch(body, /setValue\(""\)|input\.value = ""/);
+  const clear = composer.slice(composer.indexOf("clearAfterReset() {"));
+  assert.doesNotMatch(clear.slice(0, 200), /draft = ""/);
+  // 書きかけの保存し直しは close() が行う（2か所で書き戻さない）。
+  assert.match(body, /composer\.close\(\);/);
 });

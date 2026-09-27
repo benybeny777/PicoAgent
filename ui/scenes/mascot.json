@@ -1,0 +1,15 @@
+{
+  "id": "mascot",
+  "label": "ミニ",
+  "size": "window",
+  "order": ["character", "chat"],
+  "sources": {
+    "character": { "anchor": "bottom", "x": 0, "y": 0, "h": { "frac": 0.7, "min": 140 }, "maxWidthFrac": 1 },
+    "chat": {
+      "anchor": "top", "x": 0, "y": 10,
+      "w": { "frac": 0.94, "min": 190, "max": 520 },
+      "h": { "frac": 0.36, "min": 150, "max": 360 },
+      "options": { "variant": "bubble", "tail": "toward-character", "compact": true }
+    }
+  }
+}

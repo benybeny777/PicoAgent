@@ -8,7 +8,9 @@ import { readdir, readFile } from "node:fs/promises";
 import test from "node:test";
 
 const uiDir = new URL("../../ui/", import.meta.url);
-const names = await readdir(uiDir);
+// 画面のソースがある場所（ui 直下の共有部品と、メイン画面のモジュール・部品・テーマ）。
+const SOURCE_DIRS = ["", "app/", "chat/", "sources/", "character/", "components/", "themes/glass/", "themes/pastel/"];
+const names = (await Promise.all(SOURCE_DIRS.map(async dir => (await readdir(new URL(dir, uiDir))).map(name => `${dir}${name}`)))).flat();
 const readAll = async extension => {
   const targets = names.filter(name => name.endsWith(extension));
   const bodies = await Promise.all(targets.map(name => readFile(new URL(name, uiDir), "utf8")));
@@ -26,7 +28,9 @@ test("JavaScriptが付けるクラスは見た目か処理へ繋がっている"
     for (const match of body.matchAll(/classList\.(?:add|toggle)\("([a-z0-9-]+)"/g)) {
       applied.set(match[1], name);
     }
-    for (const match of body.matchAll(/className\s*=\s*"([a-z0-9 -]+)"/g)) {
+    // メイン画面のモジュールは el("div", { className: "…" }) で付ける。
+    const pattern = /^(app|chat|sources|character)\//.test(name) ? /className\s*(?:=|:)\s*"([a-z0-9 -]+)"/g : /className\s*=\s*"([a-z0-9 -]+)"/g;
+    for (const match of body.matchAll(pattern)) {
       for (const className of match[1].split(/\s+/)) {
         if (className) applied.set(className, name);
       }
@@ -53,7 +57,7 @@ test("JavaScriptが付けるクラスは見た目か処理へ繋がっている"
 // 末尾が動くものは、CSS側の完全な名前がソースへ現れない。
 const DYNAMIC_PREFIXES = ["boot-kind-", "notice-state-", "toast-"];
 // 取り込んだ外部ランタイムが自分で付けるクラス。
-const VENDOR_PREFIXES = ["moveable-"];
+const VENDOR_PREFIXES = [];
 
 test("CSSのクラスは実際に付く要素がある", () => {
   // 名前を間違えたまま置かれた規則は、何も起きないのに残り続ける。実際に

@@ -9,8 +9,9 @@ await import("../../ui/quick-actions.js");
 
 const quick = globalThis.PicoQuickActions;
 const read = path => readFile(new URL(`../../${path}`, import.meta.url), "utf8");
-const [renderer, html, shim, lib, commands] = await Promise.all([
-  read("ui/renderer.js"),
+const [composer, main, html, shim, lib, commands] = await Promise.all([
+  read("ui/chat/composer.js"),
+  read("ui/app/main.js"),
   read("ui/index.html"),
   read("ui/picoagent.js"),
   read("src-tauri/src/lib.rs"),
@@ -66,20 +67,22 @@ test("利用者が書いたクイック操作は絞り込まない", () => {
 });
 
 test("画面は quick-actions.js の既定と絞り込みを使い、起動時に設定状態を問い合わせる", () => {
-  assert.doesNotMatch(renderer, /const QUICK_ACTIONS\s*=/);
-  assert.doesNotMatch(renderer, /function parseQuickActions\(/);
-  assert.match(renderer, /quickActionItems \|\| defaultQuickActions/);
-  assert.match(renderer, /window\.PicoQuickActions\.parseQuickActions\(info\.quickActions\);\s*renderQuickActions\(\);\s*refreshDefaultQuickActions\(\);/);
+  assert.doesNotMatch(composer, /const QUICK_ACTIONS\s*=/);
+  assert.doesNotMatch(composer, /function parseQuickActions\(/);
+  assert.match(composer, /const quick = window\.PicoQuickActions;/);
+  assert.match(composer, /quickItems = quick\.parseQuickActions\(text\);/);
+  assert.match(composer, /quickItems \|\| defaultItems/);
+  assert.match(main, /composer\.setQuickActions\(info\.quickActions\);\s*composer\.refreshDefaultQuickActions\(\);/);
   const quickScript = html.indexOf('<script src="quick-actions.js');
-  assert.ok(quickScript > 0 && quickScript < html.indexOf('<script src="renderer.js'), "quick-actions.js は renderer.js より先に読み込む");
+  assert.ok(quickScript > 0 && quickScript < html.indexOf('<script type="module" src="app/main.js'), "quick-actions.js はメイン画面のモジュールより先に読み込む");
   assert.match(shim, /configPresence: \(keys = \[\]\) => call\("pet_config_presence", \{ keys \}\)/);
   assert.match(lib, /commands::pet_config_presence,/);
 });
 
 test("設定の保存直後にも、自分のクイック操作と既定ボタンの出し分けを反映する", () => {
-  const handler = renderer.slice(renderer.indexOf('window.picoagent.on("pet:ui"'));
+  const handler = main.slice(main.indexOf('bridge.on("pet:ui"'));
   const body = handler.slice(0, handler.indexOf("\n});"));
-  assert.match(body, /if \(ui\.quickActions != null\) quickActionItems = window\.PicoQuickActions\.parseQuickActions\(ui\.quickActions\);/);
-  assert.match(body, /refreshDefaultQuickActions\(\);/);
+  assert.match(body, /if \(ui\.quickActions != null\) composer\.setQuickActions\(ui\.quickActions\);/);
+  assert.match(body, /composer\.refreshDefaultQuickActions\(\);/);
   assert.match(commands, /ui\["quickActions"\] = json!\(state\.config\.get\("PICOAGENT_QUICK_ACTIONS", ""\)\);/);
 });

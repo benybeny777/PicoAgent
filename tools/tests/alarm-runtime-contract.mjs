@@ -5,7 +5,7 @@ import test from "node:test";
 await import("../../ui/alarm-runtime.js");
 
 const index = await readFile(new URL("../../ui/index.html", import.meta.url), "utf8");
-const renderer = await readFile(new URL("../../ui/renderer.js", import.meta.url), "utf8");
+const ambient = await readFile(new URL("../../ui/app/ambient.js", import.meta.url), "utf8");
 
 test("上限到達時も現在の発火記録を消さない", () => {
   const fired = new Set(Array.from({ length: 50 }, (_, index) => `old-${index}`));
@@ -18,27 +18,26 @@ test("上限到達時も現在の発火記録を消さない", () => {
 });
 
 test("実画面の目覚まし判定が共通の発火記録を使う", () => {
-  assert.ok(index.indexOf('<script src="alarm-runtime.js') < index.indexOf('<script src="renderer.js'));
-  assert.match(renderer, /PicoAlarmRuntime\.markFired\(firedAlarms, key\)/);
+  assert.ok(index.indexOf('<script src="alarm-runtime.js') < index.indexOf('<script type="module" src="app/main.js'));
+  assert.match(ambient, /PicoAlarmRuntime\.markFired\(firedAlarms, `\$\{due\.alarm\.id\}@\$\{due\.scheduledKey\}`\)/);
 });
 
 test("目覚ましは生成と合成の遅さで表示を止めない", () => {
-  const fire = renderer.slice(renderer.indexOf("async function fireAlarm"), renderer.indexOf("function startAlarmPolling"));
+  const fire = ambient.slice(ambient.indexOf("async function fireAlarm"), ambient.indexOf("async function checkAlarms"));
   // 文字が先。声はあとから。
-  assert.ok(fire.indexOf("renderAlarmReply(line)") < fire.indexOf("prepareSpeech(line)"),
+  assert.ok(fire.indexOf("chat.showAlarm(line") < fire.indexOf("voice.prepare(line)"),
     "音声合成を待ってから表示しています");
   // 再通知の起点も合成待ちで遅らせない。
-  assert.ok(fire.indexOf("armAlarmSnooze(a)") < fire.indexOf("prepareSpeech(line)"),
+  assert.ok(fire.indexOf("armSnooze(alarm)") < fire.indexOf("voice.prepare(line)"),
     "スヌーズの起点が音声合成待ちの後になっています");
   // 生成・合成のどちらにも上限がある（どちらも数十秒〜数分かかり得る）。
   assert.match(fire, /waitWithLimit\(wakeRequest, ALARM_WAKE_TIMEOUT_MS\)/);
   assert.match(fire, /waitWithLimit\(speechRequest, ALARM_SPEECH_TIMEOUT_MS\)/);
-  // 遅れて届いた音声は鳴らさない。
-  assert.match(fire, /if \(armedSnoozeState && !speech\.timedOut && speech\.value && activeAlarmSnooze === armedSnoozeState\)/);
-  assert.match(renderer, /const ALARM_WAKE_TIMEOUT_MS = 20000/);
-  assert.match(renderer, /const ALARM_SPEECH_TIMEOUT_MS = 20000/);
-  // 合成中に解除された目覚ましを遅れて鳴らさない。
-  assert.match(fire, /const armedSnoozeState = shouldArmSnooze \? activeAlarmSnooze : null/);
+  // 遅れて届いた音声は鳴らさない。合成中に解除された目覚ましも遅れて鳴らさない。
+  assert.match(fire, /if \(armed && !speech\.timedOut && speech\.value && snooze === armed\)/);
+  assert.match(fire, /const armed = shouldArm \? snooze : null/);
+  assert.match(ambient, /const ALARM_WAKE_TIMEOUT_MS = 20000/);
+  assert.match(ambient, /const ALARM_SPEECH_TIMEOUT_MS = 20000/);
 });
 
 const at = (text) => new Date(text);
@@ -109,8 +108,8 @@ test("同時刻の先頭が発火済みでも次の目覚ましを選べる", ()
 });
 
 test("実画面は共通の判定と発火記録を使う", () => {
-  assert.match(renderer, /PicoAlarmRuntime\.dueAlarms\(alarms, now\)/);
-  assert.match(renderer, /PicoAlarmRuntime\.markFired\(firedAlarms, key\)/);
+  assert.match(ambient, /PicoAlarmRuntime\.dueAlarms\(alarms, now\)/);
+  assert.match(ambient, /PicoAlarmRuntime\.markFired\(firedAlarms, /);
   // 遅れて鳴らすときは予定時刻を添える（いまの時刻の目覚ましだと誤解させない）。
-  assert.match(renderer, /due\.lateMinutes >= 1/);
+  assert.match(ambient, /due\.lateMinutes >= 1/);
 });

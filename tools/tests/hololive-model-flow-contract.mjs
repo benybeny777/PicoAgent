@@ -3,9 +3,10 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+import { installFakeDom } from "./lib/fake-dom.mjs";
 
 const read = path => readFile(new URL(`../../${path}`, import.meta.url), "utf8");
-const [settings, index, renderer] = await Promise.all([read("ui/settings.js"), read("ui/index.html"), read("ui/renderer.js")]);
+const [settings, index, markdown] = await Promise.all([read("ui/settings.js"), read("ui/index.html"), read("ui/chat/markdown.js")]);
 
 test("公式モデルリンクは新窓を抑止し、既定ブラウザの成功と失敗を欄内に表示する", async () => {
   const source = settings.slice(settings.indexOf("function officialModelLink("), settings.indexOf("\nlet data;"));
@@ -33,23 +34,28 @@ test("公式モデルリンクは新窓を抑止し、既定ブラウザの成�
 });
 
 test("初回案内は公式リンクだけを既定ブラウザへ渡し、追加ボタンの処理と分ける", async () => {
-  const start = renderer.indexOf('onboarding?.addEventListener("click",');
-  const source = renderer.slice(start, renderer.indexOf('onboarding?.addEventListener("keydown",', start));
-  let listener;
+  const document = installFakeDom();
+  const { createOnboarding } = await import("../../ui/app/onboarding.js");
+  const dialog = document.createElement("section");
   const calls = [];
-  class Target {
-    closest(selector) { return selector === "a.onboarding-link" ? { href: "https://www.mmd.hololive.tv/" } : null; }
-  }
-  new Function("onboarding", "Element", "openExternalUrl", "completeSelectedOnboarding", source)(
-    { addEventListener(_event, handler) { listener = handler; } }, Target,
-    async url => { calls.push(url); }, () => assert.fail("公式リンクで追加画面へ遷移してはいけない"),
-  );
+  let completed = 0;
+  createOnboarding({
+    dialog,
+    status: { set() {}, flash() {} },
+    openExternalUrl: async url => { calls.push(url); },
+    onComplete: () => { completed += 1; },
+    isEngineBusy: () => false,
+  });
+  const target = Object.assign(Object.create(Element.prototype), {
+    closest: selector => (selector === "a.onboarding-link" ? { href: "https://www.mmd.hololive.tv/" } : null),
+  });
   let prevented = false;
-  await listener({ target: new Target(), preventDefault() { prevented = true; } });
+  await dialog.listeners.click[0]({ target, preventDefault() { prevented = true; } });
   assert.equal(prevented, true);
   assert.deepEqual(calls, ["https://www.mmd.hololive.tv/"]);
+  assert.equal(completed, 0, "公式リンクで追加画面へ遷移してはいけない");
   // 既存の共通処理が起動失敗をトーストに表示することも維持する。
-  assert.match(renderer, /function openExternalUrl\(url\) \{[\s\S]*?showToast\("既定ブラウザでリンクを開けませんでした", "error"\)/);
+  assert.match(markdown, /export function openExternalUrl\(url\) \{[\s\S]*?toast\("既定ブラウザでリンクを開けませんでした", "error"\)/);
 });
 
 test("キャラ登録に公式MMD配布ページ・規約・ガイドラインへのリンクがある", () => {

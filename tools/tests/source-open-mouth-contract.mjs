@@ -94,8 +94,8 @@ test("未知の口モードを明示エラーにし、本体とプレビュー�
   await assert.rejects(api.create({}), /PIXI 6/, "省略は従来のsplitとして受け付けます");
   const manifest = JSON.parse(readFileSync(new URL("../../characters/mugi/character.json", import.meta.url), "utf8"));
   assert.equal(manifest.meshRig.mouthMode, "source-open");
-  const main = readFileSync(new URL("../../ui/renderer.js", import.meta.url), "utf8");
+  const main = readFileSync(new URL("../../ui/character/mesh.js", import.meta.url), "utf8");
   const preview = readFileSync(new URL("../mesh-rig-preview/index.html", import.meta.url), "utf8");
-  assert.match(main, /mouthMode: cfg\.mouthMode/);
+  assert.match(main, /mouthMode: pack\.meshRig\.mouthMode,/);
   assert.match(preview, /mouthMode: manifest\.meshRig\.mouthMode/);
 });
