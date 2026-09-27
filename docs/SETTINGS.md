@@ -75,10 +75,16 @@
 | `PICOAGENT_LOCAL_MODEL_PRESET` | `auto`（初回に `lfm25_2_6b` を保存） | local | ローカルモデルプリセット（`lfm25_2_6b`: LFM2.5 2.6B QAD/約1.59GB、`small`: Gemma 4 E2B/約3.1GB、`balanced`: Gemma 4 E4B/約5.0GB、`large`: Gemma 4 12B/約7.1GB、`qwen35_4b`: Qwen3.5 4B/約2.7GB、`qwen35_9b`: Qwen3.5 9B/約5.7GB、`gpt_oss_20b`: OpenAI gpt-oss-20b/約12.1GB、`phi4mini`: Phi-4 mini/約2.5GB、互換用`lfm25_1_2b_jp`／`llmjp4_8b`、`custom`）。既存の明示選択は変更せず、旧プリセットIDは現行候補へ自動移行する |
 | `PICOAGENT_MODEL_URL` | LFM2.5 2.6B QAD Q4_0 GGUF | local | 同梱エンジンが取得するモデル URL |
 | `PICOAGENT_LOCAL_PORT` | `11435` | local | 同梱エンジンのポート |
+| `PICOAGENT_LOCAL_VISION_ENABLED` | `false` | local | Gemma 4 E2B（small）の共通画像入力。通常チャットの画像添付とスキルで共有し、ゲーム設定には依存しない。`setup local-vision`で追加資産を明示導入する。保存時にエンジンを再起動して反映し、通常起動で追加取得しない |
 | `PICOAGENT_LOCAL_CTX` | `32768` | local | コンテキスト長。保存値と環境変数が未設定の場合だけ選択プリセットの値を保存する。**下限は 32,768 で、これより小さい保存値（旧既定の 8,192 など）は読み取り時に引き上げる**。全スキル定義だけで約16,000トークンあり、狭いコンテキストではモデルへ渡せるスキルが数件まで削られるため |
 | `PICOAGENT_LOCAL_NGL` | `999` | local | GPU へオフロードするレイヤ数（`999`=全レイヤ優先 / `0`=CPU 固定） |
 | `PICOAGENT_LOCAL_GPU_DEVICE` | （空=既定先頭） | local | 使用 GPU の指定（複数 GPU 環境向け、例 `Vulkan1`）。保存名は同じバックエンド候補だけへ渡し、CUDA等の別候補は各方式の既定先頭デバイスで起動する |
 | `OLLAMA_HOST` | `http://127.0.0.1:11434` | ollama | Ollama 接続先 |
+| `PICOAGENT_GAME_ENABLED` | `false` | game_play | Windowsのゲームプレイスキルを有効にする |
+| `PICOAGENT_GAME_WINDOW_TITLE` | （空） | game_play | 操作対象のウィンドウ名。完全一致する対象が1つだけで前面にある場合に限る |
+| `PICOAGENT_GAME_KEYS` | （空） | game_play | 実ゲームで確認済みの許可キーをカンマ区切りで指定。up/down/left/right/z/x/c/w/a/s/d/f/enter/spaceのみ。修飾キー・キー組合せは不可 |
+| `PICOAGENT_GAME_CONTROLS` | （空） | game_play | 確認済みのキーと操作の対応。例: w=上移動,a=左移動,s=下移動,d=右移動,f=攻撃。LLMへ状況とともに渡す |
+| `PICOAGENT_GAME_MAX_OPS` | `1` | game_play | 利用者の1依頼あたりの操作試行上限（1〜100）。モデルからリセットできず、失敗時はその依頼の操作を停止 |
 | `OLLAMA_MODEL` | `qwen3:8b` | ollama | Ollama 既定モデル |
 | `OPENAI_BASE_URL` | `https://api.openai.com/v1` | openai | OpenAI 互換エンドポイント |
 | `OPENAI_API_KEY` | （なし） | openai | OpenAI 互換の API キー。未設定なら選択不可 |

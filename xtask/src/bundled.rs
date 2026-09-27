@@ -11,6 +11,48 @@ use anyhow::{anyhow, bail, Context, Result};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
+#[path = "../../src-tauri/src/engine_vision_asset.rs"]
+mod vision_asset;
+
+/// 利用者が指定したときだけ、Gemma 4 E2B の画像入力資産を導入する。
+pub fn fetch_local_vision() -> Result<()> {
+    let dir = repo_root().join("src-tauri/resources/bundled/local-vision");
+    let dest = dir.join(vision_asset::FILE_NAME);
+    let asset = ReleaseAsset {
+        name: vision_asset::FILE_NAME.to_string(),
+        url: vision_asset::URL.to_string(),
+        size: vision_asset::SIZE,
+        sha256: vision_asset::SHA256.to_string(),
+    };
+    let incoming = dir.join(format!("{}.incoming", vision_asset::FILE_NAME));
+    if dest.is_file() && verify_release_asset(&dest, &asset).is_ok() {
+        cleanup_file(&incoming, "完了済み画像入力資産の一時ファイル")?;
+        cleanup_file(
+            &incoming.with_extension("incoming.part"),
+            "画像入力資産の取得途中ファイル",
+        )?;
+        log("setup:local-vision", "検証済みの画像入力資産を利用します");
+        return Ok(());
+    }
+    fs::create_dir_all(&dir)?;
+    let result = (|| -> Result<()> {
+        download_to(&asset.url, &incoming)?;
+        verify_release_asset(&incoming, &asset)?;
+        if dest.exists() {
+            fs::remove_file(&dest).context("破損した画像入力資産を置き換えられません")?;
+        }
+        fs::rename(&incoming, &dest)?;
+        Ok(())
+    })();
+    if let Err(error) = result {
+        cleanup_file(&incoming, "失敗した画像入力資産")
+            .with_context(|| format!("元の導入エラー: {error:#}"))?;
+        return Err(error);
+    }
+    log("setup:local-vision", "画像入力資産（約986MB）を検証して導入しました。ローカル画像入力を有効にしてAIを再起動してください");
+    Ok(())
+}
+
 use crate::util::{
     cleanup_dir, cleanup_file, copy_dir, download_to, env_or, exe_name, extract, flag, get_json,
     list_files, log, make_executable, mb, repo_root, warn,
