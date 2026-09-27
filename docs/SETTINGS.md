@@ -12,23 +12,18 @@
 | `PICOAGENT_MODEL` | プロバイダ既定 | AIモデル | 選択中モデル。agent_cliは `claude` / `codex` で外部アプリ既定、`claude:<モデル>` / `codex:<モデル>` で明示選択。基本設定の選択欄から保存 |
 | `PICOAGENT_SYSTEM_PROMPT` | 既定プロンプト | AIモデル | system メッセージ |
 | `PICOAGENT_THEME` | `system` | 基本 | 表示テーマ。`system` はOS/システム設定に追従、`light` は通常、`dark` はダーク。`pet:ui` で即反映 |
+| `PICOAGENT_UI_THEME` | `glass` | 基本 | メイン画面の見た目のテーマ。`ui/themes/<名前>/tokens.css` の名前で、`glass`（ダーク基調のすりガラス）/ `pastel`（明るいパステル）。明暗は `PICOAGENT_THEME` で決まり、`glass` は `system` のときダークで表示する。`pet:ui` で即反映 |
 | `PICOAGENT_BUBBLE_FONT_PX` | `13` | 基本 | フキダシの文字サイズ(px)。`pet:ui` で即反映 |
-| `PICOAGENT_BUBBLE_WIDTH_PX` | 自動 | 内部UI | フキダシ左上つまみのドラッグで自動保存する幅(px)。設定画面には出さない |
-| `PICOAGENT_BUBBLE_HEIGHT_PX` | 自動 | 内部UI | フキダシ左上つまみのドラッグで自動保存する高さ(px)。設定画面には出さない |
-| `PICOAGENT_BUBBLE_LEFT_PX` | 自動 | 内部UI | フキダシ左上つまみのドラッグで自動保存する left(px)。設定画面には出さない |
-| `PICOAGENT_BUBBLE_TOP_PX` | 自動 | 内部UI | フキダシ左上つまみのドラッグで自動保存する top(px)。設定画面には出さない |
+| `PICOAGENT_BUBBLE_WIDTH_PX` / `PICOAGENT_BUBBLE_HEIGHT_PX` / `PICOAGENT_BUBBLE_LEFT_PX` / `PICOAGENT_BUBBLE_TOP_PX` | （旧キー） | 内部UI | 旧版のフキダシ寸法・座標(px)。旧キー（シーン方式では読まない。値は削除せず残す。`PICOAGENT_SCENES` を参照） |
 | `PICOAGENT_WINDOW_WIDTH_PX` | （旧キー） | 内部UI | 旧版の共通ウィンドウ幅。現在は表示形式別の `PICOAGENT_WINDOW_LAYOUTS` を正本にする |
 | `PICOAGENT_WINDOW_HEIGHT_PX` | （旧キー） | 内部UI | 旧版の共通ウィンドウ高さ。現在は表示形式別の `PICOAGENT_WINDOW_LAYOUTS` を正本にする |
 | `PICOAGENT_WINDOW_LEFT_PX` / `PICOAGENT_WINDOW_TOP_PX` | 自動 | 内部UI | ウィンドウ左上の**仮想デスクトップ上の物理座標**(px)。アプリ終了時に保存し、起動時に復元する。マルチモニタでも同じディスプレイの同じ位置へ戻る。現在のディスプレイ構成のどこにも載らない場合は既定位置へ戻す |
 | `PICOAGENT_WINDOW_RIGHT_PX` / `PICOAGENT_WINDOW_BOTTOM_PX` | （旧キー） | 内部UI | 旧版が保存していた画面右端・下端からの相対オフセット。モニタ原点を持たないためマルチモニタでどのディスプレイに居たかを復元できず、絶対座標へ置き換えた。現在は書き込まず、「レイアウトを初期化」で他のレイアウトキーと一緒に掃除するだけ |
 | `PICOAGENT_ALWAYS_ON_TOP` | `true` | 基本 | 常に手前に表示 |
 | `PICOAGENT_GAZE_TRACKING_ENABLED` | `false` | キャラクター | 視線追従。OFFではPNGの自動よそ見・マウス方向の顔差分と傾き・Live2Dのマウス追従を止め、常に正面へ戻す。ONでは顔付近のカーソルだけへ控えめに追従し、画面下など顔から離れた位置では追従しない。`pet:ui` で即反映 |
-| `PICOAGENT_CHARACTER_ZOOM` | `1.55` | 内部UI | 構図未設定時に使う互換用の共通拡大率。新しい調整は `PICOAGENT_CHARACTER_FRAMING` を使う |
-| `PICOAGENT_CHARACTER_FRAMING` | `{}` | 画面 | キャラクターID×表示形式ごとの構図。`preset`（`bust` / `upper` / `full` / `custom`）、`zoom`、`x`、`y`を保持する。未設定時は通常2Dが従来の上半身 `upper`、長身・実写・Live2Dが胸上 `bust` を使う。旧 `talk` の保存値は `chat` へ移す |
-| `PICOAGENT_LAYOUT_PLACEMENTS` | `{}` | 内部UI | 配置編集（上部メニューの「配置」・右クリックの「配置を直接調整」）で決めた位置と倍率。フキダシ・入力欄・履歴・画面内ディスプレイは表示形式ごと、キャラクターの立ち絵は `characters` の下にキャラクターID×表示形式で持つ。値は CSS の `translate`（`Xpx Ypx`）と `scale`（`sx sy`、0.25〜4.0）。設定画面には出さず、編集画面の「保存」「閉じる」「表示形式・キャラ切替」「リセット」で保存する |
-| `PICOAGENT_CHARACTER_OFFSET_X` | `0` | 内部UI | 旧版の立ち絵横移動量（px）。通常ドラッグはウィンドウ移動へ戻したため新規には書き込まず、既存値の互換表示と位置リセットだけに使う |
-| `PICOAGENT_CHARACTER_OFFSET_Y` | `0` | 内部UI | 旧版の立ち絵縦移動量（px）。同上 |
+| `PICOAGENT_CHARACTER_ZOOM` / `PICOAGENT_CHARACTER_FRAMING` / `PICOAGENT_LAYOUT_PLACEMENTS` / `PICOAGENT_CHARACTER_OFFSET_X` / `PICOAGENT_CHARACTER_OFFSET_Y` | （旧キー） | 内部UI | 旧版のキャラ拡大率・構図・配置編集の位置と倍率・立ち絵移動量。CSSの多段拡大を前提にした値のため新しい座標系へ写さない。旧キー（シーン方式では読まない。値は削除せず残す。`PICOAGENT_SCENES` を参照） |
 | `PICOAGENT_LAYOUT` | `pet` | 画面 | 表示形式（画面構成）。現在選べるのは `pet`（既定）/ `mascot` / `stream`。旧 `talk` / `chat` / `bar` / `workspace` / `widget` または未知の値が保存中なら表示時は `pet` へ丸め、旧形式の関連設定は保持する。設定画面のプレビューカードと右クリックメニュー「画面レイアウト」の両方から変更でき、再起動なしで反映する |
+| `PICOAGENT_SCENES` | `{}` | 内部UI | 画面構成（シーン）の保存値。表示形式ごとに、利用者が動かしたソースの矩形（`anchor`・`x`・`y`・`w`・`h`・`visible`）と、`characters.<キャラID>` の矩形と構図（`framing`: `full` / `upper` / `bust`）だけを差分で持つ。既定配置は `ui/scenes/<形式ID>.json`。正規化は `scene::normalize()`（`w`/`h` 48〜20000px、`x`/`y` ±20000px）。つまみを離した・編集を閉じた・自動配置へ戻したときだけ保存し、「今の画面位置・サイズを戻す」で選択中の形式の分を捨てる。設定画面には出さない |
 | `PICOAGENT_STREAM_BACKGROUND` | `pastel` | 画面 | 配信形式の背景。`pastel` / `gaming` / `simple` / `sakura-room`（桜色のくつろぎ部屋）/ `dog-hobby-room`（犬の趣味部屋）/ `custom` |
 | `PICOAGENT_STREAM_BACKGROUND_IMAGE` | 空 | 画面 | `custom` 配信背景としてアプリ管理領域へ取り込んだ画像パス |
 | `PICOAGENT_STREAM_DISPLAY` | `dashboard` | 画面 | 配信背景内ディスプレイ。`dashboard` / `game` / `clock` / `image` / `none` |

@@ -797,10 +797,7 @@ pub async fn pet_init(app: AppHandle, state: State<'_, AppState>) -> Result<Valu
         "up": current_up(&state, STARTUP_PROVIDER_PROBE_TIMEOUT).await,
         "theme": state.config.get("PICOAGENT_THEME", "system"),
         "fontPx": state.config.get("PICOAGENT_BUBBLE_FONT_PX", "13"),
-        "bubbleWidth": state.config.get("PICOAGENT_BUBBLE_WIDTH_PX", ""),
-        "bubbleHeight": state.config.get("PICOAGENT_BUBBLE_HEIGHT_PX", ""),
-        "bubbleLeft": state.config.get("PICOAGENT_BUBBLE_LEFT_PX", ""),
-        "bubbleTop": state.config.get("PICOAGENT_BUBBLE_TOP_PX", ""),
+        "uiTheme": state.config.get("PICOAGENT_UI_THEME", "glass"),
         "voiceVolume": state.config.get("PICOAGENT_TTS_VOLUME", "35"),
         "characterId": character_id,
         "characterOverrides": state.config.get_all().get("PICOAGENT_CHARACTER_OVERRIDES").cloned().unwrap_or_else(|| json!({})),
@@ -812,24 +809,12 @@ pub async fn pet_init(app: AppHandle, state: State<'_, AppState>) -> Result<Valu
         "quickActions": state.config.get("PICOAGENT_QUICK_ACTIONS", ""),
         "napMinutes": state.config.get("PICOAGENT_NAP_MINUTES", "15"),
         "layout": crate::layout::current(&state.config),
-        "characterOffsetX": state.config.get("PICOAGENT_CHARACTER_OFFSET_X", "0"),
-        "characterOffsetY": state.config.get("PICOAGENT_CHARACTER_OFFSET_Y", "0"),
-        "characterZoom": state.config.get("PICOAGENT_CHARACTER_ZOOM", "1.55"),
+        // 画面構成（シーン）の保存値。利用者が動かしたソースだけの差分で、既定配置は画面側が持つ。
+        "scenes": crate::scene::load(&state.config),
         "gazeTrackingEnabled": state.config.get_bool("PICOAGENT_GAZE_TRACKING_ENABLED", false),
-        "characterFraming": state.config.get_all().get("PICOAGENT_CHARACTER_FRAMING").cloned().unwrap_or_else(|| json!({})),
         // 生存通知の間隔はしきい値から決める（固定値だと設定を縮めたとき通知が間に合わない）。
         "bootProgressIntervalMs": crate::boot_screen::progress_interval_ms(
             crate::boot_screen::timeout_ms(&app),
-        ),
-        // 配置編集の位置・倍率。以前は webview の localStorage にしか無く、
-        // WebViewデータの初期化や再インストールで消えていた。
-        "layoutPlacements": crate::layout_placements::normalize(
-            &state
-                .config
-                .get_all()
-                .get("PICOAGENT_LAYOUT_PLACEMENTS")
-                .cloned()
-                .unwrap_or_else(|| json!({})),
         ),
         "streamBackground": stream.background,
         "streamBackgroundImage": stream.background_image,
@@ -1246,77 +1231,6 @@ pub fn pet_set_character_profile(
     }))
 }
 
-/// 立ち絵の移動量（ウィンドウではなくキャラだけの位置）を保存する。
-/// ドラッグを離した時点で1回だけ呼ばれる（移動中は書き込まない）。
-#[tauri::command]
-pub fn pet_set_character_offset(
-    x: f64,
-    y: f64,
-    character_id: Option<String>,
-    layout: Option<String>,
-    zoom: Option<f64>,
-    state: State<'_, AppState>,
-) -> Result<(), String> {
-    // 画面外へ飛ばす値を保存させない。実際の丸めはフロントが枠の位置を見て行うが、
-    // 設定ファイルを直接編集された場合の歯止めとしてここでも範囲を見る。
-    if !(-4000.0..=4000.0).contains(&x) || !(-4000.0..=4000.0).contains(&y) {
-        return Err("立ち絵の位置が許可範囲外です。".to_string());
-    }
-    let mut patch = Map::new();
-    patch.insert(
-        "PICOAGENT_CHARACTER_OFFSET_X".to_string(),
-        json!(x.round().to_string()),
-    );
-    patch.insert(
-        "PICOAGENT_CHARACTER_OFFSET_Y".to_string(),
-        json!(y.round().to_string()),
-    );
-    if let (Some(character_id), Some(layout)) = (character_id, layout) {
-        if !crate::character_pack::is_valid_id(&character_id)
-            || !crate::layout::LAYOUTS
-                .iter()
-                .any(|(id, _, _, _)| *id == layout)
-        {
-            return Err("キャラクターまたは表示形式が不正です。".to_string());
-        }
-        let _guard = crate::store::lock_state("PICOAGENT_CHARACTER_FRAMING");
-        let stored = state
-            .config
-            .get_all()
-            .get("PICOAGENT_CHARACTER_FRAMING")
-            .cloned()
-            .unwrap_or_else(|| Value::Object(Map::new()));
-        let normalized = crate::character_framing::normalize_checked(&stored)?;
-        let mut all = normalized
-            .as_object()
-            .cloned()
-            .ok_or_else(|| "キャラクター構図設定を正規化できません".to_string())?;
-        let characters = all
-            .entry(character_id)
-            .or_insert_with(|| Value::Object(Map::new()));
-        let layouts = characters
-            .as_object_mut()
-            .ok_or_else(|| "保存済みのキャラ構図設定が不正です。".to_string())?;
-        layouts.insert(
-            layout,
-            json!({
-                "preset": "custom",
-                "zoom": zoom.unwrap_or(1.55).clamp(1.0, 4.0),
-                "x": x.round(),
-                "y": y.round(),
-            }),
-        );
-        patch.insert(
-            "PICOAGENT_CHARACTER_FRAMING".to_string(),
-            Value::Object(all),
-        );
-    }
-    state
-        .config
-        .set_all(patch)
-        .map_err(|error| format!("立ち絵の位置の保存に失敗しました: {error}"))
-}
-
 /// 配信背景または配信内ディスプレイへ使う画像を、アプリ管理領域へ取り込む。
 #[tauri::command]
 pub async fn settings_pick_stream_image(
@@ -1520,69 +1434,6 @@ fn open_with_default_app(url: &str) -> Result<(), String> {
         .map_err(|error| format!("既定のアプリで開けませんでした: {error}"))?;
 
     Ok(())
-}
-
-/// ドラッグで確定したフキダシサイズを設定の正本へ保存する。
-#[tauri::command]
-pub fn pet_set_bubble_size(
-    width: u32,
-    height: u32,
-    state: State<'_, AppState>,
-) -> Result<Value, String> {
-    if !(180..=2000).contains(&width) || !(92..=1400).contains(&height) {
-        return Err("フキダシのサイズが許可範囲外です。".to_string());
-    }
-    let mut patch = Map::new();
-    patch.insert(
-        "PICOAGENT_BUBBLE_WIDTH_PX".to_string(),
-        json!(width.to_string()),
-    );
-    patch.insert(
-        "PICOAGENT_BUBBLE_HEIGHT_PX".to_string(),
-        json!(height.to_string()),
-    );
-    state
-        .config
-        .set_all(patch)
-        .map_err(|error| error.to_string())?;
-    Ok(json!({ "ok": true }))
-}
-
-/// ドラッグで確定したフキダシのサイズと座標を設定の正本へ保存する。
-#[tauri::command]
-pub fn pet_set_bubble_layout(
-    width: u32,
-    height: u32,
-    left: u32,
-    top: u32,
-    state: State<'_, AppState>,
-) -> Result<Value, String> {
-    if !(180..=2000).contains(&width) || !(92..=1400).contains(&height) || left > 2000 || top > 1400
-    {
-        return Err("フキダシの表示位置またはサイズが許可範囲外です。".to_string());
-    }
-    let mut patch = Map::new();
-    patch.insert(
-        "PICOAGENT_BUBBLE_WIDTH_PX".to_string(),
-        json!(width.to_string()),
-    );
-    patch.insert(
-        "PICOAGENT_BUBBLE_HEIGHT_PX".to_string(),
-        json!(height.to_string()),
-    );
-    patch.insert(
-        "PICOAGENT_BUBBLE_LEFT_PX".to_string(),
-        json!(left.to_string()),
-    );
-    patch.insert(
-        "PICOAGENT_BUBBLE_TOP_PX".to_string(),
-        json!(top.to_string()),
-    );
-    state
-        .config
-        .set_all(patch)
-        .map_err(|error| error.to_string())?;
-    Ok(json!({ "ok": true }))
 }
 
 /// 追加キャラクター（自分で入れた Live2D モデル等）の一覧。
@@ -3216,10 +3067,10 @@ pub async fn settings_save(
     let schedule_guard = patch
         .contains_key(crate::scheduler::CONFIG_KEY)
         .then(|| crate::store::lock_state(crate::scheduler::CONFIG_KEY));
-    if let Some(value) = patch.get("PICOAGENT_CHARACTER_FRAMING").cloned() {
+    if let Some(value) = patch.get(crate::scene::CONFIG_KEY).cloned() {
         patch.insert(
-            "PICOAGENT_CHARACTER_FRAMING".to_string(),
-            crate::character_framing::normalize_checked(&value)?,
+            crate::scene::CONFIG_KEY.to_string(),
+            crate::scene::normalize_checked(&value)?,
         );
     }
     if let Some(value) = patch.get("PICOAGENT_STREAM_PROFILES").cloned() {
@@ -3445,21 +3296,14 @@ pub async fn settings_save(
         let mut ui = json!({
             "fontPx": state.config.get("PICOAGENT_BUBBLE_FONT_PX", "13"),
             "theme": state.config.get("PICOAGENT_THEME", "system"),
-            "bubbleWidth": state.config.get("PICOAGENT_BUBBLE_WIDTH_PX", ""),
-            "bubbleHeight": state.config.get("PICOAGENT_BUBBLE_HEIGHT_PX", ""),
-            "bubbleLeft": state.config.get("PICOAGENT_BUBBLE_LEFT_PX", ""),
-            "bubbleTop": state.config.get("PICOAGENT_BUBBLE_TOP_PX", ""),
+            "uiTheme": state.config.get("PICOAGENT_UI_THEME", "glass"),
             "voiceVolume": state.config.get("PICOAGENT_TTS_VOLUME", "35"),
             "chatterEnabled": state.config.get_bool("PICOAGENT_CHATTER_ENABLED", false),
             "chatterMinSecs": state.config.get("PICOAGENT_CHATTER_MIN_SECS", "90"),
             "chatterMaxSecs": state.config.get("PICOAGENT_CHATTER_MAX_SECS", "240"),
             "relationshipMemoryEnabled": state.config.get_bool("PICOAGENT_RELATIONSHIP_MEMORY_ENABLED", true),
             "layout": crate::layout::current(&state.config),
-            "characterOffsetX": state.config.get("PICOAGENT_CHARACTER_OFFSET_X", "0"),
-            "characterOffsetY": state.config.get("PICOAGENT_CHARACTER_OFFSET_Y", "0"),
-            "characterZoom": state.config.get("PICOAGENT_CHARACTER_ZOOM", "1.55"),
             "gazeTrackingEnabled": state.config.get_bool("PICOAGENT_GAZE_TRACKING_ENABLED", false),
-            "characterFraming": state.config.get_all().get("PICOAGENT_CHARACTER_FRAMING").cloned().unwrap_or_else(|| json!({})),
             "streamBackground": stream.background,
             "streamBackgroundImage": stream.background_image,
             "streamDisplay": stream.display,
@@ -3932,24 +3776,20 @@ pub fn pet_boot_progress(app: AppHandle) {
     crate::boot_screen::mark_progress(&app);
 }
 
-/// 配置編集（OBS風）で決めた位置・倍率を設定へ保存する。
+/// 画面構成（シーン）の保存値を設定へ保存する。
 ///
-/// 編集中は書かず、「保存」「閉じる」「表示形式・キャラ切替」「リセット」の確定時だけ呼ぶ。
-/// 保存値は `layout_placements::normalize_checked` を通し、壊れた入力で既存の配置を
-/// まとめて失わないようにする。
+/// つまみを離した・編集を閉じた・自動配置へ戻したなどの確定時だけ呼ぶ（ドラッグ中は書かない）。
+/// 保存値は `scene::normalize_checked` を通し、壊れた入力で既存の配置をまとめて失わないようにする。
 #[tauri::command]
-pub fn pet_save_layout_placements(
-    state: State<'_, AppState>,
-    placements: Value,
-) -> Result<(), String> {
-    let _guard = crate::store::lock_state("PICOAGENT_LAYOUT_PLACEMENTS");
-    let normalized = crate::layout_placements::normalize_checked(&placements)?;
+pub fn pet_save_scene(state: State<'_, AppState>, scenes: Value) -> Result<(), String> {
+    let _guard = crate::store::lock_state(crate::scene::CONFIG_KEY);
+    let normalized = crate::scene::normalize_checked(&scenes)?;
     let mut patch = Map::new();
-    patch.insert("PICOAGENT_LAYOUT_PLACEMENTS".to_string(), normalized);
+    patch.insert(crate::scene::CONFIG_KEY.to_string(), normalized);
     state
         .config
         .set_all(patch)
-        .map_err(|error| format!("配置の保存に失敗しました: {error}"))
+        .map_err(|error| format!("画面配置の保存に失敗しました: {error}"))
 }
 
 /// 共通の起動画面から、ユーザーが保存している表示形式と寸法へ戻す。
