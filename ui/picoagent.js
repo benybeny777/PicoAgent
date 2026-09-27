@@ -193,7 +193,7 @@ window.picoagent = {
   clearRelationship: () => call("pet_relationship_clear"),
   completeOnboarding: () => call("pet_complete_onboarding"),
   showOnboarding: () => call("pet_show_onboarding"),
-  menu: (context = {}) => call("pet_menu", { context }),
+  menu: (context = {}, x, y) => call("pet_menu", { context, x, y }),
   // GPU描画のエラー時に、次回起動時の描画キャッシュ削除を予約する。
   requestGpuCacheReset: (reason) => call("pet_request_gpu_cache_reset", { reason }),
   // 上端メニューの「表示」から、ボタン直下（ウィンドウ基準の論理座標）へ画面レイアウトの一覧を出す。

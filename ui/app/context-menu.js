@@ -39,7 +39,7 @@ export function createContextMenu({ onCharacterAction, openExternalUrl }) {
   document.addEventListener("contextmenu", event => {
     event.preventDefault();
     remembered = capture(event);
-    bridge.menu(remembered.context).catch(error => {
+    bridge.menu(remembered.context, Math.round(event.clientX), Math.round(event.clientY)).catch(error => {
       // 失敗はブリッジが app.log へ残す。利用者には右クリックが無反応に見えるので理由も出す。
       toast(`メニューを開けませんでした: ${preview(errorMessage(error), 60)}`, "error");
     });
