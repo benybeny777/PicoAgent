@@ -359,7 +359,7 @@ mod guard {
     #[test]
     fn 人格プロンプトの除去は受け口側だけが持つ() {
         let root = guard_scan::repo_root();
-        let renderer = std::fs::read_to_string(root.join("ui/renderer.js")).expect("renderer.js");
+        let renderer = std::fs::read_to_string(root.join("ui/app/main.js")).expect("main.js");
         for removed in [
             "stripPersonaLeak",
             "personaSpeechBlocklist",

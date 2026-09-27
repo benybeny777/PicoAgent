@@ -8,7 +8,7 @@
 
 ## 共通の表示構図
 
-PicoAgentは、低頭身2Dを従来の上半身位置 `upper`、長身・実写・Live2Dを胸全体がぎりぎり入る胸上 `bust` にします。構図保存のないキャラだけ描画形式と体型ごとの標準へ戻し、直前に選んでいた別キャラの倍率や位置を引き継ぎません。Live2Dはモデル別`scale` / `offsetY`で胸上へ合わせるため、表示側では`upper=1.55`を中立倍率として扱い、PNG向け`bust`倍率を重ねません。原画自体が胸上なら`sourceFraming: native-bust`、全身の独自2.5Dなら`sourceFraming: native-full`を指定します。`native-full`は配信画面でも260%クロップせず、Canvasをステージの高さへ収めて原画の顔を過大に引き伸ばしません。原画固有の余白は manifest の `defaultFraming` / `streamFraming` で吸収し、利用者が保存した構図を上書きしません。チャット／バーの小型アイコンは首上で切り出します。素材自体は後から調整できるよう全身・透過・余白つきで保持し、表示側で非破壊にフレーミングします。旧 `talk` はLINE風の `chat` へ統合済みで、撮影対象へ戻しません。
+PicoAgentは、低頭身2Dを従来の上半身位置 `upper`、長身・実写・Live2Dを胸全体がぎりぎり入る胸上 `bust` にします。構図保存のないキャラだけ描画形式と体型ごとの標準へ戻し、直前に選んでいた別キャラの倍率や位置を引き継ぎません。Live2Dはモデル別`scale` / `offsetY`で胸上へ合わせるため、表示側では`upper=1.55`を中立倍率として扱い、PNG向け`bust`倍率を重ねません。原画自体が胸上なら`sourceFraming: native-bust`、全身の独自2.5Dなら`sourceFraming: native-full`を指定します。`native-full`は配信画面でも260%クロップせず、Canvasをステージの高さへ収めて原画の顔を過大に引き伸ばしません。原画固有の余白は新しい描画器が可視範囲から計算します。旧 `defaultFraming.zoom` / `streamFraming` / `iconFraming` の倍率はメイン画面では読みません。チャット／バーの小型アイコンは首上で切り出します。素材自体は後から調整できるよう全身・透過・余白つきで保持し、表示側で非破壊にフレーミングします。旧 `talk` はLINE風の `chat` へ統合済みで、撮影対象へ戻しません。
 
 実画面の「配置」モードではMoveableを使い、キャラクター、フキダシ、入力、履歴、画面内ディスプレイを直接ドラッグ／拡大縮小できます。配置は表示形式ごとにローカル保存し、素材画像やmanifestは書き換えません。通常操作へ戻したときにキャラクタードラッグでウィンドウ移動できることも検査します。
 
@@ -140,7 +140,7 @@ cargo xtask character-quality --update-baseline           # 解消した指摘�
 - PNG寸法だけで合格にせず、顔・髪・輪郭を元絵、完成レイヤー、実WebViewの拡大表示で並べて確認する
 - 胸元二次動作は広いフェザーと小さい縦変形で境界が見えない
 - 配信ではPICO STUDIOの後ろ、背景の前に描画される
-- `SHOOT_CHARACTER_MATRIX=1` の全キャラ×7形式で描画欠け・速度警告が0件
+- `tools/screenshots/ui-check.mjs` の全キャラ×現行3形式で描画欠け・操作部品のはみ出しが0件。Live2DとMMDの実機表示は別途確認する
 - メッシュリグは`SHOOT_MESH_RIG=1`で閉眼、開口、頭部メッシュ、省モーション退避、縦1400画素以上の描画バッファが合格する
 
 最後に `cargo test --manifest-path xtask/Cargo.toml`、`cargo check --manifest-path src-tauri/Cargo.toml`、必要なら `cargo test --manifest-path src-tauri/Cargo.toml --lib`、`git diff --check` を実行します。
@@ -155,6 +155,6 @@ cargo xtask character-quality --update-baseline           # 解消した指摘�
 - 生成途中の画像を `characters/` へ置かない。一時物はリポジトリ直下の `temp/` だけに置く
 - `cargo xtask character-quality` の不合格を、素材を直さずベースラインへ足して回避しない
 
-Live2Dの小型アイコンは`live2d.iconFraming`でモデルごとの首上位置を指定する。`layoutFraming[形式]`があれば優先し、未指定の座標は基底設定を引き継ぐ。メッシュ配信の胸上切り出しはPIXI内部で行い、`native-full`は従来の全身表示を維持する。canvasは縦横比を保ち、原画と描画バッファをDPIで換算した上限を超えない。
+旧 `live2d.iconFraming` はメイン画面の配置には使わない。`layoutFraming[形式]`があれば優先し、未指定の座標は基底設定を引き継ぐ。メッシュ配信の胸上切り出しはPIXI内部で行い、`native-full`は従来の全身表示を維持する。canvasは縦横比を保ち、原画と描画バッファをDPIで換算した上限を超えない。
 
 メッシュが休止するチャット／バーでは、リグの有無と差分画像の有無を分けて判定する。差分画像がなければ`animations.idle`へ退避し、未指定なら既存`preview.png`を使う。原画が`source.png`のパックはidleへ明示する。LVSの顔座標がある場合は同じ原画座標で首上アイコンを切り出し、保存ズームを小型の丸枠へ重ねない。

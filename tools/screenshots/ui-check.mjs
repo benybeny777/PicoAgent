@@ -132,12 +132,21 @@ async function edgeContact(page) {
     const opaque = (x, y) => data[(y * canvas.width + x) * 4 + 3] > 40;
     const row = y => { let count = 0; for (let x = 0; x < canvas.width; x++) if (opaque(x, y)) count++; return count; };
     const column = x => { let count = 0; for (let y = 0; y < canvas.height; y++) if (opaque(x, y)) count++; return count; };
-    let total = 0;
-    for (let y = 0; y < canvas.height; y += 2) for (let x = 0; x < canvas.width; x += 2) if (opaque(x, y)) total++;
-    return { top: row(0), bottom: row(canvas.height - 1), left: column(0), right: column(canvas.width - 1), total, width: canvas.width, height: canvas.height };
+    let total = 0, minX = canvas.width, minY = canvas.height, maxX = -1, maxY = -1;
+    for (let y = 0; y < canvas.height; y += 2) for (let x = 0; x < canvas.width; x += 2) if (opaque(x, y)) {
+      total++;
+      minX = Math.min(minX, x); minY = Math.min(minY, y);
+      maxX = Math.max(maxX, x); maxY = Math.max(maxY, y);
+    }
+    return { top: row(0), bottom: row(canvas.height - 1), left: column(0), right: column(canvas.width - 1), total, width: canvas.width, height: canvas.height, minX, minY, maxX, maxY };
   }, `data:image/png;base64,${png.toString("base64")}`);
   await probe.close();
-  return { ...result, box };
+  return { ...result, box, opaque: {
+    left: box.x + result.minX / result.width * box.width,
+    right: box.x + (result.maxX + 1) / result.width * box.width,
+    top: box.y + result.minY / result.height * box.height,
+    bottom: box.y + (result.maxY + 1) / result.height * box.height,
+  } };
 }
 
 /** 要素が窓の内側に完全に収まっているか。 */
@@ -156,9 +165,11 @@ async function fullyInside(page, selector) {
 
 const LAYOUTS = { pet: [900, 600], mascot: [360, 560], stream: [1280, 720] };
 const characters = (process.env.UI_CHECK_CHARACTERS || "mugi,rin,photoreal-prototype").split(",");
+const layoutIds = (process.env.UI_CHECK_LAYOUTS || "pet,mascot,stream").split(",");
 
 for (const characterId of characters) {
-  for (const [layout, [width, height]] of Object.entries(LAYOUTS)) {
+  for (const layout of layoutIds) {
+    const [width, height] = LAYOUTS[layout];
     const label = `${characterId}/${layout}`;
     const { context, page, errors } = await openApp({ layout, width, height, characterId });
     await page.screenshot({ path: path.join(outDir, `${characterId}-${layout}.png`), omitBackground: true });
@@ -170,6 +181,17 @@ for (const characterId of characters) {
     else if (edges.top > 0) fail(label, `キャラの上端が切れています（上端の接触 ${edges.top}px）`);
     else ok(`${label} 描画（${kind}）`);
     if (errors.length) fail(label, `画面エラー: ${errors.slice(0, 3).join(" / ")}`);
+    if (layout === "stream") {
+      const overlaps = await page.evaluate(character => {
+        return ["display", "subtitle", "chat"].filter(name => {
+          const other = document.querySelector(`[data-source=${name}]`)?.getBoundingClientRect();
+          return other && character.left < other.right && other.left < character.right
+            && character.top < other.bottom && other.top < character.bottom;
+        });
+      }, edges.opaque);
+      if (overlaps.length) fail(label, `キャラ矩形が他のソースと重なっています: ${overlaps.join(", ")}`);
+      else ok(`${label} 配信ソースと非重複`);
+    }
 
     // 大きく拡大しても切れない（全身構図にして、四辺どこにも接しないことを確かめる）。
     await page.evaluate(() => window.__emit("pet:context-action", { action: "set-framing", framing: "full" }));
@@ -230,6 +252,35 @@ for (const layout of Object.keys(LAYOUTS)) {
     else if (!result.inside) fail(label, `${selector} が窓の外へ出ています ${JSON.stringify(result.rect)}`);
   }
   ok(`${label} 最小サイズの収まり`);
+  await context.close();
+}
+
+// 異常な保存値を表示時だけ収め、読み込みだけでは保存し直さない。
+{
+  const scenes = { version: 1, pet: { sources: { chat: {
+    anchor: "top-left", x: -1000, y: -1000, w: 5000, h: 4000,
+  } } } };
+  const { context, page } = await openApp({ layout: "pet", width: 900, height: 600, characterId: "mugi", scenes });
+  const bounds = await fullyInside(page, "[data-source=chat]");
+  const state = await page.evaluate(() => ({ saved: window.__saved, calls: window.__calls.filter(call => call.name === "pet_save_scene") }));
+  if (!bounds.inside) fail("saved-overflow", `会話パネルが窓外です ${JSON.stringify(bounds)}`);
+  if (JSON.stringify(state.saved) !== JSON.stringify(scenes)) fail("saved-overflow", "表示補正が保存値を書き換えました");
+  if (state.calls.length) fail("saved-overflow", "読み込みだけでシーンを保存しました");
+  if (bounds.inside && !state.calls.length) ok("巨大な保存値は表示だけ収め、保存値を保つ");
+  await context.close();
+}
+
+// 拡大を戻すと3形式とも元の会話パネル位置へ戻る。
+for (const [layout, [width, height]] of Object.entries(LAYOUTS)) {
+  const { context, page } = await openApp({ layout, width, height, characterId: "mugi" });
+  const before = await page.locator("[data-source=chat]").boundingBox();
+  const expand = page.locator('[aria-label="会話パネルを拡大"]');
+  await expand.evaluate(button => button.click());
+  await expand.evaluate(button => button.click());
+  const after = await page.locator("[data-source=chat]").boundingBox();
+  if (["x", "y", "width", "height"].some(key => Math.abs(before[key] - after[key]) > 1)) {
+    fail(`expanded/${layout}`, `元の位置へ戻りません ${JSON.stringify({ before, after })}`);
+  } else ok(`expanded/${layout} 配置復元`);
   await context.close();
 }
 

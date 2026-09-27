@@ -39,7 +39,6 @@ let renderingSettings = false;
 let characterOverrides = {};
 let characterVoiceOverrides = {};
 let characterLive2dSdkOverrides = {};
-let characterFraming = {};
 let characterFramingEditor = null;
 let characterStreamProfiles = {};
 let characterStreamProfileEditor = null;
@@ -257,10 +256,6 @@ function updateDirtyStateNow() {
   characterLive2dSdkField?.classList.toggle(
     "changed",
     stableStringify(current.PICOAGENT_LIVE2D_SDK_OVERRIDES) !== stableStringify(savedSnapshot.PICOAGENT_LIVE2D_SDK_OVERRIDES)
-  );
-  characterFramingEditor?.node?.classList.toggle(
-    "changed",
-    stableStringify(current.PICOAGENT_CHARACTER_FRAMING) !== stableStringify(savedSnapshot.PICOAGENT_CHARACTER_FRAMING)
   );
   form.querySelector(".alarm-editor")?.closest(".card-config")?.classList.toggle(
     "changed",
@@ -1049,10 +1044,12 @@ function setQuickSettingsSummary(tabId, summary) {
   if (node) node.textContent = summary;
 }
 
-function applySettingsTheme(value) {
+function applySettingsTheme(value, uiTheme = document.documentElement.dataset.uiTheme || "glass") {
+  document.documentElement.dataset.uiTheme = uiTheme === "pastel" ? "pastel" : "glass";
   const theme = value === "light" || value === "dark" ? value : "system";
   if (theme === "system") {
-    document.documentElement.removeAttribute("data-theme");
+    if (uiTheme === "glass") document.documentElement.dataset.theme = "dark";
+    else document.documentElement.removeAttribute("data-theme");
   } else {
     document.documentElement.dataset.theme = theme;
   }
@@ -2533,132 +2530,11 @@ function buildCharacterStreamProfileEditor(values) {
 }
 
 function buildCharacterFramingEditor() {
-  const layoutSelect = el("select", {}, LAYOUT_CHOICES.map(layout => el("option", { value: layout.id, textContent: layout.label })));
-  const presetSelect = el("select", {}, [
-    el("option", { value: "bust", textContent: "胸上（基本）" }),
-    el("option", { value: "upper", textContent: "上半身" }),
-    el("option", { value: "full", textContent: "全身" }),
-    el("option", { value: "custom", textContent: "細かく調整" }),
-  ]);
-  const zoom = el("input", { type: "range", min: "1", max: "4", step: ".05" });
-  const x = el("input", { type: "number", min: "-4000", max: "4000", step: "1" });
-  const y = el("input", { type: "number", min: "-4000", max: "4000", step: "1" });
-  const zoomValue = el("output", { textContent: "2.05倍" });
-  const positionValue = el("output", { textContent: "X 0 / Y 38" });
-  const preview = el("div", {
-    className: "framing-preview",
-    role: "group",
-    tabIndex: "0",
-    ariaLabel: "キャラをドラッグして位置を調整",
-  }, [
-    el("img", { alt: "選択キャラの構図プレビュー", draggable: false }),
-    el("strong", { textContent: "キャラをドラッグして位置調整" }),
-    el("span", { textContent: "字幕テロップ" }),
-  ]);
-  const defaults = { bust: { zoom: 2.05, x: 0, y: 38 }, upper: { zoom: 1.55, x: 0, y: 18 }, full: { zoom: 1, x: 0, y: 0 } };
-  const current = () => characterFraming?.[characterSelect.value]?.[layoutSelect.value];
-  // 本体の独立した scale:1.32 は、transform 内の拡大だけでなく移動量にも掛かる。
-  // 描画とドラッグの逆変換で同じ縮尺を使い、保存済みの座標は変換しない。
-  const previewPositionScale = () => (preview.querySelector("img").clientHeight || 182) / 315 * 1.32;
-  const updatePreview = () => {
-    const image = preview.querySelector("img");
-    // 本体（styles.css の .character-view）と同じ計算で描く。枠は285:315、上端基準で
-    // 「構図倍率 × 画像形式の補正1.32」を掛け、位置にも同じ形式補正を反映する。
-    const positionScale = previewPositionScale();
-    image.style.transform = `translate(calc(-50% + ${Number(x.value) * positionScale}px),${Number(y.value) * positionScale}px) scale(${Number(zoom.value) * 1.32})`;
-    zoomValue.textContent = `${Number(zoom.value).toFixed(2)}倍`;
-    positionValue.textContent = `X ${Number(x.value)} / Y ${Number(y.value)}`;
-  };
-  const load = async () => {
-    const character = characterCatalog.characters.find(item => item.id === characterSelect.value);
-    const defaultPreset = character?.renderKind === "2d" ? "upper" : "bust";
-    const saved = current() || { preset: defaultPreset, ...defaults[defaultPreset] };
-    const fallback = defaults[saved.preset] || saved;
-    presetSelect.value = saved.preset || "custom";
-    zoom.value = String(saved.zoom ?? fallback.zoom ?? defaults[defaultPreset].zoom);
-    x.value = String(saved.x ?? fallback.x ?? 0);
-    y.value = String(saved.y ?? fallback.y ?? 0);
-    updatePreview();
-    const image = preview.querySelector("img");
-    image.removeAttribute("src");
-    try {
-      const url = character ? await characterIconUrl(character, { face: false }) : "";
-      if (url) image.src = url;
-      image.alt = "選択キャラの構図プレビュー";
-    } catch (error) {
-      image.alt = "構図プレビューを読み込めません";
-      logApp("warn", "構図プレビューを読み込めませんでした", errorDetail(error));
-    }
-  };
-  const save = () => {
-    characterFraming[characterSelect.value] ||= {};
-    characterFraming[characterSelect.value][layoutSelect.value] = { preset: presetSelect.value, zoom: Number(zoom.value), x: Number(x.value), y: Number(y.value) };
-    updatePreview(); updateDirtyState();
-  };
-  presetSelect.addEventListener("change", () => {
-    const next = defaults[presetSelect.value];
-    if (next) { zoom.value = next.zoom; x.value = next.x; y.value = next.y; }
-    save();
-  });
-  for (const input of [zoom, x, y]) input.addEventListener("input", () => { presetSelect.value = "custom"; save(); });
-  let drag = null;
-  preview.addEventListener("pointerdown", event => {
-    if (event.button !== 0) return;
-    event.preventDefault();
-    drag = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, x: Number(x.value), y: Number(y.value) };
-    preview.setPointerCapture(event.pointerId);
-    preview.classList.add("is-dragging");
-  });
-  preview.addEventListener("pointermove", event => {
-    if (!drag || drag.pointerId !== event.pointerId) return;
-    // プレビュー上の移動量を本体の座標へ戻す（updatePreview の縮尺の逆数）。画像が指に付いて動く。
-    const toApp = 1 / previewPositionScale();
-    x.value = String(Math.round(Math.max(-4000, Math.min(4000, drag.x + (event.clientX - drag.startX) * toApp))));
-    y.value = String(Math.round(Math.max(-4000, Math.min(4000, drag.y + (event.clientY - drag.startY) * toApp))));
-    presetSelect.value = "custom";
-    save();
-  });
-  const endDrag = event => {
-    if (!drag || drag.pointerId !== event.pointerId) return;
-    if (preview.hasPointerCapture(event.pointerId)) preview.releasePointerCapture(event.pointerId);
-    preview.classList.remove("is-dragging");
-    drag = null;
-  };
-  preview.addEventListener("pointerup", endDrag);
-  preview.addEventListener("pointercancel", endDrag);
-  preview.addEventListener("lostpointercapture", endDrag);
-  layoutSelect.addEventListener("change", load);
-  const reset = el("button", { type: "button", className: "secondary", textContent: "この構図を初期値へ戻す" });
-  reset.addEventListener("click", async () => {
-    reset.disabled = true;
-    const characterId = characterSelect.value;
-    const layout = layoutSelect.value;
-    if (characterFraming?.[characterId]) {
-      delete characterFraming[characterId][layout];
-      if (!Object.keys(characterFraming[characterId]).length) delete characterFraming[characterId];
-    }
-    try {
-      await load();
-      updateDirtyState();
-      statusEl.textContent = "この表示形式の構図を初期値へ戻しました。「変更を保存」で反映します。";
-    } finally {
-      reset.disabled = false;
-    }
-  });
   const node = markSearchable(el("div", { className: "field framing-editor" }, [
-    el("label", { textContent: "キャラごとの構図（表示形式別）" }),
-    el("div", { className: "framing-controls" }, [
-      el("label", {}, [el("span", { textContent: "表示形式" }), layoutSelect]),
-      el("label", {}, [el("span", { textContent: "基本構図" }), presetSelect]),
-      el("label", { className: "framing-zoom" }, [el("span", { textContent: "キャラサイズ" }), zoomValue, zoom]),
-      el("label", {}, [el("span", { textContent: "横位置（X）" }), x]),
-      el("label", {}, [el("span", { textContent: "縦位置（Y）" }), y]),
-      positionValue,
-    ]), preview,
-    reset,
-    el("p", { className: "hint", textContent: "サイズはスライダー、位置はプレビュー内のキャラをドラッグして調整できます。キャラと表示形式ごとに保存します。" }),
-  ]), "キャラ 構図 胸上 上半身 全身 拡大 位置 プレビュー");
-  return { node, load };
+    el("label", { textContent: "キャラの位置・大きさ・構図" }),
+    el("p", { className: "hint", textContent: "メイン画面のキャラにマウスを乗せ、つまみで位置と大きさを調整できます。右クリックから構図と自動配置を選べます。" }),
+  ]), "キャラ 構図 胸上 上半身 全身 拡大 位置");
+  return { node, load: async () => {} };
 }
 
 function diagnosticRepairButton(label, handler) {
@@ -3193,13 +3069,17 @@ async function render() {
   const displaySec = section("画面レイアウト");
   displaySec.append(el("p", {
     className: "settings-intro",
-    textContent: "用途に合う画面レイアウトをプレビューから選べます。通常2Dは従来の上半身位置、長身キャラとLive2Dは胸上を基準に表示し、ウィンドウは端をドラッグして拡大・縮小できます。",
+    textContent: "ペット・ミニ・配信から画面を選べます。キャラの位置と大きさはメイン画面で直接調整でき、ウィンドウは端をドラッグして拡大・縮小できます。",
   }));
   displaySec.append(layoutPickerField(v.PICOAGENT_LAYOUT === "talk" ? "chat" : (v.PICOAGENT_LAYOUT || "pet")));
   displaySec.append(selectField("PICOAGENT_THEME", "表示テーマ", v.PICOAGENT_THEME || "system", [
     { value: "system", label: "システム設定に追従" },
     { value: "light", label: "通常" },
     { value: "dark", label: "ダーク" },
+  ]));
+  displaySec.append(selectField("PICOAGENT_UI_THEME", "メイン画面の見た目", v.PICOAGENT_UI_THEME || "glass", [
+    { value: "glass", label: "すりガラス" },
+    { value: "pastel", label: "パステル" },
   ]));
   displaySec.append(field("PICOAGENT_BUBBLE_FONT_PX", "会話文字の大きさ（px）", "text", v.PICOAGENT_BUBBLE_FONT_PX ?? "", "13"));
   displaySec.append(field("PICOAGENT_ALWAYS_ON_TOP", "常に手前に表示", "checkbox", v.PICOAGENT_ALWAYS_ON_TOP !== false));
@@ -3296,9 +3176,12 @@ async function render() {
     const selected = LAYOUT_CHOICES.find(item => item.id === event.target.value);
     setQuickSettingsSummary("display", selected?.label || event.target.value);
   });
-  applySettingsTheme(v.PICOAGENT_THEME || "system");
+  applySettingsTheme(v.PICOAGENT_THEME || "system", v.PICOAGENT_UI_THEME || "glass");
   inputs.get("PICOAGENT_THEME")?.addEventListener("change", event => {
     applySettingsTheme(event.target.value);
+  });
+  inputs.get("PICOAGENT_UI_THEME")?.addEventListener("change", event => {
+    applySettingsTheme(inputs.get("PICOAGENT_THEME")?.value || "system", event.target.value);
   });
 
   // --- キャラクター ---
@@ -3325,7 +3208,6 @@ async function render() {
   characterOverrides = v.PICOAGENT_CHARACTER_OVERRIDES || {};
   characterVoiceOverrides = v.PICOAGENT_TTS_CHARACTER_OVERRIDES || {};
   characterLive2dSdkOverrides = v.PICOAGENT_LIVE2D_SDK_OVERRIDES || {};
-  characterFraming = cloneSettings(v.PICOAGENT_CHARACTER_FRAMING || {});
   characterStreamProfiles = cloneSettings(v.PICOAGENT_STREAM_PROFILES || {});
   const characterSec = section("キャラクター設定");
   characterSelect = el("select");
@@ -4164,7 +4046,6 @@ function collect() {
   patch.PICOAGENT_CHARACTER_OVERRIDES = characterOverrides;
   patch.PICOAGENT_TTS_CHARACTER_OVERRIDES = characterVoiceOverrides;
   patch.PICOAGENT_LIVE2D_SDK_OVERRIDES = characterLive2dSdkOverrides;
-  patch.PICOAGENT_CHARACTER_FRAMING = characterFraming;
   patch.PICOAGENT_STREAM_PROFILES = characterStreamProfiles;
   if (alarmEditorState) patch.PICOAGENT_ALARMS = alarmEditorState.getJson();
   if (scheduleEditorState) patch.PICOAGENT_SCHEDULED_TASKS = scheduleEditorState.getJson();

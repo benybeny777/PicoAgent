@@ -1489,9 +1489,36 @@ fn remove_beta_badge(text: &str) -> Option<String> {
 /// HTML が読み込むローカルの CSS / JS へ、内容から決まる `?v=…` を付ける。
 ///
 /// 手書きの版番号は付け忘れ・書き間違いが起きる（実際に `styles.css` と `renderer.js` で
-/// 版が食い違っていた）。内容ハッシュにしておけば、変更したファイルだけが確実に読み直され、
-/// webview のキャッシュに古い CSS が残らない。
+/// 版が食い違っていた）。CSSはファイル単位、JSは依存先も含む共通ハッシュにして、
+/// import先だけが変わった場合もwebviewの古いモジュールキャッシュを読み直す。
 fn stamp_asset_versions(dest: &std::path::Path) -> Result<()> {
+    // モジュールの依存先だけが変わっても入口のURLを更新できるよう、JS全体の内容版を使う。
+    let mut modules: Vec<_> = list_files(dest)
+        .into_iter()
+        .filter(|file| file.extension().is_some_and(|extension| extension == "js"))
+        .collect();
+    modules.sort();
+    let mut module_contents = Vec::new();
+    for file in &modules {
+        module_contents.extend_from_slice(file.strip_prefix(dest)?.to_string_lossy().as_bytes());
+        let source = fs::read_to_string(file)?;
+        let normalized = rewrite_module_imports(&source, "", &|relative| {
+            file.parent()
+                .is_some_and(|parent| parent.join(relative).is_file())
+        });
+        module_contents.extend_from_slice(normalized.as_bytes());
+    }
+    let module_version = content_version(&module_contents);
+    for file in modules {
+        let source = fs::read_to_string(&file)?;
+        let stamped = rewrite_module_imports(&source, &module_version, &|relative| {
+            file.parent()
+                .is_some_and(|parent| parent.join(relative).is_file())
+        });
+        if stamped != source {
+            fs::write(file, stamped)?;
+        }
+    }
     for file in list_files(dest) {
         if file.extension().map(|e| e != "html").unwrap_or(true) {
             continue;
@@ -1509,6 +1536,43 @@ fn stamp_asset_versions(dest: &std::path::Path) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// 相対JS import/exportの指定子だけへ、依存グラフ共通の内容版を付ける。
+fn rewrite_module_imports(source: &str, version: &str, exists: &dyn Fn(&str) -> bool) -> String {
+    let mut out = String::with_capacity(source.len() + 64);
+    for line in source.split_inclusive('\n') {
+        let trimmed = line.trim_start();
+        if !(trimmed.starts_with("import ")
+            || trimmed.starts_with("export ")
+            || line.contains("import("))
+        {
+            out.push_str(line);
+            continue;
+        }
+        let mut rest = line;
+        while let Some(start) = rest.find(['\"', '\'']) {
+            let quote = rest.as_bytes()[start] as char;
+            out.push_str(&rest[..=start]);
+            let after = &rest[start + 1..];
+            let Some(end) = after.find(quote) else {
+                out.push_str(after);
+                rest = "";
+                break;
+            };
+            let value = &after[..end];
+            let path = value.split(['?', '#']).next().unwrap_or(value);
+            if path.starts_with('.') && path.ends_with(".js") && exists(path) {
+                out.push_str(&format!("{path}?v={version}"));
+            } else {
+                out.push_str(value);
+            }
+            out.push(quote);
+            rest = &after[end + 1..];
+        }
+        out.push_str(rest);
+    }
+    out
 }
 
 /// 内容から決まる短い版文字列（FNV-1a。外部クレートを増やさない）。
@@ -1835,8 +1899,8 @@ mod tests {
         character_manifests_equivalent, content_version, delivery_image_matches,
         drop_characters_from_index, file_sha256, image_dimensions, is_character_source_only,
         remove_beta_badge, remove_source_layers_from_runtime_copy, rewrite_asset_refs,
-        stamp_asset_versions, stamp_character_asset_versions, unfetched_live2d_characters,
-        validate_character_asset_generation,
+        rewrite_module_imports, stamp_asset_versions, stamp_character_asset_versions,
+        unfetched_live2d_characters, validate_character_asset_generation,
     };
 
     fn write_test_webp(path: &std::path::Path, width: u32, height: u32, seed: u8) {
@@ -2024,6 +2088,45 @@ mod tests {
             stamped,
             r#"<link rel="stylesheet" href="styles.css?v=aaaaaaaa" /><script src="renderer.js?v=bbbbbbbb"></script>"#
         );
+    }
+
+    #[test]
+    fn モジュールの相対importへ内容版を付け直す() {
+        let source = "import { a } from \"./a.js\";\nexport { b } from '../b.js?v=old';\nconst c = import('./c.js');\n";
+        let stamped = rewrite_module_imports(source, "abcd1234", &|_| true);
+        assert!(stamped.contains("./a.js?v=abcd1234"));
+        assert!(stamped.contains("../b.js?v=abcd1234"));
+        assert!(stamped.contains("./c.js?v=abcd1234"));
+        assert_eq!(
+            stamped,
+            rewrite_module_imports(&stamped, "abcd1234", &|_| true)
+        );
+    }
+
+    #[test]
+    fn 孫モジュール変更でhtmlの入口版も更新する() {
+        let root =
+            std::env::temp_dir().join(format!("picoagent-module-version-{}", std::process::id()));
+        fs::create_dir_all(&root).unwrap();
+        fs::write(
+            root.join("index.html"),
+            r#"<script type="module" src="main.js"></script>"#,
+        )
+        .unwrap();
+        fs::write(root.join("main.js"), "import './child.js';").unwrap();
+        fs::write(root.join("child.js"), "import './grandchild.js';").unwrap();
+        fs::write(root.join("grandchild.js"), "export const value = 1;").unwrap();
+        stamp_asset_versions(&root).unwrap();
+        let first = fs::read_to_string(root.join("index.html")).unwrap();
+        assert!(fs::read_to_string(root.join("main.js"))
+            .unwrap()
+            .contains("./child.js?v="));
+        stamp_asset_versions(&root).unwrap();
+        assert_eq!(first, fs::read_to_string(root.join("index.html")).unwrap());
+        fs::write(root.join("grandchild.js"), "export const value = 2;").unwrap();
+        stamp_asset_versions(&root).unwrap();
+        assert_ne!(first, fs::read_to_string(root.join("index.html")).unwrap());
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
