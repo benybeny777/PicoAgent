@@ -36,6 +36,15 @@ pub const LAYOUTS: [(&str, &str, f64, f64); 7] = [
     ("widget", "ウィジェット（予定と通知）", 440.0, 600.0),
 ];
 
+/// 現在選べる形式。旧形式の保存済み構図・配置・寸法は再提供に備えて保持する。
+pub const AVAILABLE_LAYOUTS: [(&str, &str, f64, f64); 3] = [LAYOUTS[1], LAYOUTS[0], LAYOUTS[5]];
+
+pub fn is_available(id: &str) -> bool {
+    AVAILABLE_LAYOUTS
+        .iter()
+        .any(|(layout, _, _, _)| *layout == id)
+}
+
 /// 2026-08-07以前の既定寸法。保存値がこの組み合わせと完全一致する環境だけ新しい
 /// 読みやすい既定へ移し、ユーザーが手で調整した寸法はそのまま残す。
 const LEGACY_DEFAULT_SIZES: [(&str, f64, f64); 8] = [
@@ -104,7 +113,7 @@ pub fn is_known(id: &str) -> bool {
 pub fn current(config: &crate::config::Config) -> String {
     let id = config.get("PICOAGENT_LAYOUT", DEFAULT);
     let normalized = normalize_id(&id);
-    if is_known(normalized) {
+    if is_available(normalized) {
         normalized.to_string()
     } else {
         DEFAULT.to_string()
@@ -234,7 +243,7 @@ pub fn forget_sizes(app: &AppHandle, id: Option<&str>) -> Result<(), String> {
 /// 起動時と切り替え時の両方から呼ぶ。
 pub fn apply(app: &AppHandle, id: &str) -> Result<(), String> {
     let normalized = normalize_id(id);
-    let id = if is_known(normalized) {
+    let id = if is_available(normalized) {
         normalized
     } else {
         DEFAULT
@@ -451,7 +460,7 @@ pub(crate) fn applied_physical_size(
 /// 表示形式を切り替えて保存する（右クリックメニューの入口）。
 pub fn select(app: &AppHandle, id: &str) -> Result<(), String> {
     let id = normalize_id(id);
-    if !is_known(id) {
+    if !is_available(id) {
         return Err(format!("未知の表示形式です: {id}"));
     }
     // 切り替え前の寸法を、その形式のものとして覚えておく
@@ -473,7 +482,8 @@ pub fn select(app: &AppHandle, id: &str) -> Result<(), String> {
 mod tests {
     use super::{
         begin_boot_size, boot_size_active, centered_physical_position, default_size, end_boot_size,
-        is_known, BOOT_HEIGHT, BOOT_WIDTH, DEFAULT, LAYOUTS, MIN_HEIGHT, MIN_WIDTH,
+        is_available, is_known, AVAILABLE_LAYOUTS, BOOT_HEIGHT, BOOT_WIDTH, DEFAULT, LAYOUTS,
+        MIN_HEIGHT, MIN_WIDTH,
     };
 
     /// 既定の表示形式が定義一覧に含まれていること（未知の値のフォールバック先が実在する）。
@@ -550,9 +560,13 @@ mod tests {
     }
 
     #[test]
-    fn 旧トーク形式はチャットへ統合する() {
+    fn 旧形式は保存値を残して選択だけ既定へ戻す() {
         assert!(!is_known("talk"));
+        assert!(is_known("chat"));
         assert_eq!(default_size("talk"), default_size("chat"));
+        for id in ["talk", "chat", "bar", "workspace", "widget"] {
+            assert!(!is_available(id));
+        }
     }
 
     fn read_repo_file(relative: &str) -> String {
@@ -583,7 +597,7 @@ mod tests {
             .skip(1)
             .filter_map(|rest| rest.split('"').next())
             .collect();
-        let mut expected: Vec<&str> = LAYOUTS.iter().map(|(id, _, _, _)| *id).collect();
+        let mut expected: Vec<&str> = AVAILABLE_LAYOUTS.iter().map(|(id, _, _, _)| *id).collect();
         listed.sort_unstable();
         expected.sort_unstable();
         assert_eq!(
@@ -591,7 +605,7 @@ mod tests {
             "ui/settings.js の LAYOUT_CHOICES と表示形式の定義がずれています"
         );
 
-        for (id, _, width, height) in LAYOUTS {
+        for (id, _, width, height) in AVAILABLE_LAYOUTS {
             let entry = choices
                 .split(&format!("id: \"{id}\""))
                 .nth(1)

@@ -152,7 +152,7 @@ fn layout_items(
         let state = app.state::<AppState>();
         crate::layout::current(&state.config)
     };
-    crate::layout::LAYOUTS
+    crate::layout::AVAILABLE_LAYOUTS
         .into_iter()
         .map(|(id, label, _, _)| {
             CheckMenuItemBuilder::with_id(format!("{LAYOUT_ID_PREFIX}{id}"), label)
