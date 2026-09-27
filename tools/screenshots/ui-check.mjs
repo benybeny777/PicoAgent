@@ -191,6 +191,22 @@ for (const characterId of characters) {
       }, edges.opaque);
       if (overlaps.length) fail(label, `キャラ矩形が他のソースと重なっています: ${overlaps.join(", ")}`);
       else ok(`${label} 配信ソースと非重複`);
+      if (characterId === "mugi") {
+        const subtitle = page.locator(".subtitle .reply");
+        await subtitle.evaluate(node => { node.textContent = "字幕の文字をドラッグしても選択されないか確認します"; });
+        const bounds = await subtitle.boundingBox();
+        if (!bounds) fail(`${label}/subtitle`, "字幕が表示されません");
+        else {
+          const y = bounds.y + Math.min(bounds.height / 2, 24);
+          await page.mouse.move(bounds.x + 24, y);
+          await page.mouse.down();
+          await page.mouse.move(bounds.x + Math.min(bounds.width - 24, 480), y, { steps: 8 });
+          await page.mouse.up();
+          const selected = await page.evaluate(() => String(window.getSelection?.() ?? ""));
+          if (selected) fail(`${label}/subtitle`, `ドラッグ後も字幕が選択されています: ${selected}`);
+          else ok(`${label} 字幕の文字はドラッグしても選択されない`);
+        }
+      }
     }
 
     // 大きく拡大しても切れない（全身構図にして、四辺どこにも接しないことを確かめる）。

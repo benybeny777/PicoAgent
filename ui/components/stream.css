@@ -71,6 +71,8 @@
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.86), rgba(255, 238, 246, 0.84));
   border: 2px solid rgba(255, 255, 255, 0.9);
   box-shadow: 0 16px 40px rgba(60, 30, 50, 0.22);
+  user-select: none;
+  -webkit-user-select: none;
 }
 .subtitle .reply {
   color: var(--stream-caption-color, #5a3b4b);
@@ -81,4 +83,4 @@
 }
 /* 字幕は子要素まで選択させない（入り込んだ選択の色も出さない）。 */
 .subtitle .reply, .subtitle .reply * { user-select: none; -webkit-user-select: none; }
-.subtitle .reply::selection, .subtitle .reply *::selection { background: transparent; }
+.subtitle::selection, .subtitle *::selection { color: inherit; background: transparent; }
