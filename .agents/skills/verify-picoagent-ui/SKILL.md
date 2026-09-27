@@ -31,14 +31,14 @@ description: PicoAgentの画面崩れ、ドラッグ、最大化、キャラ位�
 
 ## 検証する
 
-- PNGは`SHOOT_CHARACTER_MATRIX=1`、操作は`SHOOT_INTERACTION_MATRIX=1`、Live2Dは`SHOOT_LIVE2D_MATRIX=1`を使い、必要ならIDで対象を絞る。
-- 代表レイアウトだけで済ませず、変更に関係する現行7形式を確認する。
+- まず`tools/screenshots/ui-check.mjs`で3形式の画素・操作部品の完全包含・右クリック文脈・矩形保存を検査する。必要なら`SHOOT_CHARACTER_MATRIX=1`などの旧撮影ツールで実機の追加確認を行う。
+- 代表レイアウトだけで済ませず、変更に関係する現行3形式を確認する。
 - スクリーンショットを実際に開き、キャラの鮮明さ、切れ、左右位置、前後関係、操作部品を目視する。
 - 一時画像・結果は`temp/`だけへ置き、成果物のREADME WebPだけを`docs/images/`へ出す。
 
 ## 実Tauri WebViewを直接検査する
 
-- ブラウザ配信では足りないMMD描画・CSP・assetプロトコルは、WebView2のリモートデバッグで実アプリを検査する。`tauri.conf.json`の`additionalBrowserArgs`が環境変数`WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS`を上書きするため、環境変数だけではポートが開かない。検査中だけ`additionalBrowserArgs`へ` --remote-debugging-port=9222`を足して`cargo xtask dev`で起動し（コミットしない。終了後に必ず戻す）、`http://127.0.0.1:9222/json/list`のページターゲットへ`Runtime.evaluate`を送る。Playwrightからは`tools/screenshots/native-inspect.mjs`の`withNativePage`を使い、接続時に`noDefaults: true`を必ず指定する。接続後に`emulateMedia`を解除する旧手順は、解除前に白いフレームが出るため使用しない。テーマ・省モーション・フォーカスを検査側の既定で上書きしない。状態取得・撮影の入口は`tools/screenshots/README.md`を参照する。`renderer.js`はモジュールではないため、`mmdController`や`characterRoot`などのスクリプトスコープ変数をそのまま評価できる。
+- ブラウザ配信では足りないMMD描画・CSP・assetプロトコルは、WebView2のリモートデバッグで実アプリを検査する。`tauri.conf.json`の`additionalBrowserArgs`が環境変数`WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS`を上書きするため、環境変数だけではポートが開かない。検査中だけ`additionalBrowserArgs`へ` --remote-debugging-port=9222`を足して`cargo xtask dev`で起動し（コミットしない。終了後に必ず戻す）、`http://127.0.0.1:9222/json/list`のページターゲットへ`Runtime.evaluate`を送る。Playwrightからは`tools/screenshots/native-inspect.mjs`の`withNativePage`を使い、接続時に`noDefaults: true`を必ず指定する。接続後に`emulateMedia`を解除する旧手順は、解除前に白いフレームが出るため使用しない。テーマ・省モーション・フォーカスを検査側の既定で上書きしない。状態取得・撮影の入口は`tools/screenshots/README.md`を参照する。`ui/app/main.js`はES Moduleなので、旧`renderer.js`のスクリプトスコープ変数を直接評価する手順は使えない。DOMと公開された契約から状態を確認する。
 - 検査のために選択キャラ・表示形式を設定から切り替えてよい（利用者判断）。切り替える前の値を控え、検査の最後に必ず元へ戻す。キャラの変更は再起動で反映されるため、アプリを止めた後に戻した場合も設定値を確認する。
 - 利用者の登録データを書き換えない。検証用の表情やモーフ名は、同じPMXを隠しcanvas（`position:fixed;left:-10000px`）へ読み直した第2のコントローラへ渡し、成功・失敗のどちらでも`dispose()`とcanvas削除を通す。
 - 待ちは`setTimeout`で刻む。`requestAnimationFrame`はウィンドウが背面だと絞られて戻らず、評価そのものが返らなくなる。

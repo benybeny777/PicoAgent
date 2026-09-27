@@ -1,4 +1,4 @@
-// 設定画面の「画面」タブを配布UIから描画し、7形式のカードを回帰確認する。
+// 設定画面の「画面」タブを配布UIから描画し、現行3形式のカードを回帰確認する。
 import { createReadStream, existsSync, mkdirSync } from "node:fs";
 import { createServer } from "node:http";
 import { extname, join, normalize, resolve } from "node:path";
@@ -177,13 +177,13 @@ try {
     if (await page.locator('.tabs .tab[tabindex="0"]').count() !== 1) throw new Error("Tabキーの移動先が選択中のタブに絞られていません");
   }
   const cardCount = await page.locator(".layout-card").count();
-  if (cardCount !== 7) throw new Error(`表示形式カードが7件ではありません: ${cardCount}`);
+  if (cardCount !== 3) throw new Error(`表示形式カードが3件ではありません: ${cardCount}`);
   await page.waitForFunction(() => [...document.querySelectorAll(".layout-card img")].every(image => image.complete && image.naturalWidth > 0));
   const selected = await page.locator(".layout-card.selected strong").textContent();
   if (selected !== "配信") throw new Error(`保存中の配信カードが選択状態ではありません: ${selected}`);
-  await page.getByTitle("チャットへ変更").click();
+  await page.getByTitle("ミニへ変更").click();
   const selectedValue = await page.locator("select.layout-native-select").inputValue();
-  if (selectedValue !== "chat") throw new Error(`カード選択が設定値へ反映されません: ${selectedValue}`);
+  if (selectedValue !== "mascot") throw new Error(`カード選択が設定値へ反映されません: ${selectedValue}`);
   await page.getByTitle("配信へ変更").click();
   if (await page.getByText("表示するモニター", { exact: true }).count()) throw new Error("不要なモニター指定欄が残っています");
   if (await page.locator(".layout-live-preview img").count() !== 1) throw new Error("選択中レイアウトの大型プレビューがありません");
@@ -530,30 +530,9 @@ try {
   if (!streamEnabled) throw new Error("むぎのキャラ別配信設定が読み込まれていません");
   if (await page.locator('.stream-profile-editor input[type="color"]').inputValue() !== "#a04070") throw new Error("キャラ別字幕色が読み込まれていません");
   const framing = page.locator(".framing-editor");
-  if (!(await framing.textContent())?.includes("キャラサイズ")) throw new Error("構図にキャラサイズのスライダーがありません");
-  const zoom = framing.locator('input[type="range"]');
-  await zoom.fill("2.1");
-  if ((await framing.locator("output").first().textContent()) !== "2.10倍") throw new Error("キャラサイズの現在値が表示されません");
-  const preview = framing.locator(".framing-preview");
-  const xInput = framing.locator('input[type="number"]').first();
-  const beforeX = Number(await xInput.inputValue());
-  await preview.scrollIntoViewIfNeeded();
-  const previewBox = await preview.boundingBox();
-  if (!previewBox) throw new Error("構図プレビューの位置を取得できません");
-  await page.mouse.move(previewBox.x + previewBox.width / 2, previewBox.y + previewBox.height / 2);
-  await page.mouse.down();
-  await page.mouse.move(previewBox.x + previewBox.width / 2 + 12, previewBox.y + previewBox.height / 2 + 8);
-  await page.mouse.up();
-  if (Number(await xInput.inputValue()) <= beforeX) throw new Error("プレビューのドラッグが横位置へ反映されません");
-  if ((await framing.locator("select").nth(1).inputValue()) !== "custom") throw new Error("ドラッグ後に細かく調整へ切り替わりません");
+  if (!(await framing.textContent())?.includes("メイン画面のキャラにマウスを乗せ")) throw new Error("構図の調整場所が案内されません");
+  if (await framing.locator('input[type="range"], .framing-preview').count()) throw new Error("使われない旧構図エディタが残っています");
   await page.screenshot({ path: join(OUT, "character-framing.png") });
-  await framing.getByRole("button", { name: "この構図を初期値へ戻す", exact: true }).click();
-  await page.waitForFunction(() => document.getElementById("dirtySummary")?.textContent === "保存済み");
-  const framingResetDirty = await page.locator("#dirtySummary").textContent();
-  if (framingResetDirty !== "保存済み") {
-    const changed = await page.locator(".changed").evaluateAll(nodes => nodes.map(node => node.dataset.settingKey || `${node.className}:${node.textContent?.slice(0, 40)}`));
-    throw new Error(`構図を初期値へ戻しても未保存状態が解消されません: ${framingResetDirty} / ${changed.join(",")}`);
-  }
   const addedCharacter = page.locator(".character-card").filter({ hasText: "ID: user-test" });
   await addedCharacter.getByRole("button", { name: "このキャラを選ぶ", exact: true }).click();
   await addedCharacter.getByRole("button", { name: "削除", exact: true }).click();
@@ -662,7 +641,7 @@ try {
   await recoveryPage.getByRole("tab", { name: "基本設定", exact: true }).waitFor();
   await recoveryPage.waitForFunction(() => !document.getElementById("save").disabled);
   await recoveryPage.close();
-  console.log(`設定画面確認: 入口8件 / キャラ作成・登録・選択・音声の4分割 / 追加機能6件 / 表示形式7件 / 複数AI2件・合議・担当希望・400px表示 / モニター指定欄なし / 未保存件数（選択中キャラの改名含む）・検索解除・製品情報・構図サイズ・構図ドラッグ・配信・ミュート・長いスキルラベル600px/400px・狭幅フッター表示OK / 選択=${selected} / ${join(OUT, "display-tab.png")}`);
+  console.log(`設定画面確認: 入口8件 / キャラ作成・登録・選択・音声の4分割 / 追加機能6件 / 表示形式3件 / 複数AI2件・合議・担当希望・400px表示 / モニター指定欄なし / 未保存件数（選択中キャラの改名含む）・検索解除・製品情報・構図の調整案内・配信・ミュート・長いスキルラベル600px/400px・狭幅フッター表示OK / 選択=${selected} / ${join(OUT, "display-tab.png")}`);
 } finally {
   await browser.close();
   await new Promise(resolveClose => server.close(resolveClose));

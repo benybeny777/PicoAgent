@@ -1,145 +1,245 @@
-// menu.rs - 右クリックのネイティブコンテキストメニュー。
+// menu.rs - 右クリックの統一メニューと、上端メニューの一覧。
+//
+// どこで右クリックしても同じメニューを出す。画面は右クリックした場所の文脈（選択文字・入力欄・
+// リンク・キャラ）だけを渡し、ここは文脈に応じた項目を先頭に足すだけにする。区切り線より下の
+// 共通部分は文脈に依らず同じ並びで、項目は下の定義表から組み立てる（項目の追加・並べ替えは表の1行）。
 
-use tauri::menu::{CheckMenuItemBuilder, MenuBuilder, MenuItemBuilder, SubmenuBuilder};
-use tauri::{Emitter, LogicalPosition, Manager, PhysicalPosition};
+use serde::Deserialize;
+use tauri::menu::{
+    CheckMenuItemBuilder, IsMenuItem, MenuBuilder, MenuItemBuilder, MenuItemKind,
+    PredefinedMenuItem, SubmenuBuilder,
+};
+use tauri::{Emitter, LogicalPosition, Manager, PhysicalPosition, Wry};
 
 use crate::commands::{
     clear_conversation_and_history, open_character_settings, open_display_settings, open_settings,
     AppState,
 };
 
-/// 表示形式メニュー項目の ID 接頭辞。`layout:chat` のように形式 ID を続ける。
+/// 表示形式メニュー項目の ID 接頭辞。`layout:pet` のように形式 ID を続ける。
 const LAYOUT_ID_PREFIX: &str = "layout:";
 const CHARACTER_ID_PREFIX: &str = "character:";
 const PLACE_ID_PREFIX: &str = "place:";
+/// 文脈項目の ID 接頭辞。選ばれたら `pet:context-action` で画面へ返す。
+const CONTEXT_ID_PREFIX: &str = "ctx:";
 
-#[tauri::command]
-pub fn pet_menu(window: tauri::WebviewWindow, app: tauri::AppHandle) -> Result<(), String> {
-    let summon = MenuItemBuilder::with_id("summon", "話しかける…")
-        .build(&app)
-        .map_err(|e| e.to_string())?;
-    let settings = MenuItemBuilder::with_id("settings", "設定を開く…")
-        .build(&app)
-        .map_err(|e| e.to_string())?;
-    let games = MenuItemBuilder::with_id("games", "遊ぶ")
-        .build(&app)
-        .map_err(|e| e.to_string())?;
-    let display_settings = MenuItemBuilder::with_id("display_settings", "画面レイアウト・位置…")
-        .build(&app)
-        .map_err(|e| e.to_string())?;
-    let edit_layout = MenuItemBuilder::with_id("edit_layout", "配置を直接調整")
-        .build(&app)
-        .map_err(|e| e.to_string())?;
-    let character_settings = MenuItemBuilder::with_id("character_settings", "キャラクターの設定…")
-        .build(&app)
-        .map_err(|e| e.to_string())?;
-    let is_always_on_top = window.is_always_on_top().map_err(|e| e.to_string())?;
-    let ontop = CheckMenuItemBuilder::with_id("ontop", "常に手前に表示")
-        .checked(is_always_on_top)
-        .build(&app)
-        .map_err(|e| e.to_string())?;
-    let tts_enabled = {
-        let state = app.state::<AppState>();
-        state.config.get_bool("PICOAGENT_TTS_ENABLED", false)
-    };
-    let tts = CheckMenuItemBuilder::with_id(
-        "tts_toggle",
-        if tts_enabled {
-            "読み上げ：有効"
-        } else {
-            "読み上げ：ミュート中"
-        },
-    )
-    .checked(tts_enabled)
-    .build(&app)
-    .map_err(|e| e.to_string())?;
-    // 会話履歴だけでなく**これまで覚えたこと（長期メモリ）も消える**。以前のラベルは
-    // 「会話履歴を消して」としか言っておらず、失うものを実際より小さく見せていた。
-    let reset = MenuItemBuilder::with_id("reset", "消す（元に戻せません）")
-        .build(&app)
-        .map_err(|e| e.to_string())?;
-    let reset_layout = MenuItemBuilder::with_id("reset_layout", "今の画面位置・サイズを戻す")
-        .build(&app)
-        .map_err(|e| e.to_string())?;
-    // 立ち絵をドラッグでずらしすぎたときの戻し先。位置とサイズのリセットにも含まれるが、
-    // 「キャラを動かしたら戻せなくなった」が一番起きやすい操作ミスなので単独で出す。
-    let reset_character = MenuItemBuilder::with_id("reset_character", "キャラ位置を中央へ戻す")
-        .build(&app)
-        .map_err(|e| e.to_string())?;
-    let quit = MenuItemBuilder::with_id("quit", "終了")
-        .build(&app)
-        .map_err(|e| e.to_string())?;
+/// 右クリックした場所の文脈。文字列そのもの（選択文字・URL）は受け取らない。
+#[derive(Debug, Default, Clone, Copy, Deserialize)]
+#[serde(default)]
+pub struct MenuContext {
+    /// 選択中の文字がある。
+    pub selection: bool,
+    /// 入力欄の上で開いた。
+    pub editable: bool,
+    /// リンクの上で開いた。
+    pub link: bool,
+    /// キャラの上で開いた。
+    pub character: bool,
+}
 
-    // 表示形式は作業に合わせてその場で変えるものなので、設定画面を開かずに選べるようにする。
-    let layout_items = layout_items(&app)?;
-    let mut layout_menu = SubmenuBuilder::new(&app, "画面レイアウト");
-    for item in &layout_items {
-        layout_menu = layout_menu.item(item);
+/// メニューの1要素。定義表として `const` に並べ、組み立ては `build_entries` の1か所で行う。
+enum Entry {
+    /// 通常の項目（ID, 表示名）。
+    Item(&'static str, &'static str),
+    /// 読み上げの切り替え（表示名が状態で変わるチェック項目）。
+    Tts,
+    /// 常に手前に表示（チェック項目）。
+    OnTop,
+    /// 表示形式の一覧（`AVAILABLE_LAYOUTS` から作り、選択中にチェック）。
+    Layouts,
+    /// 区切り線。
+    Separator,
+    /// 子を持つ項目（表示名, 子）。
+    Submenu(&'static str, &'static [Entry]),
+}
+
+/// 文脈ごとに先頭へ足す項目。
+struct ContextItem {
+    when: fn(&MenuContext) -> bool,
+    entry: Entry,
+}
+
+const CONTEXT_ITEMS: &[ContextItem] = &[
+    // 入力欄では編集操作一式、それ以外で文字を選んでいればコピーだけ出す。
+    ContextItem {
+        when: |c| c.editable,
+        entry: Entry::Item("ctx:cut", "切り取り"),
+    },
+    ContextItem {
+        when: |c| c.editable || c.selection,
+        entry: Entry::Item("ctx:copy", "コピー"),
+    },
+    ContextItem {
+        when: |c| c.editable,
+        entry: Entry::Item("ctx:paste", "貼り付け"),
+    },
+    ContextItem {
+        when: |c| c.editable,
+        entry: Entry::Item("ctx:select-all", "すべて選択"),
+    },
+    ContextItem {
+        when: |c| c.link,
+        entry: Entry::Item("ctx:open-link", "リンクを開く"),
+    },
+    ContextItem {
+        when: |c| c.link,
+        entry: Entry::Item("ctx:copy-link", "リンクをコピー"),
+    },
+    ContextItem {
+        when: |c| c.character,
+        entry: Entry::Item("ctx:edit-character", "キャラの位置とサイズを調整"),
+    },
+    ContextItem {
+        when: |c| c.character,
+        entry: Entry::Submenu(
+            "構図",
+            &[
+                Entry::Item("ctx:framing:full", "全身"),
+                Entry::Item("ctx:framing:upper", "上半身"),
+                Entry::Item("ctx:framing:bust", "胸上"),
+            ],
+        ),
+    },
+    ContextItem {
+        when: |c| c.character,
+        entry: Entry::Item("ctx:reset-character", "キャラを自動配置へ戻す"),
+    },
+];
+
+/// 文脈に依らず同じ並びの共通部分。会話 → 画面の置き方 → 設定画面 → リセット → 終了の順に区切る。
+/// 読み上げの切り替えは会話中によく使う操作なので「話しかける…」と同じまとまりに置く。
+/// 会話と記憶の消去は取り消せないので、もう一段めくらないと押せない位置へ置く。
+const COMMON_ITEMS: &[Entry] = &[
+    Entry::Item("summon", "話しかける…"),
+    Entry::Tts,
+    Entry::Item("games", "遊ぶ"),
+    Entry::Separator,
+    Entry::Submenu("画面レイアウト", &[Entry::Layouts]),
+    Entry::Submenu(
+        "表示するモニター",
+        &[
+            Entry::Item("place:left", "左画面の中央"),
+            Entry::Item("place:right", "右画面の中央"),
+            Entry::Item("place:current", "現在の画面の中央"),
+            Entry::Item("place:primary", "主画面の中央"),
+        ],
+    ),
+    Entry::Item("edit_layout", "配置を編集（OBS風）"),
+    Entry::OnTop,
+    Entry::Separator,
+    Entry::Item("display_settings", "画面レイアウト・位置…"),
+    Entry::Item("character_settings", "キャラクターの設定…"),
+    Entry::Item("settings", "設定を開く…"),
+    Entry::Separator,
+    Entry::Submenu(
+        "表示と会話をリセット",
+        &[
+            Entry::Item("ctx:reset-character", "キャラを自動配置へ戻す"),
+            Entry::Item("reset_layout", "今の画面位置・サイズを戻す"),
+            Entry::Separator,
+            Entry::Submenu(
+                "会話履歴と覚えたことを消す",
+                &[Entry::Item("reset", "消す（元に戻せません）")],
+            ),
+        ],
+    ),
+    Entry::Separator,
+    Entry::Item("quit", "終了"),
+];
+
+fn err(error: tauri::Error) -> String {
+    error.to_string()
+}
+
+/// 定義表の要素を実際のメニュー項目へ組み立てる。サブメニューは再帰で組む。
+fn build_entries(
+    app: &tauri::AppHandle,
+    window: &tauri::WebviewWindow,
+    entries: &[&Entry],
+) -> Result<Vec<MenuItemKind<Wry>>, String> {
+    let mut items = Vec::new();
+    for entry in entries {
+        match entry {
+            Entry::Item(id, label) => items.push(MenuItemKind::MenuItem(
+                MenuItemBuilder::with_id(*id, *label)
+                    .build(app)
+                    .map_err(err)?,
+            )),
+            Entry::Tts => {
+                let enabled = app
+                    .state::<AppState>()
+                    .config
+                    .get_bool("PICOAGENT_TTS_ENABLED", false);
+                let label = if enabled {
+                    "読み上げ：有効"
+                } else {
+                    "読み上げ：ミュート中"
+                };
+                items.push(MenuItemKind::Check(
+                    CheckMenuItemBuilder::with_id("tts_toggle", label)
+                        .checked(enabled)
+                        .build(app)
+                        .map_err(err)?,
+                ));
+            }
+            Entry::OnTop => items.push(MenuItemKind::Check(
+                CheckMenuItemBuilder::with_id("ontop", "常に手前に表示")
+                    .checked(window.is_always_on_top().map_err(err)?)
+                    .build(app)
+                    .map_err(err)?,
+            )),
+            Entry::Layouts => items.extend(layout_items(app)?.into_iter().map(MenuItemKind::Check)),
+            Entry::Separator => items.push(MenuItemKind::Predefined(
+                PredefinedMenuItem::separator(app).map_err(err)?,
+            )),
+            Entry::Submenu(label, children) => {
+                let children: Vec<&Entry> = children.iter().collect();
+                let built = build_entries(app, window, &children)?;
+                let refs: Vec<&dyn IsMenuItem<Wry>> = built
+                    .iter()
+                    .map(|item| item as &dyn IsMenuItem<Wry>)
+                    .collect();
+                items.push(MenuItemKind::Submenu(
+                    SubmenuBuilder::new(app, *label)
+                        .items(&refs)
+                        .build()
+                        .map_err(err)?,
+                ));
+            }
+        }
     }
-    let layout_menu = layout_menu.build().map_err(|e| e.to_string())?;
-    let placement_menu = SubmenuBuilder::new(&app, "表示するモニター")
-        .item(
-            &MenuItemBuilder::with_id("place:left", "左画面の中央")
-                .build(&app)
-                .map_err(|e| e.to_string())?,
-        )
-        .item(
-            &MenuItemBuilder::with_id("place:right", "右画面の中央")
-                .build(&app)
-                .map_err(|e| e.to_string())?,
-        )
-        .item(
-            &MenuItemBuilder::with_id("place:current", "現在の画面の中央")
-                .build(&app)
-                .map_err(|e| e.to_string())?,
-        )
-        .item(
-            &MenuItemBuilder::with_id("place:primary", "主画面の中央")
-                .build(&app)
-                .map_err(|e| e.to_string())?,
-        )
-        .build()
-        .map_err(|e| e.to_string())?;
+    Ok(items)
+}
 
-    // 会話と記憶の消去は取り消せないので、もう一段めくらないと押せない位置へ置く。
-    // 同じ階層に並べていた頃は、キャラ位置を直しに来た利用者の目に、見た目が同じ3項目
-    // として並んでいた（2つは無害、1つは全消去）。
-    let reset_conversation_menu = SubmenuBuilder::new(&app, "会話履歴と覚えたことを消す")
-        .item(&reset)
-        .build()
-        .map_err(|e| e.to_string())?;
-    let reset_menu = SubmenuBuilder::new(&app, "表示と会話をリセット")
-        .item(&reset_character)
-        .item(&reset_layout)
-        .separator()
-        .item(&reset_conversation_menu)
-        .build()
-        .map_err(|e| e.to_string())?;
+/// 文脈項目（該当するものだけ）→ 区切り線 → 共通部分、の順に並べる。
+fn menu_entries(context: &MenuContext) -> Vec<&'static Entry> {
+    let mut entries: Vec<&Entry> = CONTEXT_ITEMS
+        .iter()
+        .filter(|item| (item.when)(context))
+        .map(|item| &item.entry)
+        .collect();
+    if !entries.is_empty() {
+        entries.push(&Entry::Separator);
+    }
+    entries.extend(COMMON_ITEMS.iter());
+    entries
+}
 
-    // 会話 → 画面の置き方 → 設定画面 → リセット → 終了の順に、分野ごとに区切る。
-    // 読み上げの切り替えは会話中によく使う操作なので「話しかける…」と同じまとまりに置く
-    // （以前は画面レイアウトや常に手前表示の間に混ざっていた）。
-    let menu = MenuBuilder::new(&app)
-        .item(&summon)
-        .item(&tts)
-        .item(&games)
-        .separator()
-        .item(&layout_menu)
-        .item(&placement_menu)
-        .item(&edit_layout)
-        .item(&ontop)
-        .separator()
-        .item(&display_settings)
-        .item(&character_settings)
-        .item(&settings)
-        .separator()
-        .item(&reset_menu)
-        .separator()
-        .item(&quit)
-        .build()
-        .map_err(|e| e.to_string())?;
-
-    window.popup_menu(&menu).map_err(|e| e.to_string())?;
+/// 右クリックの統一メニュー。キャラ上・会話パネル上・入力欄上・リンク上のどこでもこれを出す。
+#[tauri::command]
+pub fn pet_menu(
+    window: tauri::WebviewWindow,
+    app: tauri::AppHandle,
+    context: Option<MenuContext>,
+) -> Result<(), String> {
+    let entries = menu_entries(&context.unwrap_or_default());
+    let items = build_entries(&app, &window, &entries)?;
+    let refs: Vec<&dyn IsMenuItem<Wry>> = items
+        .iter()
+        .map(|item| item as &dyn IsMenuItem<Wry>)
+        .collect();
+    let menu = MenuBuilder::new(&app).items(&refs).build().map_err(err)?;
+    window.popup_menu(&menu).map_err(err)?;
     Ok(())
 }
 
@@ -177,12 +277,16 @@ pub fn pet_layout_menu(
     let display_settings = MenuItemBuilder::with_id("display_settings", "画面レイアウト・位置…")
         .build(&app)
         .map_err(|e| e.to_string())?;
+    let edit_layout = MenuItemBuilder::with_id("edit_layout", "配置を編集（OBS風）")
+        .build(&app)
+        .map_err(|e| e.to_string())?;
     let mut menu = MenuBuilder::new(&app);
     for item in &layout_items {
         menu = menu.item(item);
     }
     let menu = menu
         .separator()
+        .item(&edit_layout)
         .item(&display_settings)
         .build()
         .map_err(|e| e.to_string())?;
@@ -194,8 +298,6 @@ pub fn pet_layout_menu(
 
 /// 上端メニューの「キャラ選択」から、キャラクターの一覧をボタン直下へ出す。
 ///
-/// 以前は設定画面のキャラ選択タブを開くだけで、隣の「表示」がその場でメニューを出すのと
-/// 挙動が揃っておらず、切り替えるだけなのに設定画面まで往復する必要があった。
 /// 一覧は同梱キャラと追加キャラを突き合わせたフロント側の一覧をそのまま受け取る
 /// （突き合わせを二重に実装すると、片方だけ増減したときに食い違う）。
 #[tauri::command]
@@ -242,6 +344,15 @@ pub fn pet_character_menu(
     Ok(())
 }
 
+/// 文脈項目の ID を画面へ返す中身へ変える（`ctx:framing:bust` → `{ action: "set-framing", framing: "bust" }`）。
+fn context_action(id: &str) -> Option<serde_json::Value> {
+    let action = id.strip_prefix(CONTEXT_ID_PREFIX)?;
+    if let Some(framing) = action.strip_prefix("framing:") {
+        return Some(serde_json::json!({ "action": "set-framing", "framing": framing }));
+    }
+    Some(serde_json::json!({ "action": action }))
+}
+
 /// メニューで選ばれたキャラクターへ切り替える。
 /// 設定画面での保存と同じ経路（設定の保存 → 再初期化）を通すため、人格・背景・音声・
 /// 履歴の切り替えが設定画面から変えた場合と一致する。エンジンとAivisは動かしたままにする。
@@ -264,6 +375,18 @@ fn select_character(app: &tauri::AppHandle, character_id: &str) -> Result<(), St
 
 /// メニュー選択イベントの処理（main.rs の on_menu_event から呼ぶ）。
 pub fn handle_event(app: &tauri::AppHandle, id: &str) {
+    if let Some(payload) = context_action(id) {
+        // 選択範囲・リンク・キャラの扱いは右クリックした時点の状態を知っている画面側が行う。
+        if let Some(win) = app.get_webview_window("main") {
+            if let Err(error) = win.emit("pet:context-action", payload) {
+                crate::log_paths::append_app_log(
+                    app,
+                    &format!("右クリックの操作を画面へ渡せません: {error}"),
+                );
+            }
+        }
+        return;
+    }
     if let Some(layout_id) = id.strip_prefix(LAYOUT_ID_PREFIX) {
         if let Err(error) = crate::layout::select(app, layout_id) {
             crate::log_paths::append_app_log(app, &error);
@@ -320,7 +443,7 @@ pub fn handle_event(app: &tauri::AppHandle, id: &str) {
         "character_settings" => open_character_settings(app),
         "edit_layout" => {
             if let Some(win) = app.get_webview_window("main") {
-                if let Err(error) = win.emit("pet:layout-edit", "character") {
+                if let Err(error) = win.emit("pet:layout-edit", "all") {
                     crate::log_paths::append_app_log(
                         app,
                         &format!("配置編集を画面へ開始できません: {error}"),
@@ -421,60 +544,8 @@ pub fn handle_event(app: &tauri::AppHandle, id: &str) {
             }
         }
         "reset_layout" => reset_bubble_and_window_layout(app),
-        "reset_character" => reset_character_offset(app),
         "quit" => app.exit(0),
         _ => {}
-    }
-}
-
-/// 現在のキャラ・表示形式の構図と互換用移動量を既定へ戻す。
-/// ウィンドウの位置・サイズ・表示形式には触らない。
-pub(crate) fn reset_character_offset(app: &tauri::AppHandle) {
-    let state = app.state::<AppState>();
-    let mut patch = serde_json::Map::new();
-    for key in [
-        "PICOAGENT_CHARACTER_OFFSET_X",
-        "PICOAGENT_CHARACTER_OFFSET_Y",
-    ] {
-        patch.insert(key.to_string(), serde_json::Value::String(String::new()));
-    }
-    let character_id = state.config.get("PICOAGENT_CHARACTER", "mugi");
-    let layout = crate::layout::current(&state.config);
-    let _framing_guard = crate::store::lock_state("PICOAGENT_CHARACTER_FRAMING");
-    let stored_framing = state
-        .config
-        .get_all()
-        .get("PICOAGENT_CHARACTER_FRAMING")
-        .cloned()
-        .unwrap_or_else(|| serde_json::json!({}));
-    let framing = match crate::character_framing::normalize_checked(&stored_framing) {
-        Ok(framing) => framing,
-        Err(error) => {
-            crate::log_paths::append_app_log(app, &error);
-            return;
-        }
-    };
-    patch.insert(
-        "PICOAGENT_CHARACTER_FRAMING".to_string(),
-        crate::character_framing::remove(&framing, &character_id, &layout),
-    );
-    if let Err(error) = state.config.set_all(patch) {
-        crate::log_paths::append_app_log(
-            app,
-            &format!("立ち絵の位置のリセット保存に失敗しました: {error}"),
-        );
-        return;
-    }
-    if let Some(win) = app.get_webview_window("main") {
-        if let Err(error) = win.emit(
-            "pet:character-reset",
-            serde_json::json!({ "characterId": character_id, "layout": layout }),
-        ) {
-            crate::log_paths::append_app_log(
-                app,
-                &format!("立ち絵リセットを画面へ反映できません: {error}"),
-            );
-        }
     }
 }
 
@@ -488,10 +559,6 @@ pub(crate) fn reset_bubble_and_window_layout(app: &tauri::AppHandle) {
     let state = app.state::<AppState>();
     let mut patch = serde_json::Map::new();
     for key in [
-        "PICOAGENT_BUBBLE_WIDTH_PX",
-        "PICOAGENT_BUBBLE_HEIGHT_PX",
-        "PICOAGENT_BUBBLE_LEFT_PX",
-        "PICOAGENT_BUBBLE_TOP_PX",
         "PICOAGENT_WINDOW_WIDTH_PX",
         "PICOAGENT_WINDOW_HEIGHT_PX",
         // 現在保存している絶対座標。
@@ -500,9 +567,6 @@ pub(crate) fn reset_bubble_and_window_layout(app: &tauri::AppHandle) {
         // 旧版が保存していた相対オフセットのキーも掃除する。
         "PICOAGENT_WINDOW_RIGHT_PX",
         "PICOAGENT_WINDOW_BOTTOM_PX",
-        // ドラッグでずらした立ち絵の位置も既定（上半身が出る位置）へ戻す。
-        "PICOAGENT_CHARACTER_OFFSET_X",
-        "PICOAGENT_CHARACTER_OFFSET_Y",
     ] {
         patch.insert(key.to_string(), serde_json::Value::String(String::new()));
     }
@@ -512,6 +576,10 @@ pub(crate) fn reset_bubble_and_window_layout(app: &tauri::AppHandle) {
         .lock()
         .unwrap() = None;
     let active = crate::layout::current(&state.config);
+    // 会話パネルやキャラの配置も、選択中の形式のぶんだけ既定へ戻す（他の形式は残す）。
+    let _scene_guard = crate::store::lock_state(crate::scene::CONFIG_KEY);
+    let scenes = crate::scene::remove_layout(&crate::scene::load(&state.config), &active);
+    patch.insert(crate::scene::CONFIG_KEY.to_string(), scenes.clone());
     if let Err(error) = state.config.set_all(patch) {
         crate::log_paths::append_app_log(
             app,
@@ -555,7 +623,7 @@ pub(crate) fn reset_bubble_and_window_layout(app: &tauri::AppHandle) {
                 );
             }
         }
-        if let Err(error) = win.emit("pet:layout-reset", ()) {
+        if let Err(error) = win.emit("pet:layout-reset", serde_json::json!({ "scenes": scenes })) {
             crate::log_paths::append_app_log(
                 app,
                 &format!("表示リセットを画面へ反映できません: {error}"),
@@ -565,22 +633,125 @@ pub(crate) fn reset_bubble_and_window_layout(app: &tauri::AppHandle) {
 }
 
 #[cfg(test)]
-mod order_guard {
+mod tests {
+    use super::{menu_entries, Entry, MenuContext, COMMON_ITEMS};
+
+    fn ids(entries: &[&Entry]) -> Vec<String> {
+        entries
+            .iter()
+            .map(|entry| match entry {
+                Entry::Item(id, _) => id.to_string(),
+                Entry::Tts => "tts".into(),
+                Entry::OnTop => "ontop".into(),
+                Entry::Layouts => "layouts".into(),
+                Entry::Separator => "-".into(),
+                Entry::Submenu(label, children) => {
+                    let children: Vec<&Entry> = children.iter().collect();
+                    format!("{label}[{}]", ids(&children).join(","))
+                }
+            })
+            .collect()
+    }
+
+    /// 右クリックした場所によって共通部分が変わると、場所ごとに違うメニューに見える。
+    /// 文脈項目を足しても、区切り線より下は必ず同じ並びであること。
+    #[test]
+    fn 共通部分は文脈に依らず同じ並びにする() {
+        let common: Vec<&Entry> = COMMON_ITEMS.iter().collect();
+        let common = ids(&common);
+        for context in [
+            MenuContext::default(),
+            MenuContext {
+                selection: true,
+                ..Default::default()
+            },
+            MenuContext {
+                editable: true,
+                ..Default::default()
+            },
+            MenuContext {
+                link: true,
+                selection: true,
+                ..Default::default()
+            },
+            MenuContext {
+                character: true,
+                ..Default::default()
+            },
+        ] {
+            let entries = ids(&menu_entries(&context));
+            assert!(
+                entries.ends_with(&common),
+                "共通部分が文脈 {context:?} で変わっています: {entries:?}"
+            );
+            let added = entries.len() - common.len();
+            if added > 0 {
+                assert_eq!(entries[added - 1], "-", "文脈項目と共通部分の間は区切る");
+            }
+        }
+    }
+
+    #[test]
+    fn 文脈ごとの項目を先頭へ足す() {
+        let context = |c: MenuContext| {
+            let entries = menu_entries(&c);
+            let common = COMMON_ITEMS.len();
+            ids(&entries[..entries.len() - common])
+        };
+        assert!(context(MenuContext::default()).is_empty());
+        assert_eq!(
+            context(MenuContext {
+                selection: true,
+                ..Default::default()
+            }),
+            ["ctx:copy", "-"]
+        );
+        assert_eq!(
+            context(MenuContext {
+                editable: true,
+                selection: true,
+                ..Default::default()
+            }),
+            ["ctx:cut", "ctx:copy", "ctx:paste", "ctx:select-all", "-"]
+        );
+        assert_eq!(
+            context(MenuContext {
+                link: true,
+                ..Default::default()
+            }),
+            ["ctx:open-link", "ctx:copy-link", "-"]
+        );
+        let character = context(MenuContext {
+            character: true,
+            ..Default::default()
+        });
+        assert_eq!(
+            character.first().map(String::as_str),
+            Some("ctx:edit-character")
+        );
+        assert!(character
+            .iter()
+            .any(|id| id.starts_with("構図[ctx:framing:full")));
+    }
+
     /// 読み上げの切り替えを表示系の項目の間へ戻すと、別分野の操作が混ざって探しにくくなる。
     #[test]
     fn 読み上げの切り替えは話しかけるの直後に置く() {
-        let source = include_str!("menu.rs");
-        let builder = source
-            .split("let menu = MenuBuilder::new(&app)")
-            .nth(1)
-            .expect("右クリックメニューの組み立てが見つからない");
-        let position = |needle: &str| {
-            builder
-                .find(needle)
-                .unwrap_or_else(|| panic!("{needle} が見つからない"))
-        };
-        assert!(position(".item(&summon)") < position(".item(&tts)"));
-        assert!(position(".item(&tts)") < position(".separator()"));
-        assert!(position(".separator()") < position(".item(&layout_menu)"));
+        let common: Vec<&Entry> = COMMON_ITEMS.iter().collect();
+        let common = ids(&common);
+        assert_eq!(&common[..4], ["summon", "tts", "games", "-"]);
+    }
+
+    #[test]
+    fn 文脈項目のidを画面の操作名へ変える() {
+        assert_eq!(
+            super::context_action("ctx:framing:bust"),
+            Some(serde_json::json!({ "action": "set-framing", "framing": "bust" }))
+        );
+        assert_eq!(
+            super::context_action("ctx:copy"),
+            Some(serde_json::json!({ "action": "copy" }))
+        );
+        assert_eq!(super::context_action("settings"), None);
     }
 }

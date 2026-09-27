@@ -7,7 +7,8 @@ await import("../../ui/frame-scheduler.js");
 const settingsHtml = await readFile(new URL("../../ui/settings.html", import.meta.url), "utf8");
 const indexHtml = await readFile(new URL("../../ui/index.html", import.meta.url), "utf8");
 const settings = await readFile(new URL("../../ui/settings.js", import.meta.url), "utf8");
-const renderer = await readFile(new URL("../../ui/renderer.js", import.meta.url), "utf8");
+const characterHost = await readFile(new URL("../../ui/sources/character.js", import.meta.url), "utf8");
+const imageRenderer = await readFile(new URL("../../ui/character/image.js", import.meta.url), "utf8");
 
 function fixture() {
   let nextId = 1;
@@ -110,22 +111,19 @@ test("設定画面がフレーム合流と即時更新を使い分ける", () =>
 test("メイン画面が停止可能ループと最新視線イベントを使う", () => {
   assert.ok(
     indexHtml.indexOf('<script src="frame-scheduler.js')
-      < indexHtml.indexOf('<script src="renderer.js'),
+      < indexHtml.indexOf('<script type="module" src="app/main.js'),
   );
-  assert.match(renderer, /PicoFrameScheduler\.createLoop\(animate\)/);
-  assert.match(renderer, /PicoFrameScheduler\.createLatest\(applyGazePoint\)/);
-  assert.match(renderer, /gazeFrameScheduler\.schedule\(\{ clientX: event\.clientX, clientY: event\.clientY \}\)/);
-  assert.doesNotMatch(renderer, /animationRequestId\s*=\s*requestAnimationFrame\(animate\)/);
+  assert.match(imageRenderer, /PicoFrameScheduler\.createLoop\(now => this\.step\(now\)\)/);
+  assert.match(characterHost, /const gaze = window\.PicoFrameScheduler\.createLatest\(/);
+  assert.match(characterHost, /gaze\.schedule\(\{ clientX: event\.clientX, clientY: event\.clientY \}\)/);
+  assert.doesNotMatch(imageRenderer, /=\s*requestAnimationFrame\(/);
 });
 
 test("1枚絵を表示できたら描画ループを休ませる", () => {
-  // チャット・バー形式でメッシュリグを止めたキャラは preview.png の1枚だけを表示する。
-  // 送り先の無い1枚絵で true を返し続けると、変化の無い画面のために毎フレーム予約が続く。
-  const start = renderer.indexOf("function animate(now) {");
-  const body = renderer.slice(start, renderer.indexOf("\n}\n", start));
-  const displayed = body.indexOf("if (!displayPreloadedFrame(animationName, frame)) {");
-  const singleFrame = body.indexOf("if (animationFrameCount(animation) <= 1) return springActive;");
-  const advance = body.indexOf("if (now - lastFrameAt >= frameDuration(animation, frame)) {");
-  assert.ok(displayed >= 0 && singleFrame > displayed, "表示できたかの判定より後で1枚絵を休ませる（読込中は再試行を続ける）");
-  assert.ok(advance > singleFrame, "フレーム送りより前で1枚絵を休ませる");
+  // メッシュリグを止めたキャラは preview.png の1枚だけを表示する。送り先の無い1枚絵で
+  // true を返し続けると、変化の無い画面のために毎フレーム予約が続く。
+  const start = imageRenderer.indexOf("  step(now) {");
+  const body = imageRenderer.slice(start, imageRenderer.indexOf("\n  }\n", start));
+  assert.match(body, /if \(this\.disposed \|\| !this\.active \|\| document\.hidden\) return false;/);
+  assert.match(body, /paths\.length > 1/);
 });

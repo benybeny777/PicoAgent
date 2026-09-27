@@ -1,0 +1,117 @@
+/* window.css - ウィンドウの骨組み（上端メニュー・リサイズ領域・シーン・ソースの置き場）。 */
+.app {
+  position: fixed;
+  inset: 0;
+}
+
+/* シーンは上端メニューの下いっぱい。ソースは left/top/width/height だけで置く（拡大しない）。 */
+.stage {
+  position: absolute;
+  inset: var(--menu-height) 0 0 0;
+  overflow: hidden;
+}
+.stage.is-game { z-index: 215; pointer-events: none; overflow: visible; }
+.scene {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform-origin: 0 0;
+}
+.source {
+  position: absolute;
+  min-width: 0;
+  min-height: 0;
+}
+
+.app.is-booting .stage,
+.app.is-booting .top-window-menu-items { visibility: hidden; }
+
+/* 上端メニュー（常設のタイトルバー）。 */
+.top-window-menu {
+  position: fixed;
+  z-index: 250;
+  inset: 0 0 auto 0;
+  height: var(--menu-height);
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding-left: var(--space-2);
+  background: var(--menu-bg);
+  border-bottom: 1px solid var(--border);
+  backdrop-filter: var(--blur);
+  -webkit-backdrop-filter: var(--blur);
+  user-select: none;
+}
+.top-window-menu-brand {
+  flex: 0 0 auto;
+  margin-right: var(--space-2);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  background: var(--accent-gradient);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.top-window-menu-items { display: flex; gap: 2px; min-width: 0; overflow: hidden; }
+.top-window-menu-items button {
+  height: 24px;
+  padding: 0 9px;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+/* キャラ選択はキャラ名を出すので、名前の長いキャラでもウィンドウ操作を押し出さない。 */
+.top-window-menu-items button:nth-child(3) { max-width: 9em; overflow: hidden; text-overflow: ellipsis; }
+.top-window-menu-items button:hover,
+.top-window-menu-items button[aria-pressed="true"] { background: var(--surface-hover); color: var(--text); }
+.top-window-menu-items button[aria-pressed="true"] { box-shadow: inset 0 -2px 0 var(--accent); }
+.top-window-menu-drag { flex: 1 1 auto; align-self: stretch; }
+.window-caption-controls { display: flex; align-self: stretch; }
+.window-caption-controls button {
+  width: 44px;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+.window-caption-controls button:hover { background: var(--surface-hover); color: var(--text); }
+.window-caption-controls .window-close:hover { background: #e5484d; color: #fff; }
+
+/* 狭い窓ではキャラ選択 → 配置 → 表示の順に畳み、設定とウィンドウ操作は最後まで残す。 */
+@media (max-width: 420px) { .top-window-menu-items button:nth-child(3) { display: none; } }
+@media (max-width: 360px) { .top-window-menu-items button:nth-child(2) { display: none; } }
+@media (max-width: 300px) {
+  .top-window-menu-items button:nth-child(1), .top-window-menu-items button:nth-child(4) { display: none; }
+  .top-window-menu-brand { display: none; }
+}
+
+/* 枠なしウィンドウの8方向リサイズ領域。 */
+.window-resize-handles span { position: fixed; z-index: 270; }
+.window-resize-handles [data-resize-direction="North"] { top: 0; left: 8px; right: 8px; height: 4px; cursor: n-resize; }
+.window-resize-handles [data-resize-direction="South"] { bottom: 0; left: 8px; right: 8px; height: 5px; cursor: s-resize; }
+.window-resize-handles [data-resize-direction="East"] { right: 0; top: 8px; bottom: 8px; width: 5px; cursor: e-resize; }
+.window-resize-handles [data-resize-direction="West"] { left: 0; top: 8px; bottom: 8px; width: 5px; cursor: w-resize; }
+.window-resize-handles [data-resize-direction="NorthEast"] { top: 0; right: 0; width: 9px; height: 9px; cursor: ne-resize; }
+.window-resize-handles [data-resize-direction="NorthWest"] { top: 0; left: 0; width: 9px; height: 9px; cursor: nw-resize; }
+.window-resize-handles [data-resize-direction="SouthEast"] { bottom: 0; right: 0; width: 11px; height: 11px; cursor: se-resize; }
+.window-resize-handles [data-resize-direction="SouthWest"] { bottom: 0; left: 0; width: 11px; height: 11px; cursor: sw-resize; }
+
+/* どこへでもドロップして添付できることを示す。 */
+.drop-overlay {
+  position: fixed;
+  z-index: 300;
+  inset: var(--menu-height) 0 0 0;
+  display: grid;
+  place-items: center;
+  background: var(--scrim);
+  pointer-events: none;
+}
+.drop-overlay-inner {
+  padding: 14px 22px;
+  border: 2px dashed var(--accent);
+  border-radius: var(--radius-lg);
+  background: var(--surface-strong);
+  color: var(--text);
+  font-weight: 700;
+}

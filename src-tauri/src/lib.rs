@@ -8,7 +8,6 @@ mod api_server;
 mod boot_screen;
 #[cfg(test)]
 mod bundle_scope;
-mod character_framing;
 mod character_maker;
 mod character_pack;
 mod commands;
@@ -30,7 +29,6 @@ mod guard_scan;
 mod history;
 mod hotkey;
 mod layout;
-mod layout_placements;
 mod license;
 mod log_paths;
 mod mcp;
@@ -43,6 +41,7 @@ mod project_rules;
 mod providers;
 mod relationship;
 mod relationship_preset;
+mod scene;
 mod scheduler;
 mod secret;
 mod settings_memory;
@@ -53,6 +52,8 @@ mod text;
 mod tools;
 mod topic_guard;
 mod tracer;
+#[cfg(test)]
+mod ui_contract;
 mod usage;
 mod user_characters;
 mod user_skills;
@@ -121,13 +122,10 @@ pub fn run() {
             commands::pet_speak,
             commands::aivis_status,
             commands::pet_prepare_voice_model,
-            commands::pet_set_bubble_size,
-            commands::pet_set_character_offset,
             commands::pet_place_window,
             commands::pet_start_window_drag,
             commands::pet_open_external_url,
             commands::pet_open_generated_media,
-            commands::pet_set_bubble_layout,
             commands::pet_set_character_profile,
             commands::pet_relationship_state,
             commands::pet_relationship_event,
@@ -195,7 +193,7 @@ pub fn run() {
             commands::pet_finish_boot,
             commands::pet_reveal_main,
             commands::pet_reset_layout,
-            commands::pet_save_layout_placements,
+            commands::pet_save_scene,
             menu::pet_menu,
             menu::pet_layout_menu,
             menu::pet_character_menu,

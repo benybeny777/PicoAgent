@@ -1,92 +1,93 @@
+// 起動の契約: 準備が整うまで窓を出さず、仮のキャラ・読込途中の描画を見せない。
+// フロントは ui/app/main.js（起動の手順）と ui/app/boot.js（起動画面と表示の確定）、
+// バックエンドは boot_screen.rs / layout.rs が持つ。
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+import { mainScript } from "./lib/ui-source.mjs";
 
-const renderer = await readFile(new URL("../../ui/renderer.js", import.meta.url), "utf8");
+const main = await readFile(new URL("../../ui/app/main.js", import.meta.url), "utf8");
+const boot = await readFile(new URL("../../ui/app/boot.js", import.meta.url), "utf8");
+const engine = await readFile(new URL("../../ui/app/engine.js", import.meta.url), "utf8");
+const allMain = mainScript();
 const commands = await readFile(new URL("../../src-tauri/src/commands.rs", import.meta.url), "utf8");
 const layout = await readFile(new URL("../../src-tauri/src/layout.rs", import.meta.url), "utf8");
 const bootScreen = await readFile(new URL("../../src-tauri/src/boot_screen.rs", import.meta.url), "utf8");
 const windowSurface = await readFile(new URL("../../src-tauri/src/window_surface.rs", import.meta.url), "utf8");
 const lib = await readFile(new URL("../../src-tauri/src/lib.rs", import.meta.url), "utf8");
-const styles = await readFile(new URL("../../ui/styles.css", import.meta.url), "utf8");
+const styles = await readFile(new URL("../../ui/components/boot.css", import.meta.url), "utf8");
 const indexHtml = await readFile(new URL("../../ui/index.html", import.meta.url), "utf8");
-const startupStart = renderer.indexOf("(async () => {\n  startBootLogTicker();");
-const startupEnd = renderer.indexOf("\n})().catch(error => {", startupStart);
+const startupStart = main.indexOf("(async () => {\n  status.set(");
+const startupEnd = main.indexOf("\n})().catch(error => {", startupStart);
 assert.ok(startupStart >= 0 && startupEnd > startupStart, "起動シーケンスを抽出できません");
-const startup = renderer.slice(startupStart, startupEnd);
+const startup = main.slice(startupStart, startupEnd);
 
 test("セットアップ済みのlocal選択はAIと音声の準備完了まで起動画面を維持する", () => {
-  assert.match(startup, /localEngineRequired = \(info\.providerId \|\| "local"\) === "local"/);
-  assert.match(startup, /if \(localEngineRequired && info\.onboardingDone\) \{[\s\S]*?const engineState = await waitForEngineReady\(\)/);
-  assert.match(renderer, /prepareSelectedVoiceModel\(\)[\s\S]*?setStatus\("声を準備中…"\)/);
-  assert.match(startup, /await prepareSelectedVoiceModel\(\)[\s\S]*?await prepareSpeech\(startupGreeting\)/);
-  assert.doesNotMatch(renderer, /STARTUP_UI_DEADLINE_MS/);
-  assert.match(renderer, /!frontendInitialized \|\| \(localEngineRequired && !localEngineReady\)/);
+  assert.match(engine, /required = \(info\.providerId \|\| "local"\) === "local";/);
+  assert.match(startup, /if \(engine\.required && info\.onboardingDone\) \{[\s\S]*?const state = await engine\.waitUntilSettled\(/);
+  assert.match(startup, /status\.set\("声を準備中…", "boot"\);[\s\S]*?await bridge\.prepareVoiceModel\(\);\s*\n\s*preparedGreeting = await voice\.prepare\(startupGreeting\);/);
+  // 初期化前・ローカルAIの準備前は送信させない。
+  assert.match(engine, /if \(!initialized\) return "初期化完了後に送信できます";/);
+  assert.match(engine, /if \(required && !ready\) return "ローカルAIの準備完了後に送信できます";/);
 });
 
 test("初回セットアップはローカルAIの取得完了を待たない", () => {
-  // 初回案内（追加機能の選択・Live2D追加）はローカルAIを使わない。数GBの取得を
-  // 待たせると、初回だけ何分も案内へ入れないため、監視だけ始めて画面を返す。
-  assert.match(startup, /\} else if \(localEngineRequired\) \{[\s\S]*?waitForEngineReady\(\)\.catch/);
-  assert.match(startup, /if \(!startupCharacterError && !startupEngineError && info\.onboardingDone && startupGreeting\)/);
-  assert.match(renderer, /!frontendInitialized \|\| \(localEngineRequired && !localEngineReady\)/);
+  // 初回案内はローカルAIを使わない。数GBの取得を待たせると、初回だけ何分も案内へ入れないため、監視だけ始めて画面を返す。
+  assert.match(startup, /\} else if \(engine\.required\) \{[\s\S]*?engine\.waitUntilSettled\(\)\.catch/);
+  assert.match(startup, /if \(!startupError && info\.onboardingDone && startupGreeting\) \{/);
 });
 
-test("準備完了後に保存形式へ戻し起動音声を再生する", () => {
-  assert.match(renderer, /let frontendInitialized = false/);
-  assert.match(renderer, /if \(!frontendInitialized\) \{[\s\S]*?完了すると送信できます/);
-  assert.match(startup, /frontendInitialized = true;[\s\S]*?updateComposerState\(\)/);
-  assert.match(startup, /if \(bootUiReleased\) applyLayout\(startupLayout\);[\s\S]*?else applyLayout\("stream"\)/);
-  const engine = startup.indexOf("await waitForEngineReady()");
-  const voice = startup.indexOf("await prepareSelectedVoiceModel()");
-  const speech = startup.indexOf("await prepareSpeech(startupGreeting)");
-  const finish = startup.indexOf("await releaseBootUi()");
-  const play = startup.indexOf("playPreparedSpeech(startupPreparedSpeech)");
-  assert.ok(engine >= 0 && voice > engine && speech > voice && finish > speech && play > finish,
+test("準備完了後に窓を出し、起動音声はその後に再生する", () => {
+  const engineAt = startup.indexOf("await engine.waitUntilSettled(");
+  const voiceAt = startup.indexOf("await bridge.prepareVoiceModel()");
+  const speechAt = startup.indexOf("preparedGreeting = await voice.prepare(startupGreeting)");
+  const releaseAt = startup.indexOf("await boot.release(status)");
+  const playAt = main.indexOf("voice.playPrepared(preparedGreeting)");
+  assert.ok(engineAt >= 0 && voiceAt > engineAt && speechAt > voiceAt && releaseAt > speechAt && playAt > startupStart + releaseAt,
     "AI・音声準備・画面復帰・再生の順序が崩れています");
-  assert.match(renderer, /let bootBackendFinished = false/);
-  assert.match(renderer, /let bootBackendFinishPromise = null/);
-  assert.match(renderer, /bootBackendFinishPromise = window\.picoagent\.finishBoot\(\)[\s\S]*?bootBackendFinished = true/);
-  assert.match(renderer, /finally\(\(\) => \{ bootBackendFinishPromise = null; \}\)/);
-  assert.match(renderer, /function scheduleBootBackendRetry\(\)/);
-  assert.match(renderer, /bootBackendRetryDelayMs = Math\.min\(bootBackendRetryDelayMs \* 2, BOOT_BACKEND_RETRY_MAX_MS\)/);
-  assert.match(renderer, /位置・寸法の復旧中/);
-  assert.match(renderer, /catch \(error\) \{[\s\S]*?scheduleBootBackendRetry\(\)/);
-  assert.doesNotMatch(renderer, /if \(bootUiReleased\) return/);
+  // 失敗しても起動画面は必ず外す（finally）。
+  assert.match(startup, /\} finally \{[\s\S]*?await boot\.release\(status\);/);
+  // 保存した位置・寸法の復元（finishBoot）は1本に束ね、失敗したら間隔を伸ばして裏で再試行する。
+  assert.match(boot, /finishPromise = bridge\.finishBoot\(\)\s*\n\s*\.then\(\(\) => \{ backendFinished = true; \}\)\s*\n\s*\.finally\(\(\) => \{ finishPromise = null; \}\);/);
+  assert.match(boot, /function scheduleRetry\(status\)/);
+  assert.match(boot, /retryDelay = Math\.min\(retryDelay \* 2, RETRY_MAX_MS\);/);
+  assert.match(boot, /位置・寸法の復旧中/);
 });
 
 test("ローカルAIがエラーなら音声準備へ進まず元のエラーを保つ", () => {
-  assert.match(startup, /const engineState = await waitForEngineReady\(\);[\s\S]*?if \(engineState\?\.phase === "error"\) \{[\s\S]*?startupEngineError = engineState\.message/);
-  assert.match(startup, /if \(!startupCharacterError && !startupEngineError && info\.onboardingDone && startupGreeting\) \{[\s\S]*?prepareSelectedVoiceModel/);
+  assert.match(startup, /if \(state\?\.phase === "error"\) startupError = state\.message/);
+  assert.match(startup, /if \(!startupError && info\.onboardingDone && startupGreeting\) \{[\s\S]*?prepareVoiceModel/);
 });
 
 test("長いダウンロード中は進捗通知を続け通常画面で停止する", () => {
-  assert.match(renderer, /function startBootProgressTicker\(intervalMs = DEFAULT_BOOT_PROGRESS_INTERVAL_MS\)/);
-  assert.match(renderer, /startBootProgressTicker\(INITIAL_BOOT_PROGRESS_INTERVAL_MS\)/);
+  assert.match(boot, /function startProgress\(intervalMs\)/);
+  assert.match(boot, /startProgress\(INITIAL_PROGRESS_INTERVAL_MS\);/);
   // 固定値ではなく監視しきい値から決めた間隔を使う（短いしきい値でも通知が間に合う）。
-  assert.match(startup, /startBootProgressTicker\(info\.bootProgressIntervalMs\)/);
+  assert.match(startup, /boot\.setProgressInterval\(info\.bootProgressIntervalMs\);/);
   assert.match(commands, /"bootProgressIntervalMs": crate::boot_screen::progress_interval_ms/);
-  assert.match(renderer, /async function releaseBootUi[\s\S]*?clearInterval\(bootProgressTimer\)/);
+  assert.match(boot, /async release\(status\) \{\s*\n\s*if \(progressTimer\) clearInterval\(progressTimer\);/);
   assert.match(commands, /pub fn pet_boot_progress[\s\S]*?boot_screen::mark_progress/);
 });
 
 test("起動途中の仮キャラを表示せず最終DOMの後で窓を表示する", async () => {
-  assert.doesNotMatch(renderer, /chooseStartupSleepingCharacter|prepareBootCharacter|bootPetImage/);
-  const config = JSON.parse(await readFile(new URL('../../src-tauri/tauri.conf.json', import.meta.url), 'utf8'));
-  assert.equal(config.app.windows.find(w => w.label === 'main').visible, false);
-  const release = renderer.slice(renderer.indexOf('async function releaseBootUi()'), startupStart);
-  assert.ok(release.indexOf('classList.remove("is-booting")') < release.indexOf('revealMainWindow()'));
-  assert.match(release, /if \(bootBackendFinished\) await revealMainWindow\(\)/);
+  const config = JSON.parse(await readFile(new URL("../../src-tauri/tauri.conf.json", import.meta.url), "utf8"));
+  assert.equal(config.app.windows.find(w => w.label === "main").visible, false);
+  const release = boot.slice(boot.indexOf("async release(status) {"));
+  assert.ok(release.indexOf('app.classList.remove("is-booting")') < release.indexOf("await reveal()"));
+  assert.match(release, /if \(backendFinished\) await reveal\(\);/);
+  // 表示前に最終の配置を確定させる。
+  assert.ok(startup.indexOf("stage.layoutNow();") < startup.indexOf("await boot.release(status);"));
 });
 
 test("窓を出す入口を1つに保ち再試行経路でも描画を確定させる", () => {
   // 未描画canvasのまま窓を出さない保証を、初回・再試行のどちらでも通す。
-  const reveal = renderer.slice(renderer.indexOf("async function revealMainWindow()"), renderer.indexOf("async function finishBootBackend()"));
-  assert.match(reveal, /try \{ mmdController\?\.capturePreview\(\); \}/);
+  const reveal = boot.slice(boot.indexOf("async function reveal()"), boot.indexOf("async function finishBackend()"));
+  assert.match(reveal, /try \{ beforeReveal\?\.\(\); \}/);
   // 描画確定の失敗で表示まで止めない（窓が出ないと操作手段が無くなる）。
-  assert.ok(reveal.indexOf("catch (error)") < reveal.indexOf("await window.picoagent.revealMain()"));
-  assert.equal(renderer.match(/picoagent\.revealMain\(\)/g).length, 1, "表示の入口はrevealMainWindowだけにする");
-  assert.match(renderer, /if \(bootUiReleased\) await revealMainWindow\(\)/);
+  assert.ok(reveal.indexOf("catch (error)") < reveal.indexOf("await bridge.revealMain()"));
+  assert.equal(allMain.match(/bridge\.revealMain\(\)/g).length, 1, "表示の入口は reveal() だけにする");
+  assert.match(boot, /if \(released\) await reveal\(\);/);
+  assert.match(main, /createBoot\(\{ app, screen: document\.getElementById\("bootScreen"\), beforeReveal: \(\) => host\.capturePreview\(\) \}\)/);
   assert.match(commands, /pub fn pet_reveal_main[\s\S]*?boot_screen::is_finished/);
 });
 
@@ -119,7 +120,7 @@ test("再読込のたびに停止監視を張り直し準備中でも窓を呼�
 
 test("起動画面はキャラクター枠を持たない", () => {
   assert.doesNotMatch(indexHtml, /boot-character|boot-shadow/);
-  assert.doesNotMatch(styles, /boot-character|boot-shadow|data-boot-artwork/);
+  assert.doesNotMatch(styles + boot, /boot-character|boot-shadow|data-boot-artwork/);
 });
 
 test("finishBoot失敗後も位置意図を保持して再試行できる", () => {
@@ -158,25 +159,30 @@ test("再初期化は通常画面の位置を保存してから起動用の配�
   }
 });
 
-test("任意キャラクターのI/O待ちはすべて有界化する", () => {
-  assert.match(renderer, /fetchJsonWithTimeout/);
-  assert.match(renderer, /new AbortController\(\)/);
-  assert.match(renderer, /loadScriptOnce[\s\S]*STARTUP_RESOURCE_TIMEOUT_MS/);
-  assert.match(renderer, /probeRigLayers[\s\S]*STARTUP_RESOURCE_TIMEOUT_MS/);
-  assert.match(renderer, /loadLive2DModelWithTimeout/);
-  assert.match(renderer, /destroyDetachedLive2DModel\(model\)/, "遅延完了したモデルを破棄する");
-  assert.match(renderer, /function displayPreloadedFrame[\s\S]*image\.naturalWidth < 1/, "未読込フレームを表示しない");
-  assert.doesNotMatch(renderer, /petSprite\.src = frameUrl\(animationName, frame\)/, "連番を先読み前に直接表示しない");
+test("任意キャラクターのI/O待ちはすべて有界化する", async () => {
+  const util = await readFile(new URL("../../ui/app/util.js", import.meta.url), "utf8");
+  const manifest = await readFile(new URL("../../ui/character/manifest.js", import.meta.url), "utf8");
+  const mesh = await readFile(new URL("../../ui/character/mesh.js", import.meta.url), "utf8");
+  const live2d = await readFile(new URL("../../ui/character/live2d.js", import.meta.url), "utf8");
+  const image = await readFile(new URL("../../ui/character/image.js", import.meta.url), "utf8");
+  assert.match(util, /export async function fetchJson\(url, label, timeoutMs = 4000\)[\s\S]*?new AbortController\(\)/);
+  assert.match(util, /export function loadScriptOnce\(src, timeoutMs = 8000\)/);
+  assert.match(manifest, /fetchJson\(`\$\{entry\.root\}\/character\.json/);
+  assert.match(mesh, /const rig = await fetchJson\(packUrl\(pack, rigPath\), "rig\.json", 5000\);/);
+  // 描画器の中から素の fetch を使わない（上限の無い待ちを作らない）。
+  for (const [name, source] of [["mesh", mesh], ["live2d", live2d], ["image", image], ["manifest", manifest]]) {
+    assert.doesNotMatch(source, /[^.\w]fetch\(/, `${name} が上限の無い fetch を使っています`);
+  }
+  assert.match(live2d, /const MODEL_TIMEOUT_MS = 8000;/);
+  assert.match(live2d, /if \(finished\) \{\s*\n\s*try \{ model\?\.destroy\?\.\(\); \}/, "遅延完了したモデルを破棄する");
+  assert.match(image, /const timer = setTimeout\(\(\) => finish\(false\), RESOURCE_TIMEOUT_MS\);/);
 });
 
 test("選択キャラ失敗時は別キャラを出さず診断を表示する", () => {
-  assert.match(startup, /character\.style\.visibility = "hidden"/);
-  assert.match(startup, /if \(!startupCharacterError && !startupEngineError/);
-  assert.match(startup, /if \(startupCharacterError\) \{\s*setStatus\(startupCharacterError\)/);
-  assert.match(renderer, /const appearance = await window\.picoagent\.setCharacterProfile[\s\S]*?loadGeneration !== characterLoadGeneration[\s\S]*?applyStreamAppearance\(appearance\.streamBackground/);
-  assert.doesNotMatch(startup, /await loadCharacter\("mugi"/);
-  assert.match(startup, /const characterLoadPromise = loadStartupCharacter\(\)/);
-  assert.match(startup, /finally \{[\s\S]*await releaseBootUi\(\)/);
+  assert.match(startup, /characterSource\.element\.style\.visibility = "hidden";/);
+  assert.match(startup, /startupError = `選択したキャラを読み込めません: /);
+  assert.match(main, /if \(startupError\) status\.setSticky\(startupError, "error"\);/);
+  assert.doesNotMatch(startup, /loadCharacter\("mugi"/);
 });
 
 test("プロバイダ疎通は起動時の短い上限でfalseへ正規化する", () => {
@@ -190,19 +196,13 @@ test("プロバイダ疎通は起動時の短い上限でfalseへ正規化する
   assert.match(commands, /current_up\(&state, SETTINGS_PROVIDER_PROBE_TIMEOUT\)/);
 });
 
-test("起動の合図より前に重い部品を読み込まない", () => {
-  // `renderer.js` の先頭が `frontendReady()` を送り、起動シーケンスを始める。
-  // その前に置いた部品のぶんだけ、毎回の起動が遅れる。
-  const order = name => indexHtml.indexOf(`src="${name}"`);
-  const rendererAt = indexHtml.indexOf('src="renderer.js"');
-  assert.ok(rendererAt > 0, "renderer.js の読み込みが見つかりません");
-  // 配置編集の部品（245KB）は、使う layout-editor.js の直前まで下げる。
-  assert.ok(
-    order("vendor/moveable/moveable.min.js") > rendererAt,
-    "重い配置編集の部品を起動の合図より前に読み込んでいます",
-  );
-  assert.ok(
-    order("vendor/moveable/moveable.min.js") < order("layout-editor.js"),
-    "配置編集の部品が layout-editor.js より後になっています",
-  );
+test("起動の合図は最初に送り、重い部品は使う時まで読まない", () => {
+  // main.js の先頭が frontendReady() を送る。届かないと起動監視が診断画面へ切り替える。
+  const lastImport = main.lastIndexOf("\nimport ");
+  const afterImports = main.slice(main.indexOf(";\n", lastImport) + 2);
+  const firstStatement = afterImports.replace(/^(\s*\/\/[^\n]*\n)*\s*/, "");
+  assert.ok(firstStatement.startsWith("bridge.frontendReady();"), "frontendReady が最初の処理ではありません");
+  // index.html は描画ライブラリ（PIXI・Live2D・MMD）を直接読み込まない（キャラの方式が決まってから読む）。
+  assert.doesNotMatch(indexHtml, /vendor\//);
+  assert.doesNotMatch(indexHtml, /moveable/);
 });

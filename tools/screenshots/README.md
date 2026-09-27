@@ -1,5 +1,7 @@
 # README 用スクリーンショット（動く絵）の撮影
 
+シーン方式の現行画面（ペット・ミニ・配信）の受入には、まず `tools/screenshots/ui-check.mjs` を使う。`PLAYWRIGHT_MODULE` に開発用 Playwright の `index.mjs` を指定して実行すると、3形式の画素・完全包含・右クリック・保存値と、全形式の拡大復元を `temp/ui-check/` で確認できる。`UI_CHECK_CHARACTERS` と `UI_CHECK_LAYOUTS` で対象を絞れる。`docs/images/layout-shot-{pet,mascot,stream}.webp` は同検査の実画面PNGから作成する。以下の `shoot.mjs` 手順は旧画面の撮影設定を含むため、新しい画面で再利用するときは対象を確認する。
+
 `docs/images/` に置いている README 掲載画像を再生成するツールです。通常プレビューは**透過つきの
 アニメーション WebP**（無限ループ）、7形式の比較画像は1フレームの透過 WebPです。
 

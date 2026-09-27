@@ -503,7 +503,7 @@
   }
 
   class MeshRigController {
-    constructor(app, canvas, rig, planes, lvsFace = null, blush = null, textureFit = 1) {
+    constructor(app, canvas, rig, planes, lvsFace = null, blush = null, textureFit = 1, contentRect = null) {
       this.app = app;
       this.canvas = canvas;
       this.rig = rig;
@@ -511,7 +511,8 @@
       this.lvsFace = lvsFace;
       this.blush = blush;
       this.textureFit = textureFit;
-      this.framingScale = 1;
+      // モデル座標（create に渡した width × height）上で、キャラの可視範囲が占める矩形。
+      this.contentRect = contentRect || { x: 0, y: 0, w: app.screen.width, h: app.screen.height };
       this.active = false;
       this.reducedMotion = false;
       this.mouth = 0;
@@ -540,27 +541,28 @@
       this.startedAt = performance.now();
       this.lastAt = 0;
       this.tick = this.tick.bind(this);
-      this.refreshSourceLimit = this.refreshSourceLimit.bind(this);
-      root.addEventListener("resize", this.refreshSourceLimit);
-      this.refreshSourceLimit();
       this.app.ticker.add(this.tick);
       this.app.ticker.stop();
     }
 
-    setFraming(scale = 1) {
-      this.framingScale = clamp(scale, 1, 4);
-      this.app.stage.pivot.set(this.app.screen.width / 2, 0);
-      this.app.stage.position.set(this.app.screen.width / 2, 0);
-      this.app.stage.scale.set(this.framingScale);
-      this.refreshSourceLimit();
-    }
-
-    refreshSourceLimit() {
-      const dpr = Math.max(1, root.devicePixelRatio || 1);
-      const visibleSourceHeight = this.app.screen.height / this.textureFit / this.framingScale;
-      // 原画と現在の描画バッファの両方を超えない表示寸法へ制限する。
-      const bufferHeight = this.app.screen.height * this.app.renderer.resolution;
-      this.canvas.style.setProperty("--mesh-source-css-height", `${Math.min(visibleSourceHeight, bufferHeight) / dpr}px`);
+    // 表示する大きさ（CSS px）と画素密度、モデル座標上の切り出し矩形を受け取り、
+    // キャンバスをその大きさへ作り直して、切り出し矩形を縦横比を保ったまま下端中央へ収める。
+    // キャンバスの外へ描くことが無いので、どの大きさでもキャラが切れない。
+    layout(cssWidth, cssHeight, resolution, frame = this.contentRect) {
+      const width = Math.max(1, Math.round(cssWidth));
+      const height = Math.max(1, Math.round(cssHeight));
+      const renderer = this.app.renderer;
+      if (Math.abs(renderer.resolution - resolution) > 0.001) renderer.resolution = resolution;
+      renderer.resize(width, height);
+      const scale = Math.min(width / frame.w, height / frame.h);
+      this.app.stage.pivot.set(0, 0);
+      this.app.stage.scale.set(scale);
+      this.app.stage.position.set(
+        (width - frame.w * scale) / 2 - frame.x * scale,
+        height - (frame.y + frame.h) * scale,
+      );
+      // 待機中（ticker停止中）も新しい大きさで1回描き直す。
+      this.app.render();
     }
 
     setActive(active) {
@@ -1050,7 +1052,6 @@
     }
 
     destroy() {
-      root.removeEventListener("resize", this.refreshSourceLimit);
       this.app.ticker.remove(this.tick);
       this.app.destroy(false, { children: true, texture: true, baseTexture: true });
       if (this.lvsFace) {
@@ -1313,7 +1314,13 @@
     const blush = createBlushOverlay(app, rig, originX, originY, textureFit);
     canvas.style.background = "transparent";
     canvas.dataset.meshRig = "ready";
-    return new MeshRigController(app, canvas, rig, planes, lvs?.face || null, blush, textureFit);
+    const contentRect = {
+      x: (width - contentWidth * textureFit) / 2,
+      y: height - contentHeight * textureFit,
+      w: contentWidth * textureFit,
+      h: contentHeight * textureFit,
+    };
+    return new MeshRigController(app, canvas, rig, planes, lvs?.face || null, blush, textureFit, contentRect);
   }
 
   root.PicoMeshRig = Object.freeze({ create });

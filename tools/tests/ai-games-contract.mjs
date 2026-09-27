@@ -6,20 +6,22 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 const read = path => readFile(new URL(`../../${path}`, import.meta.url), "utf8");
-const [index, game, bridge, menu, lib, backend, renderer, styles, manual, spec] = await Promise.all([
-  read("ui/index.html"), read("ui/game.js"), read("ui/picoagent.js"),
+const [index, game, bridge, menu, lib, backend, main, chrome, stage, voice, styles, manual, spec] = await Promise.all([
+  read("ui/index.html"), read("ui/app/game.js"), read("ui/picoagent.js"),
   read("src-tauri/src/menu.rs"), read("src-tauri/src/lib.rs"), read("src-tauri/src/game.rs"),
-  read("ui/renderer.js"), read("ui/styles.css"), read("MANUAL.md"), read("SPEC.md"),
+  read("ui/app/main.js"), read("ui/app/window-chrome.js"), read("ui/app/stage.js"), read("ui/app/voice.js"),
+  read("ui/components/game.css"), read("MANUAL.md"), read("SPEC.md"),
 ]);
 
 test("上端と右クリックの遊ぶが同じゲーム画面を開く", () => {
-  assert.match(index, /id="gameMenuButton"[^>]*>遊ぶ<\/button>/);
+  assert.match(chrome, /const gameButton = el\("button", \{ type: "button", textContent: "遊ぶ"/);
+  assert.match(chrome, /gameButton\.addEventListener\("click", event => \{ event\.stopPropagation\(\); onGame\(\); \}\)/);
   assert.match(index, /id="gameOverlay"[^>]*role="dialog"/);
-  assert.ok(index.indexOf('src="renderer.js"') < index.indexOf('src="game.js"'));
-  assert.match(menu, /with_id\("games", "遊ぶ"\)/);
+  assert.match(menu, /"games"/);
   assert.match(menu, /"games" =>[\s\S]*?emit\("pet:game-open"/);
   assert.match(bridge, /"pet:game-open"/);
-  assert.match(game, /window\.picoagent\.on\("pet:game-open", open\)/);
+  assert.match(main, /bridge\.on\("pet:game-open", \(\) => game\.open\(\)\);/);
+  assert.match(main, /onGame: \(\) => game\.open\(\),/);
   // 遊びは1本だけ。ゲーム選択を挟まず、開いた直後が監査ブリーフィングになる。
   assert.match(game, /function open\(\) \{[\s\S]*?if \(!session\) renderBriefing\(\);/);
   assert.doesNotMatch(game, /renderPicker|data-game-id/);
@@ -124,7 +126,7 @@ test("配信向けの短い回答と見本、称号、共通音量を保つ", ()
   assert.match(styles, /\.game-criteria \.game-criterion-bonus \{/);
   // 効果音だけ本体の音量設定を迂回して大きく鳴らさない。
   // 効果音は読み上げと共通のマスター音量へ従う（詳細は「効果音も読み上げ音量に従い…」）。
-  assert.match(game, /function tonePeakGain\(\)[\s\S]*?window\.PicoVoice\?\.gain\?\.\(\)/);
+  assert.match(game, /function tonePeakGain\(\) \{\s*\n\s*const level = Number\(voice\.gain\(\)\);/);
   // 難易度は点数の倍率で効かせる（短い制限時間ほど点が伸びる）。
   assert.match(game, /easy: \{[^}]*scoreRate: 1 \}/);
   assert.match(game, /normal: \{[^}]*scoreRate: 2 \}/);
@@ -145,45 +147,46 @@ test("手引きの難易度は実装の値と一致する", () => {
 
 test("効果音も読み上げ音量に従い、閉じたら音声資源を返す", () => {
   // 固定値で鳴らしていた頃は、音量を下げても0にしても効果音だけ同じ大きさで鳴っていた。
-  assert.match(game, /function tonePeakGain\(\)[\s\S]*?window\.PicoVoice\?\.gain\?\.\(\)/);
+  assert.match(game, /function tonePeakGain\(\) \{\s*\n\s*const level = Number\(voice\.gain\(\)\);/);
   assert.match(game, /const peak = tonePeakGain\(\);[\s\S]*?if \(!\(peak > 0\.0002\)\) return;/);
   assert.match(game, /exponentialRampToValueAtTime\(peak, now \+ 0\.01\)/);
   assert.doesNotMatch(game, /exponentialRampToValueAtTime\(0\.06,/);
   // 確保した AudioContext とノードは、閉じたときと終了時に解放する。
   assert.match(game, /function releaseAudioContext\(\)[\s\S]*?context\?\.close\?\.\(\)/);
-  assert.match(game, /window\.PicoVoice\?\.stop\?\.\(\);\s*\n\s*releaseAudioContext\(\);/);
+  assert.match(game, /voice\.stop\(\);\s*\n\s*releaseAudioContext\(\);/);
   assert.match(game, /window\.addEventListener\("beforeunload", \(\) => \{\s*\n\s*clearTimer\(\);\s*\n\s*releaseAudioContext\(\);/);
   assert.match(game, /oscillator\.addEventListener\("ended"[\s\S]*?oscillator\.disconnect\(\);\s*\n\s*gain\.disconnect\(\);/);
 });
 
 test("ゲームは通常の読み上げ経路と設定を共有する", () => {
-  assert.match(renderer, /window\.PicoVoice = \{ speak: speakReply, stop: stopVoice, volume: \(\) => voiceVolume, gain: voiceOutputGain \}/);
+  // 読み上げは会話と同じ voice（音量・有効／無効・停止を共有）。別の経路を作らない。
+  assert.match(main, /const game = createGame\(\{ voice, stage \}\);/);
+  assert.match(game, /voice\.speak\(text\)/);
+  assert.match(game, /Number\(voice\.gain\(\)\)/);
+  assert.match(voice, /^    gain,$/m);
   assert.match(game, /speakGame\(`第\$\{round \+ 1\}問/);
   assert.match(game, /speakGame\(`信用度、マイナス\$\{result\.damage\}/);
   assert.match(game, /speakGame\(`監査終了。\$\{rounds\}問、\$\{session\.score\}点。称号は、/);
   assert.match(styles, /\.game-overlay/);
-  assert.match(styles, /#petApp\.is-playing-game\[data-layout\] \.character \{[^}]*z-index:215;[^}]*pointer-events:none;/);
-  // 胸上の枠（ペット形式と同じ430:540）を画面下端へ揃え、枠の外は切る。拡大は打ち消さない。
-  assert.match(styles, /#petApp\.is-playing-game\[data-layout\] \.character \{[^}]*bottom:0;[^}]*aspect-ratio:430 \/ 540;[^}]*overflow:hidden;/);
-  assert.match(styles, /#petApp\.is-playing-game\[data-layout\] \.character \{[^}]*right:clamp\(36px,7vw,90px\);/);
-  assert.match(styles, /body #petApp\.is-playing-game\[data-layout\] \.character \.character-view \{[^}]*position:absolute!important;[^}]*height:100%!important;[^}]*scale\(var\(--char-zoom,1\.55\)\)!important;/);
-  assert.match(styles, /data-render-kind="live2d"[^}]*#live2dCanvas \{[^}]*width:100%!important;[^}]*height:88%!important;/);
-  assert.match(styles, /data-render-kind="mmd"[^}]*#mmdCanvas \{[^}]*width:100%!important;[^}]*height:100%!important;/);
+  // ゲーム中のキャラは stage の一時矩形で描く（保存済みの配置は触らず、閉じると元へ戻る）。
+  assert.match(game, /function open\(\) \{[\s\S]*?stage\.setGame\(true\);/);
+  assert.match(game, /function close\(\) \{[\s\S]*?stage\.setGame\(false\);/);
+  assert.match(stage, /if \(overrides\.game && target === "character"\) rect = gameCharacterRect\(geometry\);/);
+  assert.match(stage, /const GAME_FRAMING = "bust";/);
+  assert.match(stage, /return overrides\.game \? GAME_FRAMING : savedFraming\(\);/);
   assert.match(manual, /通常の読み上げが有効なら、お題、監査AIの反応、監査終了時の点数と称号を読み上げ/);
   assert.match(manual, /選択中のキャラクターはゲーム画面の右側へバストアップで表示したまま/);
-  assert.match(spec, /`PicoVoice`の共通経路/);
 });
 
 test("採点欄はキャラクターの幅と右余白の両方を空ける", () => {
   // キャラは右端から余白を取って置かれる。採点欄が幅だけを差し引いていた頃は、
   // 1000px幅で採点欄の右端36pxがキャラの下へ隠れ、「12 / 15」の分母が読めなかった。
-  const character = styles.match(/#petApp\.is-playing-game\[data-layout\] \.character \{([^}]*)\}/)?.[1] || "";
-  const width = character.match(/width:(clamp\([^)]*\))/)?.[1];
-  const right = character.match(/right:(clamp\([^)]*\))/)?.[1];
-  assert.ok(width && right, "ゲーム中のキャラの幅・右余白を読み取れません");
   const shell = styles.match(/^\.game-shell \{([^}]*)\}/m)?.[1] || "";
-  assert.ok(shell.includes(`- ${width}`), "採点欄がキャラの幅を空けていません");
-  assert.ok(shell.includes(`- ${right}`), "採点欄がキャラの右余白を空けていません");
+  const [, width, right] = shell.match(/calc\(100% - clamp\((\d+)px,32vw,(?:\d+)px\) - clamp\((\d+)px,7vw,90px\)\)/) || [];
+  assert.ok(width && right, "採点欄の空け方を読み取れません");
+  assert.match(stage, new RegExp(`const width = clamp\\(view\\.width \\* 0\\.32, ${width}, 340\\);`), "キャラの幅と採点欄の空け方が一致しません");
+  assert.match(stage, new RegExp(`clamp\\(view\\.width \\* 0\\.07, ${right}, 90\\)`), "キャラの右余白と採点欄の空け方が一致しません");
+  assert.match(shell, /clamp\(210px,32vw,340px\)/);
 });
 
 test("追及タイム・強気宣言・連続正答の回復で山場と駆け引きを作る", () => {

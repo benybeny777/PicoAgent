@@ -65,7 +65,9 @@ fn referenced_keys() -> std::collections::BTreeSet<String> {
     }
     // フロント（JS）とタスクランナー（xtask）も設定キーを参照する。
     for relative in [
-        "ui/renderer.js",
+        "ui/app/main.js",
+        "ui/app/ambient.js",
+        "ui/character/image.js",
         "ui/quick-actions.js",
         "ui/settings.js",
         "ui/settings-schedules.js",
@@ -112,11 +114,11 @@ mod guard {
 
     #[test]
     fn 実行レイヤーはmanifestのwebpと追加パックのpngを両立する() {
-        let source = read_repo_file("ui/renderer.js").expect("renderer.js を読めない");
-        assert!(source
-            .contains("runtimeLayers = variant?.runtimeLayers || manifest.runtimeLayers || {}"));
-        assert!(source.contains("typeof runtimeLayers[name] === \"string\""));
-        assert!(source.contains(": `layers/${name}.png`"));
+        let manifest = read_repo_file("ui/character/manifest.js").expect("manifest.js を読めない");
+        let image = read_repo_file("ui/character/image.js").expect("image.js を読めない");
+        assert!(manifest.contains("runtimeLayers"));
+        assert!(image.contains("this.pack.runtimeLayers || {}"));
+        assert!(image.contains("layers/${name}.png"));
     }
 
     /// 実装が参照する設定キーは、すべて `docs/SETTINGS.md` に載っていること。
@@ -252,26 +254,26 @@ mod guard {
 
     #[test]
     fn スヌーズ再発火は多重実行と失敗を解放する() {
-        let source = read_repo_file("ui/renderer.js").expect("renderer.js を読めない");
+        let source = read_repo_file("ui/app/ambient.js").expect("ambient.js を読めない");
         let start = source
             .find("async function checkAlarms()")
             .expect("checkAlarms がない");
         let body = &source[start
             ..source
-                .find("async function fireAlarm")
-                .expect("fireAlarm がない")];
+                .find("window.addEventListener(\"beforeunload\"")
+                .expect("目覚まし確認の末尾がない")];
         let guard = body
             .find("if (alarmCheckInFlight) return")
             .expect("多重実行ガードがない");
         let advance = body
-            .find("activeAlarmSnooze.dueAt =")
+            .find("snooze.dueAt =")
             .expect("次回期限の先行更新がない");
         let fire = body
-            .find("await fireAlarm(alarm, snoozeState)")
+            .find("await fireAlarm(state.alarm, state)")
             .expect("スヌーズ発火がない");
         let release = body.find("finally").expect("失敗時の解放がない");
         assert!(guard < advance && advance < fire && fire < release);
         assert!(body.contains("alarmCheckInFlight = false"));
-        assert!(source.contains("activeAlarmSnooze === snoozeState"));
+        assert!(source.contains("snooze === snoozeState"));
     }
 }

@@ -1,46 +1,62 @@
-// 実際のゲームスクリプトを小さなDOM代替で動かし、採点拒否からの復帰を確認する。
+// 実際のゲームモジュール（ui/app/game.js）を小さなDOM代替で動かし、採点拒否からの復帰を確認する。
+// 中の状態を覗くため、読み込み時だけ戻り値に startSession / submitAnswer / state を足した写しを一時ファイルへ書く。
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
-import vm from "node:vm";
+import { pathToFileURL } from "node:url";
 
-const source = await readFile(new URL("../../ui/game.js", import.meta.url), "utf8");
+const appDir = new URL("../../ui/app/", import.meta.url);
+const source = await readFile(new URL("game.js", appDir), "utf8");
+const exposed = source
+  .replace('from "./bridge.js"', `from "${new URL("bridge.js", appDir).href}"`)
+  .replace('from "./util.js"', `from "${new URL("util.js", appDir).href}"`)
+  .replace("  return { open, close };\n}", "  return { open, close, startSession, submitAnswer, state: () => session };\n}");
+assert.notEqual(exposed, source, "ゲームモジュールの写しを作れません");
+
+const elements = new Map();
+const element = key => {
+  if (!elements.has(key)) elements.set(key, {
+    value: "", dataset: {}, listeners: {}, attributes: {}, hidden: true,
+    addEventListener(name, callback) { this.listeners[name] = callback; },
+    setAttribute(name, value) { this.attributes[name] = value; },
+    focus() {}, querySelector: element, querySelectorAll: () => [],
+  });
+  return elements.get(key);
+};
+const timers = new Map();
+let timerSequence = 0;
+const requests = [];
+globalThis.window = globalThis;
+globalThis.addEventListener = () => {};
+globalThis.PicoUI = { errorDetail: String, errorMessage: String, logApp() {}, preview: String, twoStepAction() {} };
+globalThis.picoagent = {
+  log: () => Promise.resolve(),
+  async gameJudge(request) {
+    requests.push(request);
+    if (requests.length % 2 === 1) throw new Error("回答を書き直してください。");
+    return { total: 100, criteria: [], commentary: "採点完了", highlight: "回答", improvement: "なし" };
+  },
+};
+globalThis.setInterval = callback => { const id = ++timerSequence; timers.set(id, callback); return id; };
+globalThis.clearInterval = id => { timers.delete(id); };
+globalThis.document = { getElementById: element, addEventListener() {} };
+globalThis.localStorage = { getItem: () => "off", setItem() {} };
+const directory = await mkdtemp(join(tmpdir(), "pico-game-"));
+const copy = join(directory, "game.js");
+await writeFile(copy, exposed);
+const { createGame } = await import(pathToFileURL(copy).href);
+const voice = { speak: () => Promise.resolve(), stop() {}, gain: () => 0.1225 };
+const stage = { setGame() {} };
 
 function setup() {
-  const elements = new Map();
-  const timers = new Map();
-  let timerSequence = 0;
-  const element = key => {
-    if (!elements.has(key)) elements.set(key, {
-      value: "", dataset: {}, listeners: {}, attributes: {},
-      addEventListener(name, callback) { this.listeners[name] = callback; },
-      setAttribute(name, value) { this.attributes[name] = value; },
-      focus() {}, querySelector: element,
-    });
-    return elements.get(key);
-  };
-  const requests = [];
-  const window = {
-    addEventListener() {},
-    setInterval(callback) { const id = ++timerSequence; timers.set(id, callback); return id; },
-    clearInterval(id) { timers.delete(id); },
-    picoagent: {
-      on() {},
-      async gameJudge(request) {
-        requests.push(request);
-        if (requests.length === 1) throw new Error("回答を書き直してください。");
-        return { total: 100, criteria: [], commentary: "採点完了", highlight: "回答", improvement: "なし" };
-      },
-    },
-  };
-  const context = vm.createContext({ window,
-    document: { getElementById: element, addEventListener() {} },
-    localStorage: { getItem: () => "off", setItem() {} },
-  });
-  vm.runInContext(source.replace("window.PicoGames = { open, close };",
-    "window.PicoGames = { open, close, startSession, submitAnswer, state: () => session };"), context);
-  window.PicoGames.startSession("normal");
-  return { game: window.PicoGames, element, timers, requests };
+  elements.clear();
+  timers.clear();
+  requests.length = 0;
+  const game = createGame({ voice, stage });
+  game.startSession("normal");
+  return { game, element, timers, requests };
 }
 
 for (const expired of [false, true]) {

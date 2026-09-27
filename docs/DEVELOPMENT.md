@@ -50,7 +50,7 @@ uv pip compile sidecar/requirements-comfy-rocm.in \
 
 `cargo xtask setup mmd`は`node tools/mmd-runtime/build.mjs`を実行する。再生成時はNode.jsとnpmをPATHへ用意する。`tools/mmd-runtime/package-lock.json`に固定したbabylon-mmd 1.3.0、Babylon.js 9.26.0、esbuild 0.28.2を`npm ci`で取得し、`ui/vendor/mmd/`へバンドル、ライセンス、版とSHA-256を含む`runtime.json`を配置する。生成済みランタイムはGit管理し、通常起動・通常ビルドは取得を実行しない。`build-ui`は固定lockと配信ファイルのSHA-256を照合し、欠損・不一致を明示して停止する。ライセンス原文はLFへ揃えてからハッシュを計算し、Windowsと他OSの改行変換で不一致を起こさない。
 
-モデル登録の検証は`character_pack.rs`とPMX検証モジュールを正本とする。キャラクター固有の素材・人格・スクリーンショットは企画デモのローカル管理物として`temp/`または利用者データ領域にだけ置き、Gitや配布物へ含めない。描画・姿勢・モーフの責務は`ui/mmd-renderer.js`、表示切替・音声との接続は`ui/renderer.js`に分ける。状態別ポーズは`mmd.poses`、複合表情は`mmd.expressions`にモデル固有の骨名・モーフ名で定義し、PMXへ書き戻さない。物理演算とAivis音声モデル作成は別作業とする。
+モデル登録の検証は`character_pack.rs`とPMX検証モジュールを正本とする。キャラクター固有の素材・人格・スクリーンショットは企画デモのローカル管理物として`temp/`または利用者データ領域にだけ置き、Gitや配布物へ含めない。描画・姿勢・モーフの責務は`ui/mmd-renderer.js`、表示切替は`ui/character/mmd.js`、音声との接続は`ui/app/voice.js`に分ける。状態別ポーズは`mmd.poses`、複合表情は`mmd.expressions`にモデル固有の骨名・モーフ名で定義し、PMXへ書き戻さない。物理演算とAivis音声モデル作成は別作業とする。
 
 開発中の骨・モーフ調査には`mmd-mcp`をCodexまたはClaude Codeのユーザー範囲MCPとして任意利用できる。これはMikuMikuDanceを人の目で確認しながら調整する開発支援であり、PicoAgentの実行依存・同梱物・自動取得対象にしない。実行中のMMD画面と未保存シーンを先に識別し、元PMXとテクスチャは読み取り用のまま保つ。調整値の採用判定はMikuMikuDanceだけで終えず、最終的にPicoAgentの実WebViewで両モデルを確認する。
 
@@ -319,7 +319,7 @@ NSIS アンインストーラは、インストール先またはPicoAgent管理
 | `src-tauri/src/menu.rs` | 右クリックネイティブメニューと選択イベント処理 |
 | `src-tauri/src/config.rs` | 設定の正本（`app_config_dir/config.json`）。`get()` でシークレットを透過復号 |
 | `crates/picoagent-core/` | **非公開の内部共通コア**。正規形メッセージとUTF-8安全処理など、Tauri・OS・製品設定に依存しない処理を置く。外部公開は行わず `publish = false` を保つ |
-| `src-tauri/src/layout.rs` | **表示形式（画面構成）**。`PICOAGENT_LAYOUT` 1キーで7形式を切り替え、形式ごとのウィンドウ寸法を `PICOAGENT_WINDOW_LAYOUTS` に覚える。旧 `talk` はLINE風の `chat` へ移行する。HTML はどの形式でも同じで、配置は `ui/styles.css` の `[data-layout=…]` が決める。右クリックメニューは `layout::select()`、設定保存は共通の `remember_current_size()` → `apply()` を通る |
+| `src-tauri/src/layout.rs` | 表示形式とウィンドウ寸法。選択肢は`pet`・`mascot`・`stream`の3形式。各形式のソース矩形は`ui/scenes/<形式>.json`を既定とし、利用者の確定差分を`src-tauri/src/scene.rs`が正規化・保存する |
 | `src-tauri/src/window_surface.rs` | メインウィンドウを利用者の目の前へ出す共通手順（表示 → 最小化解除 → 前面化）。ホットキー呼び出しと、多重起動時に2つ目の起動が既存ウィンドウを前面化する経路が共有する |
 | `src-tauri/src/hotkey.rs` | グローバルホットキー（`tauri-plugin-global-shortcut`）。起動時と設定保存時に `apply()` が全解除→設定どおり再登録し、終了時は `release()` で OS へ返す。呼び出しキーが無いまま隠れて操作不能にならないよう、登録できなければ非表示のウィンドウを表示へ戻す |
 | `src-tauri/src/secret.rs` | シークレット（`password` 型設定）をOSの資格情報保護へ預ける（Windows は DPAPI、macOS はログインキーチェーン）。Linux は平文 |
@@ -379,7 +379,7 @@ NSIS アンインストーラは、インストール先またはPicoAgent管理
 | `characters/` | キャラクター正本（一覧 `index.json`・人格定義・レイヤー・連番フレーム・ローディング画像。Live2D キャラは `live2d/` にモデル一式）。画像準備手順は `characters/README.md` |
 | `src-tauri/build.rs` | コネクタの `#[path] pub mod` 自動生成（`src/providers` と `skills`）＋ tauri ビルド |
 | `ui/picoagent.js` | 旧 `window.picoagent` を Tauri 上で再現する互換シム |
-| `ui/index.html` / `renderer.js` / `styles.css` | ペット UI |
+| `ui/index.html` / `ui/app/main.js` | メイン画面の入口。シーン・描画器・会話・ソースの実装は各フォルダに分ける |
 | `ui/settings.{html,js,css}` | 設定ウィンドウ（全設定の GUI 編集） |
 
 ## 📁 フォルダ構成
@@ -392,7 +392,7 @@ NSIS アンインストーラは、インストール先またはPicoAgent管理
 │   └── {time,weather,currency_rates,...}/mod.rs
 ├── ui/                         ← webview フロント正本（編集対象）
 │   ├── picoagent.js                 ← window.picoagent 互換シム（Tauri invoke/listen）
-│   ├── index.html / renderer.js / styles.css       ← ペット UI
+│   ├── index.html / app/ / character/ / chat/ / sources/ / components/ / themes/ / scenes/ ← メイン画面と差し替え単位
 │   ├── settings.html / settings*.js / settings.css ← 設定ウィンドウ
 │   ├── vendor/live2d/          ← Live2D ランタイム（git 管理外、setup live2d で取得）
 │   └── assets/characters/      ← characters/ の配信コピー（git 管理外、sync:characters で生成）

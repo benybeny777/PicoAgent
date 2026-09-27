@@ -1,0 +1,15 @@
+{
+  "id": "pet",
+  "label": "ペット",
+  "size": "window",
+  "order": ["character", "chat"],
+  "sources": {
+    "character": { "anchor": "bottom-right", "x": -10, "y": 0, "h": { "frac": 0.94, "min": 160 }, "maxWidthFrac": 0.5 },
+    "chat": {
+      "anchor": "bottom-left", "x": 14, "y": -14,
+      "w": { "frac": 0.52, "min": 200, "max": 640 },
+      "h": { "frac": 0.7, "min": 180, "max": 620 },
+      "options": { "variant": "bubble", "tail": "toward-character" }
+    }
+  }
+}

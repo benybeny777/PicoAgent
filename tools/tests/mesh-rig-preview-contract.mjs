@@ -7,7 +7,7 @@ const preview = readFileSync(
   "utf8",
 );
 const renderer = readFileSync(new URL("../../ui/mesh-rig.js", import.meta.url), "utf8");
-const appRenderer = readFileSync(new URL("../../ui/renderer.js", import.meta.url), "utf8");
+const appRenderer = readFileSync(new URL("../../ui/character/mesh.js", import.meta.url), "utf8");
 const previewLauncher = readFileSync(
   new URL("../../scripts/open-character-preview.ps1", import.meta.url),
   "utf8",
@@ -138,7 +138,7 @@ test("実画面検査は全表情と全動作を記録する", () => {
   assert.match(checker, /captureUrl\.searchParams\.set\("autoBlink", "off"\)/);
   assert.match(preview, /query\.get\("autoBlink"\) !== "off"/);
   assert.match(preview, /manifest\.meshRig\.assetVersion \|\| manifest\.assetVersion/);
-  assert.match(appRenderer, /assetVersion: cfg\.assetVersion \|\| characterAssetVersion/);
+  assert.match(appRenderer, /assetVersion: pack\.meshRig\.assetVersion \|\| pack\.assetVersion,/);
   assert.match(renderer, /createBlushOverlay\(app, rig, originX, originY, textureFit\)/);
   assert.match(renderer, /globalCompositeOperation = "destination-out"/);
   assert.match(renderer, /armClearance = Math\.max\(2,/);
@@ -159,9 +159,9 @@ test("キャラクター切替では破棄されたcanvasを再利用しない",
 test("省モーションでもメッシュを消さず受動動作だけを固定する", () => {
   assert.match(renderer, /setReducedMotion\(reduced\)/);
   assert.match(renderer, /this\.updateMesh\(this\.reducedMotion \? this\.startedAt : now, dt\)/);
-  assert.doesNotMatch(appRenderer, /meshRigController\s*&&\s*!reduceMotion/);
-  assert.match(appRenderer, /meshRigController\.setReducedMotion\(reduceMotion\)/);
-  assert.match(appRenderer, /meshRigController\?\.setReducedMotion\(reduceMotion\)/);
+  // 「アニメーションを減らす」でもメッシュ自体は止めず、描画器へ状態を渡して動きだけを抑える。
+  assert.match(appRenderer, /this\.controller\.setReducedMotion\(this\.reducedMotion\);/);
+  assert.match(appRenderer, /setReducedMotion\(reduced\) \{\s*\n\s*this\.reducedMotion = Boolean\(reduced\);\s*\n\s*this\.controller\?\.setReducedMotion\(this\.reducedMotion\);/);
 });
 
 test("独自2.5Dは首境界を開く局所頭部変形をせず一体で呼吸する", () => {
