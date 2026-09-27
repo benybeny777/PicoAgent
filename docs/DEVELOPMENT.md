@@ -107,6 +107,7 @@ graph LR
 | `cargo xtask setup pixi` | 自前メッシュリグとLive2Dが共有するPIXI 6.5.10の取得 |
 | `cargo xtask setup office` | OfficeCLI（LibreOffice）の取得 |
 | `cargo xtask setup tools` | OSS CLI ツール群の取得（`TOOLS_FORCE=1` で再取得） |
+| `cargo xtask setup local-vision` | Gemma 4 E2B用projector（約0.99GB）を固定SHA-256検証付きで任意導入。通常起動・ビルドでは取得しない。`setup all`には含む |
 | `python scripts/build-live2d-psd.py` | レイヤー画像から Live2D 用 PSD を生成 |
 | `python scripts/build-character-animations.py` | レイヤー画像から連番アニメーションを生成 |
 | `uv run --with pillow python scripts/build-mesh-rig.py <id>` | 高精細レイヤーから自前メッシュリグ資産を生成 |

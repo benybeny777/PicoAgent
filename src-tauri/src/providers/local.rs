@@ -9,7 +9,107 @@ use super::{Provider, ProviderReg};
 use crate::config::Config;
 use crate::message::{Field, Message};
 
+#[path = "../engine_vision_asset.rs"]
+pub mod vision_asset;
+
+pub fn vision_enabled(cfg: &Config) -> bool {
+    cfg.get_bool("PICOAGENT_LOCAL_VISION_ENABLED", false)
+}
+
+pub fn validate_vision_model(cfg: &Config) -> anyhow::Result<()> {
+    anyhow::ensure!(
+        preset_by_url(&model_url(cfg)).is_some_and(|preset| preset.id == "small"),
+        "画像入力は Gemma 4 E2B（small）に対応しています。モデルを選び直してください"
+    );
+    Ok(())
+}
+
+/// 通常チャットとスキルの双方で、画像を黙って無視させない。
+fn validate_image_input(cfg: &Config, messages: &[Message]) -> anyhow::Result<()> {
+    if messages.iter().any(|message| {
+        message
+            .images
+            .as_ref()
+            .is_some_and(|images| !images.is_empty())
+    }) {
+        crate::engine::ensure_vision_available(cfg).map_err(|error| anyhow::anyhow!(
+            "{error}。この会話には添付画像が含まれています。画像入力を有効にするか、画像を含まない会話で続けてください"
+        ))?;
+    }
+    Ok(())
+}
+
 pub struct Local;
+
+fn chat_body(model: &str, messages: &[Message], tools: &[Value]) -> Value {
+    let mut body = json!({
+        "model": model, "messages": to_wire(&normalize_for_local(messages)), "temperature": 0.6
+    });
+    if !tools.is_empty() {
+        body["tools"] = json!(tools);
+    }
+    body
+}
+
+fn structured_body(model: &str, messages: &[Message], schema: &Value) -> Value {
+    let mut body = chat_body(model, messages, &[]);
+    body["response_format"] = json!({
+        "type": "json_schema",
+        "json_schema": {"name": "structured_response", "strict": true, "schema": schema}
+    });
+    // 構造化結果には観測・判断の短い説明だけを返し、内部推論を含めない。
+    body["temperature"] = json!(0);
+    body["reasoning_effort"] = json!("none");
+    body["chat_template_kwargs"] = json!({"enable_thinking": false});
+    body
+}
+
+async fn send_chat(cfg: &Config, body: &Value) -> anyhow::Result<Message> {
+    let url = format!("{}/chat/completions", base_url(cfg));
+    let res = crate::tools::http::client()
+        .post(&url)
+        .json(body)
+        .send()
+        .await?;
+    if !res.status().is_success() {
+        let status = res.status();
+        let text = crate::tools::http::response_text(res)
+            .await
+            .map_err(anyhow::Error::msg)?;
+        anyhow::bail!(
+            "{}",
+            crate::tools::http::service_error(
+                "ローカルAIエンジン",
+                "/chat/completions",
+                status,
+                &text
+            )
+        );
+    }
+    let data: Value = res.json().await?;
+    let message = data
+        .get("choices")
+        .and_then(Value::as_array)
+        .and_then(|choices| choices.first())
+        .and_then(|choice| choice.get("message"))
+        .ok_or_else(|| anyhow::anyhow!("local 応答に choices[0].message がありません"))?;
+    Ok(from_wire(message))
+}
+
+/// 画像・テキスト共通のスキーマ制約付き応答。ツールや制約なしの再送は行わない。
+pub async fn chat_structured(
+    cfg: &Config,
+    model: &str,
+    messages: &[Message],
+    schema: &Value,
+) -> anyhow::Result<Message> {
+    validate_image_input(cfg, messages)?;
+    anyhow::ensure!(
+        schema.is_object(),
+        "応答スキーマはJSONオブジェクトで指定してください"
+    );
+    send_chat(cfg, &structured_body(model, messages, schema)).await
+}
 
 pub struct LocalModelPreset {
     pub id: &'static str,
@@ -340,6 +440,9 @@ fn normalize_for_local(messages: &[Message]) -> Vec<Message> {
                     }
                     last.content.push_str(&m.content);
                 }
+                if let Some(images) = m.images {
+                    last.images.get_or_insert_with(Vec::new).extend(images);
+                }
                 continue;
             }
         }
@@ -391,6 +494,12 @@ impl Provider for Local {
                 "11435",
             ),
             Field::new("PICOAGENT_LOCAL_CTX", "コンテキスト長", "text", "32768"),
+            Field::new(
+                "PICOAGENT_LOCAL_VISION_ENABLED",
+                "ローカル画像入力（Gemma 4 E2B・追加資産の明示導入と再起動が必要）",
+                "checkbox",
+                "false",
+            ),
             Field::new(
                 "PICOAGENT_LOCAL_NGL",
                 "GPU へオフロードするレイヤ数（999=全レイヤ優先 / 0=CPU 固定）",
@@ -473,49 +582,13 @@ impl Provider for Local {
         messages: &[Message],
         tools: &[Value],
     ) -> anyhow::Result<Message> {
-        let url = format!("{}/chat/completions", base_url(cfg));
-        // Gemma 等の「user/assistant 交互・user 始まり」要求に合わせて正規化してから送る。
-        let normalized = normalize_for_local(messages);
-        let wire = to_wire(&normalized);
-
+        validate_image_input(cfg, messages)?;
         // tools 付きで送り、失敗しても tools を外して再送しない。外すとツールが使えない
         // ことを誰にも伝えないまま機能だけが落ち、モデルが本文へ `web_search{...}` のような
         // 呼び出しを書いて利用者に見せてしまう。失敗は理由ごと上位へ返す（AGENTS.md の
         // 無言フォールバック禁止）。同梱エンジンは --jinja 起動で、既定の LFM2.5 も Gemma 4 も
         // ツール呼び出しに対応することを実機で確認している。
-        let send = |with_tools: bool| {
-            let mut body = json!({ "model": model, "messages": wire, "temperature": 0.6 });
-            if with_tools && !tools.is_empty() {
-                body["tools"] = json!(tools);
-            }
-            crate::tools::http::client().post(&url).json(&body).send()
-        };
-
-        let res = send(!tools.is_empty()).await?;
-        if !res.status().is_success() {
-            let status = res.status();
-            let text = crate::tools::http::response_text(res)
-                .await
-                .map_err(anyhow::Error::msg)?;
-            anyhow::bail!(
-                "{}",
-                crate::tools::http::service_error(
-                    "ローカルAIエンジン",
-                    "/chat/completions",
-                    status,
-                    &text
-                )
-            );
-        }
-        let data: Value = res.json().await?;
-        let message = data
-            .get("choices")
-            .and_then(|v| v.as_array())
-            .and_then(|arr| arr.first())
-            .and_then(|c| c.get("message"))
-            .cloned()
-            .ok_or_else(|| anyhow::anyhow!("local 応答に choices[0].message がありません"))?;
-        Ok(from_wire(&message))
+        send_chat(cfg, &chat_body(model, messages, tools)).await
     }
 
     /// ストリーミング chat。同梱 llama-server は OpenAI 互換の SSE に対応しているため、
@@ -531,6 +604,7 @@ impl Provider for Local {
     ) -> anyhow::Result<Message> {
         use std::sync::atomic::{AtomicBool, Ordering};
 
+        validate_image_input(cfg, messages)?;
         let url = format!("{}/chat/completions", base_url(cfg));
         let normalized = normalize_for_local(messages);
         let wire = to_wire(&normalized);
@@ -575,6 +649,88 @@ mod tests {
         RETIRED_MODEL_FILES,
     };
     use crate::message::Message;
+
+    #[test]
+    fn 構造化応答は画像を保持しツールを付けず正しい階層へスキーマを渡す() {
+        let schema = serde_json::json!({"type":"object","additionalProperties":false,
+            "properties":{"label":{"type":"string"}},"required":["label"]});
+        let messages = [
+            Message::new("user", "説明してください"),
+            Message::user_with_images("画像", vec!["data:image/png;base64,AA".into()]),
+        ];
+        let body = super::structured_body("small", &messages, &schema);
+        assert_eq!(body["response_format"]["type"], "json_schema");
+        assert_eq!(body["response_format"]["json_schema"]["schema"], schema);
+        assert_eq!(body["response_format"]["json_schema"]["strict"], true);
+        assert_eq!(
+            body["messages"][0]["content"][1]["image_url"]["url"],
+            "data:image/png;base64,AA"
+        );
+        assert!(body.get("tools").is_none());
+        assert_eq!(body["reasoning_effort"], "none");
+        assert_eq!(body["chat_template_kwargs"]["enable_thinking"], false);
+        let tools = [serde_json::json!({"type":"function","function":{"name":"test"}})];
+        let normal = super::chat_body("small", &messages, &tools);
+        assert_eq!(normal["messages"], body["messages"]);
+        assert_eq!(normal["tools"], serde_json::json!(tools));
+        assert!(normal.get("response_format").is_none());
+        assert!(normal.get("reasoning_effort").is_none());
+        assert!(normal.get("chat_template_kwargs").is_none());
+    }
+
+    #[test]
+    fn 通常チャットでも画像未準備を拒否しテキストのみは利用できる() {
+        let cfg = crate::config::Config::new();
+        assert!(super::validate_image_input(&cfg, &[Message::new("user", "こんにちは")]).is_ok());
+        let image =
+            Message::user_with_images("画像を説明して", vec!["data:image/png;base64,AA".into()]);
+        assert!(
+            super::validate_image_input(&cfg, std::slice::from_ref(&image))
+                .unwrap_err()
+                .to_string()
+                .contains("画像入力が無効")
+        );
+        cfg.set("PICOAGENT_LOCAL_MODEL_PRESET", "small");
+        cfg.set("PICOAGENT_LOCAL_VISION_ENABLED", "true");
+        assert!(super::validate_image_input(&cfg, &[image])
+            .unwrap_err()
+            .to_string()
+            .contains("起動が完了していません"));
+    }
+
+    #[test]
+    fn 画像入力は明示有効化と対応モデルを必要とする() {
+        let cfg = crate::config::Config::new();
+        assert!(!super::vision_enabled(&cfg));
+        assert!(super::validate_vision_model(&cfg).is_err());
+        cfg.set("PICOAGENT_LOCAL_MODEL_PRESET", "small");
+        assert!(super::validate_vision_model(&cfg).is_ok());
+        cfg.set("PICOAGENT_MODEL", "balanced");
+        assert!(super::validate_vision_model(&cfg).is_err());
+        cfg.set("PICOAGENT_MODEL", "small");
+        cfg.set("PICOAGENT_LOCAL_VISION_ENABLED", "true");
+        assert!(super::vision_enabled(&cfg));
+        assert!(super::validate_vision_model(&cfg).is_ok());
+    }
+
+    #[test]
+    fn 連続する利用者メッセージの添付画像を順番どおり保持する() {
+        let messages = vec![
+            Message::new("user", "説明"),
+            Message::user_with_images("操作前", vec!["data:image/png;base64,AA".into()]),
+            Message::user_with_images("操作後", vec!["data:image/png;base64,BB".into()]),
+        ];
+        let normalized = normalize_for_local(&messages);
+        assert_eq!(normalized.len(), 1);
+        assert_eq!(normalized[0].content, "説明\n\n操作前\n\n操作後");
+        assert_eq!(
+            normalized[0].images.as_ref().unwrap(),
+            &vec![
+                "data:image/png;base64,AA".to_string(),
+                "data:image/png;base64,BB".to_string(),
+            ]
+        );
+    }
 
     #[test]
     fn 全プリセットと設定画面のコンテキスト既定は一致する() {
