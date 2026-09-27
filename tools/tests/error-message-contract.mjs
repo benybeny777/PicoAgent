@@ -5,9 +5,10 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import vm from "node:vm";
+import { mainScript } from "./lib/ui-source.mjs";
 
 const common = await readFile(new URL("../../ui/common.js", import.meta.url), "utf8");
-const renderer = await readFile(new URL("../../ui/renderer.js", import.meta.url), "utf8");
+const main = mainScript();
 const settings = await readFile(new URL("../../ui/settings.js", import.meta.url), "utf8");
 
 function loadPicoUi() {
@@ -27,7 +28,7 @@ test("errorMessage は Error・文字列・message 付きオブジェクトか�
 });
 
 test("画面表示の文言で catch した値の .message を直接埋め込まない", () => {
-  for (const [name, source] of [["renderer.js", renderer], ["settings.js", settings]]) {
+  for (const [name, source] of [["メイン画面（ui/app ほか）", main], ["settings.js", settings]]) {
     const offenders = source
       .split("\n")
       .filter(line => /\$\{(error|err|e)\??\.message( \|\| (error|err|e))?\}/.test(line));

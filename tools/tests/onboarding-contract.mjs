@@ -10,15 +10,17 @@ import test from "node:test";
 const base = new URL("../../", import.meta.url);
 const read = name => readFile(new URL(name, base), "utf8");
 const indexHtml = await read("ui/index.html");
-const renderer = await read("ui/renderer.js");
-const styles = await read("ui/styles.css");
+const onboarding = await read("ui/app/onboarding.js");
+const main = await read("ui/app/main.js");
+const voice = await read("ui/app/voice.js");
+const styles = await read("ui/components/boot.css");
 const settings = await read("ui/settings.js");
 const commands = await read("src-tauri/src/commands.rs");
 const settingsDoc = await read("docs/SETTINGS.md");
 const spec = await read("SPEC.md");
 
 test("初回案内はLive2D追加の1画面だけで、追加機能の選択画面を持たない", () => {
-  assert.match(indexHtml, /id="onboardingCharacterStep"/);
+  assert.match(indexHtml, /<h1 id="onboardingCharacterTitle">キャラクターモデルを追加する？<\/h1>/);
   assert.doesNotMatch(indexHtml, /onboardingComponentStep/);
   assert.doesNotMatch(indexHtml, /data-component-id=/);
   assert.doesNotMatch(indexHtml, /data-onboarding-action="(install|skip|back)-components"/);
@@ -42,7 +44,7 @@ test("廃止した画面のコードとCSSを残さない", () => {
     "onboardingComponentStatus",
     "onboardingComponentStep",
   ]) {
-    assert.doesNotMatch(renderer, new RegExp(dead), `renderer.js に ${dead} が残っています`);
+    assert.doesNotMatch(onboarding + main, new RegExp(dead), `メイン画面に ${dead} が残っています`);
   }
   for (const dead of [
     "\\.onboarding-components",
@@ -50,36 +52,36 @@ test("廃止した画面のコードとCSSを残さない", () => {
     "\\.onboarding-component-actions",
     "\\.onboarding-back",
   ]) {
-    assert.doesNotMatch(styles, new RegExp(dead), `styles.css に ${dead} が残っています`);
+    assert.doesNotMatch(styles, new RegExp(dead), `boot.css に ${dead} が残っています`);
   }
 });
 
 test("音声読み上げは選ばせず初回に自動導入し、成功時に読み上げを有効にする", () => {
-  assert.match(renderer, /async function autoInstallVoiceOnFirstRun\(\)/);
+  assert.match(onboarding, /async function installVoice\(\)/);
   // 案内の表示を待たせない（await しない）。
-  assert.match(renderer, /showOnboarding\(\);\s*\n[\s\S]{0,200}?autoInstallVoiceOnFirstRun\(\)\.catch\(/);
+  assert.match(main, /onboarding\.show\(\);\s*\n\s*onboarding\.installVoice\(\)\.catch\(/);
   // 導入できた時点で読み上げを有効にする（第2引数 true）。
-  assert.match(renderer, /installComponents\(\["aivis"\], true\)/);
+  assert.match(onboarding, /installComponents\(\["aivis"\], true\)/);
   // 取得済み・取得不能では走らせない。
-  assert.match(renderer, /if \(!aivis \|\| aivis\.ready \|\| !aivis\.available\) return;/);
+  assert.match(onboarding, /if \(!aivis \|\| aivis\.ready \|\| !aivis\.available\) return;/);
 });
 
-test("取得進捗は専用画面を作らず起動画面の状態表示へ出す", () => {
-  assert.match(renderer, /window\.picoagent\.listen\("component:progress"/);
-  // setStatus は起動中なら起動画面の状態欄と起動ログ、通常画面ではステータス行へ流す。
-  assert.match(renderer, /component:progress"[\s\S]{0,700}?setStatus\(`音声読み上げを準備中…/);
+test("取得進捗は専用画面を作らず状態行（起動中は起動画面）へ出す", () => {
+  assert.match(onboarding, /bridge\.listen\("component:progress"/);
+  assert.match(onboarding, /status\.set\(`音声読み上げを準備中…\$\{size\} ※初回だけ`, "voice-install"\)/);
   // 送信を塞いでいるローカルモデル取得の理由を上書きしない。
-  assert.match(renderer, /if \(localEngineRequired && localEnginePhase !== "ready"\) return;/);
+  assert.match(onboarding, /if \(isEngineBusy\(\)\) return;/);
   // 容量は十進のMBで出す（bytes もMiBも使わない）。
-  assert.match(renderer, /bytes \/ 1_000_000/);
+  assert.match(onboarding, /downloaded \/ 1e6/);
+  assert.doesNotMatch(onboarding, /1024|MiB/);
   // 失敗しても黙らせず、入れ直し先を出す。
-  assert.match(renderer, /設定の「追加機能・更新」から入れ直せます/);
-  assert.match(renderer, /オフラインのため音声読み上げの準備を見送りました/);
+  assert.match(onboarding, /設定の「追加機能・更新」から入れ直せます/);
+  assert.match(onboarding, /オフラインのため音声読み上げの準備を見送りました/);
 });
 
 test("読み上げ音量の既定は実装・設定画面・文書で35に揃える", () => {
   // 画面側の初期値だけ 1（=100%）だと、設定を読む前に鳴る音が最大音量になる。
-  assert.match(renderer, /^let voiceVolume = 0\.35;/m);
+  assert.match(voice, /let volume = 0\.35;/);
   assert.doesNotMatch(commands, /PICOAGENT_TTS_VOLUME", "50"/);
   assert.equal(commands.match(/PICOAGENT_TTS_VOLUME", "35"/g)?.length, 2);
   assert.match(settings, /PICOAGENT_TTS_VOLUME[^)]*初期値35[^)]*"35"[^)]*"35"/);

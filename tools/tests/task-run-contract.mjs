@@ -1,6 +1,7 @@
 // 実行中タスク一覧の状態遷移と、画面・送信処理への配線を固定する。
 // 表示が崩れても例外にならず「動いているのか分からない」だけになるため、状態を直接検査する。
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
@@ -8,13 +9,14 @@ await import("../../ui/task-run.js");
 
 const TaskRun = globalThis.PicoTaskRun;
 const read = path => readFile(new URL(`../../${path}`, import.meta.url), "utf8");
-const [renderer, html, agent, styles] = await Promise.all([
-  read("ui/renderer.js"),
+const [send, html, agent, styles] = await Promise.all([
+  read("ui/chat/send.js"),
   read("ui/index.html"),
   read("src-tauri/src/agent.rs"),
-  read("ui/styles.css"),
+  read("ui/components/chat.css"),
 ]);
 
+const readNow = path => readFileSync(new URL(`../../${path}`, import.meta.url), "utf8");
 const summary = run => run.rows.map(row => [row.label, row.state]);
 
 test("送信直後は考え中の行だけを実行中にする", () => {
@@ -147,27 +149,23 @@ test("経過時間のタイマーは終了・再開始・破棄のどの経路�
 });
 
 test("送信処理と画面が実行中タスクへ状態を渡す", () => {
-  assert.match(html, /<div id="taskRun" class="task-run"[^>]*hidden><\/div>/);
-  assert.ok(html.indexOf('src="task-run.js"') > 0 && html.indexOf('src="task-run.js"') < html.indexOf('src="renderer.js"'));
-  assert.match(renderer, /globalThis\.PicoTaskRun\.createController\(/);
-  assert.match(renderer, /taskRun\.start\(\);/);
-  assert.match(renderer, /taskRun\.status\(progress\);/);
-  assert.match(renderer, /taskRun\.activity\(activity\);/);
-  assert.match(renderer, /taskRun\.finish\(jobFailed \? "failed" : jobCancelled \? "cancelled" : "completed"\);/);
-  assert.match(renderer, /closest\("button,a,textarea,\.reply-actions,\.task-run"\)/);
+  const panel = readNow("ui/chat/panel.js");
+  const history = readNow("ui/chat/history.js");
+  assert.match(panel, /const taskRun = el\("div", \{ id: "taskRun", className: "task-run", hidden: true \}/);
+  assert.ok(html.indexOf('src="task-run.js"') > 0 && html.indexOf('src="task-run.js"') < html.indexOf('src="app/main.js"'));
+  assert.match(send, /window\.PicoTaskRun\.createController\(/);
+  assert.match(send, /taskRun\.start\(\);/);
+  assert.match(send, /taskRun\.status\(progress\);/);
+  assert.match(send, /taskRun\.activity\(activity\);/);
+  assert.match(send, /taskRun\.finish\(failed \? "failed" : cancelled \? "cancelled" : "completed"\);/);
+  // 一覧の中（停止ボタン）を押しても入力欄を開かない。
+  assert.match(panel, /closest\("button,a,textarea,input,\.reply-actions,\.task-run,/);
   assert.match(agent, /"labels": tools\.iter\(\)\.map\(\|name\| crate::tools::label_of\(name\)\)/);
-  assert.match(styles, /\.bubble\.task-run-visible \.status\.busy \{ display:none; \}/);
-  // フキダシ内のボタンは既定で絶対配置されるため、見出しに留めるには static の明示が要る。
-  assert.match(styles, /\.task-run-cancel \{ position:static;/);
-  assert.match(styles, /\.bubble\.task-run-visible \.cancel-send \{ display:none; \}/);
-  // 会話履歴を出す形式では会話の末尾へ置き、キャラの描画面へ浮かせない。
-  assert.match(renderer, /function placeTaskRun\(stickToBottom = false\)/);
-  // 履歴の描き直しで文書から外れた一覧は ID で探せない。最初に見つけた要素を持ち続けること。
-  assert.match(renderer, /const panel = \(placeTaskRun\.panel \|\|= document\.getElementById\("taskRun"\)\);/);
-  assert.match(renderer, /renderHistoryRows\(\);\n  placeTaskRun\(stickToBottom\);/);
-  assert.match(renderer, /onVisibilityChange: visible => \{[\s\S]*?placeTaskRun\(visible\);/);
-  assert.match(styles, /\[data-layout\] \.history-log > \.task-run \{ position:static;/);
-  assert.match(styles, /\.bubble\.task-run-visible \.history-thinking \{ display:none; \}/);
+  assert.match(styles, /\.chat\.task-run-visible \.status\.busy,\s*\n\.chat\.task-run-visible \.cancel-send,\s*\n\.chat\.task-run-visible \.history-thinking \{ display: none; \}/);
+  // 会話履歴を出す見せ方では会話の末尾へ置く。履歴の描き直しで文書から外れても、持ち続けた要素を戻す。
+  assert.match(history, /function placeTaskPanel\(stick\)/);
+  assert.match(history, /log\.append\(taskPanel\)/);
+  assert.match(send, /onVisibilityChange: visible => \{[\s\S]*?chat\.history\.render\(\);/);
 });
 
 test("同じ進捗文言では作り直さず停止ボタンを入れ替えない", () => {

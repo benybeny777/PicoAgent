@@ -1,154 +1,51 @@
 <!doctype html>
-<html lang="ja">
-  <head>
+<html lang="ja" data-ui-theme="glass">
+<head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>PicoAgent</title>
-  <link rel="stylesheet" href="styles.css" />
+  <title>PicoAgent</title>
+  <!-- テーマは ui/themes/<名前>/tokens.css。足すときはここへ1行と app/main.js の UI_THEMES へ名前を足す。 -->
+  <link rel="stylesheet" href="themes/glass/tokens.css" />
+  <link rel="stylesheet" href="themes/pastel/tokens.css" />
+  <link rel="stylesheet" href="components/base.css" />
+  <link rel="stylesheet" href="components/window.css" />
+  <link rel="stylesheet" href="components/character.css" />
+  <link rel="stylesheet" href="components/chat.css" />
+  <link rel="stylesheet" href="components/stream.css" />
+  <link rel="stylesheet" href="components/edit.css" />
+  <link rel="stylesheet" href="components/boot.css" />
+  <link rel="stylesheet" href="components/game.css" />
 </head>
 <body>
-  <main id="petApp" class="pet-app is-booting">
+  <main id="petApp" class="app is-booting">
     <span class="beta-badge" aria-label="アルファ版" hidden>ALPHA</span>
-    <section id="bootScreen" class="boot-screen" aria-live="polite">
-      <div class="boot-stage">
-        <div id="bootLog" class="boot-log" role="group" aria-label="起動ログ"></div>
-        <div class="boot-progress" aria-hidden="true"><span></span></div>
-        <div id="bootStatus" class="boot-status"></div>
-      </div>
-    </section>
-    <!-- 生きた領域は回答欄（#reply）だけに絞る。フキダシ全体や、全件を再構築する履歴へ
-         付けると、クイック操作や通知の変更、過去の会話まで繰り返し読み上げられる。 -->
-    <section id="bubble" class="bubble">
-      <div id="replyActions" class="reply-actions" role="group" aria-label="回答操作">
-        <button id="noticeToggle" type="button" aria-label="アクションセンター" title="実行中・完了・通知">通知</button>
-        <button id="copyReply" type="button" aria-label="回答をコピー" title="回答をコピー">コピー</button>
-        <button id="regenReply" type="button" aria-label="別の答えを生成" title="会話を送信すると再生成できます" disabled>再生成</button>
-        <button id="replayReply" type="button" aria-label="もう一度読み上げ" title="もう一度読み上げ">読上</button>
-        <button id="stopVoice" type="button" aria-label="読み上げを停止" title="読み上げを停止" hidden>停止</button>
-        <button id="toggleFullscreen" type="button" aria-label="フキダシを拡大" title="フキダシを拡大">拡大</button>
-      </div>
-      <div id="noticePanel" class="notice-panel" hidden>
-        <div class="notice-head">
-          <span>アクションセンター</span>
-          <button id="noticeClear" type="button">消去</button>
-        </div>
-        <div id="noticeList" class="notice-list"></div>
-      </div>
-      <div id="historyTools" class="history-tools" role="group" aria-label="会話履歴操作">
-        <input id="historySearch" type="search" autocomplete="off" placeholder="履歴を検索" aria-label="会話履歴を検索" title="履歴を検索（Ctrl+F／⌘+F、Escapeで解除）" />
-        <button id="historyJumpLatest" type="button" title="表示中の履歴の末尾へ移動" hidden>末尾へ</button>
-        <button id="exportHistory" type="button" title="会話をMarkdownで書き出し">書き出し</button>
-      </div>
-      <div id="historyLog" class="history-log" role="group" aria-label="会話履歴"></div>
-      <!-- ウィジェット表示のときだけ出す時計。他の表示形式では CSS で隠す。 -->
-      <div id="widgetClock" class="widget-clock" aria-hidden="true"><strong></strong><span></span></div>
-      <div id="streamInfo" class="stream-info" role="group" aria-label="配信情報">
-        <span class="stream-live">● LIVE</span><strong></strong><span></span>
-      </div>
-      <div id="streamDisplay" class="stream-display" role="group" aria-label="配信画面内ディスプレイ">
-        <strong>PICO STUDIO</strong><span>CHAT &amp; CHARACTER</span>
-      </div>
-      <div id="reply" class="reply" aria-live="polite" aria-atomic="true">こんにちは。クリックして話しかけてね。</div>
-      <form id="composer" class="composer" hidden>
-        <div id="imagePreview" class="image-preview" hidden></div>
-        <div id="attachmentSuggestions" class="attachment-suggestions" hidden role="group" aria-label="添付ファイルのおすすめ操作"></div>
-        <div id="quickActions" class="quick-actions" role="group" aria-label="クイック操作"></div>
-        <textarea id="input" rows="2" placeholder="話しかける… / 画像をペーストまたはドロップ"></textarea>
-        <div class="composer-actions">
-          <button id="voiceLoopButton" class="voice-loop-button" type="button" aria-pressed="false" title="返答後も自動で聞き続ける">連続</button>
-          <button id="micButton" type="button" aria-label="音声入力" title="クリックで録音開始・停止 / 長押し中だけ録音">音声</button>
-          <button id="sendButton" type="submit" aria-label="送信" title="Enter または Ctrl+Enter で送信 / Shift+Enterで改行 / ↑↓で入力履歴">送る</button>
-        </div>
-      </form>
-      <div id="status" class="status" role="status" aria-live="polite" aria-atomic="true"></div>
-      <div id="taskRun" class="task-run" role="group" aria-label="実行中のタスク" hidden></div>
-      <button id="cancelVoice" class="cancel-voice" type="button" hidden>読み上げを中止</button>
-      <button id="cancelSend" class="cancel-send" type="button" hidden>処理を止める</button>
-      <button id="bubbleResize" class="bubble-resize" type="button" aria-label="フキダシのサイズを変更" title="ドラッグしてサイズ変更"></button>
-    </section>
-    <section id="character" class="character" data-render-kind="2d" title="ドラッグで画面を移動／右クリックで設定" role="button" tabindex="0" aria-label="キャラクターに触れる。ドラッグで画面を移動、右クリックで設定">
-      <!-- 立ち絵の拡大・移動はこの枠にかける。待機モーションは中の img を動かすので、
-           同じ要素に transform を重ねないよう1枚挟んでいる。 -->
-      <div id="characterView" class="character-view">
-        <img id="petSprite" src="assets/characters/mugi/preview.png" alt="むぎ" draggable="false" />
-        <div id="characterSpringMotion" class="character-spring-motion" aria-hidden="true" hidden></div>
-      </div>
-      <span id="online" class="online"></span>
-      <button id="relationshipButton" class="relationship-button" type="button" title="いっしょの記録を見る" aria-label="いっしょの記録を見る" aria-controls="relationshipCard" aria-expanded="false">♡</button>
-    </section>
-    <aside id="relationshipCard" class="relationship-card" role="dialog" aria-modal="false" aria-labelledby="relationshipLabel" hidden>
-      <button id="relationshipClose" class="relationship-close" type="button" aria-label="閉じる">×</button>
-      <div class="relationship-kicker">いっしょの記録</div>
-      <strong id="relationshipLabel">出会ったばかり</strong>
-      <div id="relationshipStats" class="relationship-stats"></div>
-      <div id="relationshipMoments" class="relationship-moments"></div>
-      <button id="relationshipClear" class="relationship-clear" type="button">記録をすべて消す</button>
-      <label id="variantRow" class="variant-row" hidden>スタイル<select id="variantSelect"></select></label>
-      <label id="mmdPoseRow" class="variant-row" hidden>待機姿勢<select id="mmdPoseSelect"><option value="natural">自然な姿勢</option><option value="original">元の姿勢</option></select></label>
-    </aside>
-    <!-- 初回案内はキャラクターモデル追加の1画面だけ。追加機能の選択画面は廃止した。
-         モデルは同梱・再配布せず、公式配布元へ案内して利用者自身に取得してもらう。
-         読み上げ（Aivis）は選ばせず起動時に自動導入し、進捗は起動画面の状態表示へ出す。
-         音声入力・Office変換・文書ツールは「設定 → 追加機能・更新」で導入する。 -->
+    <section id="bootScreen" class="boot-screen" aria-live="polite"></section>
+    <!-- シーン。ソース（キャラ・会話パネル・字幕…）は app/stage.js が置く。 -->
+    <div id="stage" class="stage">
+      <div id="sceneRoot" class="scene"></div>
+    </div>
+    <div id="editLayer" class="edit-layer" hidden></div>
+    <section id="editToolbar" class="edit-toolbar" aria-label="配置の編集" hidden></section>
+    <aside id="relationshipCard" class="relationship-card" role="dialog" aria-modal="false" aria-labelledby="relationshipLabel" hidden></aside>
+    <!-- 初回案内はキャラクターモデル追加の1画面だけ。モデルは同梱・再配布せず、公式配布元へ案内する。 -->
     <section id="onboarding" class="onboarding" hidden aria-modal="true" role="dialog" aria-labelledby="onboardingCharacterTitle">
       <div class="onboarding-card">
         <div class="onboarding-mark">PicoAgent</div>
-        <div id="onboardingCharacterStep">
-          <h1 id="onboardingCharacterTitle">キャラクターモデルを追加する？</h1>
-          <p>公式サイトで配布されている無料モデルを取得するか、手元のモデルを追加できます。ダウンロード後はこの画面へ戻って追加してください。</p>
-          <div class="onboarding-choices">
-            <a class="onboarding-link" href="https://www.mmd.hololive.tv/" target="_blank" rel="noreferrer"><b>ホロライブ公式MMDを取得</b><span>利用規約と二次創作ガイドラインを確認してダウンロード</span></a>
-            <a class="onboarding-link" href="https://www.live2d.com/learn/sample/" target="_blank" rel="noreferrer"><b>Live2D公式サンプル（桃瀬ひより など）を取得</b><span>利用条件を確認してダウンロード</span></a>
-            <button type="button" data-onboarding-action="add-character"><b>取得したモデルをPicoAgentへ追加</b><span>zip／フォルダを選ぶ画面へ進む</span></button>
-            <button type="button" data-onboarding-action="skip-character"><b>今はしない</b><span>いつでも「キャラ登録」から追加できます</span></button>
-          </div>
-          <p class="onboarding-component-note">音声入力・Office変換・PDF／画像／文書ツールは「設定 → 追加機能・更新」から導入できます。</p>
+        <h1 id="onboardingCharacterTitle">キャラクターモデルを追加する？</h1>
+        <p>公式サイトで配布されている無料モデルを取得するか、手元のモデルを追加できます。ダウンロード後はこの画面へ戻って追加してください。</p>
+        <div class="onboarding-choices">
+          <a class="onboarding-link" href="https://www.mmd.hololive.tv/" target="_blank" rel="noreferrer"><b>ホロライブ公式MMDを取得</b><span>利用規約と二次創作ガイドラインを確認してダウンロード</span></a>
+          <a class="onboarding-link" href="https://www.live2d.com/learn/sample/" target="_blank" rel="noreferrer"><b>Live2D公式サンプル（桃瀬ひより など）を取得</b><span>利用条件を確認してダウンロード</span></a>
+          <button type="button" data-onboarding-action="add-character"><b>取得したモデルをPicoAgentへ追加</b><span>zip／フォルダを選ぶ画面へ進む</span></button>
+          <button type="button" data-onboarding-action="skip-character"><b>今はしない</b><span>いつでも「キャラ登録」から追加できます</span></button>
         </div>
+        <p class="onboarding-component-note">音声入力・Office変換・PDF／画像／文書ツールは「設定 → 追加機能・更新」から導入できます。</p>
       </div>
     </section>
-    <div class="window-resize-handles" aria-hidden="true">
-      <span data-resize-direction="North"></span>
-      <span data-resize-direction="East"></span>
-      <span data-resize-direction="South"></span>
-      <span data-resize-direction="West"></span>
-      <span data-resize-direction="NorthEast"></span>
-      <span data-resize-direction="SouthEast"></span>
-      <span data-resize-direction="SouthWest"></span>
-      <span data-resize-direction="NorthWest"></span>
-    </div>
     <div id="dropOverlay" class="drop-overlay" hidden aria-hidden="true">
       <div class="drop-overlay-inner">📎 ここにドロップして添付</div>
     </div>
-    <nav id="topWindowMenu" class="top-window-menu" aria-label="PicoAgent メニュー">
-      <span class="top-window-menu-brand">PicoAgent</span>
-      <button id="layoutMenuButton" type="button" aria-haspopup="menu" title="画面レイアウトを切り替え">表示</button>
-      <button id="layoutEditToggle" class="layout-edit-toggle" type="button" aria-pressed="false" title="OBS風に画面を編集">配置</button>
-      <button id="characterMenuButton" type="button" aria-haspopup="menu" title="キャラクターを切り替え">キャラ選択</button>
-      <button id="gameMenuButton" type="button" title="「人間だとバレるな」で遊ぶ">遊ぶ</button>
-      <button type="button" data-settings-tab="">設定</button>
-      <span class="top-window-menu-drag" aria-hidden="true"></span>
-      <section id="layoutEditorToolbar" class="layout-editor-toolbar" aria-label="レイアウト編集" hidden>
-        <strong>レイアウト編集</strong>
-        <label>対象
-          <select id="layoutEditorTarget">
-            <option value="character">キャラクター</option>
-            <option value="bubble">会話パネル</option>
-            <option value="reply">字幕</option>
-            <option value="history">配信チャット</option>
-            <option value="display">配信表示</option>
-          </select>
-        </label>
-        <button id="layoutEditorUndo" type="button">元に戻す</button>
-        <button id="layoutEditorSave" type="button">保存</button>
-        <button id="layoutEditorReset" type="button">既定へ戻す</button>
-        <button id="layoutEditorClose" type="button">閉じる</button>
-      </section>
-      <span class="window-caption-controls" aria-label="ウィンドウ操作">
-        <button id="windowMinimize" type="button" title="最小化" aria-label="最小化">&#x2212;</button>
-        <button id="windowMaximize" type="button" title="最大化" aria-label="最大化">&#x25A1;</button>
-        <button id="windowClose" class="window-close" type="button" title="閉じる" aria-label="閉じる">&#x2715;</button>
-      </span>
-    </nav>
+    <nav id="topWindowMenu" class="top-window-menu" aria-label="PicoAgent メニュー"></nav>
   </main>
   <section id="gameOverlay" class="game-overlay" role="dialog" aria-modal="true" aria-labelledby="gameTitle" hidden>
     <div class="game-shell">
@@ -166,20 +63,16 @@
       <div id="gameStatus" class="game-status" role="status" aria-live="polite"></div>
     </div>
   </section>
+  <!-- 状態を持たない共通の道具（設定画面・Node のテストと共有する）。 -->
   <script src="picoagent.js"></script>
   <script src="common.js"></script>
   <script src="frame-scheduler.js"></script>
   <script src="composer-draft.js"></script>
   <script src="quick-actions.js"></script>
-  <script src="mesh-rig.js"></script>
   <script src="alarm-runtime.js"></script>
   <script src="task-run.js"></script>
-  <script src="renderer.js"></script>
-  <script src="game.js"></script>
-  <script src="top-menu.js"></script>
-  <!-- 配置編集の部品は245KBある。先に読むと、起動の合図（frontendReady）と pet_init が
-       そのぶん遅れる。使う layout-editor.js の直前まで下げ、起動の待ちに重ねる。 -->
-  <script src="vendor/moveable/moveable.min.js"></script>
-  <script src="layout-editor.js"></script>
+  <script src="mesh-rig.js"></script>
+  <!-- メイン画面の入口。以降は ES Modules で、Tauri を呼ぶのは app/bridge.js だけ。 -->
+  <script type="module" src="app/main.js"></script>
 </body>
 </html>

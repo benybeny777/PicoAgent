@@ -1,0 +1,186 @@
+/* base.css - テーマに依らない共通の土台（文字・余白・角丸・動き・ボタン・入力欄・通知）。
+   色は themes/<名前>/tokens.css の変数だけを参照する。 */
+:root {
+  --font-ui: "Noto Sans JP", "Yu Gothic UI", "Hiragino Sans", "Hiragino Kaku Gothic ProN", Meiryo, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", "Cascadia Code", Consolas, "Yu Gothic UI", monospace;
+  --radius-xl: 20px;
+  --radius-lg: 16px;
+  --radius-md: 12px;
+  --radius-sm: 8px;
+  --radius-pill: 999px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --dur-fast: 140ms;
+  --dur: 220ms;
+  --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --menu-height: 32px;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+/* 透明ウィンドウ。背景を塗らず、パネルだけを浮かせる。 */
+html, body {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: transparent;
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: 14px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+[hidden] { display: none !important; }
+
+button, input, textarea, select { font: inherit; color: inherit; }
+
+button {
+  cursor: pointer;
+  border: 0;
+  background: none;
+  padding: 0;
+}
+button:disabled { cursor: default; opacity: 0.45; }
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+/* 小さなボタン（回答操作・履歴操作・パネル内の操作）。 */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1);
+  min-height: 28px;
+  padding: 0 11px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--surface-sunken);
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
+}
+.chip:not(:disabled):hover { background: var(--surface-hover); color: var(--text); border-color: var(--border-strong); }
+.chip[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent-strong); border-color: var(--accent); }
+.chip.danger { color: var(--danger); }
+.chip.danger[data-confirming="true"] { background: var(--danger-soft); border-color: var(--danger); }
+
+.primary {
+  background: var(--accent-gradient);
+  color: var(--on-accent);
+  border: 0;
+  font-weight: 700;
+  box-shadow: 0 6px 18px var(--accent-soft);
+}
+.chip.primary { color: var(--on-accent); }
+.primary:not(:disabled):hover { filter: brightness(1.08); }
+
+.icon-button {
+  display: inline-grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: var(--radius-pill);
+  background: var(--surface-sunken);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 15px;
+  line-height: 1;
+}
+.icon-button:hover { color: var(--text); background: var(--surface-hover); }
+
+input[type="search"], textarea, select {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-sunken);
+  color: var(--text);
+  transition: border-color var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease);
+}
+input[type="search"]:focus, textarea:focus, select:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+::placeholder { color: var(--text-faint); }
+
+/* スクロールバーは細く、パネルの色に馴染ませる。 */
+* { scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: var(--radius-pill); }
+::-webkit-scrollbar-track { background: transparent; }
+
+/* すりガラスのパネルの共通見た目。 */
+.glass {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-panel), var(--highlight);
+  backdrop-filter: var(--blur);
+  -webkit-backdrop-filter: var(--blur);
+}
+
+/* トースト。操作ボタンの無いものはクリックを背後のデスクトップへ通す。 */
+.toast {
+  position: fixed;
+  z-index: 400;
+  left: 50%;
+  bottom: 18px;
+  max-width: min(92vw, 460px);
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 9px 14px;
+  border-radius: var(--radius-md);
+  background: var(--surface-strong);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-soft);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+  pointer-events: none;
+  opacity: 0;
+  translate: -50% 8px;
+  transition: opacity var(--dur) var(--ease), translate var(--dur) var(--ease);
+}
+.toast-show { opacity: 1; translate: -50% 0; }
+.toast::before { content: ""; flex: 0 0 auto; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
+.toast-success::before { background: var(--success); }
+.toast-warn::before { background: var(--warn); }
+.toast-error::before { background: var(--danger); }
+.toast-actionable { pointer-events: auto; }
+.toast-action {
+  padding: 4px 10px;
+  border-radius: var(--radius-pill);
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.beta-badge {
+  position: fixed;
+  z-index: 260;
+  top: calc(var(--menu-height) + 6px);
+  right: 10px;
+  padding: 2px 8px;
+  border-radius: var(--radius-pill);
+  background: var(--accent-gradient);
+  color: var(--on-accent);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { transition-duration: 0ms; animation-duration: 0ms; animation-iteration-count: 1; }
+}

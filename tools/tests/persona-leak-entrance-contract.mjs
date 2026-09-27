@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import { mainScript } from "./lib/ui-source.mjs";
 
-const renderer = readFileSync(new URL("../../ui/renderer.js", import.meta.url), "utf8");
+const main = mainScript();
 const agent = readFileSync(new URL("../../src-tauri/src/agent.rs", import.meta.url), "utf8");
 const prompt = readFileSync(
   new URL("../../src-tauri/src/agent/prompt.rs", import.meta.url),
@@ -32,6 +33,6 @@ test("人格プロンプトの除去を画面側（出口）でやり直さな�
     "setPersonaSpeechBlocklist",
     "normalizeLeakLine",
   ]) {
-    assert.ok(!renderer.includes(removed), `画面側に出口フィルタが残っています: ${removed}`);
+    assert.ok(!main.includes(removed), `画面側に出口フィルタが残っています: ${removed}`);
   }
 });

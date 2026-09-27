@@ -1,0 +1,76 @@
+/* boot.css - 起動画面と初回案内。 */
+.boot-screen {
+  position: fixed;
+  z-index: 280;
+  inset: var(--menu-height) 0 0 0;
+  display: none;
+  place-items: center;
+  padding: 16px;
+}
+.app.is-booting .boot-screen { display: grid; }
+.boot-stage {
+  width: min(420px, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 22px;
+  border-radius: var(--radius-xl);
+  background: var(--surface-strong);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-panel), var(--highlight);
+  backdrop-filter: var(--blur);
+  -webkit-backdrop-filter: var(--blur);
+}
+.boot-mark {
+  font-size: 20px;
+  font-weight: 800;
+  background: var(--accent-gradient);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.boot-log { display: flex; flex-direction: column; gap: 2px; min-height: 0; max-height: 7.5em; overflow: hidden; color: var(--text-faint); font-size: 11px; }
+.boot-log-line { animation: panel-in var(--dur) var(--ease); }
+.boot-progress { position: relative; height: 4px; border-radius: var(--radius-pill); background: var(--surface-hover); overflow: hidden; }
+.boot-progress span { position: absolute; top: 0; bottom: 0; width: 42%; border-radius: inherit; background: var(--accent-gradient); animation: boot-progress 1.6s var(--ease) infinite; }
+@keyframes boot-progress { 0% { left: -45%; } 55% { left: 32%; } 100% { left: 105%; } }
+.boot-status { color: var(--text); font-size: 13px; font-weight: 600; min-height: 1.4em; }
+
+.onboarding {
+  position: fixed;
+  z-index: 290;
+  inset: var(--menu-height) 0 0 0;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  overflow: auto;
+  background: var(--scrim);
+  backdrop-filter: blur(6px);
+}
+.onboarding-card {
+  width: min(520px, 100%);
+  padding: 22px;
+  border-radius: var(--radius-xl);
+  background: var(--surface-strong);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-panel), var(--highlight);
+}
+.onboarding-mark { color: var(--accent-strong); font-size: 12px; font-weight: 800; letter-spacing: 0.1em; }
+.onboarding h1 { margin: 6px 0 8px; font-size: 20px; }
+.onboarding p { color: var(--text-muted); font-size: 13px; }
+.onboarding-choices { display: grid; gap: 8px; margin: 14px 0; }
+.onboarding-choices a, .onboarding-choices button {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px 14px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: var(--surface-sunken);
+  color: var(--text);
+  text-align: left;
+  text-decoration: none;
+}
+.onboarding-choices a:hover, .onboarding-choices button:hover { border-color: var(--accent); background: var(--accent-soft); }
+.onboarding-choices span { color: var(--text-muted); font-size: 12px; }
+.onboarding-component-note { font-size: 12px; }

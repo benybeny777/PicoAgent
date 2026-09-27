@@ -1,5 +1,11 @@
-(() => {
-  "use strict";
+// game.js - 「人間だとバレるな」（AIものまねゲーム）。試験・採点の流れと画面はここ、採点は game.rs。
+//
+// ゲーム中のキャラは stage のゲーム用の一時矩形で描く（保存済みの配置は使わず、閉じると元へ戻る）。
+
+import * as bridge from "./bridge.js";
+import { logApp } from "./util.js";
+
+export function createGame({ voice, stage }) {
 
   const overlay = document.getElementById("gameOverlay");
   const content = document.getElementById("gameContent");
@@ -7,7 +13,7 @@
   const status = document.getElementById("gameStatus");
   const closeButton = document.getElementById("gameClose");
   const soundButton = document.getElementById("gameSound");
-  if (!overlay || !content || !title || !status) return;
+  if (!overlay || !content || !title || !status) return { open() {}, close() {} };
 
   // 遊びは「人間だとバレるな」1本。AI疑惑をかけられた人間として監査AIの試験へ
   // 答え、人間らしさが漏れるほど削られる信用度が0になるまでの点数で称号を決める。
@@ -287,7 +293,7 @@
   };
   const writeStorage = (key, value) => {
     try { localStorage.setItem(key, value); }
-    catch (error) { window.PicoUI?.logApp?.("warn", "ゲームの記録を保存できませんでした", error); }
+    catch (error) { logApp("warn", "ゲームの記録を保存できませんでした", error); }
   };
 
   let session = null;
@@ -351,7 +357,7 @@
   // 既定35%のとき従来と同じ 0.06 になる係数を掛ける。
   const TONE_LEVEL_RATIO = 0.5;
   function tonePeakGain() {
-    const level = Number(window.PicoVoice?.gain?.());
+    const level = Number(voice.gain());
     return (Number.isFinite(level) ? level : 0.1225) * TONE_LEVEL_RATIO;
   }
 
@@ -380,7 +386,7 @@
         gain.disconnect();
       }, { once: true });
     } catch (error) {
-      window.PicoUI?.logApp?.("warn", "ゲーム効果音を再生できませんでした", error);
+      logApp("warn", "ゲーム効果音を再生できませんでした", error);
     }
   }
 
@@ -390,7 +396,7 @@
     const context = audioContext;
     audioContext = null;
     context?.close?.().catch(error => {
-      window.PicoUI?.logApp?.("warn", "ゲーム効果音を解放できませんでした", error);
+      logApp("warn", "ゲーム効果音を解放できませんでした", error);
     });
   }
 
@@ -410,8 +416,8 @@
   }
 
   function speakGame(text) {
-    window.PicoVoice?.speak?.(text).catch(error => {
-      window.PicoUI?.logApp?.("warn", "ゲームの読み上げに失敗しました", error);
+    voice.speak(text).catch(error => {
+      logApp("warn", "ゲームの読み上げに失敗しました", error);
     });
   }
 
@@ -445,7 +451,7 @@
       event.currentTarget.textContent = "AIを確認中…";
       setStatus("採点するAIの準備を確認しています。", "busy");
       try {
-        const readiness = await window.picoagent.gameReady();
+        const readiness = await bridge.gameReady();
         if (!readiness?.ready) throw new Error(readiness?.message || "AIへ接続できません。");
         startSession(difficulty);
       } catch (error) {
@@ -675,7 +681,7 @@
     content.innerHTML = `<div class="game-judging"><div class="game-thinking" aria-hidden="true"><i></i><i></i><i></i></div><strong>監査AIが照合中…</strong><span>回答のどこに人間らしさが残るか見ています</span></div>`;
     setStatus("この採点は通常の会話履歴へ入りません。", "busy");
     try {
-      const result = await window.picoagent.gameJudge({
+      const result = await bridge.gameJudge({
         gameId: exam.source.id,
         prompt: session.currentPrompt,
         answer,
@@ -781,8 +787,7 @@
 
   function open() {
     overlay.hidden = false;
-    document.getElementById("petApp")?.classList.add("is-playing-game");
-    window.dispatchEvent(new Event("pico:game-visibility"));
+    stage.setGame(true);
     if (!session) renderBriefing();
     closeButton.focus();
   }
@@ -792,11 +797,10 @@
     if (active && !window.confirm("監査の途中です。中断しますか？ 今回の結末と記録は残りません。")) return;
     clearTimer();
     session = null;
-    window.PicoVoice?.stop?.();
+    voice.stop();
     releaseAudioContext();
     overlay.hidden = true;
-    document.getElementById("petApp")?.classList.remove("is-playing-game");
-    window.dispatchEvent(new Event("pico:game-visibility"));
+    stage.setGame(false);
     setStatus("");
   }
 
@@ -816,6 +820,5 @@
     if (event.key === "Escape" && !overlay.hidden) close();
   });
   syncSoundButton();
-  window.PicoGames = { open, close };
-  window.picoagent.on("pet:game-open", open);
-})();
+  return { open, close };
+}

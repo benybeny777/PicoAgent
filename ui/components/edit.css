@@ -1,0 +1,82 @@
+/* edit.css - ソースの直接操作（選択枠・つまみ・ツールバー）。 */
+.edit-layer { position: fixed; inset: 0; z-index: 230; pointer-events: none; }
+.edit-frame {
+  position: fixed;
+  border: 1.5px dashed var(--accent);
+  border-radius: 6px;
+  pointer-events: none;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.12);
+}
+.edit-frame.is-body-draggable { pointer-events: auto; cursor: move; background: var(--accent-soft); }
+.edit-frame.is-selected { border-style: solid; border-color: var(--accent-strong); }
+.edit-label {
+  position: absolute;
+  left: 6px;
+  top: 6px;
+  padding: 1px 8px;
+  border-radius: var(--radius-pill);
+  background: var(--surface-strong);
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 700;
+  pointer-events: none;
+  opacity: 0;
+}
+.edit-frame.is-body-draggable .edit-label { opacity: 1; }
+.edit-handle {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--surface-strong);
+  border: 2px solid var(--accent);
+  box-shadow: var(--shadow-soft);
+  pointer-events: auto;
+}
+.edit-handle[data-corner="top-left"] { left: -7px; top: -7px; cursor: nwse-resize; }
+.edit-handle[data-corner="top-right"] { right: -7px; top: -7px; cursor: nesw-resize; }
+.edit-handle[data-corner="bottom-left"] { left: -7px; bottom: -7px; cursor: nesw-resize; }
+.edit-handle[data-corner="bottom-right"] { right: -7px; bottom: -7px; cursor: nwse-resize; }
+.edit-move {
+  position: absolute;
+  left: 50%;
+  top: 8px;
+  translate: -50% 0;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: var(--surface-strong);
+  border: 1px solid var(--border-strong);
+  color: var(--accent-strong);
+  font-size: 15px;
+  box-shadow: var(--shadow-soft);
+  pointer-events: auto;
+  cursor: move;
+}
+
+.edit-toolbar {
+  position: fixed;
+  z-index: 255;
+  top: calc(var(--menu-height) + 8px);
+  left: 50%;
+  translate: -50% 0;
+  max-width: calc(100vw - 16px);
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 7px 10px;
+  border-radius: var(--radius-pill);
+  background: var(--surface-strong);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-panel), var(--highlight);
+  backdrop-filter: var(--blur);
+  -webkit-backdrop-filter: var(--blur);
+  font-size: 12px;
+}
+.edit-toolbar strong { padding: 0 4px; }
+.edit-sources, .edit-framing { display: flex; gap: 4px; flex-wrap: wrap; }
+.edit-source { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: var(--radius-pill); background: var(--surface-sunken); color: var(--text-muted); }
+
+/* 配置の編集中は、各ソースの占める範囲を薄い破線で見せる（どこを掴めるか分かるように）。 */
+body.is-editing .source:not([hidden]) { outline: 1px dashed var(--border-strong); outline-offset: -1px; }

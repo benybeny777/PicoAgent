@@ -4,33 +4,31 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+import { uiFile } from "./lib/ui-source.mjs";
 
-const read = path => readFile(new URL(`../../${path}`, import.meta.url), "utf8");
-const [renderer, html, css, spec] = await Promise.all([
-  read("ui/renderer.js"),
-  read("ui/index.html"),
-  read("ui/styles.css"),
-  read("SPEC.md"),
-]);
+const panel = uiFile("chat/panel.js");
+const base = uiFile("components/base.css");
+const spec = await readFile(new URL("../../SPEC.md", import.meta.url), "utf8");
 
 test("読み上げていない起動直後は停止を出さず、読上を出す", () => {
-  assert.match(html, /<button id="stopVoice"[^>]*\shidden[\s>]/);
-  assert.doesNotMatch(html, /<button id="replayReply"[^>]*\shidden[\s>]/);
+  assert.match(panel, /const stopButton = el\("button", \{[^\n]*hidden: true/);
+  assert.doesNotMatch(panel.match(/const replayButton = el\([^\n]+/)[0], /hidden: true/);
 });
 
 test("読み上げの開始と終了で、読上と停止と読み上げ中止を同じ関数が切り替える", () => {
-  const start = renderer.indexOf("function setVoiceCancelVisible(visible) {");
-  assert.ok(start >= 0, "setVoiceCancelVisible が見つからない");
-  const body = renderer.slice(start, renderer.indexOf("\n}\n", start));
-  assert.match(body, /cancelVoiceButton\.hidden = !visible/);
-  assert.match(body, /stopVoiceButton\.hidden = !visible/);
-  assert.match(body, /replayReplyButton\.hidden = visible/);
+  const start = panel.indexOf("setVoiceActive(active) {");
+  assert.ok(start >= 0, "setVoiceActive が見つからない");
+  const body = panel.slice(start, panel.indexOf("\n    },", start));
+  assert.match(body, /cancelVoiceButton\.hidden = !active/);
+  assert.match(body, /stopButton\.hidden = !active/);
+  assert.match(body, /replayButton\.hidden = active/);
   // 押したボタンが隠れても、キーボード操作のフォーカスを入れ替わった側へ渡す。
   assert.match(body, /\.focus\(\)/);
 });
 
-test("回答操作ボタンの display 指定が hidden を打ち消さない", () => {
-  assert.match(css, /\.reply-actions button\[hidden\]\s*\{\s*display:\s*none;?\s*\}/);
+test("ボタンの display 指定が hidden を打ち消さない", () => {
+  // 部品側で display を書いても、[hidden] の打ち消しが必ず勝つ（全画面で唯一の !important）。
+  assert.match(base, /\[hidden\]\s*\{\s*display:\s*none\s*!important;?\s*\}/);
 });
 
 test("仕様書の回答操作ラベルと一致する", () => {

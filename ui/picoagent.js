@@ -52,7 +52,8 @@ const PET_EVENT_CHANNELS = [
   "pet:notice",
   "pet:hotkey",
   "pet:layout",
-  "pet:character-reset",
+  "pet:context-action",
+  "pet:show-onboarding",
 ];
 
 async function managedListen(channel, callback) {
@@ -129,7 +130,7 @@ window.picoagent = {
   finishBoot: () => call("pet_finish_boot"),
   revealMain: () => call("pet_reveal_main"),
   // 配置編集（OBS風）の位置・倍率を設定へ保存する（確定時だけ呼ぶ）。
-  saveLayoutPlacements: (placements) => call("pet_save_layout_placements", { placements }),
+  saveScene: (scenes) => call("pet_save_scene", { scenes }),
   // ウィンドウとフキダシの位置・サイズを既定へ戻す。
   resetLayout: () => call("pet_reset_layout"),
   aivisStatus: () => call("aivis_status"),
@@ -137,7 +138,7 @@ window.picoagent = {
   userCharacters: () => call("pet_user_characters"),
   // 追加キャラクターの実ファイルを webview から読める URL へ変換する。
   assetUrl: (path) => convertFileSrc(path),
-  // ウィンドウをフルスクリーン化／解除する（フキダシ全画面表示で使用）。
+  // ウィンドウをフルスクリーン化／解除する（会話パネルの拡大で使用）。
   setFullscreen: async (on) => {
     try { return await getCurrentWindow().setFullscreen(on); }
     catch (error) { logInvokeError("setFullscreen", error); throw error; }
@@ -163,8 +164,7 @@ window.picoagent = {
     }
     catch (error) { logInvokeError("moveAndResizeWindow", error); throw error; }
   },
-  // 立ち絵の移動量（ウィンドウではなくキャラだけの位置）を保存する。
-  setCharacterOffset: (x, y, characterId, layout, zoom) => call("pet_set_character_offset", { x, y, characterId, layout, zoom }),
+  // ウィンドウを指定モニターの中央へ置く。
   placeWindow: (position) => call("pet_place_window", { position }),
   // キャラ上の通常ドラッグをOS標準のウィンドウ移動へ渡す。
   startWindowDrag: () => call("pet_start_window_drag"),
@@ -185,8 +185,6 @@ window.picoagent = {
     try { return await getCurrentWindow().startResizeDragging(direction); }
     catch (error) { logInvokeError("startResizeDragging", error); throw error; }
   },
-  setBubbleSize: (width, height) => call("pet_set_bubble_size", { width, height }),
-  setBubbleLayout: (width, height, left, top) => call("pet_set_bubble_layout", { width, height, left, top }),
   setCharacterProfile: (characterId, profile, greeting) => call("pet_set_character_profile", { characterId, profile, greeting }),
   relationshipState: () => call("pet_relationship_state"),
   relationshipEvent: (kind, detail = "") => call("pet_relationship_event", { kind, detail }),
@@ -195,7 +193,7 @@ window.picoagent = {
   clearRelationship: () => call("pet_relationship_clear"),
   completeOnboarding: () => call("pet_complete_onboarding"),
   showOnboarding: () => call("pet_show_onboarding"),
-  menu: () => call("pet_menu"),
+  menu: (context = {}) => call("pet_menu", { context }),
   // GPU描画のエラー時に、次回起動時の描画キャッシュ削除を予約する。
   requestGpuCacheReset: (reason) => call("pet_request_gpu_cache_reset", { reason }),
   // 上端メニューの「表示」から、ボタン直下（ウィンドウ基準の論理座標）へ画面レイアウトの一覧を出す。

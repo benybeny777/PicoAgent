@@ -1,0 +1,344 @@
+/* chat.css - 会話パネル（回答欄・回答操作・履歴・入力欄・状態行・通知・実行中タスク）。
+   見せ方は data-variant（bubble / column）で切り替える。形式名では分岐しない。 */
+.chat {
+  --chat-font-size: 14px;
+  --status-font-size: 11px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: 12px 14px 12px;
+  border-radius: var(--radius-xl);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-panel), var(--highlight);
+  backdrop-filter: var(--blur);
+  -webkit-backdrop-filter: var(--blur);
+  font-size: var(--chat-font-size);
+  container-type: inline-size;
+  animation: panel-in var(--dur) var(--ease);
+}
+@keyframes panel-in { from { opacity: 0; translate: 0 6px; } }
+
+/* ── 回答操作 ── */
+.reply-actions {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: clamp(3px, 1.2cqi, 6px);
+  flex: 0 0 auto;
+}
+.reply-actions .chip { min-height: 26px; padding: 0 clamp(6px, 2.4cqi, 11px); font-size: clamp(10px, 3cqi, 12px); }
+.notice-toggle { position: relative; }
+.notice-toggle[data-count]:not([data-count=""])::after {
+  content: attr(data-count);
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 4px;
+  border-radius: var(--radius-pill);
+  background: var(--danger);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 17px;
+  text-align: center;
+}
+
+/* ── 回答欄 ── */
+.reply-home { flex: 1 1 auto; min-height: 0; display: flex; }
+.reply {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 2px 2px 4px;
+  color: var(--text);
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+.chat.composing .reply { max-height: 34%; }
+.reply-error { color: var(--danger); }
+.reply.streaming .md > :last-child::after {
+  content: "";
+  display: inline-block;
+  width: 7px;
+  height: 1.05em;
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  border-radius: 2px;
+  background: var(--accent);
+  animation: caret-blink 1s steps(2) infinite;
+}
+@keyframes caret-blink { 50% { opacity: 0; } }
+
+/* ── Markdown ── */
+.md > :first-child { margin-top: 0; }
+.md > :last-child { margin-bottom: 0; }
+.md p, .md ul, .md ol, .md blockquote, .md pre, .md .md-table-wrap { margin: 0 0 0.6em; }
+.md h1, .md h2, .md h3 { margin: 0.4em 0 0.3em; font-size: 1.06em; line-height: 1.35; }
+.md ul, .md ol { padding-left: 1.3em; }
+.md code { padding: 1px 5px; border-radius: 6px; background: var(--code-bg); font-family: var(--font-mono); font-size: 0.9em; }
+.md pre { position: relative; padding: 10px 12px; border-radius: var(--radius-md); background: var(--code-bg); overflow: auto; }
+.md pre code { padding: 0; background: none; white-space: pre; }
+.md blockquote { padding-left: 10px; border-left: 3px solid var(--accent); color: var(--text-muted); }
+.md hr { border: 0; border-top: 1px solid var(--border); }
+.md a { color: var(--accent-strong); }
+.md .md-image { display: block; max-width: 100%; margin: 4px 0; border-radius: var(--radius-sm); cursor: pointer; }
+.md table { border-collapse: collapse; font-size: 0.92em; }
+.md th, .md td { padding: 4px 8px; border: 1px solid var(--border); text-align: left; }
+.md-table-wrap { overflow: auto; }
+.copy-code {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  padding: 2px 8px;
+  border-radius: var(--radius-pill);
+  background: var(--surface-raised);
+  color: var(--text-muted);
+  font-size: 11px;
+}
+.retry-btn { margin-top: 8px; padding: 5px 12px; border-radius: var(--radius-pill); background: var(--accent-soft); color: var(--accent-strong); font-weight: 700; }
+.approval-card { padding: 12px; border: 1px solid var(--border-strong); border-radius: var(--radius-md); background: var(--surface-sunken); }
+.approval-card-title { font-weight: 800; }
+.approval-card-desc { margin: 4px 0 8px; color: var(--text-muted); }
+.approval-cmd { padding: 8px 10px; border-radius: var(--radius-sm); background: var(--code-bg); font-family: var(--font-mono); font-size: 12px; overflow-wrap: anywhere; }
+.approval-meta { margin-top: 8px; color: var(--text-muted); font-size: 12px; }
+.approval-actions, .alarm-actions { display: flex; justify-content: flex-end; gap: var(--space-2); margin-top: 10px; }
+.approval-actions button, .alarm-actions button { padding: 6px 12px; border-radius: var(--radius-pill); background: var(--surface-sunken); border: 1px solid var(--border); font-weight: 700; }
+.approval-actions .primary, .alarm-actions .primary { border: 0; }
+
+/* 考え中の3点表示。 */
+.typing-indicator { display: inline-flex; align-items: center; gap: 8px; min-height: 26px; color: var(--text-muted); font-size: 13px; }
+.typing-dots { display: inline-flex; gap: 4px; }
+.typing-dots i { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); animation: typing-dot 1.2s infinite; }
+.typing-dots i:nth-child(2) { animation-delay: 0.15s; }
+.typing-dots i:nth-child(3) { animation-delay: 0.3s; }
+@keyframes typing-dot { 0%, 60%, 100% { opacity: 0.3; translate: 0 0; } 30% { opacity: 1; translate: 0 -3px; } }
+
+/* ── 履歴 ── */
+.history-tools, .history-log { display: none; }
+.chat[data-variant="column"] .history-tools,
+.chat.expanded .history-tools { display: flex; gap: 6px; align-items: center; }
+.chat[data-variant="column"] .history-log,
+.chat.expanded .history-log { display: flex; flex-direction: column; gap: 10px; flex: 1 1 auto; min-height: 0; overflow: auto; padding-right: 2px; }
+.chat.expanded .reply-home { flex: 0 0 auto; max-height: 30%; }
+.history-tools input { flex: 1 1 auto; min-width: 0; height: 30px; padding: 0 12px; font-size: 12px; }
+.history-item { padding: 9px 12px; border-radius: var(--radius-md); background: var(--assistant-bubble); border: 1px solid var(--border); }
+.history-item.user { background: var(--user-bubble); margin-left: 12%; }
+.history-item.assistant { margin-right: 6%; }
+.history-meta { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 3px; }
+.history-role { display: flex; align-items: baseline; gap: 6px; font-size: 11px; font-weight: 700; color: var(--text-muted); }
+.history-item.assistant .history-role-name { color: var(--accent-strong); }
+.history-time { color: var(--text-faint); font-weight: 500; }
+.history-actions { display: flex; gap: 4px; opacity: 0; transition: opacity var(--dur-fast) var(--ease); }
+.history-item:hover .history-actions, .history-item:focus-within .history-actions { opacity: 1; }
+.history-actions button { padding: 1px 7px; border-radius: var(--radius-pill); color: var(--text-muted); font-size: 11px; }
+.history-actions button:hover { background: var(--surface-hover); color: var(--text); }
+.history-body { font-size: 0.95em; }
+.history-empty { margin: auto; color: var(--text-faint); font-size: 12px; }
+
+/* 配信のチャット列では、回答欄は字幕のソースへ移る。 */
+.chat[data-variant="column"] { border-radius: var(--radius-lg); }
+.chat[data-variant="column"] .reply-home { display: none; }
+
+/* ── 入力欄 ── */
+.composer { display: flex; flex-direction: column; gap: 6px; flex: 0 0 auto; }
+.composer textarea {
+  width: 100%;
+  min-height: 44px;
+  max-height: 180px;
+  padding: 10px 12px;
+  resize: none;
+  line-height: 1.5;
+  font-size: var(--chat-font-size);
+}
+.composer.drag-over textarea { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.composer-actions { display: flex; justify-content: flex-end; gap: 6px; }
+.composer-actions button {
+  height: 32px;
+  padding: 0 14px;
+  border-radius: var(--radius-pill);
+  background: var(--surface-sunken);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+.composer-actions button:not(:disabled):hover { color: var(--text); background: var(--surface-hover); }
+.composer-actions .primary { border: 0; color: var(--on-accent); min-width: 64px; }
+.composer-actions .primary:not(:disabled):hover { color: var(--on-accent); background: var(--accent-gradient); }
+.voice-loop-button[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent-strong); border-color: var(--accent); }
+#micButton.recording { background: var(--danger-soft); color: var(--danger); border-color: var(--danger); animation: mic-pulse 1.2s ease-in-out infinite; }
+@keyframes mic-pulse { 50% { box-shadow: 0 0 0 6px var(--danger-soft); } }
+.quick-actions, .attachment-suggestions { display: flex; gap: 5px; overflow-x: auto; scrollbar-width: none; }
+.quick-actions button, .attachment-suggestions button {
+  flex: 0 0 auto;
+  padding: 3px 10px;
+  border-radius: var(--radius-pill);
+  background: var(--surface-sunken);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.quick-actions button:not(:disabled):hover, .attachment-suggestions button:hover { color: var(--text); border-color: var(--accent); }
+.image-preview { display: flex; flex-wrap: wrap; gap: 6px; }
+.image-thumb-wrap, .file-chip { position: relative; display: flex; align-items: center; gap: 6px; }
+.image-thumb-wrap img { width: 52px; height: 52px; object-fit: cover; border-radius: var(--radius-sm); border: 1px solid var(--border); }
+.file-chip { padding: 4px 26px 4px 8px; border-radius: var(--radius-pill); background: var(--surface-sunken); border: 1px solid var(--border); font-size: 11px; }
+.file-chip-icon { flex: 0 0 auto; }
+.file-chip-name { max-width: 14em; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.image-remove, .file-remove {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--surface-raised);
+  border: 1px solid var(--border-strong);
+  font-size: 11px;
+  line-height: 1;
+}
+.file-remove { top: 50%; right: 4px; translate: 0 -50%; }
+
+/* 狭い窓では優先度の低い順に畳む（履歴検索 → クイック操作 → 回答本文の高さ）。 */
+@container (max-width: 260px) {
+  .quick-actions { display: none; }
+  .history-tools .chip { display: none; }
+  .voice-loop-button { display: none; }
+  .composer-actions button { padding: 0 10px; }
+  .composer-actions .primary { min-width: 0; }
+}
+/* 回答操作は1行に保つ。入らない幅では優先度の低いもの（拡大 → 読上 → 再生成）から畳む。 */
+.reply-actions { overflow: hidden; }
+.composer-actions button { white-space: nowrap; }
+@container (max-width: 300px) { .reply-actions .chip:nth-last-child(1) { display: none; } }
+@container (max-width: 240px) { .reply-actions .chip:nth-child(4), .reply-actions .chip:nth-child(5) { display: none; } }
+@container (max-width: 190px) { .reply-actions .chip:nth-child(3) { display: none; } }
+
+/* ── 状態行・中止 ── */
+.status {
+  flex: 0 0 auto;
+  min-height: 0;
+  color: var(--text-muted);
+  font-size: var(--status-font-size);
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+.status:empty { display: none; }
+.status.busy, .status.engine-pending { display: flex; align-items: center; gap: 6px; }
+.status.busy:empty { display: none; }
+.status.engine-pending::before {
+  content: "";
+  flex: 0 0 auto;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  border: 2px solid var(--accent);
+  border-top-color: transparent;
+  animation: status-spin 0.8s linear infinite;
+}
+.status.engine-error { color: var(--danger); font-weight: 700; }
+@keyframes status-spin { to { rotate: 360deg; } }
+.cancel-voice, .cancel-send {
+  align-self: flex-start;
+  padding: 4px 12px;
+  border-radius: var(--radius-pill);
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+/* ── 通知（アクションセンター） ── */
+.notice-panel {
+  flex: 0 1 auto;
+  max-height: 60%;
+  overflow: auto;
+  padding: 10px;
+  border-radius: var(--radius-md);
+  background: var(--surface-strong);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-soft);
+  animation: panel-in var(--dur-fast) var(--ease);
+}
+.notice-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; font-size: 12px; }
+.notice-list { display: flex; flex-direction: column; gap: 6px; }
+.notice-item { padding: 8px 10px; border-radius: var(--radius-sm); background: var(--surface-sunken); border-left: 3px solid var(--success); }
+.notice-item.error { border-left-color: var(--danger); }
+.notice-title { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 700; }
+.notice-meta { color: var(--text-faint); font-size: 10px; }
+.notice-body { color: var(--text-muted); font-size: 12px; overflow-wrap: anywhere; }
+.notice-state { padding: 0 6px; border-radius: var(--radius-pill); background: var(--surface-hover); font-size: 10px; }
+.notice-state-running { color: var(--accent-strong); }
+.notice-state-failed { color: var(--danger); }
+.notice-actions { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+.notice-progress { height: 4px; margin-top: 6px; border-radius: var(--radius-pill); background: var(--surface-hover); overflow: hidden; }
+.notice-progress-fill { height: 100%; background: var(--accent-gradient); }
+.notice-empty { color: var(--text-faint); font-size: 12px; text-align: center; padding: 8px; }
+
+/* ── 実行中のタスク（task-run.js が行を作る） ── */
+.task-run { flex: 0 0 auto; display: flex; flex-direction: column; gap: 4px; padding: 7px 10px; border-radius: var(--radius-md); background: var(--surface-sunken); border: 1px solid var(--border); font-size: 11px; }
+.task-run-head { display: flex; align-items: center; gap: 6px; min-height: 22px; }
+.task-run-title { font-weight: 800; }
+.task-run-total { margin-left: auto; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.task-run-cancel { height: 22px; padding: 0 10px; border-radius: var(--radius-pill); background: var(--danger-soft); color: var(--danger); font-size: 11px; font-weight: 700; }
+.task-run-list { display: grid; gap: 3px; max-height: 112px; margin: 0; padding: 0; overflow: auto; list-style: none; }
+.task-run-row { display: grid; grid-template-columns: 10px minmax(0, 1fr) auto auto; align-items: center; gap: 6px; }
+.task-run-label { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.task-run-state, .task-run-time { color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.task-run-mark { width: 9px; height: 9px; border-radius: 50%; background: var(--text-faint); }
+.task-run-row[data-state="running"] .task-run-mark { background: transparent; border: 2px solid var(--accent); border-top-color: transparent; animation: status-spin 0.8s linear infinite; }
+.task-run-row[data-state="completed"] .task-run-mark { background: var(--success); }
+.task-run-row[data-state="failed"] .task-run-mark { background: var(--danger); }
+.task-run-row[data-state="failed"] .task-run-state { color: var(--danger); font-weight: 800; }
+.task-run-row[data-state="waiting"] .task-run-mark,
+.task-run-row[data-state="cancelled"] .task-run-mark { background: var(--warn); }
+@media (max-height: 360px) { .task-run-list { max-height: 36px; } }
+/* 実行中タスクの一覧が見えている間は、同じことを伝える状態行・「処理を止める」・考え中の3点を出さない（一覧に停止がある）。 */
+.chat.task-run-visible .status.busy,
+.chat.task-run-visible .cancel-send,
+.chat.task-run-visible .history-thinking { display: none; }
+/* 会話履歴を出す見せ方では、一覧は会話の末尾へ移る（キャラの描画面へ浮かせない）。 */
+.history-log > .task-run { flex: 0 0 auto; }
+
+/* ── キャラへ向く尻尾（bubble のときだけ） ── */
+.chat-tail {
+  --tail-offset: 60%;
+  position: absolute;
+  background: var(--surface);
+  pointer-events: none;
+  backdrop-filter: var(--blur);
+  -webkit-backdrop-filter: var(--blur);
+}
+.chat-tail[data-side="right"], .chat-tail[data-side="left"] { top: calc(var(--tail-offset) - 10px); width: 11px; height: 20px; }
+.chat-tail[data-side="top"], .chat-tail[data-side="bottom"] { left: calc(var(--tail-offset) - 10px); width: 20px; height: 11px; }
+.chat-tail[data-side="right"] { left: calc(100% - 1px); clip-path: polygon(0 0, 100% 50%, 0 100%); }
+.chat-tail[data-side="left"] { right: calc(100% - 1px); clip-path: polygon(100% 0, 0 50%, 100% 100%); }
+.chat-tail[data-side="bottom"] { top: calc(100% - 1px); clip-path: polygon(0 0, 100% 0, 50% 100%); }
+.chat-tail[data-side="top"] { bottom: calc(100% - 1px); clip-path: polygon(0 100%, 100% 100%, 50% 0); }
+.chat[data-variant="column"] .chat-tail { display: none; }
+
+/* 会話パネルの大きさを変えるつまみ（アンカーの反対側の角）。 */
+.source-grip {
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease);
+}
+.chat:hover .source-grip, .source-grip:focus-visible { opacity: 1; }
+.source-grip::before {
+  content: "";
+  position: absolute;
+  inset: 4px;
+  border: 2px solid var(--text-faint);
+  border-radius: 2px;
+  clip-path: polygon(0 0, 100% 0, 100% 100%);
+}
+.source-grip[data-corner="top-right"] { top: 2px; right: 2px; cursor: ne-resize; }
+.source-grip[data-corner="top-left"] { top: 2px; left: 2px; cursor: nw-resize; rotate: -90deg; }
+.source-grip[data-corner="bottom-right"] { bottom: 2px; right: 2px; cursor: se-resize; rotate: 90deg; }
+.source-grip[data-corner="bottom-left"] { bottom: 2px; left: 2px; cursor: sw-resize; rotate: 180deg; }
+.chat.expanded .source-grip { display: none; }

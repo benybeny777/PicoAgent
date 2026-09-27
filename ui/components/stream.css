@@ -1,0 +1,84 @@
+/* stream.css - 配信のソース（背景・画面内ディスプレイ・配信情報・字幕）。 */
+.stream-background {
+  border-radius: 14px;
+  background:
+    linear-gradient(180deg, rgba(24, 16, 35, 0.08), rgba(24, 16, 35, 0.22)),
+    url("../assets/backgrounds/vtuber-room.webp") center / cover no-repeat;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1), inset 0 -70px 120px rgba(17, 12, 30, 0.18);
+  pointer-events: none;
+}
+.stream-background[data-background="gaming"] {
+  background:
+    radial-gradient(circle at 22% 20%, rgba(126, 213, 255, 0.24), transparent 32%),
+    radial-gradient(circle at 76% 30%, rgba(236, 158, 213, 0.22), transparent 34%),
+    linear-gradient(145deg, #17253a, #332846 58%, #201d31);
+}
+.stream-background[data-background="simple"] { background: linear-gradient(145deg, #fff8f4, #f8e9f2 48%, #e6f1f4); }
+.stream-background[data-background="sakura-room"] {
+  background: linear-gradient(180deg, rgba(62, 33, 38, 0.04), rgba(62, 33, 38, 0.14)), url("../assets/backgrounds/sakura-room.webp") center / cover no-repeat;
+}
+.stream-background[data-background="dog-hobby-room"] {
+  background: linear-gradient(180deg, rgba(54, 24, 31, 0.04), rgba(54, 24, 31, 0.15)), url("../assets/backgrounds/dog-hobby-room.webp") center / cover no-repeat;
+}
+.stream-background[data-background="custom"] {
+  background: linear-gradient(180deg, rgba(24, 16, 35, 0.06), rgba(24, 16, 35, 0.2)), var(--stream-custom-background) center / cover no-repeat;
+}
+
+.stream-display {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  overflow: hidden;
+  border: 12px solid rgba(39, 31, 49, 0.82);
+  border-radius: 12px;
+  color: #f9edf5;
+  background: linear-gradient(145deg, rgba(59, 51, 79, 0.92), rgba(81, 55, 78, 0.92));
+  box-shadow: 0 16px 40px rgba(27, 19, 36, 0.3);
+  pointer-events: none;
+}
+.stream-display strong { font-size: 40px; letter-spacing: 0.14em; }
+.stream-display span { font-size: 20px; opacity: 0.76; letter-spacing: 0.1em; }
+.stream-display[data-kind="game"] { background: radial-gradient(circle at 50% 32%, #8ee6ff 0 5%, transparent 6%), linear-gradient(145deg, #273a62, #60436b); }
+.stream-display[data-kind="image"] { background: var(--stream-display-image) center / cover no-repeat; }
+.stream-display[data-kind="image"] > * { display: none; }
+.stream-display[data-kind="none"] { display: none; }
+
+.stream-info {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 0 22px;
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  border-radius: 20px;
+  background: rgba(24, 20, 34, 0.7);
+  color: #fff;
+  box-shadow: 0 10px 30px rgba(20, 14, 30, 0.25);
+  backdrop-filter: blur(12px);
+  pointer-events: none;
+}
+.stream-live { padding: 5px 14px; border-radius: 999px; background: #e0506c; font-size: 18px; font-weight: 900; letter-spacing: 0.1em; }
+.stream-info strong { font: 700 34px/1 var(--font-mono); }
+.stream-info > span:last-child { font-size: 18px; font-weight: 700; opacity: 0.9; }
+
+/* 字幕。回答欄（#reply）をここへ移して表示する。本文だけを置き、選択はさせない。 */
+.subtitle {
+  display: flex;
+  align-items: stretch;
+  padding: 20px 30px;
+  border-radius: 22px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.86), rgba(255, 238, 246, 0.84));
+  border: 2px solid rgba(255, 255, 255, 0.9);
+  box-shadow: 0 16px 40px rgba(60, 30, 50, 0.22);
+}
+.subtitle .reply {
+  color: var(--stream-caption-color, #5a3b4b);
+  font-size: 34px;
+  font-weight: 700;
+  line-height: 1.5;
+  overflow: hidden;
+}
+/* 字幕は子要素まで選択させない（入り込んだ選択の色も出さない）。 */
+.subtitle .reply, .subtitle .reply * { user-select: none; -webkit-user-select: none; }
+.subtitle .reply::selection, .subtitle .reply *::selection { background: transparent; }
