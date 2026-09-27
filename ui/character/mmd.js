@@ -40,10 +40,10 @@ export class MmdRenderer {
 
   /** 3D は構図ごとの縦横比をカメラが吸収する。既定の比率（幅/高さ）だけを返す。 */
   framingRect(name) {
-    const aspect = { full: 0.42, upper: 0.72, bust: 0.9 }[name] || 0.9;
+    const aspect = { full: 0.65, upper: 0.92, bust: 1.2 }[name] || 1.2;
     return { x: 0, y: 0, w: aspect, h: 1 };
   }
-  naturalSize() { return { w: 0.42, h: 1 }; }
+  naturalSize() { return { w: 0.65, h: 1 }; }
   defaultFraming() { return defaultFramingFor(this.pack, "mmd"); }
   get sourcePixelsPerUnit() { return Infinity; }
 

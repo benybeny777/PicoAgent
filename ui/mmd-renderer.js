@@ -214,10 +214,17 @@
         const head = kind === 'head';
         const full = kind === 'full';
         const upper = kind === 'upper';
-        const visibleHeight = height * (full ? 1.08 : upper ? 0.72 : head ? 0.24 : 0.48);
-        camera.setTarget(head ? faceCenter : new B.Vector3(0, high - visibleHeight * (full ? 0.47 : upper ? 0.45 : 0.44), 0));
-        const aspect = Math.max(0.2, canvas.clientWidth / Math.max(1, canvas.clientHeight));
-        camera.radius = visibleHeight / (2 * Math.tan(camera.fov / 2)) * Math.max(1, 0.65 / aspect);
+        const eyeDepth = Math.max(0.08, Math.min(0.2, (high - faceCenter.y) / height));
+        const depth = upper
+          ? Math.max(0.6, Math.min(0.68, eyeDepth + 0.49))
+          : Math.max(0.38, Math.min(0.4, eyeDepth + 0.25));
+        // 頭頂の余白と胸元・腰・足先をモデルの寸法と目の高さから決める。
+        // カメラの中心は切り出す上下端の中点に置き、倍率で胴体を隠さない。
+        const top = head ? faceCenter.y + height * 0.12 : high + height * 0.04;
+        const bottom = head ? faceCenter.y - height * 0.12 : full ? low : high - height * depth;
+        const visibleHeight = top - bottom;
+        camera.setTarget(new B.Vector3(faceCenter.x, (top + bottom) / 2, faceCenter.z));
+        camera.radius = visibleHeight / (2 * Math.tan(camera.fov / 2));
         camera.alpha = -Math.PI / 2;
         camera.beta = Math.PI / 2;
       }

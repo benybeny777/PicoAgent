@@ -138,8 +138,28 @@
 .history-empty { margin: auto; color: var(--text-faint); font-size: 12px; }
 
 /* 配信のチャット列では、回答欄は字幕のソースへ移る。 */
-.chat[data-variant="column"] { border-radius: var(--radius-lg); }
+.chat[data-variant="column"] {
+  border-radius: var(--radius-lg);
+  font-size: max(var(--chat-font-size), 20px);
+}
 .chat[data-variant="column"] .reply-home { display: none; }
+.chat[data-variant="column"] .history-body { font-size: 1em; line-height: 1.55; }
+.chat[data-variant="column"] .history-role { font-size: 16px; }
+.chat[data-variant="column"] .reply-actions .chip,
+.chat[data-variant="column"] .quick-actions button,
+.chat[data-variant="column"] .composer-actions button,
+.chat[data-variant="column"] .history-tools input { font-size: 16px; }
+.chat[data-variant="column"] .composer textarea { min-height: 60px; font-size: max(var(--chat-font-size), 20px); }
+.chat[data-variant="column"] .status { font-size: max(var(--status-font-size), 16px); }
+.chat[data-variant="column"] .composer-actions .primary { min-width: 92px; height: 42px; }
+.chat[data-variant="column"] .status.engine-error {
+  max-height: 96px;
+  overflow: auto;
+  padding: 8px 10px;
+  border: 1px solid var(--danger);
+  border-radius: var(--radius-sm);
+  background: var(--danger-soft);
+}
 
 /* ── 入力欄 ── */
 .composer { display: flex; flex-direction: column; gap: 6px; flex: 0 0 auto; }
@@ -166,6 +186,7 @@
 }
 .composer-actions button:not(:disabled):hover { color: var(--text); background: var(--surface-hover); }
 .composer-actions .primary { border: 0; color: var(--on-accent); min-width: 64px; }
+.composer-actions .primary:not(:disabled) { background: var(--accent-gradient); color: var(--on-accent); }
 .composer-actions .primary:not(:disabled):hover { color: var(--on-accent); background: var(--accent-gradient); }
 .voice-loop-button[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent-strong); border-color: var(--accent); }
 #micButton.recording { background: var(--danger-soft); color: var(--danger); border-color: var(--danger); animation: mic-pulse 1.2s ease-in-out infinite; }

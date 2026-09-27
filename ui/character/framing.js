@@ -28,7 +28,7 @@ export function framingRectsFor(visible, { proportion = "standard", sourceFramin
   return {
     full: content,
     upper: topSlice(content, compact ? 0.82 : 0.62, compact ? 1.05 : 0.92),
-    bust: topSlice(content, compact ? 0.62 : 0.4, compact ? 1.15 : 1.08),
+    bust: topSlice(content, compact ? 0.62 : 0.4, compact ? 1.15 : 1.2),
   };
 }
 

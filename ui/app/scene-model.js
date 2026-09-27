@@ -71,28 +71,26 @@ export function nearestAnchor(rect, sceneWidth, sceneHeight) {
 /**
  * 既定定義と保存値を重ねて、1つのソースの配置（anchor / x / y / w / h / visible）を返す。
  * `aspect` は幅を省いた定義で高さから幅を決める比（キャラの構図の縦横比）。
- * 描画方式別の既定位置・大きさは保存値がないときだけ使う。
  */
-export function resolvePlacement(definition, saved, sceneWidth, sceneHeight, aspect = null, renderKind = "") {
-  const initial = { ...definition, ...(definition.placementByRenderKind?.[renderKind] || {}) };
+export function resolvePlacement(definition, saved, sceneWidth, sceneHeight, aspect = null) {
   const hasSavedRect = saved && ANCHORS.includes(saved.anchor)
     && [saved.x, saved.y, saved.w, saved.h].every(Number.isFinite);
-  const visible = typeof saved?.visible === "boolean" ? saved.visible : initial.visible !== false;
+  const visible = typeof saved?.visible === "boolean" ? saved.visible : definition.visible !== false;
   if (hasSavedRect) {
     return { anchor: saved.anchor, x: saved.x, y: saved.y, w: saved.w, h: saved.h, visible, saved: true };
   }
-  let h = resolveLength(initial.h, sceneHeight, sceneHeight * 0.5);
-  let w = initial.w == null && aspect ? h * aspect : resolveLength(initial.w, sceneWidth, sceneWidth * 0.5);
+  let h = resolveLength(definition.h, sceneHeight, sceneHeight * 0.5);
+  let w = definition.w == null && aspect ? h * aspect : resolveLength(definition.w, sceneWidth, sceneWidth * 0.5);
   // 幅を構図から決めた場合も、定義の上限（シーン幅に対する割合）を越えたら高さごと縮めて縦横比を保つ。
-  const maxW = Number.isFinite(initial.maxWidthFrac) ? sceneWidth * initial.maxWidthFrac : Infinity;
-  if (initial.w == null && aspect && w > maxW) {
+  const maxW = Number.isFinite(definition.maxWidthFrac) ? sceneWidth * definition.maxWidthFrac : Infinity;
+  if (definition.w == null && aspect && w > maxW) {
     w = maxW;
     h = w / aspect;
   }
   return {
-    anchor: ANCHORS.includes(initial.anchor) ? initial.anchor : "top-left",
-    x: Number.isFinite(initial.x) ? initial.x : 0,
-    y: Number.isFinite(initial.y) ? initial.y : 0,
+    anchor: ANCHORS.includes(definition.anchor) ? definition.anchor : "top-left",
+    x: Number.isFinite(definition.x) ? definition.x : 0,
+    y: Number.isFinite(definition.y) ? definition.y : 0,
     w: Math.max(MIN_SIZE, w),
     h: Math.max(MIN_SIZE, h),
     visible,
