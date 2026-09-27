@@ -186,7 +186,7 @@
 }
 .composer-actions button:not(:disabled):hover { color: var(--text); background: var(--surface-hover); }
 .composer-actions .primary { border: 0; color: var(--on-accent); min-width: 64px; }
-.composer-actions .primary:not(:disabled) { background: var(--accent-gradient); color: var(--on-accent); }
+.chat[data-variant="column"] .composer-actions .primary:not(:disabled) { background: var(--accent-gradient); color: var(--on-accent); }
 .composer-actions .primary:not(:disabled):hover { color: var(--on-accent); background: var(--accent-gradient); }
 .voice-loop-button[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent-strong); border-color: var(--accent); }
 #micButton.recording { background: var(--danger-soft); color: var(--danger); border-color: var(--danger); animation: mic-pulse 1.2s ease-in-out infinite; }
