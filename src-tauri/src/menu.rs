@@ -1,7 +1,7 @@
 // menu.rs - 右クリックの統一メニューと、上端メニューの一覧。
 //
 // どこで右クリックしても同じメニューを出す。画面は右クリックした場所の文脈（選択文字・入力欄・
-// リンク・キャラ）だけを渡し、ここは文脈に応じた項目を先頭に足すだけにする。区切り線より下の
+// リンク・キャラ）と窓内座標だけを渡し、ここは文脈に応じた項目を先頭に足すだけにする。区切り線より下の
 // 共通部分は文脈に依らず同じ並びで、項目は下の定義表から組み立てる（項目の追加・並べ替えは表の1行）。
 
 use serde::Deserialize;
@@ -231,6 +231,8 @@ pub fn pet_menu(
     window: tauri::WebviewWindow,
     app: tauri::AppHandle,
     context: Option<MenuContext>,
+    x: f64,
+    y: f64,
 ) -> Result<(), String> {
     let entries = menu_entries(&context.unwrap_or_default());
     let items = build_entries(&app, &window, &entries)?;
@@ -239,7 +241,9 @@ pub fn pet_menu(
         .map(|item| item as &dyn IsMenuItem<Wry>)
         .collect();
     let menu = MenuBuilder::new(&app).items(&refs).build().map_err(err)?;
-    window.popup_menu(&menu).map_err(err)?;
+    window
+        .popup_menu_at(&menu, LogicalPosition::new(x, y))
+        .map_err(err)?;
     Ok(())
 }
 

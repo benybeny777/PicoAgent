@@ -5,10 +5,11 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 const read = path => readFile(new URL(`../../${path}`, import.meta.url), "utf8");
-const [chrome, appBridge, bridge, lib, menu, readme, spec, styles] = await Promise.all([
+const [chrome, appBridge, bridge, contextMenu, lib, menu, readme, spec, styles] = await Promise.all([
   read("ui/app/window-chrome.js"),
   read("ui/app/bridge.js"),
   read("ui/picoagent.js"),
+  read("ui/app/context-menu.js"),
   read("src-tauri/src/lib.rs"),
   read("src-tauri/src/menu.rs"),
   read("README.md"),
@@ -27,6 +28,15 @@ test("上端メニューの並びと、狭い窓で畳む規則が実在のボ�
   assert.ok(folded.every(Boolean), "上端メニューに無い位置を指す規則があります");
   // キャラ選択はキャラ名を出すので、名前が長くてもウィンドウ操作を押し出さない。
   assert.match(styles, /\.top-window-menu-items button:nth-child\(3\) \{ max-width: 9em; overflow: hidden; text-overflow: ellipsis; \}/);
+});
+
+test("右クリックの統一メニューは窓内のクリック位置を渡す", () => {
+  assert.match(contextMenu, /bridge\.menu\(remembered\.context, Math\.round\(event\.clientX\), Math\.round\(event\.clientY\)\)/);
+  assert.match(appBridge, /export const menu = \(context, x, y\) => api\.menu\(context, x, y\);/);
+  assert.match(bridge, /menu: \(context = \{\}, x, y\) => call\("pet_menu", \{ context, x, y \}\)/);
+  const handler = menu.slice(menu.indexOf("pub fn pet_menu("), menu.indexOf("pub fn pet_layout_menu("));
+  assert.match(handler, /popup_menu_at\(&menu, LogicalPosition::new\(x, y\)\)/);
+  assert.doesNotMatch(handler, /window\.popup_menu\(&menu\)/);
 });
 
 test("「表示」ボタンは設定タブではなく画面レイアウトの一覧を開く", () => {

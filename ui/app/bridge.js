@@ -37,7 +37,7 @@ export const userCharacters = () => api.userCharacters();
 export const assetUrl = path => api.assetUrl(path);
 export const saveScene = scenes => api.saveScene(scenes);
 
-export const menu = context => api.menu(context);
+export const menu = (context, x, y) => api.menu(context, x, y);
 export const layoutMenu = (x, y) => api.layoutMenu(x, y);
 export const characterMenu = (x, y, characters) => api.characterMenu(x, y, characters);
 

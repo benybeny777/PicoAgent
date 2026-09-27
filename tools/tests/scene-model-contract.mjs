@@ -60,6 +60,18 @@ test("保存値が無ければ既定定義から、キャラは構図の縦横�
   assert.deepEqual([saved.x, saved.y, saved.w, saved.h, saved.saved], [1, 2, 300, 600, true]);
 });
 
+test("配信MMDだけ胸元を字幕上へ置き、保存済み配置を優先する", () => {
+  const definition = scenes.stream.sources.character;
+  const image = resolvePlacement(definition, null, 1920, 1080, 0.9, "mesh-rig");
+  const mmd = resolvePlacement(definition, null, 1920, 1080, 0.9, "mmd");
+  assert.equal(image.h, 480);
+  assert.equal(mmd.h, 711);
+  assert.equal(mmd.w, 639.9);
+  assert.equal(mmd.y, -196);
+  const saved = resolvePlacement(definition, { anchor: "center", x: 0, y: 0, w: 600, h: 600 }, 1920, 1080, 0.9, "mmd");
+  assert.deepEqual([saved.y, saved.w, saved.h, saved.saved], [0, 600, 600, true]);
+});
+
 test("最小の大きさを下回らず、窓外へ消えない", () => {
   assert.equal(fromRect({ left: 0, top: 0, width: 5, height: 5 }, "top-left", 100, 100).w, MIN_SIZE);
   const lost = keepReachable({ left: 5000, top: -5000, width: 200, height: 200 }, 800, 600);
