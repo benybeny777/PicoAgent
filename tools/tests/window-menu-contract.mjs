@@ -34,7 +34,10 @@ test("上端メニューのボタン操作をウィンドウドラッグが奪�
   const existingSettings = commands.slice(commands.indexOf('if let Some(win) = app.get_webview_window("settings")'), commands.indexOf('let path = tab'));
   assert.ok(existingSettings.indexOf("win.show()") < existingSettings.indexOf("center_settings_on_main_monitor"),
     "既存の設定画面は表示を成立させてから右画面へ配置する");
-  assert.match(capabilities, /core:window:allow-close/);
+  const windowPermissions = JSON.parse(capabilities).permissions;
+  for (const operation of ["close", "minimize", "unminimize", "toggle-maximize"]) {
+    assert.ok(windowPermissions.includes(`core:window:allow-${operation}`), `${operation} の権限がありません`);
+  }
   assert.match(menu, /\[minimize, bridge\.minimizeWindow, "最小化"\], \[maximize, bridge\.toggleMaximizeWindow, "最大化の切り替え"\], \[close, bridge\.closeWindow, "閉じる"\]/);
   assert.match(appBridge, /export const minimizeWindow = \(\) => api\.minimizeWindow\(\);/);
   assert.match(bridge, /minimizeWindow[\s\S]*?getCurrentWindow\(\)\.minimize\(\)/);

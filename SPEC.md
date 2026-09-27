@@ -636,6 +636,7 @@ JSON-RPC 2.0、プロトコルバージョン `2024-11-05`。
 - 描画方式（通常2D・メッシュ・Live2D・MMD）は `ui/character/<方式>.js` の描画器が担い、共通の `CharacterRenderer`（`load` / `naturalBounds` / `framingRects` / `resize(cssW, cssH, dpr)` / `setFraming` / `setState` / `dispose`）を実装して `ui/character/index.js` の登録表へ載せる。方式名による中央の分岐を書かない。
 - **キャンバスの寸法はキャラのソース矩形そのもの。** 描画器は与えられた矩形いっぱいに、構図の切り出し範囲を縦横比を保って収め（下端中央基準）、矩形の外へ描くことが無い＝キャラが切れない。キャラを拡大すると描画バッファ（CSS寸法×DPR、1辺4096pxまで）も大きくなり、低解像度の描画をCSSで引き伸ばさない。
 - **構図**（`full` 全身 / `upper` 上半身 / `bust` 胸上）は描画範囲の切り出しで、倍率ではない。各描画器がモデルの可視範囲（透明余白を除いた範囲）から切り出し矩形を返す。既定は、`sourceFraming=native-bust` の画像系が `full`、低頭身（`bodyProportion=compact`）の画像系が `upper`、その他の画像系が `bust`、Live2D が `upper`（下記）、MMD が `bust`。`stream` は `streamFraming` があればそれを優先する。構図を切り替えるとソース矩形の高さを保ち、幅を構図の縦横比へ合わせる。
+- 通常2D・メッシュの低頭身キャラは、胸上でも頭頂から高さの76%を切り出して胸元を含める。描画器は `bodyProportion` を共通の構図計算へ渡す。ペット・ミニでも同じ胸上範囲を使い、形式別の倍率は設けない。
 - MMDのカメラはモデルの頭頂・足先・目の位置から構図を決め、キャンバスの幅と高さの両方を収める距離を選ぶ。細い保存済み配置でも肩や腕を切らず、`bodyProportion=compact` の胸上・上半身は標準頭身より深く映す。保存済み配置は構図の更新で変更しない。
 - 拡大の上限は、構図の切り出し範囲の原画画素を表示画素の2倍以上へ引き伸ばさない大きさとする（つまみとホイールが止まる）。
 
@@ -643,7 +644,7 @@ JSON-RPC 2.0、プロトコルバージョン `2024-11-05`。
 
 - **ランタイム**: `pixi-live2d-display 0.4.0` / PIXI 6.5.10 と公式の世代別 Core を組み合わせる。SDK 5 モデルは Core 6（Cubism 5.3形式）、SDK 4 モデルは Core 5 で読む（Cubism 5.3用 Core ではひよりの口 ArtMesh が消えるため統一しない）。`cargo xtask setup live2d` は版付きURLから両方を取得して SHA-256 を照合する。PIXI 6 は `cargo xtask setup pixi` が `ui/vendor/pixi/` へ、Cubism Core と pixi-live2d-display は `bundled::fetch_live2d_runtime` が `ui/vendor/live2d/` へ取得し、モデル選択時だけ遅延読み込みする。
 - **定義**: `character.json` に `live2d` を持つキャラは Cubism ランタイムで WebGL 描画する（`animations` は省略可。`live2d.model` か `animations.idle` のどちらかが必須）。`live2d` は `model`（キャラフォルダ相対の `.model3.json`）、`models`（`{ "sdk":"4"|"5", "path":"...model3.json" }` の配列。自動時は定義順に試す）、`motions`（idle / thinking / talking / sad → モーショングループ名）、`lipSyncParam`（省略時はモデルの `Groups: LipSync` 先頭IDを自動検出）、`lipSync`（`false` で口パク無効）、`scale`（既定1）、`offsetY`（既定0）を持つ。複数世代は `PICOAGENT_LIVE2D_SDK_OVERRIDES` で自動／Cubism 4固定／Cubism 5固定を切り替える。
-- **寸法**: モデルはモデル座標（`originalWidth`×`originalHeight`）へ等倍で置き、構図の切り出し矩形をキャンバスへ写す変換だけを PIXI のステージへ掛ける。モデル別の `scale` / `offsetX` / `offsetY` は旧来の 285×315 の基準枠で上半身が収まるよう調整された値なので、その枠が写していたモデル座標の範囲へ換算して `upper` の切り出し矩形として使う（既存の定義をそのまま読めるようにする）。任意の `layoutFraming[形式]` があれば同じ換算でその形式の既定構図にする。`full` はモデル全体、`bust` は `upper` の上側65%。
+- **寸法**: モデルはモデル座標（`originalWidth`×`originalHeight`）へ等倍で置き、構図の切り出し矩形をキャンバスへ写す変換だけを PIXI のステージへ掛ける。モデル別の `scale` / `offsetX` / `offsetY` は旧来の 285×315 の基準枠で上半身が収まるよう調整された値なので、その枠が写していたモデル座標の範囲へ換算して `upper` の切り出し矩形として使う（既存の定義をそのまま読めるようにする）。任意の `layoutFraming[形式]` があれば同じ換算でその形式の既定構図にする。`full` はモデル全体、`bust` は `upper` の上側80%。モデル固有の `bustDepth` または `layoutFraming[形式].bustDepth` で胸元までの深さを調整でき、ひよりの配信は95%とする。
 - 公式サンプルモデルは自動取得・製品同梱しない（開発者が条件確認後に `cargo xtask setup live2d-samples` を明示した場合だけ Git 管理外で取得）。モデル同梱音声は TTS と重ねず、`PIXI.live2d.config.sound = false` で鳴らさない。`build-character-animations.py` は Live2D キャラを飛ばす。
 - `characters/*/live2d/` は再配布条件のため Git 管理外。宣言したモデルが**1つも無い**キャラは「未取得」として同期対象と生成先 `index.json` から外し（既定キャラだった場合は残った先頭へ寄せる）、同期は成功させる（clone 直後でも `dev` / `build` が `ui-dist/` を作れるようにする）。**一部だけ**欠けている場合は壊れているので失敗させる。
 
@@ -762,8 +763,8 @@ JSON-RPC 2.0、プロトコルバージョン `2024-11-05`。
 
 #### 配信形式
 
-- 1920×1080 の固定シーンに、背景（`background`）、小さく控えめな画面内ディスプレイ（`display`・左上）、キャラ（`character`・中央より右、全描画方式で初期高さ480px・下端に接する配置。胸上構図は描画器が頭頂から胸元までを映す）、横長の字幕帯（`subtitle`・下端でキャラの手前）、チャット列（`chat`・右、履歴と常時見える入力欄を一体にしたパネル）、配信情報（`info`・左上の時計）を置く。既定配置は `ui/scenes/stream.json`。各ソースは配置編集で動かせる。保存済みのキャラ配置は初期値の変更で上書きしない。
-- 配信チャット列はシーンを縮小して表示する場合も読めるよう、会話本文と入力文字をシーン上で最低20px、操作と状態表示を最低16pxとする。AIの準備に失敗して送信できない場合は、理由をチャット列の状態欄へ読み取れる大きさで表示する。
+- 1920×1080 の固定シーンに、背景（`background`）、小さく控えめな画面内ディスプレイ（`display`・左上）、キャラ（`character`・中央より右、全描画方式で初期高さ800px・下端に接する配置。胸上構図は描画器が頭頂から胸元までを映す）、横長の字幕帯（`subtitle`・下端でキャラの手前、胸元より下へ重なる）、チャット列（`chat`・右、履歴と常時見える入力欄を一体にしたパネル）、配信情報（`info`・左上の時計）を置く。既定配置は `ui/scenes/stream.json`。各ソースは配置編集で動かせる。保存済みのキャラ配置は初期値の変更で上書きしない。
+- 配信チャット列はシーンを縮小して表示する場合も読めるよう、会話本文と入力文字をシーン上で最低26px、操作と状態表示を最低20pxとする。AIの準備に失敗して送信できない場合は、理由をチャット列の状態欄へ読み取れる大きさで表示する。
 - 字幕は Markdown を安全な plain text へ変換してから実DOM寸法でページ化し、URL・リンク・コード記法を途中で分けたり読み上げたりしない。字幕枠は白〜薄桃半透明のパステル調で、枠内には本文だけを置く。
 - 背景はキャラ画像へ合成せず、`assets/backgrounds/` の同梱背景（既定の `vtuber-room.webp`、オリジナルの `sakura-room.webp` と `dog-hobby-room.webp`）または利用者が取り込んだ画像を独立した背景として使う。
 

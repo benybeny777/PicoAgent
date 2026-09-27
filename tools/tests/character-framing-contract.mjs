@@ -38,6 +38,8 @@ test("全身の矩形は可視範囲の上と左右に余白を足し、下端�
 test("低頭身は同じ名前でも深めに切り出し、原画が胸上なら全身＝上半身", () => {
   const standard = framingRectsFor(content);
   const compact = framingRectsFor(content, { proportion: "compact" });
+  assert.deepEqual(framingRectsFor(content, { bodyProportion: "compact" }), compact,
+    "描画器が渡すキャラ設定の低頭身指定も構図へ反映する");
   assert.ok(compact.upper.h > standard.upper.h);
   assert.ok(compact.bust.h > standard.bust.h);
   const nativeBust = framingRectsFor(content, { sourceFraming: "native-bust" });

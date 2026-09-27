@@ -140,17 +140,20 @@
 /* 配信のチャット列では、回答欄は字幕のソースへ移る。 */
 .chat[data-variant="column"] {
   border-radius: var(--radius-lg);
-  font-size: max(var(--chat-font-size), 20px);
+  font-size: max(var(--chat-font-size), 26px);
 }
 .chat[data-variant="column"] .reply-home { display: none; }
 .chat[data-variant="column"] .history-body { font-size: 1em; line-height: 1.55; }
-.chat[data-variant="column"] .history-role { font-size: 16px; }
+.chat[data-variant="column"] .history-empty { color: var(--text-muted); font-size: 20px; }
+.chat[data-variant="column"] .history-role { font-size: 20px; }
 .chat[data-variant="column"] .reply-actions .chip,
 .chat[data-variant="column"] .quick-actions button,
 .chat[data-variant="column"] .composer-actions button,
-.chat[data-variant="column"] .history-tools input { font-size: 16px; }
-.chat[data-variant="column"] .composer textarea { min-height: 60px; font-size: max(var(--chat-font-size), 20px); }
-.chat[data-variant="column"] .status { font-size: max(var(--status-font-size), 16px); }
+.chat[data-variant="column"] .history-tools input { font-size: 20px; }
+.chat[data-variant="column"] .composer textarea { min-height: 60px; font-size: max(var(--chat-font-size), 26px); }
+.chat[data-variant="column"] .composer textarea::placeholder,
+.chat[data-variant="column"] .history-tools input::placeholder { color: var(--text-muted); }
+.chat[data-variant="column"] .status { font-size: max(var(--status-font-size), 20px); }
 .chat[data-variant="column"] .composer-actions .primary { min-width: 92px; height: 42px; }
 .chat[data-variant="column"] .status.engine-error {
   max-height: 96px;

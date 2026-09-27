@@ -154,7 +154,10 @@ export class Live2dRenderer {
     const full = { x: 0, y: 0, w: this.originalWidth, h: this.originalHeight };
     if (name === "full") return full;
     const upper = this.frameFor(this.layoutId);
-    if (name === "bust") return { x: upper.x, y: upper.y, w: upper.w, h: upper.h * 0.65 };
+    if (name === "bust") {
+      const depth = this.config.layoutFraming?.[this.layoutId]?.bustDepth ?? this.config.bustDepth ?? 0.8;
+      return { x: upper.x, y: upper.y, w: upper.w, h: upper.h * depth };
+    }
     return upper;
   }
 

@@ -192,6 +192,17 @@ for (const characterId of characters) {
       if (bareCharacter.top > 0 || bareCharacter.left > 0 || bareCharacter.right > 0) {
         fail(label, `胸上構図の上端・左右に余白がありません ${JSON.stringify(bareCharacter)}`);
       } else ok(`${label} 胸上構図の上端・左右に余白がある`);
+      const faceClearance = await page.evaluate(() => {
+        const character = document.querySelector('[data-source="character"]')?.getBoundingClientRect();
+        const subtitle = document.querySelector('[data-source="subtitle"]')?.getBoundingClientRect();
+        if (!character || !subtitle) return null;
+        const horizontalOverlap = character.left < subtitle.right && subtitle.left < character.right;
+        // MMD胸上は頭頂余白4%と目の深さ最大20%を含み、顎までの余裕を足して枠の上70%を守る。
+        return { horizontalOverlap, faceBottom: character.top + character.height * 0.7, subtitleTop: subtitle.top };
+      });
+      if (!faceClearance || (faceClearance.horizontalOverlap && faceClearance.faceBottom > faceClearance.subtitleTop + 1)) {
+        fail(label, `字幕が胸上の顔領域に重なります ${JSON.stringify(faceClearance)}`);
+      } else ok(`${label} 字幕は胸上の顔領域に重ならない`);
       const streamUi = await page.evaluate(() => {
         const chat = document.querySelector("[data-source=chat]")?.getBoundingClientRect();
         const display = document.querySelector("[data-source=display]")?.getBoundingClientRect();
@@ -225,7 +236,7 @@ for (const characterId of characters) {
           const style = getComputedStyle(button);
           return { disabled: button.disabled, background: style.backgroundImage, font: parseFloat(getComputedStyle(document.querySelector('.chat[data-variant="column"]')).fontSize) };
         });
-        if (send.disabled || send.background === "none" || send.font < 20) {
+        if (send.disabled || send.background === "none" || send.font < 26) {
           fail(`${label}/chat`, `配信の入力・送信操作が見づらいか使えません ${JSON.stringify(send)}`);
         } else ok(`${label} 読める履歴文字と押せる送信ボタン`);
         await page.fill("#input", "");
