@@ -81,7 +81,7 @@ graph TD
 
 ### 表示形式とウィンドウ
 
-- 表示形式は `layout.rs` が担当する。`PICOAGENT_LAYOUT` 1キーで `mascot` / `pet` / `chat` / `bar` / `workspace` / `stream` / `widget` の7形式を切り替え、`styles.css` が `<main id="petApp" data-layout="…">` を見て配置を変える。`chat` は青灰色の壁紙と左右の白／緑吹き出しを持つLINE風表示。**HTML の要素はどの形式でも同じ**で、描画・履歴・アクションセンター・読み上げ・音声入力・添付・許可判定は共通のまま使う。バックエンドの仕事は「選択中の形式」と「ウィンドウ寸法」の2つだけ。
+- 表示形式は `layout.rs` が担当する。`PICOAGENT_LAYOUT` 1キーで `pet`（既定）/ `mascot` / `stream` の3形式を切り替え、`styles.css` が `<main id="petApp" data-layout="…">` を見て配置を変える。旧 `chat` / `bar` / `workspace` / `widget` の寸法・構図・配置は削除せず保持し、旧形式が保存中なら表示時は `pet` へ戻す。**HTML の要素はどの形式でも同じ**で、描画・履歴・アクションセンター・読み上げ・音声入力・添付・許可判定は共通のまま使う。バックエンドの仕事は「選択中の形式」と「ウィンドウ寸法」の2つだけ。
 - 切替は設定画面「画面・操作」の実表示プレビューカード、右クリック「画面レイアウト」、上端メニューから行う。上端メニューの「表示」は `pet_layout_menu` で同じ形式一覧（選択中にチェック）と「画面レイアウト・位置…」をボタン直下へ出す。右クリックは `layout::select()`、設定保存は `remember_current_size()` → 設定保存 → `apply()` の順に処理し、どちらも切替前の寸法を `PICOAGENT_WINDOW_LAYOUTS` へ覚えてから次の形式の寸法を当てる。画面外へ出た場合は `pull_back_on_screen()` が戻す。
 - キャラの通常ドラッグはOS標準のウィンドウ移動とする。構図の標準は、通常2Dが上半身 `upper`、長身・実写・Live2Dが胸上 `bust`。Live2Dはモデル別の `live2d.scale` / `offsetY` で胸上へ調整済みなので、未保存時にPNG向け `bust` 倍率を重ねず `upper=1.55` を基準倍率にする。`PICOAGENT_CHARACTER_FRAMING` はキャラIDと表示形式ごとに `zoom` / `x` / `y` / `preset` を持ち、表示側は `#characterView` に `translate(--char-x, --char-y) scale(--char-zoom)` を当てて中の `img` の待機モーションと干渉させない。 設定の構図プレビューは本体の標準ペット形式の拡大補正1.32を位置にも適用し、ドラッグはその逆変換で保存座標へ戻す。
 - 配置編集（上端メニュー「配置」・右クリック「配置を直接調整」）の位置と倍率は `PICOAGENT_LAYOUT_PLACEMENTS` 1キーへ保存する。フキダシ・入力欄・履歴・画面内ディスプレイは表示形式ごと、立ち絵は `characters` の下にキャラクターID×表示形式で持つ。正規化は `layout_placements::normalize()` が正本で、未知の形式・対象・不正値を落とし、倍率は0.25〜4.0、位置は±20000pxへ丸める。保存は確定時（保存・閉じる・表示形式／キャラ切替・リセット）だけ `pet_save_layout_placements` で行い、ドラッグ中は書かない。読み込みは `pet_init` の `layoutPlacements`。
@@ -540,7 +540,7 @@ PicoAgent 自身と Git 管理するベンダの JavaScript は `eval()`／`Func
 
 各タブ:
 
-- **画面・操作**: `build-ui` が README 撮影で検証した7形式の WebP を配信アセットへコピーし、用途・既定寸法・選択中状態とカード表示する。カードのIDと既定寸法は `layout::tests` が `LAYOUTS` と突き合わせる。
+- **画面・操作**: `build-ui` が README 撮影で検証した表示形式の WebP を配信アセットへコピーし、現在選べる3形式の用途・既定寸法・選択中状態をカード表示する。カードのIDと既定寸法は `layout::tests` が `AVAILABLE_LAYOUTS` と突き合わせる。
 - **キャラ選択**: 一覧は `assets/characters/index.json` と各 `character.json` から、表示名・内部ID・説明・描画形式バッジ（`PNGアニメ` / `Live2D` / `追加PNG`）と、idle 先頭フレーム（無ければ `boot.sleeping`、それも無ければ `_preview-placeholder.png`）の丸アイコンを出す。表示名・内部ID・説明の検索と `Live2D` / `PNGアニメ` / `追加キャラ` のフィルターで候補件数を出す。使用中カードは「選択中」の無効表示にし、他のカードの「このキャラを選ぶ」で `PICOAGENT_CHARACTER` と人格・口調の編集対象を切り替える（反映は保存時）。人格欄はマニフェスト既定値と異なる場合だけ `PICOAGENT_CHARACTER_OVERRIDES` へ保存する。
 - **キャラの音声**: キャラ別の Aivis Style ID を `PICOAGENT_TTS_CHARACTER_OVERRIDES` へ保存し、空欄でパック既定へ戻す。
 - **AIモデル**: 選択中プロバイダの設定だけを表示し、未使用プロバイダの欄は DOM にも作らない。保存時は既存設定を土台に表示中の入力だけを上書きする。一覧は `local` を先頭に、その他はラベル順。「使うAI」の「モデル」欄は Ollama のローカルモデル一覧と `agent_cli` 専用で、その他は「AIサービスごとの設定」で種類・サイズの2段セレクトから選び、保存時に `PICOAGENT_MODEL` へも同期する。Ollama は `settings_list_models` で `/api/tags` を読み、選択を `PICOAGENT_MODEL` と `OLLAMA_MODEL` の両方へ入れる。

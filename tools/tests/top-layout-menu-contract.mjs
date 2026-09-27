@@ -54,7 +54,7 @@ test("「表示」ボタンは設定タブではなく画面レイアウトの�
 test("一覧は右クリックと同じ組み立てを共有し、ボタンの直下へ出す", () => {
   assert.match(menu, /pub fn pet_layout_menu\(/);
   // 選択中の形式にチェックを付ける組み立ては1か所だけに置く。
-  assert.equal(menu.match(/crate::layout::LAYOUTS/g)?.length, 1);
+  assert.equal(menu.match(/crate::layout::AVAILABLE_LAYOUTS/g)?.length, 1);
   const layoutMenu = menu.slice(menu.indexOf("pub fn pet_layout_menu("), menu.indexOf("pub fn handle_event("));
   assert.match(layoutMenu, /layout_items\(&app\)/);
   assert.match(layoutMenu, /"display_settings"/);
