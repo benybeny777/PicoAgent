@@ -75,11 +75,7 @@ const SETTINGS_RUNTIME_KEYS = new Set([
 const LAYOUT_CHOICES = [
   { id: "pet", label: "ペット", size: "900×600", description: "キャラと会話をゆったり表示。普段使い向け" },
   { id: "mascot", label: "ミニ", size: "360×560", description: "キャラ中心。必要な時だけ会話する" },
-  { id: "chat", label: "チャット", size: "520×760", description: "LINE風の吹き出しで会話する" },
-  { id: "bar", label: "バー", size: "900×320", description: "呼び出してすばやく質問する" },
-  { id: "workspace", label: "作業", size: "1400×850", description: "履歴・回答・実行状況を並べて見る" },
   { id: "stream", label: "配信", size: "1920×1080", description: "フルHD背景でキャラと字幕を映す" },
-  { id: "widget", label: "ウィジェット", size: "440×600", description: "時計・通知・入力をまとめて置く" },
 ];
 const requestedSettingsTab = new URLSearchParams(window.location.search).get("tab");
 let activeSettingsTab = requestedSettingsTab === "character-add"
@@ -954,7 +950,7 @@ function selectField(key, label, value, options) {
 }
 
 function layoutPickerField(value) {
-  if (value === "talk") value = "chat";
+  if (!LAYOUT_CHOICES.some(layout => layout.id === value)) value = "pet";
   const select = el("select", { className: "layout-native-select", ariaLabel: "画面レイアウト" });
   const cards = el("div", { className: "layout-card-grid" });
   const livePreview = el("div", { className: "layout-live-preview" }, [

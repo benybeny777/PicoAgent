@@ -184,18 +184,14 @@ AIモデルなど数GBの取得は `setup` を明示したときだけ行いま�
     <tr>
       <td width="25%" align="center"><img src="docs/images/layout-shot-mascot.webp" alt="ミニ表示" width="230" /><br /><b>ミニ</b><br /><sub>キャラ中心。必要な時だけ会話</sub></td>
       <td width="25%" align="center"><img src="docs/images/layout-shot-pet.webp" alt="ペット表示" width="230" /><br /><b>ペット</b>（既定）<br /><sub>キャラ＋会話。ふだん使い</sub></td>
-      <td width="25%" align="center"><img src="docs/images/layout-shot-chat.webp" alt="LINE風チャット表示" width="230" /><br /><b>チャット</b><br /><sub>LINE風の左右吹き出し</sub></td>
     </tr>
     <tr>
-      <td align="center"><img src="docs/images/layout-shot-bar.webp" alt="バー表示" width="230" /><br /><b>バー</b><br /><sub>1 行入力。呼んで消す</sub></td>
-      <td align="center"><img src="docs/images/layout-shot-workspace.webp" alt="作業表示" width="230" /><br /><b>作業</b><br /><sub>履歴・回答・実行状況の 3 ペイン</sub></td>
       <td align="center"><img src="docs/images/layout-shot-stream.webp" alt="配信表示" width="230" /><br /><b>配信</b><br /><sub>フルHD背景＋胸上キャラ＋字幕</sub></td>
-      <td align="center"><img src="docs/images/layout-shot-widget.webp" alt="ウィジェット表示" width="230" /><br /><b>ウィジェット</b><br /><sub>時計と通知を出しておく</sub></td>
     </tr>
   </table>
 </div>
 
-- 既定寸法はミニ360×560／ペット900×600／チャット520×760／バー900×320／作業1400×850／配信1920×1080／ウィジェット440×600。寸法は形式ごとに覚えます
+- 既定寸法はミニ360×560／ペット900×600／配信1920×1080。寸法は形式ごとに覚えます。以前の形式の保存値も保持します
 - ウィンドウの辺をドラッグすると幅または高さ、四隅で縦横を変更。キャラをドラッグするとウィンドウが動きます
 - 「配置」モードではキャラやフキダシを直接ドラッグ／拡大縮小でき、キャラの位置と倍率はキャラごと・表示形式ごとに設定ファイルへ保存します（更新・再インストールでも残ります）
 - 起動準備中はウィンドウを出さず、キャラ・ローカルAI・音声・最初の挨拶が揃ってから表示します。準備が長いときに呼び出しホットキーを押すと、進捗と起動ログの待ち画面が出ます

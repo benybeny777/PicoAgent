@@ -28,13 +28,13 @@
 | `PICOAGENT_LAYOUT_PLACEMENTS` | `{}` | 内部UI | 配置編集（上部メニューの「配置」・右クリックの「配置を直接調整」）で決めた位置と倍率。フキダシ・入力欄・履歴・画面内ディスプレイは表示形式ごと、キャラクターの立ち絵は `characters` の下にキャラクターID×表示形式で持つ。値は CSS の `translate`（`Xpx Ypx`）と `scale`（`sx sy`、0.25〜4.0）。設定画面には出さず、編集画面の「保存」「閉じる」「表示形式・キャラ切替」「リセット」で保存する |
 | `PICOAGENT_CHARACTER_OFFSET_X` | `0` | 内部UI | 旧版の立ち絵横移動量（px）。通常ドラッグはウィンドウ移動へ戻したため新規には書き込まず、既存値の互換表示と位置リセットだけに使う |
 | `PICOAGENT_CHARACTER_OFFSET_Y` | `0` | 内部UI | 旧版の立ち絵縦移動量（px）。同上 |
-| `PICOAGENT_LAYOUT` | `pet` | 画面 | 表示形式（画面構成）。`mascot` / `pet` / `chat` / `bar` / `workspace` / `stream` / `widget`。旧 `talk` はLINE風の `chat` へ移行し、未知の値は `pet` へ丸める。設定画面のプレビューカードと右クリックメニュー「画面レイアウト」の両方から変更でき、再起動なしで反映する |
+| `PICOAGENT_LAYOUT` | `pet` | 画面 | 表示形式（画面構成）。現在選べるのは `pet`（既定）/ `mascot` / `stream`。旧 `talk` / `chat` / `bar` / `workspace` / `widget` または未知の値が保存中なら表示時は `pet` へ丸め、旧形式の関連設定は保持する。設定画面のプレビューカードと右クリックメニュー「画面レイアウト」の両方から変更でき、再起動なしで反映する |
 | `PICOAGENT_STREAM_BACKGROUND` | `pastel` | 画面 | 配信形式の背景。`pastel` / `gaming` / `simple` / `sakura-room`（桜色のくつろぎ部屋）/ `dog-hobby-room`（犬の趣味部屋）/ `custom` |
 | `PICOAGENT_STREAM_BACKGROUND_IMAGE` | 空 | 画面 | `custom` 配信背景としてアプリ管理領域へ取り込んだ画像パス |
 | `PICOAGENT_STREAM_DISPLAY` | `dashboard` | 画面 | 配信背景内ディスプレイ。`dashboard` / `game` / `clock` / `image` / `none` |
 | `PICOAGENT_STREAM_DISPLAY_IMAGE` | 空 | 画面 | `image` ディスプレイへ映す、アプリ管理領域へ取り込んだ画像パス |
 | `PICOAGENT_STREAM_PROFILES` | `{}` | キャラクター | キャラクターID別の配信表示上書き。背景、背景画像、画面内ディスプレイ、表示画像、字幕色を保持し、未設定キャラは共通の配信設定を使う。不正なID・選択肢・色は保存時に除去または安全な既定値へ正規化する |
-| `PICOAGENT_WINDOW_LAYOUTS` | `{}` | 内部UI | 表示形式ごとに覚えたウィンドウ寸法（`{"chat":{"w":520,"h":760}}`）。既定はミニ360×560／ペット900×600／チャット520×760／バー900×320／作業1400×850／配信1920×1080（フルHD）／ウィジェット440×600。旧 `talk` の保存寸法は `chat` の値がない場合に引き継ぐ。旧既定値と完全一致する保存値だけ新既定へ移し、手動調整値は保持する。位置は形式をまたいで共有する。設定画面には出さない |
+| `PICOAGENT_WINDOW_LAYOUTS` | `{}` | 内部UI | 表示形式ごとに覚えたウィンドウ寸法（`{"pet":{"w":900,"h":600}}`）。現在選べる形式の既定はミニ360×560／ペット900×600／配信1920×1080（フルHD）。旧 `chat` / `bar` / `workspace` / `widget` の保存値も保持する。旧 `talk` の保存寸法は `chat` の値がない場合に引き継ぐ。旧既定値と完全一致する保存値だけ新既定へ移し、手動調整値は保持する。位置は形式をまたいで共有する。設定画面には出さない |
 | `PICOAGENT_HOTKEY_ENABLED` | `true` | 画面 | グローバルホットキーを使う。OFF ですべてのホットキーを解除する |
 | `PICOAGENT_HOTKEY_SUMMON` | `CommandOrControl+Alt+P` | 画面 | 呼び出しキー。表示・前面化してから `pet:hotkey` を送り、フロントが居眠り解除と入力欄オープンを行う。空欄は他の欄と同じく既定値、`off` でこのキーだけ無効 |
 | `PICOAGENT_HOTKEY_HIDE` | `CommandOrControl+Alt+H` | 画面 | 隠す／戻すキー。表示中は `hide()`、隠れているときは呼び出しと同じ動作。空欄は他の欄と同じく既定値、`off` でこのキーだけ無効 |
