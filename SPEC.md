@@ -357,7 +357,7 @@ LLMによる候補生成・隔離検証・版管理を加える未実装の設�
 | **Action**（ファイル生成・変換） | write | 9 | `ms_office` `document_convert` `pdf_tools` `image_tools` `image_generate` `comfyui` `meeting_recorder` `whisper_transcribe` `notebook_edit` |
 | **Action**（資料一式の生成） | write | 3 | `genspark_suite` `spark_workspace` `artifact_pipeline` |
 | **Action**（汎用の出入り口） | write | 3 | `http_api` `workspace_files` `edit_file` |
-| **Destructive / 高リスク** | destructive | 6 | `trash_file` `run_command` `command_job` `code_runner` `app_control` `desktop_control` |
+| **Destructive / 高リスク** | destructive | 7 | `trash_file` `run_command` `command_job` `code_runner` `app_control` `desktop_control` `game_play` |
 | **State**（アプリ内の永続状態） | write | 9 | `alarm` `reminder` `focus_timer` `task_scheduler` `praise_log` `todo_plan` `project` `user_skill` `job_center` |
 | **Computation**（純粋計算） | read-only | 1 | `productivity_tools` |
 | **Orchestration**（多段実行・組み立て） | 呼び先に従う | 6 | `subagent` `workflow` `daily_briefing` `research_report` `chitchat` `ask_user` |
@@ -457,8 +457,25 @@ PicoAgent 自身と Git 管理するベンダの JavaScript は `eval()`／`Func
 | `command_job` | `background=true` のジョブの一覧・途中出力・停止 | 起動はできない。`PICOAGENT_COMMAND_ENABLED` が必要。同時4件、保持出力64KB（古い側から破棄）、終了済み20件。`output` は前回の続きだけを返す。停止は `kill` 後に `wait` で回収し、`RunEvent::Exit` で全ジョブを止める |
 | `code_runner` | 安全な隔離実行を準備中の内部機能 | OSレベルのサンドボックスが無いため `agent_callable=false`。設定を有効にしてもモデルへ公開しない |
 | `desktop_control` | マウス・キーボード操作（クリック・ドラッグ・文字入力・キー送出・スクロール）とウィンドウ一覧・前面化 | 既定無効、**シェルを介さない固定 action のみ**、座標の画面内チェック、入力2,000文字、1分あたりの操作回数上限。ウィンドウ操作は Windows のみ。Linux は X11 またはデスクトップ環境の許可範囲で動き、Wayland が拒否したらエラー |
+| `game_play` | ゲーム画面の認識→ローカルLLMの1操作選択→許可キー入力→結果確認 | Windows限定・既定無効。画像入力済みGemma 4 E2B、完全一致の前面ウィンドウ、許可キー、依頼ごとの操作上限が必要。認識不明・画面変化・重複・停止時は再送しない |
 | `app_control` | PicoAgent 自身の終了（「アプリ終了して」「PicoAgent を閉じて」） | 結果の `PICOAGENT_APP_QUIT_REQUESTED` をバックエンドが検出し、フロントが短く表示してから `pet_quit` で `app.exit(0)`。単なる「終了」はタイマー等と混ざるので、アプリ名または文脈を含む依頼だけ |
 | `ask_user` | 判断が分かれる点を2〜4個の選択肢つきで確認する | マーカーでループを止め、質問と選択肢を返す（フロントは選択肢ボタンを出す）。次の発話が番号・全角番号・ラベル一致なら選択肢名へ寄せ、それ以外は自由記述として渡す。質問300文字・ラベル40文字・説明120文字 |
+
+#### 共通のローカル画像入力
+
+- `PICOAGENT_LOCAL_VISION_ENABLED` は通常チャットとスキルで共有する。ゲーム設定には依存せず、画像添付の説明・文字読み取り・画面相談にも使う。
+- Gemma 4 E2B用projectorは `cargo xtask setup local-vision` で `resources/bundled/local-vision` へ明示導入する。旧名 `game-vision` はコマンドの互換別名としてのみ残す。
+- ローカルプロバイダの通常・ストリーミング両経路は画像がある場合に設定・対応モデル・画像エンジン起動完了を確認し、未準備なら送信前にエラーを返す。画像を落とした再送は行わない。テキストのみの利用は影響を受けない。
+- 最新の利用者発話に画像がある場合、本文だけで定型回答やツールの先回り実行を決めず、画像と依頼を先にモデルへ渡す。モデルによる通常のツール選択は維持する。過去画像が履歴に残る場合も画像入力の準備が必要で、無効化時はその理由と画像のない会話で続ける案内を表示する。
+- 構造化データが必要なスキルはローカルの共通 `chat_structured` を利用し、`response_format` のJSON Schemaで形式を指定する。ツール呼出しと併用せず、非対応・不正応答時に通常文章へ降格しない。
+
+#### ゲームプレイの初期仕様
+
+- `game_play` の `windows` はウィンドウ一覧、`step` は一連の1操作、`stop` は実行中操作の停止。`step` の `sequence` は最初1から正常終了ごとに1増やす。固定上限は停止フラグとは独立したチャット1依頼のIDへ結び付け、モデルによるリセットを設けない。同じ依頼の委譲先もIDを共有し、新しい利用者依頼だけ別予算になる。停止ボタンのないAPI・スケジューラからは入力しない。
+- ローカル画像認識へツールを渡さず、画像から得る構造化データ（HP、満腹度、場面、短い観測・選択理由、1キー）だけを受け取る。認識不成立、低信頼度、数値欠落、ダンジョン以外、未許可キー、不正JSONは入力前に停止。モデルの信頼度は正確さの証明ではなく、実機受入は別途必要。
+- 対象ウィンドウはハンドル・PID・タイトル・矩形・前面状態を撮影時と入力直前に再検査する。キー押下・解放は同期処理とし、修飾キー等の手入力中は拒否する。入力直前の再撮影が認識元と一致しない場合も止める。初期版はアニメーション変化も停止対象となり、動きのある画面での継続性は未保証。
+- 設定保存先配下 `gameplay/step-*/` に `before.png`、`decision.json`、入力直後と確認後の `result.json`、`after.png` を保存する。判定前の構造化観測を `before-observation.json` / `after-observation.json` に保存し、入力拒否時も画像と照合できるようにする。停止時は別の `stopped.json` を残し、既存の入力時刻を上書きしない。`decision_at_action` は実行前に確定したコメントで、後付け解説と混同しない。入力と記録はOSを跨ぐ原子的処理ではないため、異常終了で「入力前」のままなら未実行と断定せず再送しない。
+- 直近16件の観測履歴を同じ依頼中だけ渡す。探索済み地図の統合、1フロア自律探索、連続録画、既存動画制作アプリへの自動取り込みは次段階。今回の最小構成を達成済み扱いにせず、実機の認識・入力・結果確認は別途検証する。
 
 #### 生活・状態
 
