@@ -51,8 +51,14 @@
       "talking": "TapBody",
       "sad": "Idle"
     },
-    "scale": 3.2,
-    "offsetY": 595,
+    "scale": 1.7,
+    "offsetY": 205,
+    "layoutFraming": {
+      "stream": {
+        "scale": 1.2,
+        "offsetY": 30
+      }
+    },
     "iconFraming": {
       "scale": 4.8,
       "offsetY": 990

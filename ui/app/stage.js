@@ -67,8 +67,7 @@ export function createStage({ stageElement, sceneRoot, sources, character, toast
     const def = definition().sources?.[target];
     if (!def) return null;
     const aspect = target === "character" ? character.framingAspect(savedFraming()) : null;
-    const renderKind = target === "character" ? character.kind : "";
-    const base = resolvePlacement(def, savedFor(target), geometry.width, geometry.height, aspect, renderKind);
+    const base = resolvePlacement(def, savedFor(target), geometry.width, geometry.height, aspect);
     const preview = previews.get(target);
     return preview ? { ...base, ...preview } : base;
   }

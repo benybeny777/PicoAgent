@@ -172,16 +172,26 @@ for (const characterId of characters) {
     const [width, height] = LAYOUTS[layout];
     const label = `${characterId}/${layout}`;
     const { context, page, errors } = await openApp({ layout, width, height, characterId });
-    await page.screenshot({ path: path.join(outDir, `${characterId}-${layout}.png`), omitBackground: true });
     const kind = await page.evaluate(() => document.querySelector("[data-source=character] .character-view")?.dataset.renderKind);
     const framing = await page.evaluate(() => document.querySelector("[data-source=character] canvas")?.dataset.framing || "");
     const edges = await edgeContact(page);
+    await page.screenshot({ path: path.join(outDir, `${characterId}-${layout}.png`), omitBackground: true });
     report.push({ label, kind, framing, edges });
     if (edges.total < 50) fail(label, `キャラが描かれていません（不透明画素 ${edges.total}）`);
     else if (edges.top > 0) fail(label, `キャラの上端が切れています（上端の接触 ${edges.top}px）`);
     else ok(`${label} 描画（${kind}）`);
     if (errors.length) fail(label, `画面エラー: ${errors.slice(0, 3).join(" / ")}`);
     if (layout === "stream") {
+      // 字幕を隠した状態でも胴体の切れ目を字幕に頼らず画面下端へ置く。
+      const hiddenSubtitle = await page.addStyleTag({ content: '[data-source="subtitle"] { visibility: hidden !important; }' });
+      const bareCharacter = await edgeContact(page);
+      await hiddenSubtitle.evaluate(node => node.remove());
+      if (Math.abs(bareCharacter.box.y + bareCharacter.box.height - height) > 1 || bareCharacter.bottom === 0) {
+        fail(label, `字幕なしではキャラが下端まで続きません ${JSON.stringify(bareCharacter)}`);
+      } else ok(`${label} 字幕なしでもキャラが画面下端へ続く`);
+      if (bareCharacter.top > 0 || bareCharacter.left > 0 || bareCharacter.right > 0) {
+        fail(label, `胸上構図の上端・左右に余白がありません ${JSON.stringify(bareCharacter)}`);
+      } else ok(`${label} 胸上構図の上端・左右に余白がある`);
       const streamUi = await page.evaluate(() => {
         const chat = document.querySelector("[data-source=chat]")?.getBoundingClientRect();
         const display = document.querySelector("[data-source=display]")?.getBoundingClientRect();
@@ -209,6 +219,16 @@ for (const characterId of characters) {
       if (overlaps.length) fail(label, `キャラ矩形が他のソースと重なっています: ${overlaps.join(", ")}`);
       else ok(`${label} 配信ソースと非重複`);
       if (characterId === "mugi") {
+        await page.fill("#input", "配信から送信します");
+        const send = await page.evaluate(() => {
+          const button = document.querySelector("#sendButton");
+          const style = getComputedStyle(button);
+          return { disabled: button.disabled, background: style.backgroundImage, font: parseFloat(getComputedStyle(document.querySelector('.chat[data-variant="column"]')).fontSize) };
+        });
+        if (send.disabled || send.background === "none" || send.font < 20) {
+          fail(`${label}/chat`, `配信の入力・送信操作が見づらいか使えません ${JSON.stringify(send)}`);
+        } else ok(`${label} 読める履歴文字と押せる送信ボタン`);
+        await page.fill("#input", "");
         const subtitle = page.locator(".subtitle .reply");
         await subtitle.evaluate(node => { node.textContent = "字幕の文字をドラッグしても選択されないか確認します"; });
         const bounds = await subtitle.boundingBox();
@@ -310,6 +330,10 @@ for (const [layout, [width, height]] of Object.entries(LAYOUTS)) {
   const expand = page.locator('[aria-label="会話パネルを拡大"]');
   await expand.evaluate(button => button.click());
   await expand.evaluate(button => button.click());
+  await page.waitForFunction(original => {
+    const rect = document.querySelector('[data-source="chat"]')?.getBoundingClientRect();
+    return rect && ["x", "y", "width", "height"].every(key => Math.abs(rect[key] - original[key]) <= 1);
+  }, before, { timeout: 2000 }).catch(() => {});
   const after = await page.locator("[data-source=chat]").boundingBox();
   if (["x", "y", "width", "height"].some(key => Math.abs(before[key] - after[key]) > 1)) {
     fail(`expanded/${layout}`, `元の位置へ戻りません ${JSON.stringify({ before, after })}`);

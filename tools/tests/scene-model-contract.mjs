@@ -60,15 +60,17 @@ test("保存値が無ければ既定定義から、キャラは構図の縦横�
   assert.deepEqual([saved.x, saved.y, saved.w, saved.h, saved.saved], [1, 2, 300, 600, true]);
 });
 
-test("配信MMDだけ胸元を字幕上へ置き、保存済み配置を優先する", () => {
+test("配信の配置は描画方式によらず同じで、保存済み配置を優先する", () => {
   const definition = scenes.stream.sources.character;
-  const image = resolvePlacement(definition, null, 1920, 1080, 0.9, "mesh-rig");
-  const mmd = resolvePlacement(definition, null, 1920, 1080, 0.9, "mmd");
-  assert.equal(image.h, 480);
-  assert.equal(mmd.h, 711);
-  assert.equal(mmd.w, 639.9);
-  assert.equal(mmd.y, -196);
-  const saved = resolvePlacement(definition, { anchor: "center", x: 0, y: 0, w: 600, h: 600 }, 1920, 1080, 0.9, "mmd");
+  assert.equal(JSON.stringify(scenes.stream).includes("placementByRenderKind"), false);
+  assert.doesNotMatch(resolvePlacement.toString(), /renderKind|placementByRenderKind/);
+  assert.doesNotMatch(readFileSync(new URL("../../ui/app/stage.js", import.meta.url), "utf8"), /placementByRenderKind|resolvePlacement\([^\n]*renderKind/);
+  const image = resolvePlacement(definition, null, 1920, 1080, 1.08);
+  const mmd = resolvePlacement(definition, null, 1920, 1080, 1.08);
+  assert.deepEqual(mmd, image);
+  assert.equal(mmd.h, 480);
+  assert.equal(mmd.y, 0);
+  const saved = resolvePlacement(definition, { anchor: "center", x: 0, y: 0, w: 600, h: 600 }, 1920, 1080, 1.08);
   assert.deepEqual([saved.y, saved.w, saved.h, saved.saved], [0, 600, 600, true]);
 });
 
