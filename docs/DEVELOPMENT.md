@@ -380,7 +380,7 @@ NSIS アンインストーラは、インストール先またはPicoAgent管理
 | `src-tauri/build.rs` | コネクタの `#[path] pub mod` 自動生成（`src/providers` と `skills`）＋ tauri ビルド |
 | `ui/picoagent.js` | 旧 `window.picoagent` を Tauri 上で再現する互換シム |
 | `ui/index.html` / `ui/app/main.js` | メイン画面の入口。シーン・描画器・会話・ソースの実装は各フォルダに分ける |
-| `ui/settings.{html,js,css}` | 設定ウィンドウ（全設定の GUI 編集） |
+| `ui/settings.html` / `ui/settings.js` / `ui/settings.css` / `ui/settings-shell.css` | 設定ウィンドウ。`settings.js` が設定値と保存、`settings.css` が入力部品、`settings-shell.css` が分類・検索・ページ見出し・保存帯の配置を持つ |
 
 ## 📁 フォルダ構成
 

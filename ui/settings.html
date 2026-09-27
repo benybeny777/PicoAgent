@@ -6,23 +6,33 @@
   <link rel="stylesheet" href="themes/glass/tokens.css" />
   <link rel="stylesheet" href="themes/pastel/tokens.css" />
   <link rel="stylesheet" href="settings.css" />
+  <link rel="stylesheet" href="settings-shell.css" />
 </head>
 <body>
-  <header>
-    <h1>PicoAgent の設定</h1>
-    <p class="hint">左から目的を選び、必要な項目だけ変更してください。変更内容は下の「保存」で反映します。</p>
-    <label class="settings-search" for="settingsSearch">
-      <span>設定を検索</span>
-      <input id="settingsSearch" type="search" autocomplete="off" placeholder="例: 音声、画面、APIキー、キャラクター" />
-      <button id="clearSettingsSearch" class="search-clear" type="button" hidden>解除</button>
-    </label>
-    <div class="search-shortcuts" role="group" aria-label="よく使う設定の検索">
-      <span>すぐ探す</span>
-      <button type="button" data-settings-query="画面">画面</button>
-      <button type="button" data-settings-query="キャラクター">キャラ</button>
-      <button type="button" data-settings-query="読み上げ">音声</button>
-      <button type="button" data-settings-query="AI">AI</button>
-      <button type="button" data-settings-query="APIキー">APIキー</button>
+  <header class="settings-header">
+    <div class="settings-heading">
+      <span class="settings-mark" aria-hidden="true">P</span>
+      <div>
+        <p class="settings-kicker">PicoAgent · 設定</p>
+        <h1>設定</h1>
+        <p class="hint">使い方に合わせて整える</p>
+      </div>
+    </div>
+    <div class="settings-finder">
+      <label class="settings-search" for="settingsSearch">
+        <span class="search-symbol" aria-hidden="true">⌕</span>
+        <span class="visually-hidden">設定を検索</span>
+        <input id="settingsSearch" type="search" autocomplete="off" placeholder="設定を検索 · 例：音声、画面、APIキー" />
+        <button id="clearSettingsSearch" class="search-clear" type="button" hidden>解除</button>
+      </label>
+      <div class="search-shortcuts" role="group" aria-label="よく使う設定の検索">
+        <span>すぐ探す</span>
+        <button type="button" data-settings-query="画面">画面</button>
+        <button type="button" data-settings-query="キャラクター">キャラ</button>
+        <button type="button" data-settings-query="読み上げ">音声</button>
+        <button type="button" data-settings-query="AI">AI</button>
+        <button type="button" data-settings-query="APIキー">APIキー</button>
+      </div>
     </div>
   </header>
 

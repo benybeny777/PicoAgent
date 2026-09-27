@@ -27,7 +27,7 @@ test("音声ありは字幕ページと発話単位を同期し音声なしも�
 
 test("字幕は子要素まで選択できず、入り込んだ選択も解除する", () => {
   assert.match(stream, /\.subtitle \.reply, \.subtitle \.reply \* \{ user-select: none; -webkit-user-select: none; \}/);
-  assert.match(stream, /\.subtitle \.reply::selection, \.subtitle \.reply \*::selection \{ background: transparent; \}/);
+  assert.match(stream, /\.subtitle::selection, \.subtitle \*::selection \{ color: inherit; background: transparent; \}/);
   assert.match(subtitle, /element\.addEventListener\("selectstart", event => event\.preventDefault\(\)\)/);
   assert.match(subtitle, /document\.addEventListener\("selectionchange", \(\) => \{[\s\S]*?intersectsNode\(element\)[\s\S]*?removeAllRanges\(\)/);
 });

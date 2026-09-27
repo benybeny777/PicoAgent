@@ -81,6 +81,11 @@ let activeSettingsTab = requestedSettingsTab === "character-add"
   ? "character-register"
   : (SETTINGS_TAB_IDS.has(requestedSettingsTab) ? requestedSettingsTab : "basic");
 
+function resetSettingsScroll() {
+  if (window.matchMedia("(max-width: 760px)").matches) window.scrollTo(0, 0);
+  else form.scrollTop = 0;
+}
+
 function activateSettingsTab(tabId) {
   if (tabId === "character-add") tabId = "character-register";
   if (!SETTINGS_TAB_IDS.has(tabId)) return false;
@@ -88,7 +93,7 @@ function activateSettingsTab(tabId) {
   const button = document.getElementById(`tab-${tabId}`);
   if (button) {
     button.click();
-    form.scrollTop = 0;
+    resetSettingsScroll();
     // タブ一覧は高さ上限の中でスクロールする。下側のタブを開いても選択中が隠れないようにする。
     button.scrollIntoView({ block: "nearest" });
   }
@@ -1401,8 +1406,10 @@ function createTabs(items) {
   const tabs = el("div", { className: "tabs", role: "tablist" });
   const panels = el("div", { className: "tab-panels" });
   const byId = {};
+  let group = "";
   items.forEach(item => {
     if (item.heading) {
+      group = item.heading;
       // 分類見出しはタブではない。支援技術がタブ数へ数えないよう読み上げ対象から外す。
       const heading = el("div", { className: "tab-group-heading", textContent: item.heading });
       heading.setAttribute("aria-hidden", "true");
@@ -1413,10 +1420,12 @@ function createTabs(items) {
     const button = el("button", {
       className: selected ? "tab active" : "tab",
       id: `tab-${item.id}`,
-      textContent: item.label,
       type: "button",
       tabIndex: selected ? 0 : -1,
-    });
+    }, [
+      el("span", { className: "tab-icon", textContent: item.icon || "•", ariaHidden: "true" }),
+      el("span", { className: "tab-name", textContent: item.label }),
+    ]);
     button.setAttribute("role", "tab");
     button.setAttribute("aria-selected", selected ? "true" : "false");
     button.setAttribute("aria-controls", `panel-${item.id}`);
@@ -1426,6 +1435,11 @@ function createTabs(items) {
     });
     panel.setAttribute("role", "tabpanel");
     panel.setAttribute("aria-labelledby", button.id);
+    panel.append(el("div", { className: "settings-panel-head" }, [
+      el("span", { className: "settings-panel-kicker", textContent: group }),
+      el("h2", { textContent: item.label }),
+      el("p", { textContent: item.description || "必要な項目を変更し、画面下の「変更を保存」で反映します。" }),
+    ]));
     if (!selected) panel.hidden = true;
     button.addEventListener("click", () => {
       activeSettingsTab = item.id;
@@ -1440,7 +1454,7 @@ function createTabs(items) {
         current.classList.toggle("active", active);
         current.hidden = !active;
       }
-      form.scrollTop = 0;
+      resetSettingsScroll();
       applySettingsSearch();
     });
     button.addEventListener("keydown", event => {
@@ -3005,21 +3019,21 @@ async function render() {
   const panels = createTabs([
     // 同じ分類のタブを見出しの下へ集め、分類内はよく使う順に並べる。
     { heading: "よく使う" },
-    { id: "basic", label: "基本設定" },
-    { id: "display", label: "画面・操作" },
+    { id: "basic", label: "基本設定", icon: "✦", description: "会話と記憶、日常の動きを整えます。" },
+    { id: "display", label: "画面・操作", icon: "▣", description: "表示形式、テーマ、ウィンドウと操作を調整します。" },
     { heading: "キャラクター" },
-    { id: "character", label: "キャラ選択" },
-    { id: "voice", label: "キャラの音声" },
-    { id: "character-register", label: "キャラ登録" },
-    { id: "character-maker", label: "キャラ作成（テスト）" },
+    { id: "character", label: "キャラ選択", icon: "◉", description: "話す相手と、そのキャラクターの設定を選びます。" },
+    { id: "voice", label: "キャラの音声", icon: "♪", description: "読み上げる声と再生の動きを設定します。" },
+    { id: "character-register", label: "キャラ登録", icon: "◇", description: "手持ちの画像やモデルを PicoAgent に追加します。" },
+    { id: "character-maker", label: "キャラ作成（テスト）", icon: "✧", description: "原画からキャラクターを作るテスト機能です。" },
     { heading: "AI・機能" },
-    { id: "providers", label: "AIモデル" },
-    { id: "tools", label: "スキル・連携" },
-    { id: "components", label: "追加機能・更新" },
+    { id: "providers", label: "AIモデル", icon: "✳", description: "使う AI とモデル、接続先を選びます。" },
+    { id: "tools", label: "スキル・連携", icon: "⌘", description: "PicoAgent に任せる操作と外部連携を管理します。" },
+    { id: "components", label: "追加機能・更新", icon: "＋", description: "必要な機能の導入とアプリの更新を管理します。" },
     { heading: "安全・サポート" },
-    { id: "permissions", label: "安全・許可" },
-    { id: "skillguide", label: "使い方" },
-    { id: "diagnostics", label: "診断・修復" },
+    { id: "permissions", label: "安全・許可", icon: "◈", description: "フォルダや操作の許可を確認します。" },
+    { id: "skillguide", label: "使い方", icon: "?", description: "スキルの使い方とできることを調べます。" },
+    { id: "diagnostics", label: "診断・修復", icon: "◎", description: "接続状態を確認し、問題があれば修復します。" },
   ]);
   panels.components.append(buildAppUpdateSection(v), buildComponentManager());
   panels["character-maker"].append(buildCharacterMaker(registerInstalledCharacter));

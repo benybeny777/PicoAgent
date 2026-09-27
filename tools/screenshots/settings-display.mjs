@@ -546,8 +546,10 @@ try {
     throw new Error("既定人格だけで未保存扱いになっています " + JSON.stringify(detail));
   }
   await page.getByRole("tab", { name: "キャラの音声", exact: true }).click();
+  const voicePanelHeadingBox = await page.locator("#panel-voice .settings-panel-head h2").boundingBox();
+  if (!voicePanelHeadingBox || voicePanelHeadingBox.y < 0 || voicePanelHeadingBox.y > 260) throw new Error("音声タブの見出しが先頭から表示されません");
   const voiceHeadingBox = await page.getByRole("heading", { name: "キャラの音声設定", exact: true }).boundingBox();
-  if (!voiceHeadingBox || voiceHeadingBox.y < 0 || voiceHeadingBox.y > 260) throw new Error("音声タブが先頭から表示されません");
+  if (!voiceHeadingBox || voiceHeadingBox.y < 0 || voiceHeadingBox.y > 420) throw new Error("音声設定の本文が先頭から表示されません");
   const muteStatus = await page.locator(".tts-master-status").textContent();
   if (!muteStatus?.includes("ミュート中")) throw new Error(`読み上げのミュート状態が分かりません: ${muteStatus}`);
   if (!(await page.locator(".character-voice-context").textContent())?.includes("むぎ")) throw new Error("音声タブに選択中キャラが表示されません");
@@ -558,8 +560,10 @@ try {
   await page.waitForFunction(() => document.getElementById("dirtySummary")?.textContent === "保存済み");
   await page.screenshot({ path: join(OUT, "character-voice-tab.png") });
   await page.getByRole("tab", { name: "キャラ登録", exact: true }).click();
+  const registerPanelHeadingBox = await page.locator("#panel-character-register .settings-panel-head h2").boundingBox();
+  if (!registerPanelHeadingBox || registerPanelHeadingBox.y < 0 || registerPanelHeadingBox.y > 260) throw new Error("登録タブの見出しが先頭から表示されません");
   const registerHeadingBox = await page.getByRole("heading", { name: "キャラクターを追加", exact: true }).boundingBox();
-  if (!registerHeadingBox || registerHeadingBox.y < 0 || registerHeadingBox.y > 260) throw new Error("登録タブが先頭から表示されません");
+  if (!registerHeadingBox || registerHeadingBox.y < 0 || registerHeadingBox.y > 420) throw new Error("キャラ登録の本文が先頭から表示されません");
   if (await page.getByRole("heading", { name: "キャラクターを追加", exact: true }).count() !== 1) throw new Error("キャラ登録タブに追加操作がありません");
   if (await page.locator(".character-browser-list:visible").count()) throw new Error("キャラ登録タブに選択一覧が混ざっています");
   if (await page.locator(".tts-master-status:visible").count()) throw new Error("キャラ登録タブに音声設定が混ざっています");
@@ -581,8 +585,24 @@ try {
   ]);
   if (!resetBox || !saveBox || resetBox.width < 140 || saveBox.width < 140) throw new Error("狭幅で保存操作の可読幅が足りません");
   if (Math.abs(resetBox.y - saveBox.y) > 2) throw new Error("狭幅で保存と取り消しが不揃いです");
-  const horizontalOverflow = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth);
-  if (horizontalOverflow) throw new Error("狭幅でページ全体が横にはみ出しています");
+  const horizontalOverflow = await page.evaluate(() => ({
+    width: document.documentElement.clientWidth,
+    scrollWidth: document.documentElement.scrollWidth,
+    layout: Object.fromEntries(["body", "main", ".tabs", ".tab-panels"].map(selector => {
+      const node = document.querySelector(selector);
+      const box = node?.getBoundingClientRect();
+      return [selector, node && box ? { x: box.x, width: box.width, scrollWidth: node.scrollWidth, overflowX: getComputedStyle(node).overflowX } : null];
+    })),
+    nodes: [...document.querySelectorAll(".tab-panel:not([hidden]) *")].filter(node => {
+      const box = node.getBoundingClientRect();
+      return box.width > 0 && box.right > document.documentElement.clientWidth - 16 + 1;
+    }).slice(0, 12).map(node => `${node.tagName.toLowerCase()}#${node.id}.${String(node.className).split(" ").join(".")}`),
+  }));
+  if (horizontalOverflow.scrollWidth > horizontalOverflow.width) throw new Error(`狭幅でページ全体が横にはみ出しています: ${JSON.stringify(horizontalOverflow)}`);
+  await page.evaluate(() => window.scrollTo(0, 600));
+  await page.getByRole("tab", { name: "基本設定", exact: true }).click();
+  const tabScroll = await page.evaluate(() => window.scrollY);
+  if (tabScroll > 10) throw new Error(`狭幅のタブ切替で先頭へ戻りません: ${tabScroll}`);
   await page.screenshot({ path: join(OUT, "narrow-footer.png") });
   // キャラ一覧のアイコンを全件撮る。メッシュ化したキャラが同梱の仮画像に落ちていないかを目視する。
   await page.setViewportSize({ width: 960, height: 2600 });
