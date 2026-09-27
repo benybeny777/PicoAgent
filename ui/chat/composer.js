@@ -33,6 +33,7 @@ export function createComposer({ form, input, preview: previewBox, suggestions, 
   let choices = null; // 質問カード（ask_user）の選択肢
   let onSubmit = () => {};
   let onOpenChange = () => {};
+  let persistent = false;
 
   function readDraft() {
     try { return draftStore.readDraft(localStorage.getItem(DRAFT_KEY)); }
@@ -248,6 +249,19 @@ export function createComposer({ form, input, preview: previewBox, suggestions, 
     onOpenChange(callback) { onOpenChange = callback; },
     onEscape: null,
     get isOpen() { return !form.hidden; },
+    setPersistent(value) {
+      const next = Boolean(value);
+      if (persistent === next) return;
+      persistent = next;
+      if (persistent) {
+        form.hidden = false;
+        autosize();
+        updateState();
+        onOpenChange(true);
+      } else {
+        composer.close();
+      }
+    },
     open() {
       if (blocked.busy) return;
       form.hidden = false;
@@ -261,6 +275,10 @@ export function createComposer({ form, input, preview: previewBox, suggestions, 
     close() {
       draft = input.value;
       persistDraft();
+      if (persistent) {
+        input.blur();
+        return;
+      }
       form.hidden = true;
       updateState();
       onOpenChange(false);

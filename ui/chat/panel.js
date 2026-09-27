@@ -206,6 +206,8 @@ export function createChatSource(context) {
       element.dataset.compact = String(Boolean(options.compact));
       element.classList.toggle("expanded", Boolean(expanded));
       history.setVisible(variant === "column" || Boolean(expanded));
+      // 配信の履歴列は空き面をクリックしても入力が開かないため、入力欄を常設する。
+      composer.setPersistent(variant === "column");
       // 回答欄は1つだけ。配信では字幕のソースへ移し、それ以外はパネルの中へ戻す。
       const host = variant === "column" ? reusable() : replyHome;
       if (host && reply.parentElement !== host) host.append(reply);

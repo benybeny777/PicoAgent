@@ -29,17 +29,17 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 10px;
+  gap: 5px;
   overflow: hidden;
-  border: 12px solid rgba(39, 31, 49, 0.82);
-  border-radius: 12px;
+  border: 6px solid rgba(39, 31, 49, 0.72);
+  border-radius: 8px;
   color: #f9edf5;
-  background: linear-gradient(145deg, rgba(59, 51, 79, 0.92), rgba(81, 55, 78, 0.92));
-  box-shadow: 0 16px 40px rgba(27, 19, 36, 0.3);
+  background: linear-gradient(145deg, rgba(59, 51, 79, 0.78), rgba(81, 55, 78, 0.76));
+  box-shadow: 0 10px 24px rgba(27, 19, 36, 0.22);
   pointer-events: none;
 }
-.stream-display strong { font-size: 40px; letter-spacing: 0.14em; }
-.stream-display span { font-size: 20px; opacity: 0.76; letter-spacing: 0.1em; }
+.stream-display strong { font-size: 22px; letter-spacing: 0.12em; }
+.stream-display span { font-size: 11px; opacity: 0.68; letter-spacing: 0.1em; }
 .stream-display[data-kind="game"] { background: radial-gradient(circle at 50% 32%, #8ee6ff 0 5%, transparent 6%), linear-gradient(145deg, #273a62, #60436b); }
 .stream-display[data-kind="image"] { background: var(--stream-display-image) center / cover no-repeat; }
 .stream-display[data-kind="image"] > * { display: none; }
@@ -66,17 +66,18 @@
 .subtitle {
   display: flex;
   align-items: stretch;
-  padding: 20px 30px;
-  border-radius: 22px;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.86), rgba(255, 238, 246, 0.84));
-  border: 2px solid rgba(255, 255, 255, 0.9);
-  box-shadow: 0 16px 40px rgba(60, 30, 50, 0.22);
+  padding: 14px 22px;
+  border-radius: 16px;
+  background: linear-gradient(135deg, rgba(255, 253, 248, 0.96), rgba(255, 238, 244, 0.94));
+  border: 1px solid rgba(213, 156, 172, 0.56);
+  border-left: 6px solid var(--accent);
+  box-shadow: 0 8px 24px rgba(60, 30, 50, 0.2);
   user-select: none;
   -webkit-user-select: none;
 }
 .subtitle .reply {
   color: var(--stream-caption-color, #5a3b4b);
-  font-size: 34px;
+  font-size: 28px;
   font-weight: 700;
   line-height: 1.5;
   overflow: hidden;

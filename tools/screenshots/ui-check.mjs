@@ -182,8 +182,25 @@ for (const characterId of characters) {
     else ok(`${label} 描画（${kind}）`);
     if (errors.length) fail(label, `画面エラー: ${errors.slice(0, 3).join(" / ")}`);
     if (layout === "stream") {
+      const streamUi = await page.evaluate(() => {
+        const chat = document.querySelector("[data-source=chat]")?.getBoundingClientRect();
+        const display = document.querySelector("[data-source=display]")?.getBoundingClientRect();
+        const subtitle = document.querySelector("[data-source=subtitle]")?.getBoundingClientRect();
+        const form = document.querySelector("#composer");
+        const input = document.querySelector("#input")?.getBoundingClientRect();
+        return { chat: chat && { bottom: chat.bottom }, display: display && { width: display.width },
+          subtitle: subtitle && { width: subtitle.width }, input: input && { bottom: input.bottom },
+          formVisible: Boolean(form && !form.hidden) };
+      });
+      if (!streamUi.formVisible || !streamUi.input || streamUi.input.bottom > streamUi.chat?.bottom) {
+        fail(label, `履歴列の入力欄が見えません ${JSON.stringify(streamUi)}`);
+      } else ok(`${label} 履歴列の入力欄を常時表示`);
+      if (!streamUi.subtitle || streamUi.subtitle.width < 700 || !streamUi.display || streamUi.display.width > 320) {
+        fail(label, `字幕帯とディスプレイの寸法が違います ${JSON.stringify(streamUi)}`);
+      } else ok(`${label} 横長の字幕帯と控えめなディスプレイ`);
       const overlaps = await page.evaluate(character => {
-        return ["display", "subtitle", "chat"].filter(name => {
+        // 字幕帯は仕様上キャラの手前に重なる。ディスプレイとチャット列だけを除外する。
+        return ["display", "chat"].filter(name => {
           const other = document.querySelector(`[data-source=${name}]`)?.getBoundingClientRect();
           return other && character.left < other.right && other.left < character.right
             && character.top < other.bottom && other.top < character.bottom;
