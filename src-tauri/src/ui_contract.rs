@@ -8,10 +8,7 @@ mod guard {
     use std::collections::BTreeSet;
 
     fn read_repo_file(relative: &str) -> String {
-        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .expect("リポジトリ直下を解決できない");
-        std::fs::read_to_string(root.join(relative))
+        std::fs::read_to_string(crate::guard_scan::repo_root().join(relative))
             .unwrap_or_else(|error| panic!("{relative} を読めない: {error}"))
     }
 

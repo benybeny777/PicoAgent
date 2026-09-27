@@ -633,7 +633,7 @@ pub(crate) fn reset_bubble_and_window_layout(app: &tauri::AppHandle) {
 }
 
 #[cfg(test)]
-mod guard {
+mod tests {
     use super::{menu_entries, Entry, MenuContext, COMMON_ITEMS};
 
     fn ids(entries: &[&Entry]) -> Vec<String> {
