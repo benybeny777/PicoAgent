@@ -96,6 +96,8 @@ const settingsData = {
 };
 const mock = `
 window.__listeners = {};
+window.__settingsData = JSON.parse(sessionStorage.getItem("mockSettingsData") || ${JSON.stringify(JSON.stringify(settingsData))});
+window.__savedSettingsPatches = [];
 window.__memoryItems = [
   { category: "好み", text: "私は結論から読むのが好き", updated_at: "2026-08-18T08:30:00Z", hits: 4 },
   { category: "継続指示", text: "今後はサイズをMBかGBで表示してほしい", updated_at: "2026-08-18T07:15:00Z", hits: 2 },
@@ -107,7 +109,13 @@ window.__TAURI__ = {
         sessionStorage.setItem("settings-load-retried", "1");
         throw new Error("設定読込の検証用エラー");
       }
-      return ${JSON.stringify(settingsData)};
+      return window.__settingsData;
+    }
+    if (name === "settings_save") {
+      window.__savedSettingsPatches.push(args.patch);
+      Object.assign(window.__settingsData.values, args.patch);
+      sessionStorage.setItem("mockSettingsData", JSON.stringify(window.__settingsData));
+      return { up: true };
     }
     if (name === "settings_memory_list") return { items: window.__memoryItems };
     if (name === "settings_memory_delete") {
@@ -194,6 +202,17 @@ try {
   await page.waitForTimeout(100);
   mkdirSync(OUT, { recursive: true });
   await page.screenshot({ path: join(OUT, "display-tab.png") });
+  const streamFont = page.locator("#setting-PICOAGENT_STREAM_CHAT_FONT_PX");
+  if (await streamFont.inputValue() !== "30") throw new Error("配信文字サイズの初期値が30ではありません");
+  await streamFont.fill("42");
+  if (await page.locator("#save").isDisabled()) throw new Error("配信文字サイズの変更を未保存として検出しません");
+  await page.locator("#save").click();
+  await page.waitForFunction(() => document.getElementById("status")?.textContent?.includes("保存しました"));
+  const savedFont = await page.evaluate(() => window.__savedSettingsPatches.at(-1)?.PICOAGENT_STREAM_CHAT_FONT_PX);
+  if (savedFont !== "42") throw new Error(`配信文字サイズを保存していません: ${savedFont}`);
+  await page.reload();
+  await page.waitForSelector("#setting-PICOAGENT_STREAM_CHAT_FONT_PX");
+  if (await page.locator("#setting-PICOAGENT_STREAM_CHAT_FONT_PX").inputValue() !== "42") throw new Error("再読込後に配信文字サイズが戻りました");
   await page.getByRole("tab", { name: "基本設定" }).click();
   if (await page.locator(".quick-settings-card").count() !== 8) throw new Error("よく使う設定への入口が8件ではありません");
   // 基本設定は会話と記憶だけにした。別分類の項目が戻っていないことを確かめる。

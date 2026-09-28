@@ -47,7 +47,7 @@ window.__TAURI__ = {
   core: { invoke: (name, args = {}) => {
     window.__calls.push({ name, args: JSON.parse(JSON.stringify(args)) });
     if (name === "pet_init") return Promise.resolve({
-      up: true, providerId: "local", theme: "system", uiTheme: "glass", fontPx: "14", voiceVolume: "35",
+      up: true, providerId: "local", theme: "system", uiTheme: "glass", fontPx: "14", streamChatFontPx: "30", voiceVolume: "35",
       characterId: ${JSON.stringify(characterId)}, characterOverrides: {}, live2dSdkOverrides: {},
       layout: ${JSON.stringify(layout)}, scenes: window.__saved, history: ${JSON.stringify(history)},
       quickActions: "", napMinutes: "0", onboardingDone: ${JSON.stringify(onboardingDone)},
@@ -116,7 +116,7 @@ async function openApp({ layout, width, height, characterId, scenes, onboardingD
 async function edgeContact(page) {
   const box = await page.locator("[data-source=character]").boundingBox();
   // キャラの描画だけを撮る（他のソース・枠・キャラ上の小物を一時的に隠す）。
-  const style = await page.addStyleTag({ content: ".source:not([data-source=character]), #editLayer, #editToolbar, #topWindowMenu, .toast, .relationship-button, .online-dot, .beta-badge { visibility: hidden; }" });
+  const style = await page.addStyleTag({ content: "html, body, .app, #stage, #sceneRoot { background: transparent !important; } .source:not([data-source=character]), #editLayer, #editToolbar, #topWindowMenu, .toast, .relationship-button, .online-dot, .beta-badge { visibility: hidden; }" });
   const png = await page.screenshot({ clip: box, omitBackground: true });
   await style.evaluate(node => node.remove());
   const probe = await browser.newPage();
@@ -241,15 +241,18 @@ for (const characterId of characters) {
         fail(label, `字幕帯とディスプレイの寸法が違います ${JSON.stringify(streamUi)}`);
       } else ok(`${label} 横長の字幕帯と控えめなディスプレイ`);
       const overlaps = await page.evaluate(character => {
-        // 字幕帯は仕様上キャラの手前に重なる。ディスプレイとチャット列だけを除外する。
-        return ["display", "chat"].filter(name => {
-          const other = document.querySelector(`[data-source=${name}]`)?.getBoundingClientRect();
-          return other && character.left < other.right && other.left < character.right
-            && character.top < other.bottom && other.top < character.bottom;
-        });
+        const display = document.querySelector('[data-source="display"]')?.getBoundingClientRect();
+        const chat = document.querySelector('[data-source="chat"]')?.getBoundingClientRect();
+        const displayOverlap = display ? Math.max(0, Math.min(character.right, display.right) - Math.max(character.left, display.left))
+          * Math.max(0, Math.min(character.bottom, display.bottom) - Math.max(character.top, display.top))
+          / (display.width * display.height) : 0;
+        // チャットはキャラの右側へ重ねてよいが、中央まで隠さない。
+        const chatOverlap = chat ? Math.max(0, character.right - chat.left) / (character.right - character.left) : 0;
+        return { displayOverlap, chatOverlap };
       }, edges.opaque);
-      if (overlaps.length) fail(label, `キャラ矩形が他のソースと重なっています: ${overlaps.join(", ")}`);
-      else ok(`${label} 配信ソースと非重複`);
+      if (overlaps.displayOverlap > 0.05 || overlaps.chatOverlap > 0.25) {
+        fail(label, `キャラの中央やディスプレイが隠れています: ${JSON.stringify(overlaps)}`);
+      } else ok(`${label} キャラの右側だけチャットと重なる`);
       if (characterId === "mugi") {
         await page.fill("#input", "配信から送信します");
         const send = await page.evaluate(() => {
@@ -262,9 +265,20 @@ for (const characterId of characters) {
             controlFont: parseFloat(getComputedStyle(chat.querySelector('.reply-actions .chip')).fontSize),
             width: chat.getBoundingClientRect().width / document.getElementById('sceneRoot').getBoundingClientRect().width * 1920 };
         });
-        if (send.disabled || send.background === "none" || send.font < 30 || send.inputFont < 30 || send.controlFont < 24 || send.width < 600) {
+        if (send.disabled || send.background === "none" || send.font < 30 || send.inputFont < 30 || send.controlFont < 24 || send.width < 720) {
           fail(`${label}/chat`, `配信の入力・送信操作が見づらいか使えません ${JSON.stringify(send)}`);
         } else ok(`${label} 読める履歴文字と押せる送信ボタン`);
+        await page.evaluate(() => window.__emit("pet:ui", { streamChatFontPx: "42" }));
+        const largerFont = await page.evaluate(() => {
+          const chat = document.querySelector('.chat[data-variant="column"]');
+          return { body: parseFloat(getComputedStyle(chat).fontSize),
+            input: parseFloat(getComputedStyle(chat.querySelector('textarea')).fontSize),
+            controls: parseFloat(getComputedStyle(chat.querySelector('.reply-actions .chip')).fontSize) };
+        });
+        if (largerFont.body !== 42 || largerFont.input !== 42 || largerFont.controls !== 34) {
+          fail(`${label}/chat-font`, `保存後の配信文字サイズが即反映されません ${JSON.stringify(largerFont)}`);
+        } else ok(`${label} 配信文字サイズを再起動なしで変更`);
+        await page.evaluate(() => window.__emit("pet:ui", { streamChatFontPx: "30" }));
         await page.fill("#input", "");
         const subtitle = page.locator(".subtitle .reply");
         await subtitle.evaluate(node => { node.textContent = "字幕の文字をドラッグしても選択されないか確認します"; });

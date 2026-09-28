@@ -9,11 +9,11 @@
     "display": { "anchor": "top-left", "x": 48, "y": 140, "w": 360, "h": 208 },
     "info": { "anchor": "top-left", "x": 40, "y": 32, "w": 460, "h": 104 },
     "character": {
-      "anchor": "bottom-right", "x": -620, "y": 0, "h": { "px": 800 }, "maxWidthFrac": 0.62
+      "anchor": "bottom-right", "x": -685, "y": 0, "h": { "px": 800 }, "maxWidthFrac": 0.62
     },
     "subtitle": { "anchor": "bottom-left", "x": 40, "y": -36, "w": 1240, "h": 168 },
     "chat": {
-      "anchor": "top-right", "x": -12, "y": 16, "w": 600, "h": 1048,
+      "anchor": "top-right", "x": -12, "y": 16, "w": 720, "h": 1048,
       "options": { "variant": "column", "history": true }
     }
   }

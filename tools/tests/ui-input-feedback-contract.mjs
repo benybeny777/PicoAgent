@@ -14,7 +14,7 @@ test("設定のJSONが不正でも保存失敗後に入力と復元を操作で�
   const form = { inert: false, setAttribute() {} };
   let saves = 0;
   const context = vm.createContext({
-    saveBtn, resetChangesBtn, form, dirtySummary: button(), statusEl: {},
+    saveBtn, resetChangesBtn, form, dirtySummary: button(), statusEl: {}, inputs: new Map(),
     collect() { throw new Error("ツール引数は正しいJSONを入力してください"); },
     logApp() {}, errorDetail: String, errorMessage: error => error?.message || String(error),
     window: { picoagent: { settings: { save() { saves++; } } } },

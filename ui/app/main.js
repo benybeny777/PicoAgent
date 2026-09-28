@@ -424,6 +424,7 @@ bridge.on("pet:ui", ui => {
   if (!ui) return;
   applyTheme(ui.theme, ui.uiTheme);
   if (ui.fontPx != null) chat.setFontPx(ui.fontPx);
+  if (ui.streamChatFontPx != null) chat.setStreamFontPx(ui.streamChatFontPx);
   if (ui.voiceVolume != null) voice.setVolume(ui.voiceVolume);
   if (ui.relationshipMemoryEnabled != null) relationship.setMemoryEnabled(ui.relationshipMemoryEnabled, characterSource.heart);
   if (ui.gazeTrackingEnabled != null) host.setGazeTracking(ui.gazeTrackingEnabled);
@@ -455,6 +456,7 @@ async function loadSceneDefinitions() {
   document.querySelector(".beta-badge")?.toggleAttribute("hidden", info.betaBuild !== true);
   applyTheme(info.theme, info.uiTheme);
   if (info.fontPx != null) chat.setFontPx(info.fontPx);
+  if (info.streamChatFontPx != null) chat.setStreamFontPx(info.streamChatFontPx);
   if (info.voiceVolume != null) voice.setVolume(info.voiceVolume);
   voice.setEnabled(info.ttsEnabled !== false);
   host.setGazeTracking(info.gazeTrackingEnabled === true);

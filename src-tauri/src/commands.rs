@@ -797,6 +797,7 @@ pub async fn pet_init(app: AppHandle, state: State<'_, AppState>) -> Result<Valu
         "up": current_up(&state, STARTUP_PROVIDER_PROBE_TIMEOUT).await,
         "theme": state.config.get("PICOAGENT_THEME", "system"),
         "fontPx": state.config.get("PICOAGENT_BUBBLE_FONT_PX", "13"),
+        "streamChatFontPx": state.config.get("PICOAGENT_STREAM_CHAT_FONT_PX", "30"),
         "uiTheme": state.config.get("PICOAGENT_UI_THEME", "glass"),
         "voiceVolume": state.config.get("PICOAGENT_TTS_VOLUME", "35"),
         "characterId": character_id,
@@ -3057,6 +3058,15 @@ fn diagnose_tool_test(name: &str, result: &str, ok: bool) -> String {
     "原因を分類できませんでした。表示された API エラー本文、token の権限、対象ID、ネットワーク状態を順に確認してください。".to_string()
 }
 
+fn valid_stream_chat_font_px(value: &Value) -> bool {
+    value.as_str().is_some_and(|text| {
+        text.is_empty()
+            || text
+                .parse::<u8>()
+                .is_ok_and(|size| (18..=48).contains(&size))
+    })
+}
+
 #[tauri::command]
 pub async fn settings_save(
     mut patch: Map<String, Value>,
@@ -3064,6 +3074,11 @@ pub async fn settings_save(
     state: State<'_, AppState>,
     app: tauri::AppHandle,
 ) -> Result<Value, String> {
+    if let Some(value) = patch.get("PICOAGENT_STREAM_CHAT_FONT_PX") {
+        if !valid_stream_chat_font_px(value) {
+            return Err("配信チャットの文字サイズは18〜48の整数で指定してください。".to_string());
+        }
+    }
     let schedule_guard = patch
         .contains_key(crate::scheduler::CONFIG_KEY)
         .then(|| crate::store::lock_state(crate::scheduler::CONFIG_KEY));
@@ -3296,6 +3311,7 @@ pub async fn settings_save(
         let stream = crate::stream_profile::resolve(&state.config, &active_character);
         let mut ui = json!({
             "fontPx": state.config.get("PICOAGENT_BUBBLE_FONT_PX", "13"),
+            "streamChatFontPx": state.config.get("PICOAGENT_STREAM_CHAT_FONT_PX", "30"),
             "theme": state.config.get("PICOAGENT_THEME", "system"),
             "uiTheme": state.config.get("PICOAGENT_UI_THEME", "glass"),
             "voiceVolume": state.config.get("PICOAGENT_TTS_VOLUME", "35"),
@@ -5048,10 +5064,21 @@ mod tests {
         default_character_tts_voice, enable_tts_after_component_install, limit_aivis_volume,
         multi_ai_context, parse_update_feed, preserve_unreadable_secrets, probe_with_timeout,
         replace_auto_summary, resolved_judge_model, safe_wake_message, settings_tab, speech_text,
-        stable_persona_prompt, update_series_is_newer, update_status, validate_multi_ai_settings,
-        verify_windows_installer, version_is_newer, AUTO_SUMMARY_BEGIN, AUTO_SUMMARY_END,
-        MAX_UPDATE_FEED_BYTES,
+        stable_persona_prompt, update_series_is_newer, update_status, valid_stream_chat_font_px,
+        validate_multi_ai_settings, verify_windows_installer, version_is_newer, AUTO_SUMMARY_BEGIN,
+        AUTO_SUMMARY_END, MAX_UPDATE_FEED_BYTES,
     };
+
+    #[test]
+    fn 配信チャット文字は指定範囲の整数だけ保存する() {
+        for value in ["", "18", "30", "48"] {
+            assert!(valid_stream_chat_font_px(&serde_json::json!(value)));
+        }
+        for value in ["17", "49", "30.5", "abc"] {
+            assert!(!valid_stream_chat_font_px(&serde_json::json!(value)));
+        }
+        assert!(!valid_stream_chat_font_px(&serde_json::json!(30)));
+    }
 
     #[test]
     fn 設定画面を負座標モニターの中央へ配置する() {
