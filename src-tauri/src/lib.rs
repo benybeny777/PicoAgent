@@ -17,6 +17,7 @@ mod daily;
 mod diagnostics;
 #[cfg(test)]
 mod doc_sync;
+mod downloaded_characters;
 mod durable_jobs;
 mod emotion;
 mod engine;
@@ -144,6 +145,7 @@ pub fn run() {
             settings_memory::settings_memory_list,
             settings_memory::settings_memory_delete,
             commands::settings_character_pick,
+            commands::settings_character_discover_downloads,
             commands::settings_character_install,
             commands::settings_character_install_live2d,
             commands::settings_character_install_mmd,

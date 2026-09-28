@@ -525,6 +525,51 @@ fn build_mmd_pack(
     Ok(())
 }
 
+/// PMXを直接選んだ場合、ダウンロードフォルダ全体ではなく参照素材だけを取り込む。
+fn copy_selected_pmx(source: &Path, destination: &Path) -> Result<PathBuf> {
+    let parent = source.parent().context("PMXの親フォルダがありません")?;
+    let source_root = parent.canonicalize()?;
+    let name = source.file_name().context("PMX名がありません")?;
+    if !source.canonicalize()?.starts_with(&source_root) {
+        bail!("PMXが指定フォルダ外を参照しています");
+    }
+    if std::fs::metadata(source)?.len() > character_pack::file_limit(source) {
+        bail!("PMXが大きすぎます");
+    }
+    let bytes = std::fs::read(source)?;
+    let textures = character_pack::mmd_texture_references(&bytes)?;
+    std::fs::create_dir_all(destination)?;
+    let selected = destination.join(name);
+    crate::store::write_atomic(&selected, &bytes)?;
+    let mut total = bytes.len() as u64;
+    let mut copied = std::collections::HashSet::new();
+    for texture in textures {
+        if texture.is_empty() || !copied.insert(texture.clone()) {
+            continue;
+        }
+        let normalized = texture.replace('\\', "/");
+        if normalized.contains(':') || normalized.starts_with('/') {
+            bail!("PMXのテクスチャに外部パスは指定できません: {texture}");
+        }
+        let relative = character_pack::safe_relative(&normalized, "PMXテクスチャ")?;
+        let from = parent.join(&relative);
+        if !from.canonicalize()?.starts_with(&source_root) {
+            bail!("PMXテクスチャがモデルフォルダ外を参照しています: {texture}");
+        }
+        let size = std::fs::metadata(&from)?.len();
+        total = total.saturating_add(size);
+        if size > character_pack::file_limit(&from) || total > MAX_TOTAL_BYTES {
+            bail!("PMXとテクスチャの合計が導入上限を超えています");
+        }
+        let to = destination.join(relative);
+        if let Some(folder) = to.parent() {
+            std::fs::create_dir_all(folder)?;
+        }
+        std::fs::copy(&from, to)?;
+    }
+    Ok(selected)
+}
+
 /// フォルダまたは zip を導入する。導入したキャラクターの id と名前を返す。
 /// 配信物の一覧から同梱キャラクターのidを取り出す（`characters` 配列の `id`）。
 fn parse_bundled_ids(index_json: &str) -> Vec<String> {
@@ -786,11 +831,7 @@ pub fn install_mmd(
             .and_then(|s| s.to_str())
             .is_some_and(|s| s.eq_ignore_ascii_case("pmx"))
         {
-            copy_dir(
-                source.parent().context("PMXの親フォルダがありません")?,
-                &extracted,
-            )?;
-            Some(extracted.join(source.file_name().context("PMX名がありません")?))
+            Some(copy_selected_pmx(source, &extracted)?)
         } else {
             prepare_source(source, &extracted)?;
             None
@@ -1190,6 +1231,24 @@ mod tests {
         let manifest = crate::character_pack::validate(&pack).unwrap();
         assert_eq!(manifest["mmd"]["model"], "mmd/b.pmx");
         assert_eq!(std::fs::read(pack.join("mmd/b.pmx")).unwrap(), pmx);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn 直接選んだpmxは隣の無関係なダウンロードを取り込まない() {
+        let dir = temp_dir("selected-pmx-only");
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut pmx = b"PMX ".to_vec();
+        pmx.extend(2.0f32.to_le_bytes());
+        pmx.extend([8, 1, 0, 1, 1, 1, 1, 1, 1]);
+        pmx.extend([0u8; 52]);
+        let source = dir.join("selected.pmx");
+        std::fs::write(&source, &pmx).unwrap();
+        std::fs::write(dir.join("unrelated.txt"), b"private").unwrap();
+        let destination = dir.join("copied");
+        let selected = super::copy_selected_pmx(&source, &destination).unwrap();
+        assert_eq!(std::fs::read(selected).unwrap(), pmx);
+        assert!(!destination.join("unrelated.txt").exists());
         std::fs::remove_dir_all(dir).unwrap();
     }
 

@@ -3718,6 +3718,81 @@ async function render() {
     className: "hint",
     textContent: "取得したMMDのPMX・zip・フォルダやLive2Dを追加できます。モデルはこのPCのユーザー領域へ保存します。",
   });
+  const discoveryStatus = el("p", { className: "hint download-discovery-status", role: "status" });
+  const discoveryResults = el("div", { className: "card-list download-discovery-results" });
+  const discoveryForm = el("div", { className: "field download-discovery-form" });
+  discoveryForm.hidden = true;
+  const discoveryName = el("input", { type: "text", maxLength: 80, placeholder: "表示名" });
+  const discoveryId = el("input", { type: "text", maxLength: 64, placeholder: "英数字・-・_ のID" });
+  const discoveryTerms = el("input", { type: "checkbox" });
+  const discoveryInstall = el("button", { className: "primary", type: "button", textContent: "選んだモデルを追加" });
+  let discoverySelected = null;
+  discoveryInstall.addEventListener("click", async () => {
+    if (!discoverySelected) return;
+    const id = discoveryId.value.trim();
+    const name = discoveryName.value.trim();
+    if (!discoveryTerms.checked) { discoveryStatus.textContent = "配布元の利用条件を確認してください。"; return; }
+    if (!id || !name) { discoveryStatus.textContent = "表示名とキャラクターIDを入力してください。"; return; }
+    if (characterCatalog.characters.some(character => character.id === id)) {
+      discoveryStatus.textContent = `キャラクターID ${id} は既に使われています。`;
+      return;
+    }
+    discoveryInstall.disabled = true;
+    discoveryStatus.textContent = `${discoverySelected.kind === "mmd" ? "MMD" : "Live2D"}モデルを確認して追加しています…`;
+    try {
+      const install = discoverySelected.kind === "mmd"
+        ? window.picoagent.settings.installMmdCharacter
+        : window.picoagent.settings.installLive2dCharacter;
+      const result = await install(discoverySelected.path, id, name);
+      const added = await registerInstalledCharacter(result.id);
+      discoveryStatus.textContent = `${added.name}（${added.id}）を追加して選びました。「保存」で反映します。`;
+      discoveryForm.hidden = true;
+      discoverySelected = null;
+    } catch (error) {
+      discoveryStatus.textContent = `追加できませんでした: ${errorMessage(error)}`;
+    } finally {
+      discoveryInstall.disabled = false;
+    }
+  });
+  discoveryForm.append(
+    el("label", { textContent: "表示名" }), discoveryName,
+    el("label", { textContent: "キャラクターID（英数字・-・_）" }), discoveryId,
+    el("label", { className: "check-row" }, [discoveryTerms, el("span", { textContent: "配布元の利用条件を確認し、このモデルを使う権利があります" })]),
+    discoveryInstall,
+  );
+  const discoverButton = el("button", { className: "secondary", type: "button", textContent: "ダウンロードからモデルを探す" });
+  discoverButton.addEventListener("click", async () => {
+    discoverButton.disabled = true;
+    discoveryResults.replaceChildren();
+    discoveryForm.hidden = true;
+    discoverySelected = null;
+    discoveryStatus.textContent = "ダウンロードフォルダを確認しています…";
+    try {
+      const { candidates } = await window.picoagent.settings.discoverDownloadedCharacters();
+      discoveryStatus.textContent = candidates.length
+        ? `${candidates.length}件見つかりました。使うモデルを選んでください。`
+        : "単一モデルのPMX・Live2Dを含むzip／フォルダは見つかりませんでした。ファイル選択から追加できます。";
+      for (const candidate of candidates) {
+        const select = el("button", { className: "secondary", type: "button", textContent: "このモデルを選ぶ" });
+        select.addEventListener("click", () => {
+          discoverySelected = candidate;
+          discoveryName.value = candidate.name;
+          discoveryId.value = `${candidate.kind}-${Date.now().toString(36)}`;
+          discoveryTerms.checked = false;
+          discoveryForm.hidden = false;
+          discoveryStatus.textContent = `${candidate.name}を選びました。表示名・IDと利用条件を確認してください。`;
+        });
+        discoveryResults.append(el("div", { className: "card-item" }, [
+          el("strong", { textContent: `${candidate.kind === "mmd" ? "MMD" : "Live2D"} · ${candidate.name}` }),
+          el("div", { className: "card-desc", textContent: candidate.path }), select,
+        ]));
+      }
+    } catch (error) {
+      discoveryStatus.textContent = `モデル候補を探せませんでした: ${errorMessage(error)}`;
+    } finally {
+      discoverButton.disabled = false;
+    }
+  });
   const addStatus = el("p", { className: "hint" });
   const live2dIdInput = el("input", {
     type: "text",
@@ -3860,6 +3935,10 @@ async function render() {
   ]);
   addSec.append(
     addHint,
+    discoverButton,
+    discoveryStatus,
+    discoveryResults,
+    discoveryForm,
     el("div", { className: "subhead", textContent: "ホロライブ公式MMDモデルを取得して追加" }),
     el("p", { className: "hint", textContent: "ホロライブ公式のMMDモデルは公式サイトから無料で配布されています。PicoAgentはモデルを同梱・再配布しないので、公式ページからご自身で取得してください。" }),
     hololiveLinks,

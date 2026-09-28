@@ -200,7 +200,7 @@ impl Reader<'_> {
     }
 }
 
-fn inspect(bytes: &[u8]) -> Result<Vec<String>> {
+pub(super) fn inspect(bytes: &[u8]) -> Result<Vec<String>> {
     let mut r = Reader {
         bytes,
         at: 0,
