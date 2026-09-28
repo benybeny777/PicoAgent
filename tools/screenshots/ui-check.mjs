@@ -171,7 +171,12 @@ for (const characterId of characters) {
   for (const layout of layoutIds) {
     const [width, height] = LAYOUTS[layout];
     const label = `${characterId}/${layout}`;
-    const { context, page, errors } = await openApp({ layout, width, height, characterId });
+    const history = layout === "stream" ? [
+      { role: "assistant", content: "今日の目標を確認しながら、一緒に次の準備を進めましょう。" },
+      { role: "user", content: "この配信画面で文字が読めるか確認したい" },
+      { role: "assistant", content: "履歴と入力欄の文字を読みやすい大きさで表示します。" },
+    ] : [];
+    const { context, page, errors } = await openApp({ layout, width, height, characterId, history });
     const kind = await page.evaluate(() => document.querySelector("[data-source=character] .character-view")?.dataset.renderKind);
     const framing = await page.evaluate(() => document.querySelector("[data-source=character] canvas")?.dataset.framing || "");
     const edges = await edgeContact(page);
@@ -250,9 +255,14 @@ for (const characterId of characters) {
         const send = await page.evaluate(() => {
           const button = document.querySelector("#sendButton");
           const style = getComputedStyle(button);
-          return { disabled: button.disabled, background: style.backgroundImage, font: parseFloat(getComputedStyle(document.querySelector('.chat[data-variant="column"]')).fontSize) };
+          const chat = document.querySelector('.chat[data-variant="column"]');
+          return { disabled: button.disabled, background: style.backgroundImage,
+            font: parseFloat(getComputedStyle(chat).fontSize),
+            inputFont: parseFloat(getComputedStyle(chat.querySelector('textarea')).fontSize),
+            controlFont: parseFloat(getComputedStyle(chat.querySelector('.reply-actions .chip')).fontSize),
+            width: chat.getBoundingClientRect().width / document.getElementById('sceneRoot').getBoundingClientRect().width * 1920 };
         });
-        if (send.disabled || send.background === "none" || send.font < 26) {
+        if (send.disabled || send.background === "none" || send.font < 30 || send.inputFont < 30 || send.controlFont < 24 || send.width < 600) {
           fail(`${label}/chat`, `配信の入力・送信操作が見づらいか使えません ${JSON.stringify(send)}`);
         } else ok(`${label} 読める履歴文字と押せる送信ボタン`);
         await page.fill("#input", "");
