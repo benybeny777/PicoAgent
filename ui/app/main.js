@@ -120,6 +120,7 @@ composer.onEscape = () => mic.cancelPendingSubmit();
 const editor = createEditor({
   layer: document.getElementById("editLayer"),
   toolbar: document.getElementById("editToolbar"),
+  stageElement,
   stage,
   host,
   toast,
@@ -127,8 +128,6 @@ const editor = createEditor({
 });
 context.edit = editor;
 editor.attachGrip("chat", chat.resizeGrip);
-characterSource.element.addEventListener("pointerenter", () => editor.hover("character"));
-characterSource.element.addEventListener("pointerleave", () => editor.leave());
 characterSource.element.addEventListener("wheel", event => editor.wheel(event, "character"), { passive: false });
 stage.events.on("layout", () => chat.refreshTail());
 

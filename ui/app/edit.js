@@ -1,8 +1,6 @@
 // edit.js - ソースの直接操作（選択枠・つまみ・移動・拡大縮小）の持ち主。
 //
-// 3つの入口がある。どれも最後は stage.commit() で保存する。
-//   - キャラにマウスを乗せると、枠と四隅のつまみ・移動つまみが出る（モードに入らずにすぐ直せる）。
-//     キャラ本体の通常ドラッグはこれまでどおりウィンドウ移動のまま。
+// 2つの入口がある。どちらも最後は stage.commit() で保存する。
 //   - 右クリック「キャラの位置とサイズを調整」: キャラだけを調整するモード（本体ドラッグでキャラを動かす）。
 //   - 上端メニュー「配置」・右クリック「配置を編集（OBS風）」: この形式の全ソースを動かすモード。
 // ドラッグ中は stage.preview() で見た目だけを変え、保存はつまみを離した時だけ行う。
@@ -12,20 +10,19 @@ import { SOURCE_LABELS } from "../sources/index.js";
 import { el } from "./util.js";
 
 const MIN_SIZE = 48;
-const HOVER_HIDE_MS = 700;
 const CORNERS = ["top-left", "top-right", "bottom-left", "bottom-right"];
 
-export function createEditor({ layer, toolbar, stage, host, toast, onModeChange }) {
+export function createEditor({ layer, toolbar, stageElement, stage, host, toast, onModeChange }) {
   let mode = ""; // "" | "character" | "all"
-  let hoverTarget = "";
-  let hoverTimer = 0;
   let selected = "character";
   let drag = null;
+  let wheelTimer = 0;
+  let wheelTarget = "";
   const frames = new Map();
 
   function targets() {
     if (mode === "all") return stage.sourceNames().filter(name => stage.sources.get(name) && !stage.sources.get(name).element.hidden);
-    if (mode === "character" || hoverTarget) return ["character"];
+    if (mode === "character") return ["character"];
     return [];
   }
 
@@ -36,8 +33,6 @@ export function createEditor({ layer, toolbar, stage, host, toast, onModeChange 
     const handles = CORNERS.map(corner => el("span", { className: "edit-handle", dataset: { corner } }, [], { "aria-hidden": "true" }));
     const frame = el("div", { className: "edit-frame", dataset: { target: name } }, [label, move, ...handles]);
     frame.addEventListener("pointerdown", event => startDrag(event, name));
-    frame.addEventListener("pointerenter", () => clearTimeout(hoverTimer));
-    frame.addEventListener("pointerleave", () => scheduleHoverHide());
     frame.addEventListener("wheel", event => wheelResize(event, name), { passive: false });
     move.addEventListener("dblclick", event => {
       event.preventDefault();
@@ -51,32 +46,45 @@ export function createEditor({ layer, toolbar, stage, host, toast, onModeChange 
   function render() {
     const wanted = new Set(targets());
     for (const [name, frame] of frames) frame.hidden = !wanted.has(name);
+    const viewport = stageElement.getBoundingClientRect();
     for (const name of wanted) {
       const rect = stage.rectOf(name);
       if (!rect) continue;
       const windowRect = stage.toWindow(rect);
       const frame = frameFor(name);
-      frame.hidden = false;
-      frame.classList.toggle("is-selected", mode && name === selected);
-      frame.classList.toggle("is-body-draggable", mode !== "");
+      // stage 座標を固定レイヤーの viewport 座標へ変える。画面外の保存値は表示だけ切る。
+      const bounds = {
+        left: windowRect.left + viewport.left,
+        top: windowRect.top + viewport.top,
+        right: windowRect.left + windowRect.width + viewport.left,
+        bottom: windowRect.top + windowRect.height + viewport.top,
+      };
+      const visible = {
+        left: Math.max(bounds.left, viewport.left),
+        top: Math.max(bounds.top, viewport.top),
+        right: Math.min(bounds.right, viewport.right),
+        bottom: Math.min(bounds.bottom, viewport.bottom),
+      };
+      frame.hidden = visible.right <= visible.left || visible.bottom <= visible.top;
+      if (frame.hidden) continue;
+      frame.classList.toggle("is-top-clipped", bounds.top < viewport.top);
+      for (const handle of frame.querySelectorAll(".edit-handle")) {
+        const corner = handle.dataset.corner;
+        const x = corner.endsWith("left") ? bounds.left : bounds.right;
+        const y = corner.startsWith("top") ? bounds.top : bounds.bottom;
+        handle.hidden = x < viewport.left || x > viewport.right || y < viewport.top || y > viewport.bottom;
+      }
+      frame.classList.toggle("is-selected", name === selected);
+      frame.classList.add("is-body-draggable");
       Object.assign(frame.style, {
-        left: `${windowRect.left}px`,
-        top: `${windowRect.top}px`,
-        width: `${windowRect.width}px`,
-        height: `${windowRect.height}px`,
+        left: `${visible.left}px`,
+        top: `${visible.top}px`,
+        width: `${visible.right - visible.left}px`,
+        height: `${visible.bottom - visible.top}px`,
       });
     }
     layer.hidden = wanted.size === 0;
     toolbar.hidden = !mode;
-  }
-
-  function scheduleHoverHide() {
-    if (drag) return;
-    clearTimeout(hoverTimer);
-    hoverTimer = setTimeout(() => {
-      hoverTarget = "";
-      render();
-    }, HOVER_HIDE_MS);
   }
 
   /** キャラの構図で原画を2倍以上に引き伸ばさない高さの上限（窓座標）。 */
@@ -89,9 +97,7 @@ export function createEditor({ layer, toolbar, stage, host, toast, onModeChange 
   function startDrag(event, name) {
     if (event.button !== 0) return;
     const handle = event.target instanceof Element ? event.target.closest(".edit-handle") : null;
-    const onMove = event.target instanceof Element && event.target.closest(".edit-move");
-    // 調整モード外で枠の本体を押したときは、下のキャラの操作（ウィンドウ移動・クリック）へ通す。
-    if (!handle && !onMove && !mode) return;
+    if (!mode) return;
     event.preventDefault();
     event.stopPropagation();
     selected = name;
@@ -171,9 +177,9 @@ export function createEditor({ layer, toolbar, stage, host, toast, onModeChange 
     else stage.commit(name, null).catch(() => {});
   }
 
-  /** Ctrl+ホイール（調整モード中はホイールだけ）で、中心を保って拡大縮小する。 */
+  /** 配置の編集中だけ、ホイールで中心を保って拡大縮小する。 */
   function wheelResize(event, name) {
-    if (!event.ctrlKey && !mode) return;
+    if (!mode) return;
     event.preventDefault();
     const rect = stage.toWindow(stage.rectOf(name));
     const factor = Math.exp(-Math.sign(event.deltaY) * 0.06);
@@ -182,8 +188,9 @@ export function createEditor({ layer, toolbar, stage, host, toast, onModeChange 
     const width = name === "character" ? height * (rect.width / rect.height) : Math.max(MIN_SIZE, rect.width * factor);
     const next = { left: rect.left + (rect.width - width) / 2, top: rect.top + rect.height - height, width, height };
     stage.preview(name, next);
-    clearTimeout(wheelResize.timer);
-    wheelResize.timer = setTimeout(() => commit(name, next), 350);
+    clearTimeout(wheelTimer);
+    wheelTarget = name;
+    wheelTimer = setTimeout(() => { wheelTimer = 0; wheelTarget = ""; commit(name, next); }, 350);
   }
 
   function nudge(dx, dy) {
@@ -247,10 +254,11 @@ export function createEditor({ layer, toolbar, stage, host, toast, onModeChange 
     get active() { return mode !== ""; },
     get mode() { return mode; },
     start(nextMode = "all") {
+      if (mode) editor.stop();
       mode = nextMode === "character" ? "character" : "all";
       selected = "character";
-      hoverTarget = "";
       document.body.classList.add("is-editing");
+      document.body.classList.toggle("is-editing-all", mode === "all");
       renderToolbar();
       render();
       onModeChange?.(mode);
@@ -258,25 +266,29 @@ export function createEditor({ layer, toolbar, stage, host, toast, onModeChange 
     },
     stop() {
       if (!mode) return;
+      if (drag) {
+        const current = drag;
+        drag = null;
+        current.element.removeEventListener("pointermove", onDragMove);
+        current.element.removeEventListener("pointerup", onDragEnd);
+        current.element.removeEventListener("pointercancel", onDragEnd);
+        if (current.element.hasPointerCapture(current.pointerId)) current.element.releasePointerCapture(current.pointerId);
+        stage.cancelPreview(current.name);
+      }
+      clearTimeout(wheelTimer);
+      if (wheelTarget) stage.cancelPreview(wheelTarget);
+      wheelTimer = 0;
+      wheelTarget = "";
       mode = "";
       document.body.classList.remove("is-editing");
+      document.body.classList.remove("is-editing-all");
       render();
       onModeChange?.("");
-    },
-    /** キャラにマウスが乗った。モードに入らずに、つまみだけ出す。 */
-    hover(name) {
-      if (mode || stage.playingGame) return;
-      clearTimeout(hoverTimer);
-      hoverTarget = name;
-      render();
-    },
-    leave() {
-      if (!mode) scheduleHoverHide();
     },
     /** 会話パネルのつまみ: アンカーの反対側の角で大きさを変える。 */
     attachGrip(name, grip) {
       grip.addEventListener("pointerdown", event => {
-        if (event.button !== 0) return;
+        if (event.button !== 0 || mode !== "all") return;
         const placement = stage.placementOf(name);
         const { fx, fy } = anchorFactors(placement?.anchor || "top-left");
         const corner = `${fy === 1 ? "top" : "bottom"}-${fx === 1 ? "left" : "right"}`;
