@@ -42,6 +42,12 @@
   -webkit-backdrop-filter: var(--blur);
   user-select: none;
 }
+/* 固定シーンを等倍率で収めた左右の余白へ、タイトルバーだけが伸びないようにする。 */
+.app.has-fixed-scene .top-window-menu {
+  left: var(--scene-view-left);
+  right: auto;
+  width: var(--scene-view-width);
+}
 .top-window-menu-brand {
   flex: 0 0 auto;
   margin-right: var(--space-2);

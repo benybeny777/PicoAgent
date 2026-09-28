@@ -190,6 +190,14 @@ for (const characterId of characters) {
     else ok(`${label} 描画（${kind}）`);
     if (errors.length) fail(label, `画面エラー: ${errors.slice(0, 3).join(" / ")}`);
     if (layout === "stream") {
+      const headerFit = await page.evaluate(() => {
+        const scene = document.getElementById("sceneRoot").getBoundingClientRect();
+        const header = document.getElementById("topWindowMenu").getBoundingClientRect();
+        return { scene: { left: scene.left, right: scene.right }, header: { left: header.left, right: header.right } };
+      });
+      if (Math.abs(headerFit.scene.left - headerFit.header.left) > 1 || Math.abs(headerFit.scene.right - headerFit.header.right) > 1) {
+        fail(label, `タイトルバーと配信画面の左右端がずれています ${JSON.stringify(headerFit)}`);
+      } else ok(`${label} タイトルバーは配信画面の幅に揃う`);
       // 字幕を隠した状態でも胴体の切れ目を字幕に頼らず画面下端へ置く。
       const hiddenSubtitle = await page.addStyleTag({ content: '[data-source="subtitle"] { visibility: hidden !important; }' });
       const bareCharacter = await edgeContact(page);
