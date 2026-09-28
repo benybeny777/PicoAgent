@@ -1,5 +1,9 @@
 # README 用スクリーンショット（動く絵）の撮影
 
+## 人が確認する画面
+
+`node tools/screenshots/review-board.mjs --capture` で、同梱の全キャラを現行3形式（ペット・ミニ・配信）で順に撮影し、`temp/visual-review/index.html` に目視確認画面を作る。画像を拡大し、キャラ・形式・状態で絞り込める。各組み合わせの「問題なし／要修正」と所見はブラウザ内に保存され、JSONとして書き出せる。既存の会話、設定、Windows WebView2 の撮影結果へのリンクもまとめる。撮影済み画像だけから画面を作り直す場合は `--capture` を省く。`PLAYWRIGHT_MODULE` は下記の `ui-check.mjs` と同じ指定を使う。`%APPDATA%/PicoAgent/characters/` の追加キャラも一覧へ載る。MMDなど実機で撮影するキャラは `temp/visual-review/native/<キャラID>-<pet|mascot|stream>.png` に画像を置いてから画面を再生成する。追加キャラの画像はヘッドレスでは撮影しない。
+
 シーン方式の現行画面（ペット・ミニ・配信）の受入には、まず `tools/screenshots/ui-check.mjs` を使う。`PLAYWRIGHT_MODULE` に開発用 Playwright の `index.mjs` を指定して実行すると、3形式の画素・完全包含・右クリック・保存値と、全形式の拡大復元を `temp/ui-check/` で確認できる。`UI_CHECK_CHARACTERS` と `UI_CHECK_LAYOUTS` で対象を絞れる。`docs/images/layout-shot-{pet,mascot,stream}.webp` は同検査の実画面PNGから作成する。以下の `shoot.mjs` 手順は旧画面の撮影設定を含むため、新しい画面で再利用するときは対象を確認する。
 
 `docs/images/` に置いている README 掲載画像を再生成するツールです。通常プレビューは**透過つきの
