@@ -198,6 +198,13 @@ export function createChatSource(context) {
       // 状態表示は補助の1行。会話文字を大きくしても上限を設け、入力欄を窓外へ押し出さない。
       element.style.setProperty("--status-font-size", `${Math.min(18, Math.max(9, Math.round(size * 0.72)))}px`);
     },
+    setStreamFontPx(px) {
+      const requested = Number(px);
+      const size = Number.isInteger(requested) && requested >= 18 && requested <= 48 ? requested : 30;
+      element.style.setProperty("--stream-chat-font-size", `${size}px`);
+      element.style.setProperty("--stream-chat-control-font-size", `${Math.round(size * 0.8)}px`);
+      element.style.setProperty("--stream-chat-action-font-size", `${Math.round(size * 0.65)}px`);
+    },
     update({ options, expanded }) {
       const nextVariant = options.variant === "column" ? "column" : "bubble";
       if (nextVariant !== variant) pager.cancel();

@@ -645,6 +645,11 @@ function field(key, label, type, value, placeholder) {
     input.max = "100";
     input.step = "1";
   }
+  if (key === "PICOAGENT_STREAM_CHAT_FONT_PX") {
+    input.min = "18";
+    input.max = "48";
+    input.step = "1";
+  }
   if (key === "PICOAGENT_MODEL") input.setAttribute("list", "modelOptions");
   // 天気の地点は一覧から選べるようにする（自由入力も残す）。
   if (key === "PICOAGENT_WEATHER_DEFAULT_LOCATION") {
@@ -2428,7 +2433,8 @@ function bindStreamImagePicker(button, kind, label, onPicked, isAvailable = () =
 }
 
 function streamSettingsField(values) {
-  const wrapper = markSearchable(el("div", { className: "stream-settings" }), "配信 背景 ディスプレイ 画像 日付 時刻 LIVE");
+  const wrapper = markSearchable(el("div", { className: "stream-settings" }), "配信 チャット 文字 サイズ 背景 ディスプレイ 画像 日付 時刻 LIVE");
+  wrapper.append(field("PICOAGENT_STREAM_CHAT_FONT_PX", "配信チャットの文字サイズ（18〜48px）", "number", values.PICOAGENT_STREAM_CHAT_FONT_PX ?? "30", "30"));
   wrapper.append(selectField("PICOAGENT_STREAM_BACKGROUND", "配信背景", values.PICOAGENT_STREAM_BACKGROUND || "pastel", [
     { value: "pastel", label: "パステルスタジオ" },
     { value: "gaming", label: "落ち着いたゲーム部屋" },
@@ -3095,7 +3101,7 @@ async function render() {
     { value: "glass", label: "すりガラス" },
     { value: "pastel", label: "パステル" },
   ]));
-  displaySec.append(field("PICOAGENT_BUBBLE_FONT_PX", "会話文字の大きさ（px）", "text", v.PICOAGENT_BUBBLE_FONT_PX ?? "", "13"));
+  displaySec.append(field("PICOAGENT_BUBBLE_FONT_PX", "ペット・ミニの会話文字（px）", "text", v.PICOAGENT_BUBBLE_FONT_PX ?? "", "13"));
   displaySec.append(field("PICOAGENT_ALWAYS_ON_TOP", "常に手前に表示", "checkbox", v.PICOAGENT_ALWAYS_ON_TOP !== false));
   displaySec.append(streamSettingsField(v));
   displaySec.append(layoutResetField());
@@ -4128,6 +4134,8 @@ function confirmRestart() {
 
 saveBtn.addEventListener("click", async () => {
   if (settingsMutationBusy || !savedSnapshot) return;
+  const streamFontInput = inputs.get("PICOAGENT_STREAM_CHAT_FONT_PX");
+  if (streamFontInput && !streamFontInput.reportValidity()) return;
   setSettingsMutationBusy(true);
   statusEl.textContent = "保存中…";
   try {
