@@ -1,6 +1,6 @@
 # holo Indie 応募企画書の下書き生成ツール
 
-holo Indie へ応募する作品 PicoAgent の企画書の下書き `temp/HOLO-INDIE-PLAN.pptx`（全10枚）を生成します。提出物はDrive上の動画付きGoogleスライドです。下書きPPTXはGitにも提出先にも置きません。
+holo Indie へ応募する作品 PicoAgent の企画提案書の下書き `temp/HOLO-INDIE-PLAN.pptx`（全11枚）を生成します。構成は「表紙 → コンセプト → 着眼点 → 体験 → キャラクター → 遊びのループ → おまけゲーム → IPを守る設計 → 実現性 → ロードマップ → ご相談」で、機能紹介ではなく企画提案として読める順にしています。提出物はDrive上の動画付きGoogleスライドです。下書きPPTXはGitにも提出先にも置きません。
 
 **応募作の本体は PicoAgent で、ミニゲーム「人間だとバレるな」はおまけです。** 企画書でもミニゲームは1枚だけで紹介します。
 
@@ -24,16 +24,18 @@ Playwright をグローバル以外に置いている場合は `PLAYWRIGHT_MODUL
 
 ## 掲載する画像と動画
 
-審査版の主役はさくらみこです。4枚目には、さくらみこのMMDとAivis音声を含む7秒のMP4と、ひよりのLive2D動作を示す無音のMP4を埋め込みます。ひよりは旧UIで撮影した動作例であり、審査版への同梱キャラではありません。Googleスライドへ変換した後は両MP4をDriveへアップロードし、静止画化した箇所をDrive動画へ置き換えます。スライドショーで▶を押すと再生します。編集画面やPDFでは動きません。この条件をファイル名と資料内に明記します。
+審査版の主役はさくらみこです。5枚目には、さくらみこのMMDとAivis音声を含む7秒のMP4と、ひよりのLive2D動作を示す無音のMP4を埋め込みます。ひよりは旧UIで撮影した動作例であり、審査版への同梱キャラではありません。Googleスライドへ変換した後は両MP4をDriveへアップロードし、静止画化した箇所をDrive動画へ置き換えます。スライドショーで▶を押すと再生します。編集画面やPDFでは動きません。この条件をファイル名と資料内に明記します。
 
 | 素材 | 使用箇所 |
 |---|---|
 | `holo-miko-stream.png` | 表紙（さくらみこの配信表示） |
-| `holo-miko-stream.png` | 3枚目（みこの配信表示） |
-| `holo-miko-chat.png` | 5枚目（さくらみこのチャット表示） |
-| `holo-miko-motion.mp4` と `holo-miko-motion-poster.png` | 4枚目（さくらみこの動作） |
-| `holo-hiyori-motion.mp4` と `holo-hiyori-motion-poster.png` | 4枚目（ひよりのLive2D動作） |
-| `holo-indie-result.webp` | 6枚目（おまけのミニゲーム） |
+| `holo-miko-stream.png` | 4枚目（推しと過ごす1日） |
+| `holo-miko-motion.mp4` と `holo-miko-motion-poster.png` | 5枚目（さくらみこの動作） |
+| `holo-hiyori-motion.mp4` と `holo-hiyori-motion-poster.png` | 5枚目（ひよりのLive2D動作） |
+| `holo-miko-chat.png` | 6枚目（遊びのループ） |
+| `holo-indie-result.webp` | 7枚目（おまけのミニゲーム） |
+
+背景（夜色の地にピンク・ミントの光と点格子）は生成時にSVGから作り、画像ファイルとしてはリポジトリに置きません。文字は Google スライドでも使える Noto Sans JP を指定しています。
 
 `capture-current.mjs`は現行の実フロントを使い、バックエンド応答だけを撮影用に固定します。`--voice-video`では既存のAivis合成音声サンプルを実フロントの読み上げ経路へ渡し、さくらみこの配信動画に音声を収録します。音声の文章と画面上の固定応答の一致は収録前に確認してください。AIの実応答の検証ではありません。導入済みモデルだけを読み取り、PMX・テクスチャや利用者設定は変更しません。モデル本体はPPTにもGitにも追加せず、表示した画面と録画だけを保存します。動画はH.264・yuv420pで、外部リンクに依存せずPPT内へ埋め込みます。
 
@@ -52,4 +54,4 @@ python3 <pptxスキル>/scripts/office/validate.py temp/HOLO-INDIE-PLAN.pptx
 soffice --headless --convert-to pdf temp/HOLO-INDIE-PLAN.pptx
 ```
 
-LibreOffice は Meiryo を別フォントへ置き換えるため、文字幅は実際の PowerPoint と完全には一致しません。文字あふれは余裕をもって判定し、送付前に PowerPoint で目視してください。
+Noto Sans JP が入っていない環境では別フォントへ置き換わるため、文字幅は実際の PowerPoint と完全には一致しません。文字あふれは余裕をもって判定し、送付前に PowerPoint で目視してください。
