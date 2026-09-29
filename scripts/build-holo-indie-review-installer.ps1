@@ -26,6 +26,7 @@ Set-Location -LiteralPath $root
 $characterId = 'miko-mmd'
 $reviewIdentifier = 'com.picoagent.holo-indie-review'
 $reviewDataRoot = "PicoAgent\instances\$reviewIdentifier"
+$reviewDataScope = $reviewDataRoot -replace '\\', '/'
 $characterRoot = Join-Path $env:APPDATA 'PicoAgent\characters'
 $characterSource = Join-Path $characterRoot $characterId
 $characterJson = Join-Path $characterSource 'character.json'
@@ -68,6 +69,14 @@ $initialConfig = [ordered]@{
     PICOAGENT_LAYOUT          = 'pet'
     PICOAGENT_PROVIDER        = 'local'
     PICOAGENT_TTS_ENABLED     = $true
+    PICOAGENT_TTS_CHARACTER_OVERRIDES = @{
+        'miko-mmd' = @{
+            speaker = '888753760'
+            modelUuid = 'a59cb814-0083-4369-8542-f51a29e72af7'
+            speakerUuid = 'e756b8e4-b606-4e15-99b1-3f9c6a1b2317'
+            styleName = 'ノーマル'
+        }
+    }
     PICOAGENT_CHATTER_ENABLED = $false
 }
 [System.IO.File]::WriteAllText(
@@ -93,6 +102,19 @@ $hook.Add('!macroend')
 $config = [ordered]@{
     productName = 'PicoAgent holo Indie 審査版'
     identifier  = $reviewIdentifier
+    app         = [ordered]@{
+        security = [ordered]@{
+            assetProtocol = [ordered]@{
+                enable = $true
+                scope = @(
+                    "`$DATA/$reviewDataScope/characters/**"
+                    "`$DATA/$reviewDataScope/display/**"
+                    "`$DATA/$reviewDataScope/character-maker/characters/**"
+                    "`$DATA/$reviewDataScope/generated-media/**"
+                )
+            }
+        }
+    }
     bundle      = [ordered]@{
         resources = @(
             'resources/bundled/engine/**/*',
@@ -118,6 +140,9 @@ if ($generated -match 'SetOutPath\s+"\$APPDATA\\com\.picoagent\.desktop(?:\\|\")
 }
 if ($initialConfig.PICOAGENT_TTS_ENABLED -ne $true -or $generated -notmatch 'resources/bundled/aivis') {
     throw '審査版のAivis読み上げ設定が揃っていません。'
+}
+if ($generated -notmatch [regex]::Escape("`$DATA/$reviewDataScope/characters/**")) {
+    throw '審査版のキャラクター読み取り範囲が専用領域へ設定されていません。'
 }
 if (-not (Test-Path -LiteralPath 'src-tauri/resources/bundled/aivis/run.exe' -PathType Leaf)) {
     throw 'Aivis本体が見つかりません。cargo xtask setup aivis を実行してください。'

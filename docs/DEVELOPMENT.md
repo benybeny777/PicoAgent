@@ -178,7 +178,7 @@ cargo xtask update-feed src-tauri\target\release\bundle\nsis\PicoAgent_<版>_x64
 holo Indieの審査へ渡す候補は、リポジトリ直下の`holo Indie審査版インストーラをビルド.bat`で生成します（本体は`scripts/build-holo-indie-review-installer.ps1`。PowerShell 7が必要）。通常版、関係者版、審査版を同じ成果物として扱いません。
 
 - `%APPDATA%\PicoAgent\characters\miko-mmd`に、公式配布元の`readme.txt`を含むさくらみこMMD登録データを用意します。出所と利用条件を確認できない場合はビルド前に停止します。
-- 配信・動画から学習した本人音声モデルやAIVMXは含めません。Aivis本体を同梱して読み上げを既定で有効にし、初回起動時に公式の既定音声モデルを取得して仮音声で話します。仮音声は本人の声ではありません。
+- 配信・動画から学習した本人音声モデルやAIVMXは含めません。Aivis本体を同梱して読み上げを既定で有効にし、初回起動時にAivisHub公開モデル「まお」（ACML 1.0）を取得して仮音声で話します。仮音声は本人の声ではありません。専用Tauri設定のasset protocolは審査版の利用者領域だけを許可し、通常版のキャラクター領域へはアクセスしません。
 - 識別子`com.picoagent.holo-indie-review`の専用利用者領域へ導入し、通常版の設定、会話履歴、キャラクター、音声モデルを読みません。
 - 生成設定だけを軽く検査するときは`pwsh -File scripts/build-holo-indie-review-installer.ps1 -PrepareOnly -AllowStale`を使います。
 - 生成物は`temp\holo-indie-review-installer\PicoAgent_<版>_holo-Indie-Review_x64-setup.exe`です。holo Indie審査への限定共有専用であり、公開LP、公開Release、`latest.json`へ載せません。一般配布は許諾後に別の配布設定と実機検証で作ります。
