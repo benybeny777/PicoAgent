@@ -1,0 +1,131 @@
+// 現行シーン方式のさくらみこ表示を、登録済みモデルを読み取り専用で撮影する。
+import http from "node:http";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { execFileSync } from "node:child_process";
+
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
+const sourceRoot = process.env.PICO_CAPTURE_SOURCE || root;
+const uiRoot = path.join(sourceRoot, "ui");
+const modelRoot = path.join(process.env.APPDATA || "", "PicoAgent", "characters", "miko-mmd");
+const output = path.join(root, "docs", "images");
+const playwrightModule = process.env.PLAYWRIGHT_MODULE;
+const { chromium } = await import(playwrightModule ? pathToFileURL(playwrightModule).href : "playwright");
+const types = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".json": "application/json", ".png": "image/png", ".webp": "image/webp", ".jpg": "image/jpeg", ".svg": "image/svg+xml", ".wasm": "application/wasm" };
+
+if (!fs.existsSync(path.join(modelRoot, "character.json"))) throw new Error("登録済みのさくらみこMMDモデルが見つかりません");
+fs.mkdirSync(output, { recursive: true });
+
+const server = http.createServer((request, response) => {
+  try {
+    const name = decodeURIComponent(new URL(request.url, "http://localhost").pathname).replace(/^\//, "");
+    const model = name.startsWith("assets/characters/miko-mmd/");
+    const base = model ? modelRoot : uiRoot;
+    const relative = model ? name.slice("assets/characters/miko-mmd/".length) : name || "index.html";
+    const file = path.resolve(base, relative);
+    if (!file.startsWith(path.resolve(base) + path.sep) || !fs.statSync(file).isFile()) throw new Error("対象外のファイルです");
+    let body = fs.readFileSync(file);
+    if (name === "assets/characters/index.json") {
+      const catalog = JSON.parse(body.toString("utf8"));
+      catalog.characters.push({ id: "miko-mmd", name: "さくらみこ", manifest: "miko-mmd/character.json" });
+      body = Buffer.from(JSON.stringify(catalog));
+    }
+    response.writeHead(200, { "Content-Type": types[path.extname(file)] || "application/octet-stream", "Cache-Control": "no-store" });
+    response.end(body);
+  } catch {
+    response.writeHead(404);
+    response.end("not found");
+  }
+});
+
+const history = [
+  { role: "user", content: "今日やることを一緒に整理して" },
+  { role: "assistant", content: "にゃっはろ～！予定の整理も調べものも、いっしょに進めようにぇ。" },
+];
+const mock = (layout, characterId) => `
+window.__TAURI__ = {
+  core: { invoke: (name, args = {}) => {
+    if (name === "pet_init") return Promise.resolve({
+      up: true, providerId: "local", theme: "system", uiTheme: "glass", fontPx: "14", streamChatFontPx: "30", voiceVolume: "35",
+      characterId: ${JSON.stringify(characterId)}, characterOverrides: {}, live2dSdkOverrides: {}, layout: ${JSON.stringify(layout)}, scenes: {},
+      history: ${JSON.stringify(history)}, quickActions: "", napMinutes: "0", onboardingDone: true,
+      relationshipMemoryEnabled: true, relationship: {}, bondLabel: "いっしょの相棒", gazeTrackingEnabled: false,
+      bootProgressIntervalMs: 10000, ttsEnabled: false, streamBackground: "pastel", streamDisplay: "dashboard",
+      streamCaptionColor: "#5a3b4b", chatterEnabled: false, chatterMinSecs: "9999", chatterMaxSecs: "9999", betaBuild: false,
+    });
+    if (name === "engine_status") return Promise.resolve({ phase: "ready" });
+    if (name === "aivis_status" || name === "pet_speak") return Promise.resolve({ enabled: false });
+    if (name === "pet_alarms") return Promise.resolve({ alarms: [] });
+    if (name === "pet_daily_events") return Promise.resolve({ events: [] });
+    if (name === "pet_user_characters") return Promise.resolve({ characters: [] });
+    if (name === "pet_config_presence") return Promise.resolve({});
+    if (name === "pet_schedule_runs" || name === "pet_durable_jobs") return Promise.resolve([]);
+    if (name === "settings_components_status") return Promise.resolve([]);
+    return Promise.resolve({});
+  } },
+  event: { listen: () => Promise.resolve(() => {}) },
+  window: { getCurrentWindow: () => ({ setFullscreen: async () => {}, setSize: async () => {}, scaleFactor: async () => 1,
+    outerPosition: async () => ({ x: 0, y: 0 }), setPosition: async () => {}, startResizeDragging: async () => {},
+    minimize: async () => {}, toggleMaximize: async () => {}, close: async () => {} }) },
+  dpi: {},
+};`;
+
+let browser;
+try {
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  browser = await chromium.launch({ args: ["--enable-unsafe-swiftshader", "--use-gl=swiftshader", "--ignore-gpu-blocklist"] });
+  const base = `http://127.0.0.1:${server.address().port}/`;
+  for (const { characterId, layout, width, height, image, video, seconds, fps } of [
+    { characterId: "miko-mmd", layout: "stream", width: 1280, height: 720, image: "holo-miko-stream.png", video: "holo-miko-motion.mp4", seconds: 7, fps: 30 },
+    { characterId: "miko-mmd", layout: "pet", width: 900, height: 600, image: "holo-miko-pet.png" },
+    { characterId: "hiyori", layout: "pet", width: 900, height: 600, video: "holo-hiyori-motion.mp4", seconds: 6, fps: 60 },
+  ]) {
+    const context = await browser.newContext({ viewport: { width, height }, deviceScaleFactor: 1 });
+    try {
+      const page = await context.newPage();
+      const errors = [];
+      page.on("pageerror", error => errors.push(String(error)));
+      await page.addInitScript(mock(layout, characterId));
+      await page.goto(base);
+      await page.waitForFunction(() => !document.getElementById("petApp")?.classList.contains("is-booting"), null, { timeout: 30000 });
+      await page.waitForFunction(kind => {
+        const view = document.querySelector("[data-source=character] .character-view");
+        const canvas = view?.querySelector("canvas");
+        return view?.dataset.renderKind === kind && canvas?.width > 1 && canvas?.height > 1;
+      }, characterId === "miko-mmd" ? "mmd" : "live2d", { timeout: 30000 });
+      await page.waitForTimeout(1200);
+      if (errors.length) throw new Error(errors.join("\n"));
+      if (image) await page.screenshot({ path: path.join(output, image) });
+      if (characterId === "miko-mmd" && layout === "stream") {
+        const chat = page.locator('[data-source="chat"]');
+        await chat.screenshot({ path: path.join(output, "holo-miko-chat.png") });
+      }
+      if (video && process.argv.includes("--video")) {
+        const tempRoot = path.join(root, "temp");
+        fs.mkdirSync(tempRoot, { recursive: true });
+        const frames = fs.mkdtempSync(path.join(tempRoot, "holo-current-"));
+        try {
+          const start = await page.evaluate(() => Date.now());
+          await page.clock.pauseAt(new Date(start + 10000));
+          for (let index = 0; index < seconds * fps; index += 1) {
+            const next = Math.round((index + 1) * 1000 / fps) - Math.round(index * 1000 / fps);
+            await page.clock.runFor(next);
+            const frame = await page.screenshot();
+            fs.writeFileSync(path.join(frames, `f-${String(index).padStart(4, "0")}.png`), frame);
+            if (index === 0) fs.writeFileSync(path.join(output, `holo-${characterId === "miko-mmd" ? "miko" : "hiyori"}-motion-poster.png`), frame);
+          }
+          execFileSync(process.env.SHOOT_FFMPEG || "ffmpeg", ["-y", "-loglevel", "error", "-framerate", String(fps), "-i", path.join(frames, "f-%04d.png"), "-c:v", "libx264", "-preset", "medium", "-crf", "18", "-pix_fmt", "yuv420p", "-an", "-movflags", "+faststart", path.join(output, video)], { stdio: "pipe" });
+        } finally {
+          fs.rmSync(frames, { recursive: true, force: true });
+        }
+      }
+      console.log(`現行画面を撮影: ${characterId}/${layout}${video && process.argv.includes("--video") ? "（動画あり）" : ""}`);
+    } finally {
+      await context.close();
+    }
+  }
+} finally {
+  await browser?.close();
+  await new Promise(resolve => server.close(resolve));
+}
