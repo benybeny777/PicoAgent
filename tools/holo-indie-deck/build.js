@@ -106,17 +106,19 @@ function badge(s, o) {
   });
 }
 
-// 画面写真。元画像の縦横比を保って枠内へ収める。
+// 画面写真。元画像の縦横比を保って指定範囲の中央へ収め、枠は画像の外周に合わせる。
 function shot(s, name, o) {
-  s.addShape(pres.ShapeType.roundRect, {
-    x: o.x - 0.06, y: o.y - 0.06, w: o.w + 0.12, h: o.h + 0.12, rectRadius: 0.12,
-    fill: { color: NIGHT }, line: { color: NIGHT }, shadow: shadow(),
-  });
   const { width, height } = imageSizes.get(name);
   const scale = Math.min(o.w / width, o.h / height);
   const w = width * scale;
   const h = height * scale;
-  s.addImage({ path: path.join(IMG, name + ".png"), x: o.x + (o.w - w) / 2, y: o.y + (o.h - h) / 2, w, h });
+  const x = o.x + (o.w - w) / 2;
+  const y = o.y + (o.h - h) / 2;
+  s.addShape(pres.ShapeType.roundRect, {
+    x: x - 0.06, y: y - 0.06, w: w + 0.12, h: h + 0.12, rectRadius: 0.12,
+    fill: { color: NIGHT }, line: { color: NIGHT }, shadow: shadow(),
+  });
+  s.addImage({ path: path.join(IMG, name + ".png"), x, y, w, h });
   if (name.startsWith("holo-miko-")) {
     s.addNotes("さくらみこ公式MMDモデルをPicoAgentの実フロントで描画した画面。会話は撮影用の固定応答。モデル本体と利用者設定は変更していない。");
   }

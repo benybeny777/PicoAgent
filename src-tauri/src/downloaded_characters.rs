@@ -81,15 +81,15 @@ fn folder_models(
 
 fn zip_models(path: &Path) -> Option<ModelCounts> {
     let file = std::fs::File::open(path).ok()?;
-    let mut archive = zip::ZipArchive::new(file).ok()?;
+    let archive = zip::ZipArchive::new(file).ok()?;
     if archive.len() > MAX_FOLDER_ENTRIES {
         return None;
     }
+    // 中央ディレクトリの名前だけを見る。暗号化エントリを含むzipも候補判定から落とさない。
     let mut counts = ModelCounts::default();
-    for index in 0..archive.len() {
-        let entry = archive.by_index(index).ok()?;
-        if !entry.is_dir() {
-            counts.add(entry.name());
+    for name in archive.file_names() {
+        if !name.ends_with('/') {
+            counts.add(name);
         }
         if counts.mmd + counts.live2d > 1 {
             break;
