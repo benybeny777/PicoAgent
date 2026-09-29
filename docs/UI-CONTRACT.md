@@ -88,6 +88,7 @@
 | `settings_check_update` | なし | 更新の有無 |
 | `settings_install_update` | なし | 更新の実行結果 |
 | `settings_character_pick` | `folder` | 選んだパス |
+| `settings_character_discover_downloads` | なし | ダウンロードフォルダ内のMMD・Live2D候補 |
 | `settings_character_install` | `path` | 導入結果 |
 | `settings_character_install_live2d` | `path`, `id`, `name` | 導入結果 |
 | `settings_character_install_mmd` | `path`, `id`, `name` | 導入結果 |

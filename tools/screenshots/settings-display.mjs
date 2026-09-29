@@ -125,6 +125,10 @@ window.__TAURI__ = {
       return { items: window.__memoryItems };
     }
     if (name === "pet_user_characters") return { characters: [{ id: "user-test", name: "追加テスト", path: "http://127.0.0.1:${port}/assets/characters/mugi", user: true }], root: "" };
+    if (name === "settings_character_discover_downloads") return { candidates: [
+      { kind: "live2d", name: "ひより", path: "C:\\Users\\me\\Downloads\\ひより.zip" },
+      { kind: "mmd", name: "モデル", path: "C:\\Users\\me\\Downloads\\モデル.pmx" },
+    ] };
     if (name === "settings_character_rename") return { ok: true, id: args.id, name: args.name };
     if (name === "settings_character_remove") return { ok: true, activeCharacter: "mugi" };
     if (name === "settings_export_diagnostics") return { path: "C:\\\\Users\\\\me\\\\AppData\\\\Roaming\\\\PicoAgent\\\\log\\\\diagnostics.2026-09-02.080000.txt" };
@@ -586,6 +590,13 @@ try {
   if (await page.getByRole("heading", { name: "キャラクターを追加", exact: true }).count() !== 1) throw new Error("キャラ登録タブに追加操作がありません");
   if (await page.locator(".character-browser-list:visible").count()) throw new Error("キャラ登録タブに選択一覧が混ざっています");
   if (await page.locator(".tts-master-status:visible").count()) throw new Error("キャラ登録タブに音声設定が混ざっています");
+  await page.getByRole("button", { name: "ダウンロードからモデルを探す" }).click();
+  if (await page.locator(".download-discovery-results .card-item").count() !== 2) throw new Error("ダウンロード済みモデル候補が表示されません");
+  await page.locator(".download-discovery-results .card-item").first().getByRole("button", { name: "このモデルを選ぶ" }).click();
+  if (!await page.locator(".download-discovery-form").isVisible()) throw new Error("モデル選択後の確認欄が出ません");
+  if (await page.locator(".download-discovery-form input[type=text]").first().inputValue() !== "ひより") throw new Error("候補の表示名が入力されません");
+  await page.getByRole("button", { name: "選んだモデルを追加" }).click();
+  if (!await page.locator(".download-discovery-status").textContent().then(text => text.includes("利用条件"))) throw new Error("利用条件の未確認時に追加を止めません");
   await page.screenshot({ path: join(OUT, "character-register-tab.png") });
   await page.getByRole("tab", { name: "診断・修復" }).click();
   // 不具合連絡用の書き出し。保存先をその場に出す（秘密値を含めないことも明示する）。

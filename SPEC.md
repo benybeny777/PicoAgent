@@ -389,8 +389,9 @@ LLMによる候補生成・隔離検証・版管理を加える未実装の設�
 
 PicoAgent 自身と Git 管理するベンダの JavaScript は `eval()`／`Function` コンストラクタを使わず、`bundle_scope::guard` が追加を拒否する。
 
-- **導入**: 設定「キャラ登録」で zip またはフォルダを選ぶ。選択は `settings_character_pick` が Rust 側の `tauri-plugin-dialog` で行い、パスだけを返す。完成済みパックは `settings_character_install`、利用者が取得した生の Live2D は `settings_character_install_live2d`。
+- **導入**: 設定「キャラ登録」の「ダウンロードからモデルを探す」を押すと、OSのダウンロードフォルダの直下300項目から、単一PMXまたは単一 `.model3.json` を含むzip・フォルダを読み取り専用で探す。候補は新しい順に最大30件表示し、複数モデルを含むものは自動選択しない。利用者が候補、表示名、ID、利用条件を確認して追加を押した後だけ、既存のMMD／Live2D導入処理へ渡す。常時監視、無断取得、元ファイルの移動・削除はしない。候補がなければ手動選択を使う。zip またはフォルダの手動選択は `settings_character_pick` が Rust 側の `tauri-plugin-dialog` で行い、パスだけを返す。完成済みパックは `settings_character_install`、利用者が取得した生の Live2D は `settings_character_install_live2d`。
   - 生の Live2D は `.model3.json` を再帰的に探し、1個だけならその親フォルダをコピーして `character.json` を自動生成する。0個または複数なら拒否する。公式サンプルを含むモデル実体をアプリが代理取得・再配布しない。
+  - PMXを直接選んだときは、同じフォルダ全体ではなくPMXが参照するテクスチャだけを相対配置を保ってコピーする。ダウンロードフォルダにある無関係なファイルは読み込まない。
   - 「zip を開くとモデル名のフォルダが1つ」という配布形は1階層だけ潜って `character.json` を探す（複数なら拒否）。
   - 「一時フォルダへ展開/複製 → 検証 → `rename` で確定」の順で、検証を通らないものを導入先へ残さない。zip は `enclosed_name()` で zip slip を拒否し、件数・総量・1ファイルサイズを展開しながら検査する。
   - GUI生成・導入・削除は同じ `user-characters` 状態ロックで直列化する。

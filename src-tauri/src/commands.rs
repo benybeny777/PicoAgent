@@ -1477,6 +1477,21 @@ pub async fn settings_character_pick(app: AppHandle, folder: bool) -> Result<Val
     Ok(json!({ "path": picked }))
 }
 
+/// 利用者が押したときだけダウンロードフォルダの候補を読み取り専用で列挙する。
+#[tauri::command]
+pub async fn settings_character_discover_downloads() -> Result<Value, String> {
+    let downloads = dirs::download_dir().ok_or_else(|| {
+        "ダウンロードフォルダを特定できません。ファイル選択から追加してください。".to_string()
+    })?;
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::downloaded_characters::discover(&downloads)
+            .map(|candidates| json!({ "candidates": candidates }))
+            .map_err(|error| format!("ダウンロードしたモデルを探せませんでした: {error:#}"))
+    })
+    .await
+    .map_err(|error| format!("モデル候補の検索を完了できませんでした: {error}"))?
+}
+
 /// キャラクターパックを導入する。導入後は一覧へすぐ反映される（再起動は不要）。
 #[tauri::command(async)]
 pub fn settings_character_install(app: AppHandle, path: String) -> Result<Value, String> {

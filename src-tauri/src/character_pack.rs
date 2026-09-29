@@ -20,6 +20,10 @@ use serde_json::Value;
 #[path = "mmd_character_pack.rs"]
 mod mmd_character_pack;
 
+pub(crate) fn mmd_texture_references(bytes: &[u8]) -> Result<Vec<String>> {
+    mmd_character_pack::inspect(bytes)
+}
+
 /// パックに置ける拡張子。実行可能なものは入れない。
 pub const ALLOWED_EXTENSIONS: &[&str] = &[
     "json",

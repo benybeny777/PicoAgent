@@ -245,6 +245,7 @@ window.picoagent = {
     // キャラクターパック（フォルダ / zip）の選択・導入・削除。
     userCharacters: () => call("pet_user_characters"),
     pickCharacterPack: (folder) => call("settings_character_pick", { folder }),
+    discoverDownloadedCharacters: () => call("settings_character_discover_downloads"),
     installCharacter: (path) => call("settings_character_install", { path }),
     installLive2dCharacter: (path, id, name) => call("settings_character_install_live2d", { path, id, name }),
     installMmdCharacter: (path, id, name) => call("settings_character_install_mmd", { path, id, name }),
