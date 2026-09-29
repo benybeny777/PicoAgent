@@ -65,10 +65,12 @@ window.__TAURI__ = {
     if (name === "pet_alarms") return Promise.resolve({ alarms: [] });
     if (name === "pet_game_ready") return Promise.resolve({ ready: true });
     if (name === "pet_game_judge") return Promise.resolve({ total: 86, criteria: [
-      { key: "tone", label: "AIらしい話し方", score: 22, maxScore: 25, reason: "丁寧な説明で落ち着いている" },
-      { key: "logic", label: "言い訳の巧さ", score: 21, maxScore: 25, reason: "原因から代案へ自然につないだ" },
-      { key: "fit", label: "お題への対応", score: 18, maxScore: 20, reason: "状況を正しく拾っている" },
-      { key: "bonus", label: "おもしろボーナス", score: 5, maxScore: 10, reason: "少し大げさな丁寧さが面白い" },
+      { key: "ai_style", label: "AIらしい話し方", score: 22, maxScore: 25, reason: "丁寧な説明で落ち着いている" },
+      { key: "excuse", label: "言い訳の巧さ", score: 21, maxScore: 25, reason: "原因から代案へ自然につないだ" },
+      { key: "plausibility", label: "もっともらしさ", score: 16, maxScore: 20, reason: "確認を重ねた経緯に筋が通っている" },
+      { key: "extra_help", label: "頼まれていない親切", score: 17, maxScore: 20, reason: "重要部分の先行提出を提案した" },
+      { key: "relevance", label: "お題への対応", score: 5, maxScore: 10, reason: "遅延した状況を拾っている" },
+      { key: "fun_bonus", label: "おもしろボーナス", score: 5, maxScore: 10, reason: "少し大げさな丁寧さが面白い" },
     ], commentary: "AIらしい説明でした。人間らしさはほとんど見えません。", highlight: "確認を慎重に進めた結果", improvement: "次は代案をもう一つ添えましょう。" });
     if (name === "pet_daily_events") return Promise.resolve({ events: [] });
     if (name === "pet_user_characters") return Promise.resolve({ characters: [] });
