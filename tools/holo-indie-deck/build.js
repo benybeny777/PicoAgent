@@ -16,8 +16,8 @@ const OUT = path.join(ROOT, "temp", "HOLO-INDIE-PLAN.pptx");
 // pptxgenjs は WebP を埋め込めないため、掲載する画像だけ PNG へ変換して一時領域へ置く。
 fs.mkdirSync(path.join(ROOT, "temp"), { recursive: true });
 const IMG = fs.mkdtempSync(path.join(ROOT, "temp", "holo-indie-deck-"));
-// 本体画面はさくらみこ、ひよりはLive2Dの動作例として別に紹介する。
-const USED = ["holo-miko-stream", "holo-miko-pet", "holo-miko-chat", "holo-indie-result"];
+// さくらみこところねを表示例にし、ひよりはLive2Dの動作例として紹介する。
+const USED = ["holo-miko-stream", "holo-korone-stream", "holo-miko-chat", "holo-indie-result"];
 const imageSizes = new Map();
 
 async function prepareImages() {
@@ -119,6 +119,9 @@ function shot(s, name, o) {
   s.addImage({ path: path.join(IMG, name + ".png"), x: o.x + (o.w - w) / 2, y: o.y + (o.h - h) / 2, w, h });
   if (name.startsWith("holo-miko-")) {
     s.addNotes("さくらみこ公式MMDモデルをPicoAgentの実フロントで描画した画面。会話は撮影用の固定応答。モデル本体と利用者設定は変更していない。");
+  }
+  if (name.startsWith("holo-korone-")) {
+    s.addNotes("利用者が追加した戌神ころねMMDモデルを実フロントで描画した画面。審査版には同梱しない。モデル本体と利用者設定は変更していない。");
   }
   if (o.caption) {
     s.addText(o.caption, {
@@ -229,9 +232,9 @@ function build() {
         x: M + 0.78, y: y + 0.38, w: 5.6, h: 0.52, isTextBox: true, margin: 0, fontFace: JP, fontSize: 12, color: MUTED, lineSpacing: 18, valign: "top",
       });
     });
-    shot(s, "holo-miko-pet", { x: 7.35, y: 1.9, w: 5.2, h: 3.47, caption: SAMPLE });
-    s.addText("ペット形式：左にフキダシ、右にキャラクター。いちばん普段づかいの表示です。", {
-      x: 7.35, y: 5.95, w: 5.2, h: 0.3, isTextBox: true, margin: 0, fontFace: JP, fontSize: 11, color: MUTED,
+    shot(s, "holo-korone-stream", { x: 7.35, y: 1.9, w: 5.2, h: 3.47, caption: "戌神ころね：利用者が追加したMMDモデル" });
+    s.addText("キャラの追加数に固定上限はありません。利用条件と端末容量に応じて増やせます。", {
+      x: 7.35, y: 5.8, w: 5.2, h: 0.55, isTextBox: true, margin: 0, fontFace: JP, fontSize: 11, color: MUTED,
     });
     pageNo(s, 3);
   }
@@ -366,7 +369,7 @@ function build() {
     const rx = M + 6.45;
     const others = [
       ["秘", "会話を外へ出さない", "審査版は既定で端末内のAIで動作。作者は会話ログを収集しない"],
-      ["公", "公式素材の扱い", "同梱は出所と利用条件を確認したさくらみこ公式MMDモデル1体のみ。音声モデルは同梱せず、読み上げは無効"],
+      ["公", "公式素材の扱い", "審査版はさくらみこ1体を同梱。利用者が追加するキャラ数に固定上限はない。音声モデルは同梱しない"],
       ["次", "一般配布までに対応", "公式キャラクターの人格を上書きできない「人格ロック」と、AIによる生成である旨の常時表示"],
     ];
     others.forEach(([icon, t, b], i) => {
@@ -390,7 +393,7 @@ function build() {
     title(s, "REVIEW BUILD", "審査ビルドと、審査で見せる3分間");
     const rows = [
       ["対象OS", "Windows 10／11（x64）"],
-      ["キャラクター", "さくらみこ公式MMDモデル1体のみ"],
+      ["同梱キャラ", "さくらみこ1体／追加数に固定上限なし"],
       ["AI", "同梱エンジンで端末内動作（初回にモデルを取得）"],
       ["音声", "なし（字幕表示のみ）"],
       ["初期表示", "ペット形式"],
