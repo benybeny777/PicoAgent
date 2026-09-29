@@ -11,9 +11,11 @@ holo Indie へ応募する作品 PicoAgent の説明資料の下書き `temp/HOL
 ```bash
 npm install -g pptxgenjs sharp jszip playwright   # 初回だけ。アプリのビルドには不要な作業用ツール
 git lfs pull                                 # docs/images/ の実体が必要
-node tools/holo-indie-deck/capture-current.mjs --video # 現行画面と2体の動作を撮影
+node tools/holo-indie-deck/capture-current.mjs --voice-video # Aivis音声を含むさくらみこの配信動画を撮影
 node tools/holo-indie-deck/build.js          # temp/HOLO-INDIE-PLAN.pptx を生成
 ```
+
+`--voice-video`の前に、Aivisを起動して公開モデル「まお」を導入し、`pwsh -File tools/holo-indie-deck/synthesize-demo.ps1`で撮影用WAVを作ります。Aivisのポートが既定と異なる場合は`-Endpoint`を指定します。撮影用WAVは`temp/`だけに置き、Gitと提出先には含めません。
 
 Playwright をグローバル以外に置いている場合は `PLAYWRIGHT_MODULE=<playwright の index.mjs>`、Chromium を指定する場合は `CHROMIUM_PATH` を渡します。
 
@@ -21,7 +23,7 @@ Playwright をグローバル以外に置いている場合は `PLAYWRIGHT_MODUL
 
 ## 掲載する画像と動画
 
-本体の画面例には、さくらみこと利用者が追加した戌神ころねのMMDモデルを使います。審査版に同梱する1体と、アプリで追加できるキャラ数は別です。4枚目には、さくらみこのMMDとひよりのLive2Dを無音MP4として埋め込みます。さくらみこは7秒・30fps、ひよりは6秒・60fpsです。ひよりはLive2Dの動作例として紹介し、ホロライブのキャラクターや審査ビルドへの同梱キャラクターとは区別します。Googleスライドへ変換した後はMP4をDriveへアップロードし、静止画化した箇所をDrive動画へ置き換えます。スライドショーで各動画の▶を押すと再生します。編集画面やPDFでは動きません。この条件をファイル名と資料内に明記します。
+本体の画面例には、さくらみこと利用者が追加した戌神ころねのMMDモデルを使います。審査版に同梱する1体と、アプリで追加できるキャラ数は別です。4枚目には、さくらみこのMMDとAivis音声を含むMP4、ひよりのLive2Dを示す無音MP4を埋め込みます。さくらみこは7秒、ひよりは6秒です。ひよりはLive2Dの動作例として紹介し、ホロライブのキャラクターや審査ビルドへの同梱キャラクターとは区別します。Googleスライドへ変換した後はMP4をDriveへアップロードし、静止画化した箇所をDrive動画へ置き換えます。スライドショーで各動画の▶を押すと再生します。編集画面やPDFでは動きません。この条件をファイル名と資料内に明記します。
 
 | 素材 | 使用箇所 |
 |---|---|
@@ -32,7 +34,7 @@ Playwright をグローバル以外に置いている場合は `PLAYWRIGHT_MODUL
 | `holo-hiyori-motion.mp4` と `holo-hiyori-motion-poster.png` | 4枚目（ひよりのLive2D動作） |
 | `holo-indie-result.webp` | 6枚目（おまけのミニゲーム） |
 
-`capture-current.mjs`は現行の実フロントを使い、バックエンド応答だけを撮影用に固定します。AIの実応答や実音声の検証ではありません。導入済みモデルだけを読み取り、PMX・テクスチャや利用者設定は変更しません。モデル本体はPPTにもGitにも追加せず、表示した画面と録画だけを保存します。動画はH.264・yuv420pで、外部リンクに依存せずPPT内へ埋め込みます。
+`capture-current.mjs`は現行の実フロントを使い、バックエンド応答だけを撮影用に固定します。`--voice-video`では既存のAivis合成音声サンプルを実フロントの読み上げ経路へ渡し、さくらみこの配信動画に音声を収録します。音声の文章と画面上の固定応答の一致は収録前に確認してください。AIの実応答の検証ではありません。導入済みモデルだけを読み取り、PMX・テクスチャや利用者設定は変更しません。モデル本体はPPTにもGitにも追加せず、表示した画面と録画だけを保存します。動画はH.264・yuv420pで、外部リンクに依存せずPPT内へ埋め込みます。
 
 `holo-indie-result.webp` は `capture-current.mjs` が現行ゲーム画面から撮影します。透明なペット画面には説明用の背景色を足さず、スライドには背景を持つ配信画面を掲載します。
 

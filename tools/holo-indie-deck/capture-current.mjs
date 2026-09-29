@@ -12,6 +12,9 @@ const uiRoot = path.join(sourceRoot, "ui");
 const userCharactersRoot = path.join(process.env.APPDATA || "", "PicoAgent", "characters");
 const mmdModels = new Map(["miko-mmd", "korone-mmd"].map(id => [id, path.join(userCharactersRoot, id)]));
 const output = path.join(root, "docs", "images");
+const voicedVideo = process.argv.includes("--voice-video");
+const voiceSample = path.join(root, "temp", "holo-indie-review-installer", "aivis-holo-demo.wav");
+if (voicedVideo && !fs.existsSync(voiceSample)) throw new Error(`Aivis音声サンプルがありません: ${voiceSample}`);
 const playwrightModule = process.env.PLAYWRIGHT_MODULE;
 const { chromium } = await import(playwrightModule ? pathToFileURL(playwrightModule).href : "playwright");
 const sharp = createRequire(import.meta.url)("sharp");
@@ -57,11 +60,14 @@ window.__TAURI__ = {
       characterId: ${JSON.stringify(characterId)}, characterOverrides: {}, live2dSdkOverrides: {}, layout: ${JSON.stringify(layout)}, scenes: {},
       history: ${JSON.stringify(history)}, quickActions: "", napMinutes: "0", onboardingDone: true,
       relationshipMemoryEnabled: true, relationship: {}, bondLabel: "いっしょの相棒", gazeTrackingEnabled: false,
-      bootProgressIntervalMs: 10000, ttsEnabled: false, streamBackground: "pastel", streamDisplay: "dashboard",
+      bootProgressIntervalMs: 10000, ttsEnabled: ${voicedVideo}, streamBackground: "pastel", streamDisplay: "dashboard",
       streamCaptionColor: "#5a3b4b", chatterEnabled: false, chatterMinSecs: "9999", chatterMaxSecs: "9999", betaBuild: false,
     });
     if (name === "engine_status") return Promise.resolve({ phase: "ready" });
-    if (name === "aivis_status" || name === "pet_speak") return Promise.resolve({ enabled: false });
+    if (name === "aivis_status") return Promise.resolve({ enabled: ${voicedVideo} });
+    if (name === "pet_speak") return ${voicedVideo}
+      ? window.__captureSpeech().then(audio => ({ enabled: true, mime: "audio/wav", audio, lipSync: [] }))
+      : Promise.resolve({ enabled: false });
     if (name === "pet_alarms") return Promise.resolve({ alarms: [] });
     if (name === "pet_game_ready") return Promise.resolve({ ready: true });
     if (name === "pet_game_judge") return Promise.resolve({ total: 86, criteria: [
@@ -91,15 +97,21 @@ try {
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   browser = await chromium.launch({ args: ["--enable-unsafe-swiftshader", "--use-gl=swiftshader", "--ignore-gpu-blocklist"] });
   const base = `http://127.0.0.1:${server.address().port}/`;
-  for (const { characterId, layout, width, height, image, video, seconds, fps } of [
+  const scenes = [
     { characterId: "miko-mmd", layout: "stream", width: 1280, height: 720, image: "holo-miko-stream.png", video: "holo-miko-motion.mp4", seconds: 7, fps: 30 },
     { characterId: "miko-mmd", layout: "pet", width: 900, height: 600 },
     { characterId: "korone-mmd", layout: "stream", width: 1280, height: 720, image: "holo-korone-stream.png" },
     { characterId: "hiyori", layout: "pet", width: 900, height: 600, video: "holo-hiyori-motion.mp4", seconds: 6, fps: 60 },
-  ]) {
-    const context = await browser.newContext({ viewport: { width, height }, deviceScaleFactor: 1 });
+  ];
+  for (const { characterId, layout, width, height, image, video, seconds, fps } of
+    (voicedVideo ? scenes.slice(0, 1) : scenes)) {
+    const recording = voicedVideo && video ? fs.mkdtempSync(path.join(root, "temp", "holo-voice-video-")) : null;
+    const context = await browser.newContext({ viewport: { width, height }, deviceScaleFactor: 1,
+      ...(recording ? { recordVideo: { dir: recording, size: { width, height } } } : {}) });
     try {
       const page = await context.newPage();
+      const recordingStart = Date.now();
+      if (voicedVideo) await page.exposeFunction("__captureSpeech", () => [...fs.readFileSync(voiceSample)]);
       const errors = [];
       page.on("pageerror", error => errors.push(String(error)));
       await page.addInitScript(mock(layout, characterId));
@@ -128,7 +140,20 @@ try {
         const png = await page.locator(".game-shell").screenshot();
         await sharp(png).webp({ quality: 90 }).toFile(path.join(output, "holo-indie-result.webp"));
       }
-      if (video && process.argv.includes("--video")) {
+      if (recording) {
+        await page.waitForTimeout(3500);
+        await page.getByRole("button", { name: "もう一度読み上げ" }).click();
+        await page.waitForFunction(() => document.querySelector("#status")?.textContent?.includes("読み上げ中"), null, { timeout: 15000 });
+        const startOffset = Math.max(0, (Date.now() - recordingStart) / 1000 - 0.2);
+        await page.waitForTimeout(seconds * 1000);
+        await context.close();
+        const recorded = await page.video().path();
+        execFileSync(process.env.SHOOT_FFMPEG || "ffmpeg", ["-y", "-loglevel", "error",
+          "-ss", String(startOffset), "-i", recorded, "-i", voiceSample,
+          "-filter_complex", "[1:a]adelay=200|200,apad[a]", "-map", "0:v:0", "-map", "[a]",
+          "-t", String(seconds), "-c:v", "libx264", "-preset", "medium", "-crf", "18",
+          "-pix_fmt", "yuv420p", "-c:a", "aac", "-movflags", "+faststart", path.join(output, video)], { stdio: "pipe" });
+      } else if (video && process.argv.includes("--video")) {
         const tempRoot = path.join(root, "temp");
         fs.mkdirSync(tempRoot, { recursive: true });
         const frames = fs.mkdtempSync(path.join(tempRoot, "holo-current-"));
@@ -150,6 +175,7 @@ try {
       console.log(`現行画面を撮影: ${characterId}/${layout}${video && process.argv.includes("--video") ? "（動画あり）" : ""}`);
     } finally {
       await context.close();
+      if (recording) fs.rmSync(recording, { recursive: true, force: true });
     }
   }
 } finally {
