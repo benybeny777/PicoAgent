@@ -35,6 +35,13 @@
     "lipSyncParam": "ParamMouthOpenY",
     "scale": 2.7,
     "offsetY": 520,
+    "layoutFraming": {
+      "stream": {
+        "scale": 2.8,
+        "offsetY": 507,
+        "bustDepth": 0.95
+      }
+    },
     "iconFraming": {
       "scale": 4.3,
       "offsetY": 900

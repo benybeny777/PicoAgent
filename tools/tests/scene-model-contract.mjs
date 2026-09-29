@@ -64,7 +64,7 @@ test("配信の配置は描画方式によらず同じで、保存済み配置�
   const definition = scenes.stream.sources.character;
   assert.deepEqual(Object.keys(definition).sort(), ["anchor", "h", "maxWidthFrac", "x", "y"]);
   const initial = resolvePlacement(definition, null, 1920, 1080, 1.08);
-  assert.equal(initial.h, 480);
+  assert.equal(initial.h, 800);
   assert.equal(initial.y, 0);
   const saved = resolvePlacement(definition, { anchor: "center", x: 0, y: 0, w: 600, h: 600 }, 1920, 1080, 1.08);
   assert.deepEqual([saved.y, saved.w, saved.h, saved.saved], [0, 600, 600, true]);

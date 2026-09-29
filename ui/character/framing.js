@@ -17,18 +17,18 @@ function topSlice(content, heightFrac, widthPerHeight) {
  * 低頭身（compact）は頭の比率が大きいので、同じ名前でも深めに切り出す。
  * 原画がもともと胸上（native-bust）なら、全身＝上半身＝原画全体とする。
  */
-export function framingRectsFor(visible, { proportion = "standard", sourceFraming = "default" } = {}) {
+export function framingRectsFor(visible, { proportion = "standard", bodyProportion = "standard", sourceFraming = "default" } = {}) {
   // 可視範囲はアホ毛や指先ちょうどで切った矩形なので、上と左右へ少し余白を足してから切り出す。
   // 下端は足元（または原画の下端）なので足さない。これで髪先や手先が枠に接して切れて見えない。
   const content = padded(visible);
   if (sourceFraming === "native-bust") {
     return { full: content, upper: content, bust: topSlice(content, 0.78, 1.1) };
   }
-  const compact = proportion === "compact";
+  const compact = proportion === "compact" || bodyProportion === "compact";
   return {
     full: content,
     upper: topSlice(content, compact ? 0.82 : 0.62, compact ? 1.05 : 0.92),
-    bust: topSlice(content, compact ? 0.62 : 0.4, compact ? 1.15 : 1.2),
+    bust: topSlice(content, compact ? 0.76 : 0.4, compact ? 1.15 : 1.2),
   };
 }
 
