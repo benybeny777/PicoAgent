@@ -1,5 +1,5 @@
 #Requires -Version 7
-# holo Indie審査へ限定共有する、公式MMD 1体・音声モデルなしのWindows版を生成する。
+# holo Indie審査へ限定共有する、公式MMD 1体・Aivisの仮音声によるWindows版を生成する。
 # 正規入口はリポジトリ直下の「holo Indie審査版インストーラをビルド.bat」。
 [CmdletBinding()]
 param(
@@ -22,10 +22,11 @@ $root = Split-Path -Parent $PSScriptRoot
 Set-Location -LiteralPath $root
 
 # 初回審査は出所を確認できたさくらみこ公式MMDだけを使う。
-# 配信・動画から学習した音声モデルとAivis本体は一切同梱しない。
+# 本人音声モデルは同梱せず、Aivis公式の既定モデルを初回起動時に取得する。
 $characterId = 'miko-mmd'
 $reviewIdentifier = 'com.picoagent.holo-indie-review'
 $reviewDataRoot = "PicoAgent\instances\$reviewIdentifier"
+$reviewDataScope = $reviewDataRoot -replace '\\', '/'
 $characterRoot = Join-Path $env:APPDATA 'PicoAgent\characters'
 $characterSource = Join-Path $characterRoot $characterId
 $characterJson = Join-Path $characterSource 'character.json'
@@ -67,7 +68,15 @@ $initialConfig = [ordered]@{
     PICOAGENT_CHARACTER       = $characterId
     PICOAGENT_LAYOUT          = 'pet'
     PICOAGENT_PROVIDER        = 'local'
-    PICOAGENT_TTS_ENABLED     = $false
+    PICOAGENT_TTS_ENABLED     = $true
+    PICOAGENT_TTS_CHARACTER_OVERRIDES = @{
+        'miko-mmd' = @{
+            speaker = '888753760'
+            modelUuid = 'a59cb814-0083-4369-8542-f51a29e72af7'
+            speakerUuid = 'e756b8e4-b606-4e15-99b1-3f9c6a1b2317'
+            styleName = 'ノーマル'
+        }
+    }
     PICOAGENT_CHATTER_ENABLED = $false
 }
 [System.IO.File]::WriteAllText(
@@ -93,9 +102,23 @@ $hook.Add('!macroend')
 $config = [ordered]@{
     productName = 'PicoAgent holo Indie 審査版'
     identifier  = $reviewIdentifier
+    app         = [ordered]@{
+        security = [ordered]@{
+            assetProtocol = [ordered]@{
+                enable = $true
+                scope = @(
+                    "`$DATA/$reviewDataScope/characters/**"
+                    "`$DATA/$reviewDataScope/display/**"
+                    "`$DATA/$reviewDataScope/character-maker/characters/**"
+                    "`$DATA/$reviewDataScope/generated-media/**"
+                )
+            }
+        }
+    }
     bundle      = [ordered]@{
         resources = @(
             'resources/bundled/engine/**/*',
+            'resources/bundled/aivis/**/*',
             'resources/component-manifest.json'
         )
         windows   = [ordered]@{
@@ -105,7 +128,7 @@ $config = [ordered]@{
 }
 [System.IO.File]::WriteAllText($configPath, ($config | ConvertTo-Json -Depth 10), [System.Text.UTF8Encoding]::new($false))
 
-$forbidden = @('aivis', '.aivmx', 'seed-voices')
+$forbidden = @('.aivmx', 'seed-voices')
 $generated = (Get-Content -Raw -Encoding UTF8 -LiteralPath $hookPath) + (Get-Content -Raw -Encoding UTF8 -LiteralPath $configPath)
 foreach ($word in $forbidden) {
     if ($generated -match [regex]::Escape($word)) {
@@ -115,17 +138,30 @@ foreach ($word in $forbidden) {
 if ($generated -match 'SetOutPath\s+"\$APPDATA\\com\.picoagent\.desktop(?:\\|\")') {
     throw '審査版が通常版のキャラクター領域を上書きする設定になっています。'
 }
+if ($initialConfig.PICOAGENT_TTS_ENABLED -ne $true -or $generated -notmatch 'resources/bundled/aivis') {
+    throw '審査版のAivis読み上げ設定が揃っていません。'
+}
+if ($generated -notmatch [regex]::Escape("`$DATA/$reviewDataScope/characters/**")) {
+    throw '審査版のキャラクター読み取り範囲が専用領域へ設定されていません。'
+}
+if (-not (Test-Path -LiteralPath 'src-tauri/resources/bundled/aivis/run.exe' -PathType Leaf)) {
+    throw 'Aivis本体が見つかりません。cargo xtask setup aivis を実行してください。'
+}
+$bundledVoiceModels = @(Get-ChildItem -LiteralPath 'src-tauri/resources/bundled/aivis' -Recurse -File -Filter '*.aivmx')
+if ($bundledVoiceModels.Count -gt 0) {
+    throw '審査版のAivis本体に本人音声モデルが混入しています。'
+}
 
 if ($PrepareOnly) {
     Write-Host ''
     Write-Host "準備検査完了: $outputRoot"
-    Write-Host '公式MMD: さくらみこ1体 / 音声モデル: なし / 読み上げ: 既定OFF / 通常版と利用者領域を分離'
+    Write-Host '公式MMD: さくらみこ1体 / Aivis: 同梱 / 本人音声モデル: なし / 読み上げ: 既定ON / 通常版と利用者領域を分離'
     exit 0
 }
 
 $started = Get-Date
 Invoke-Step '起動中のPicoAgentと同梱エンジンを停止' 'cargo' @('xtask', 'stop')
-Invoke-Step 'Live2DとローカルAIエンジンを準備' 'cargo' @('xtask', 'setup', 'live2d', 'engine')
+Invoke-Step 'Live2DとローカルAI・Aivisエンジンを準備' 'cargo' @('xtask', 'setup', 'live2d', 'engine', 'aivis')
 Invoke-Step '配布対象キャラクターを同期' 'cargo' @('xtask', 'preview-distribution')
 Invoke-Step 'アルファ版の画面を生成' 'cargo' @('xtask', 'build-ui', '--release', '--beta')
 Invoke-Step 'NSISインストーラを生成' 'cargo' @(
