@@ -5,6 +5,30 @@
   const vendorUrl = new URL('vendor/mmd/mmd-runtime.js', document.currentScript?.src || new URL('mmd-renderer.js', document.baseURI)).href;
   let vendorPromise;
   const clamp = value => Math.max(0, Math.min(1, Number(value) || 0));
+  const framingAspects = Object.freeze({ full: 0.65, upper: 0.92, bust: 1.2, head: 0.8 });
+  const framingAspect = kind => framingAspects[kind] || framingAspects.bust;
+  // モデル座標の切り出し範囲を、キャンバスの縦横比にかかわらず収める。
+  function calculateFraming({ low, high, eyeY, eyeX = 0, eyeZ = 0, kind = 'bust', proportion = 'standard', canvasAspect, fov }) {
+    const height = high - low;
+    const head = kind === 'head';
+    const full = kind === 'full';
+    const compact = proportion === 'compact';
+    const eyeDepth = Math.max(0.08, Math.min(0.2, (high - eyeY) / height));
+    const depth = kind === 'upper'
+      ? compact ? 0.82 : Math.max(0.6, Math.min(0.68, eyeDepth + 0.49))
+      : compact ? 0.62 : Math.max(0.38, Math.min(0.4, eyeDepth + 0.25));
+    const top = head ? eyeY + height * 0.12 : high + height * 0.04;
+    const bottom = head ? eyeY - height * 0.12 : full ? low : high - height * depth;
+    const frameHeight = top - bottom;
+    const frameWidth = frameHeight * framingAspect(kind);
+    const viewHeight = frameHeight * Math.max(1, framingAspect(kind) / Math.max(0.01, canvasAspect));
+    return {
+      top, bottom, frameHeight, frameWidth, viewHeight,
+      viewWidth: viewHeight * canvasAspect,
+      target: { x: eyeX, y: (top + bottom) / 2, z: eyeZ },
+      radius: viewHeight / (2 * Math.tan(fov / 2)),
+    };
+  }
   const stateAliases = Object.freeze({
     success: 'happy', pleased: 'happy', shy: 'happy', concern: 'sad', failed: 'sad', error: 'sad',
     searching: 'thinking', working: 'thinking', listening: 'thinking',
@@ -211,20 +235,10 @@
       function setFraming(kind = 'bust') {
         if (disposed) return;
         framing = kind;
-        const head = kind === 'head';
-        const full = kind === 'full';
-        const upper = kind === 'upper';
-        const eyeDepth = Math.max(0.08, Math.min(0.2, (high - faceCenter.y) / height));
-        const depth = upper
-          ? Math.max(0.6, Math.min(0.68, eyeDepth + 0.49))
-          : Math.max(0.38, Math.min(0.4, eyeDepth + 0.25));
-        // 頭頂の余白と胸元・腰・足先をモデルの寸法と目の高さから決める。
-        // カメラの中心は切り出す上下端の中点に置き、倍率で胴体を隠さない。
-        const top = head ? faceCenter.y + height * 0.12 : high + height * 0.04;
-        const bottom = head ? faceCenter.y - height * 0.12 : full ? low : high - height * depth;
-        const visibleHeight = top - bottom;
-        camera.setTarget(new B.Vector3(faceCenter.x, (top + bottom) / 2, faceCenter.z));
-        camera.radius = visibleHeight / (2 * Math.tan(camera.fov / 2));
+        const frame = calculateFraming({ low, high, eyeY: faceCenter.y, eyeX: faceCenter.x, eyeZ: faceCenter.z,
+          kind, proportion: config.bodyProportion, canvasAspect: canvas.clientWidth / Math.max(1, canvas.clientHeight), fov: camera.fov });
+        camera.setTarget(new B.Vector3(frame.target.x, frame.target.y, frame.target.z));
+        camera.radius = frame.radius;
         camera.alpha = -Math.PI / 2;
         camera.beta = Math.PI / 2;
       }
@@ -337,6 +351,6 @@
   }
   window.PicoMMD = Object.freeze({
     create, normalizeState, normalizePoseMap, normalizeExpressionProfile, normalizeProfiles,
-    profileFor, combinePose, blendFactor, expressionTargets, blinkWeight,
+    profileFor, combinePose, blendFactor, expressionTargets, blinkWeight, framingAspect, calculateFraming,
   });
 })();

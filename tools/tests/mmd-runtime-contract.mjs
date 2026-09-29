@@ -13,6 +13,39 @@ function profileApi() {
   return window.PicoMMD;
 }
 
+test('MMDの全構図は頭頂から指定下端までを切り出し、細い保存枠でも左右を収める', () => {
+  const { calculateFraming, framingAspect } = profileApi();
+  const model = { low: 0, high: 20, eyeY: 16.8, eyeX: 1, eyeZ: 2, fov: Math.PI / 4 };
+  for (const kind of ['bust', 'upper', 'full']) {
+    for (const canvasAspect of [0.4, 0.9, framingAspect(kind), 2]) {
+      const frame = calculateFraming({ ...model, kind, canvasAspect });
+      assert.ok(frame.top > model.high, `${kind}: 頭頂の余白`);
+      const expectedDepth = kind === 'bust' ? 0.4 : kind === 'upper' ? 0.65 : 1;
+      assert.ok(Math.abs(frame.bottom - (kind === 'full' ? model.low : model.high - 20 * expectedDepth)) < 1e-9,
+        `${kind}: 下端`);
+      assert.ok(frame.viewWidth + 1e-9 >= frame.frameWidth, `${kind}/${canvasAspect}: 左右が切れる`);
+      assert.ok(frame.viewHeight + 1e-9 >= frame.frameHeight, `${kind}/${canvasAspect}: 上下が切れる`);
+      assert.ok(Math.abs(frame.viewHeight / (2 * Math.tan(model.fov / 2)) - frame.radius) < 1e-9);
+      assert.deepEqual(plain(frame.target), { x: 1, y: (frame.top + frame.bottom) / 2, z: 2 });
+    }
+  }
+  const saved = calculateFraming({ ...model, kind: 'bust', canvasAspect: 639.9 / 711 });
+  assert.ok(saved.viewWidth >= saved.frameWidth);
+  assert.ok(saved.viewHeight > saved.frameHeight);
+});
+
+test('低頭身MMDは胸元と腰まで深く映し、標準頭身の範囲は維持する', () => {
+  const { calculateFraming } = profileApi();
+  const model = { low: 0, high: 20, eyeY: 16.8, canvasAspect: 1.2, fov: Math.PI / 4 };
+  for (const [kind, standardRange, compactDepth] of [['bust', [0.38, 0.4], 0.62], ['upper', [0.6, 0.68], 0.82]]) {
+    const standard = calculateFraming({ ...model, kind });
+    const compact = calculateFraming({ ...model, kind, proportion: 'compact' });
+    assert.ok((model.high - standard.bottom) / 20 >= standardRange[0]);
+    assert.ok((model.high - standard.bottom) / 20 <= standardRange[1]);
+    assert.equal(compact.bottom, model.high - 20 * compactDepth);
+  }
+});
+
 test('MMDの状態別ポーズはモデル固有値を正規化し、基底姿勢へ加算する', () => {
   const api = profileApi();
   const poses = api.normalizeProfiles({

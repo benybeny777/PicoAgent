@@ -30,9 +30,15 @@ test("キャラ切替は旧音声の合成待ちと再生を止めてから表�
 
 test("MMD読込後は閉口・指定した元姿勢で始め、会話中・喜びの表情を渡す", async () => {
   const calls = [];
-  window.PicoMMD = { create: async () => controllerStub(calls) };
+  let config;
+  window.PicoMMD = {
+    create: async (_canvas, options) => { config = options.config; return controllerStub(calls); },
+    framingAspect: name => ({ full: 0.65, upper: 0.92, bust: 1.2 })[name],
+  };
   const renderer = new MmdRenderer();
-  await renderer.load({ root: "user-characters/demo", mmd: { model: "mmd/demo.pmx", defaultPose: "original" } });
+  await renderer.load({ root: "user-characters/demo", bodyProportion: "compact", mmd: { model: "mmd/demo.pmx", defaultPose: "original" } });
+  assert.equal(config.bodyProportion, "compact");
+  assert.equal(renderer.framingRect("bust").w, window.PicoMMD.framingAspect("bust"));
   assert.deepEqual(calls, [["motion", true], ["mouth", 0], ["pose", "original"]]);
   renderer.setFraming("upper");
   renderer.setMotion("talking");
