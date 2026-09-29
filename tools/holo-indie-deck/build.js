@@ -1,6 +1,6 @@
 // docs/HOLO-INDIE-PLAN.md の内容から、holo Indie へ応募する作品（PicoAgent）の企画書PowerPointを生成する。
 // 実行: node tools/holo-indie-deck/build.js
-// 前提: pptxgenjs・sharp・jszip（アプリのビルドには不要な作業用ツール）。ミニゲームの画面は capture.mjs で撮る。
+// 前提: pptxgenjs・sharp・jszip（アプリのビルドには不要な作業用ツール）。
 // 文面の正本は docs/HOLO-INDIE-PLAN.md（おまけのミニゲームは docs/HOLO-INDIE-MINIGAME.md）。
 // 先に正本を直してからこのスクリプトへ反映する。
 const fs = require("fs");
@@ -18,15 +18,18 @@ fs.mkdirSync(path.join(ROOT, "temp"), { recursive: true });
 const IMG = fs.mkdtempSync(path.join(ROOT, "temp", "holo-indie-deck-"));
 // 本体画面はさくらみこ、ひよりはLive2Dの動作例として別に紹介する。
 const USED = ["holo-miko-stream", "holo-miko-pet", "holo-miko-chat", "holo-indie-result"];
+const imageSizes = new Map();
 
 async function prepareImages() {
   for (const name of USED) {
     const from = path.join(SRC_IMG, name + (name === "holo-indie-result" ? ".webp" : ".png"));
-    if (!fs.existsSync(from)) throw new Error("画像が見つかりません（holo-indie-* は capture.mjs で撮影してください）: " + from);
+    if (!fs.existsSync(from)) throw new Error("画像が見つかりません: " + from);
     const head = fs.readFileSync(from, { encoding: "utf8", flag: "r" }).slice(0, 20);
     if (head.startsWith("version https")) {
       throw new Error("Git LFS のポインタのままです。git lfs pull を先に実行してください: " + from);
     }
+    const { width, height } = await sharp(from).metadata();
+    imageSizes.set(name, { width, height });
     await sharp(from).png().toFile(path.join(IMG, name + ".png"));
   }
 }
@@ -103,13 +106,17 @@ function badge(s, o) {
   });
 }
 
-// 画面写真。縦長の画面を、角丸の枠に収めて置く（縦横比は画像に合わせて呼び出し側で決める）。
+// 画面写真。元画像の縦横比を保って枠内へ収める。
 function shot(s, name, o) {
   s.addShape(pres.ShapeType.roundRect, {
     x: o.x - 0.06, y: o.y - 0.06, w: o.w + 0.12, h: o.h + 0.12, rectRadius: 0.12,
     fill: { color: NIGHT }, line: { color: NIGHT }, shadow: shadow(),
   });
-  s.addImage({ path: path.join(IMG, name + ".png"), x: o.x, y: o.y, w: o.w, h: o.h });
+  const { width, height } = imageSizes.get(name);
+  const scale = Math.min(o.w / width, o.h / height);
+  const w = width * scale;
+  const h = height * scale;
+  s.addImage({ path: path.join(IMG, name + ".png"), x: o.x + (o.w - w) / 2, y: o.y + (o.h - h) / 2, w, h });
   if (name.startsWith("holo-miko-")) {
     s.addNotes("さくらみこ公式MMDモデルをPicoAgentの実フロントで描画した画面。会話は撮影用の固定応答。モデル本体と利用者設定は変更していない。");
   }
@@ -238,7 +245,7 @@ function build() {
       { name: "holo-miko-motion", label: "さくらみこ｜MMD", x: M, y: 2.15, w: 5.8, h: 3.2625,
         body: "待機動作・まばたき・表情の変化", detail: "ホロライブ向けのキャラクター表示例" },
       { name: "holo-hiyori-motion", label: "ひより｜Live2D", x: 6.85, y: 2.03, w: 5.75, h: 3.833333,
-        body: "滑らかな体の動き・髪の揺れ・口パク", detail: "Live2Dの動作例（ホロライブのキャラクターではありません）" },
+        body: "滑らかな体の動き・髪の揺れ・まばたき", detail: "Live2Dの動作例（ホロライブのキャラクターではありません）" },
     ];
     for (const demo of demos) {
       s.addText(demo.label, { x: demo.x, y: 1.65, w: demo.w, h: 0.32, margin: 0,
@@ -247,7 +254,7 @@ function build() {
       const poster = path.join(SRC_IMG, demo.name + "-poster.png");
       for (const asset of [video, poster]) {
         if (!fs.existsSync(asset) || fs.readFileSync(asset).subarray(0, 20).toString().startsWith("version https")) {
-          throw new Error("動画またはポスターの実体がありません。capture-motion.mjsで撮影してください: " + asset);
+          throw new Error("動画またはポスターの実体がありません。capture-current.mjs --video で撮影してください: " + asset);
         }
       }
       s.addMedia({ type: "video", path: video, cover: "image/png;base64," + fs.readFileSync(poster).toString("base64"),
@@ -290,7 +297,7 @@ function build() {
     s.addText("PC操作や外部サービスとの連携は、安全のため既定では無効です。", {
       x: M, y: 6.1, w: 6.9, h: 0.3, isTextBox: true, margin: 0, fontFace: JP, fontSize: 11, color: MUTED,
     });
-    shot(s, "holo-miko-chat", { x: 8.65, y: 1.25, w: 3.4, h: 4.25, caption: "さくらみこ：チャット形式（審査版の初期表示）" });
+    shot(s, "holo-miko-chat", { x: 8.65, y: 1.25, w: 3.4, h: 4.25, caption: "さくらみこ：配信形式のチャット列" });
     pageNo(s, 5);
   }
 
@@ -386,7 +393,7 @@ function build() {
       ["キャラクター", "さくらみこ公式MMDモデル1体のみ"],
       ["AI", "同梱エンジンで端末内動作（初回にモデルを取得）"],
       ["音声", "なし（字幕表示のみ）"],
-      ["初期表示", "チャット形式"],
+      ["初期表示", "ペット形式"],
       ["導入先", "通常版とは別の領域。通常版の設定や履歴に触れない"],
     ];
     rows.forEach(([k, v], i) => {
