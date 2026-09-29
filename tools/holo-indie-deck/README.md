@@ -24,7 +24,7 @@ Playwright をグローバル以外に置いている場合は `PLAYWRIGHT_MODUL
 
 ## 掲載する画像と動画
 
-審査版の主役はさくらみこです。5枚目には、さくらみこのMMDとAivis音声を含む7秒のMP4と、ひよりのLive2D動作を示す無音のMP4を埋め込みます。ひよりは旧UIで撮影した動作例であり、審査版への同梱キャラではありません。Googleスライドへ変換した後は両MP4をDriveへアップロードし、静止画化した箇所をDrive動画へ置き換えます。スライドショーで▶を押すと再生します。編集画面やPDFでは動きません。この条件をファイル名と資料内に明記します。
+審査版の主役はさくらみこです。5枚目には、さくらみこのMMDとAivis音声を含む7秒のMP4と、ひよりのLive2D動作を示す無音のMP4を埋め込みます。ひよりはLive2Dのサンプルキャラで、現行UIの配信表示で撮影した動作例です。審査版への同梱キャラではありません。ひよりの動画は `cargo xtask setup live2d-samples` で取得したモデルを使い、`PICO_CAPTURE_SOURCE=<Live2Dランタイムとモデルがあるチェックアウト> node tools/holo-indie-deck/capture-current.mjs --only=hiyori --video` で撮り直せます。動画の縦横比が枠と違う場合は、枠の中央へ縦横比を保って置きます。Googleスライドへ変換した後は両MP4をDriveへアップロードし、静止画化した箇所をDrive動画へ置き換えます。スライドショーで▶を押すと再生します。編集画面やPDFでは動きません。この条件をファイル名と資料内に明記します。
 
 | 素材 | 使用箇所 |
 |---|---|
@@ -32,7 +32,6 @@ Playwright をグローバル以外に置いている場合は `PLAYWRIGHT_MODUL
 | `holo-miko-stream.png` | 4枚目（推しと過ごす1日） |
 | `holo-miko-motion.mp4` と `holo-miko-motion-poster.png` | 5枚目（さくらみこの動作） |
 | `holo-hiyori-motion.mp4` と `holo-hiyori-motion-poster.png` | 5枚目（ひよりのLive2D動作） |
-| `holo-miko-chat.png` | 6枚目（遊びのループ） |
 | `holo-indie-result.webp` | 7枚目（おまけのミニゲーム） |
 
 背景（夜色の地にピンク・ミントの光と点格子）は生成時にSVGから作り、画像ファイルとしてはリポジトリに置きません。文字は Google スライドでも使える Noto Sans JP を指定しています。

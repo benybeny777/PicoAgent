@@ -17,7 +17,7 @@ const OUT = path.join(ROOT, "temp", "HOLO-INDIE-PLAN.pptx");
 fs.mkdirSync(path.join(ROOT, "temp"), { recursive: true });
 const IMG = fs.mkdtempSync(path.join(ROOT, "temp", "holo-indie-deck-"));
 // 画面例は審査版の主役であるさくらみこに統一する。
-const USED = ["holo-miko-stream", "holo-miko-chat", "holo-indie-result"];
+const USED = ["holo-miko-stream", "holo-indie-result"];
 const imageSizes = new Map();
 
 async function prepareImages() {
@@ -250,9 +250,9 @@ function build() {
     header(s, "CHARACTER", "表情と声で、キャラクターが生きている。", null, MINT);
     const demos = [
       { name: "holo-miko-motion", label: "さくらみこ", tag: "MMD・Aivis音声つき", x: M, color: PINK,
-        body: "待機動作・まばたき・表情の変化。返答をその場で音声で話す。", detail: "審査版に同梱するキャラクター" },
-      { name: "holo-hiyori-motion", label: "ひより", tag: "Live2D・無音（旧UI撮影）", x: 6.95, color: MINT,
-        body: "滑らかな体の動き・髪の揺れ・まばたき。", detail: "Live2Dの動作例。審査版への同梱キャラではありません" },
+        body: "待機動作・まばたき・表情の変化。返答をその場で音声で話す。", detail: "審査版にテストとして同梱するキャラクター" },
+      { name: "holo-hiyori-motion", label: "ひより", tag: "Live2Dサンプル・無音", x: 6.95, color: MINT,
+        body: "滑らかな体の動き・髪の揺れ・まばたき。", detail: "Live2Dのサンプルキャラ。審査版には同梱しません" },
     ];
     for (const demo of demos) {
       const w = 5.63, h = w * 9 / 16;
@@ -270,8 +270,12 @@ function build() {
         x: demo.x - 0.04, y: 2.45 - 0.04, w: w + 0.08, h: h + 0.08,
         fill: { color: BASE }, line: { color: demo.color, width: 1.5 }, shadow: glow(demo.color),
       });
-      s.addMedia({ type: "video", path: video, cover: "image/png;base64," + fs.readFileSync(poster).toString("base64"),
-        x: demo.x, y: 2.45, w, h, objectName: demo.name });
+      // 動画の縦横比が枠と違っても引き伸ばさず、枠の中央へ置く。ポスターPNGの寸法を動画の縦横比とみなす。
+      const png = fs.readFileSync(poster);
+      const aspect = png.readUInt32BE(16) / png.readUInt32BE(20);
+      const vw = Math.min(w, h * aspect), vh = vw / aspect;
+      s.addMedia({ type: "video", path: video, cover: "image/png;base64," + png.toString("base64"),
+        x: demo.x + (w - vw) / 2, y: 2.45 + (h - vh) / 2, w: vw, h: vh, objectName: demo.name });
       text(s, demo.body, { x: demo.x, y: 5.85, w, h: 0.35, fontSize: 13, bold: true });
       text(s, demo.detail, { x: demo.x, y: 6.25, w, h: 0.3, fontSize: 10.5, color: DIM });
     }
@@ -285,24 +289,23 @@ function build() {
     header(s, "PLAY LOOP", "毎日立ち上げたくなる、3つのループ");
     const loops = [
       ["会話のループ", PINK, ["話しかける", "返答と表情が変わる", "次の話題を試したくなる"]],
-      ["相棒のループ", GOLD, ["調べもの・タイマーを頼む", "実際に手伝ってくれる", "毎日立ち上げる理由になる"]],
+      ["相棒のループ", GOLD, ["調べものやタイマーを頼む", "実際に手伝ってくれる", "毎日立ち上げる理由になる"]],
       ["共有のループ", MINT, ["予想外の反応・講評", "配信で共有できる", "配信の見せ場になる"]],
     ];
     loops.forEach(([t, color, flow], i) => {
-      const y = 2.0 + i * 1.38;
-      glass(s, { x: M, y, w: 7.9, h: 1.2 });
-      s.addShape(pres.ShapeType.rect, { x: M, y, w: 0.08, h: 1.2, fill: { color }, line: { color } });
-      text(s, t, { x: M + 0.35, y: y + 0.18, w: 3, h: 0.35, fontSize: 15, bold: true, color });
+      const y = 1.95 + i * 1.45;
+      glass(s, { x: M, y, w: CW, h: 1.3 });
+      s.addShape(pres.ShapeType.rect, { x: M, y, w: 0.08, h: 1.3, fill: { color }, line: { color } });
+      text(s, t, { x: M + 0.4, y, w: 2.6, h: 1.3, fontSize: 19, bold: true, color, valign: "middle" });
       flow.forEach((f, j) => {
-        const fx = M + 0.35 + j * 2.5;
-        text(s, f, { x: fx, y: y + 0.6, w: 2.1, h: 0.5, fontSize: 11.5, bold: j === 2, color: j === 2 ? WHITE : SUB, lineSpacingMultiple: 1.2 });
-        if (j < 2) text(s, "→", { x: fx + 2.1, y: y + 0.58, w: 0.35, h: 0.4, fontSize: 14, bold: true, color });
+        const fx = M + 2.85 + j * 3.0;
+        text(s, f, { x: fx, y, w: 2.55, h: 1.3, fontSize: 14, bold: j === 2, color: j === 2 ? WHITE : SUB, valign: "middle", lineSpacingMultiple: 1.2 });
+        if (j < 2) text(s, "→", { x: fx + 2.55, y, w: 0.45, h: 1.3, fontSize: 18, bold: true, color, valign: "middle" });
       });
     });
     text(s, "PicoAgent本体は多機能です。holo Indie向けには会話・音声・表情と遊びに絞る企画で、専用版での機能の削減範囲は試遊と監修を踏まえて決めます。", {
-      x: M, y: 6.25, w: 7.9, h: 0.5, fontSize: 10.5, color: DIM, lineSpacingMultiple: 1.25,
+      x: M, y: 6.4, w: CW, h: 0.4, fontSize: 11, color: DIM,
     });
-    shot(s, "holo-miko-chat", { x: 9.15, y: 1.95, w: 3.4, h: 4.3, glow: VIOLET, caption: "配信形式のチャット（さくらみこ）" });
   }
 
   /* ---------- 7. おまけ：ミニゲーム ---------- */
@@ -358,7 +361,7 @@ function build() {
     const rx = M + 6.6;
     const others = [
       ["会話を外へ出さない", MINT, "審査版は既定で端末内のAIで動作。会話は外部へ送信されず、作者も会話ログを収集しない"],
-      ["公式素材の扱い", VIOLET, "同梱はさくらみこ公式MMDモデル1体とAivis。本人の音声モデルは含めず、公開モデル「まお」の仮音声を初回に取得する"],
+      ["公式素材の扱い", VIOLET, "審査版はテストとしてさくらみこ公式MMDモデル1体とAivisを同梱。許可が出れば他のキャラも同梱する。本人の音声モデルは含めず、「まお」の仮音声を使う"],
       ["一般配布までに対応", GOLD, "公式キャラクターの人格を上書きできない「人格ロック」と、AIによる生成である旨の常時表示"],
     ];
     others.forEach(([t, color, b], i) => {
@@ -377,7 +380,7 @@ function build() {
       "企画書だけでなく、Windows向けの審査ビルドを提出します。");
     const rows = [
       ["対象OS", "Windows 10／11（x64）"],
-      ["同梱キャラ", "さくらみこ公式MMDモデル1体"],
+      ["同梱キャラ", "さくらみこ1体（テスト。許可後に他キャラも）"],
       ["AI", "同梱エンジンで端末内動作（初回にモデルを取得）"],
       ["音声", "AIの返答をAivisでその場で話す（公開モデル）"],
       ["初期表示", "配信形式"],
@@ -420,10 +423,10 @@ function build() {
     header(s, "ROADMAP", "審査から一般配布、その先へ",
       "時期は未定です。各段階の内容は、審査と監修の結果に応じて決めます。", MINT);
     const phases = [
-      ["PHASE 1", "審査（今回）", PINK, ["Windows向け審査版", "さくらみこ公式MMDモデル1体", "公開モデル「まお」の仮音声"]],
-      ["PHASE 2", "監修・許諾", GOLD, ["キャラクター表現の監修", "本人音声の許諾と学習", "モデルの提供・同梱許可"]],
+      ["PHASE 1", "審査（今回）", PINK, ["Windows向け審査版", "さくらみこ1体をテスト同梱", "公開モデル「まお」の仮音声"]],
+      ["PHASE 2", "監修・許諾", GOLD, ["キャラクター表現の監修", "本人音声の許諾と学習", "他キャラも含むモデルの同梱許可"]],
       ["PHASE 3", "一般配布", MINT, ["人格ロック", "AI生成である旨の常時表示", "ホロライブ向けに機能を絞る", "価格・販売は貴社方針に従う"]],
-      ["PHASE 4", "展開", VIOLET, ["macOS・Linux版", "スマートフォン版", "SaaS化", "（表示と処理の分離を活用）"]],
+      ["PHASE 4", "展開", VIOLET, ["macOS版に取り組む予定", "勝ち筋や要望があれば、", "　Linux・スマホ・SaaS化", "（表示と処理の分離を活用）"]],
     ];
     const pw = 2.82, gap = 0.19;
     phases.forEach(([p, t, color, items], i) => {
@@ -433,7 +436,7 @@ function build() {
       glass(s, { x, y: 3.35, w: pw, h: 3.0, line: i === 0 ? PINK : undefined, lineWidth: 1.5, transparency: i === 0 ? 90 : 93 });
       text(s, t, { x: x + 0.28, y: 3.55, w: pw - 0.5, h: 0.45, fontSize: 18, bold: true, });
       items.forEach((it, j) => {
-        text(s, (it.startsWith("（") ? "" : "・") + it, { x: x + 0.22, y: 4.2 + j * 0.5, w: pw - 0.35, h: 0.45, fontSize: 11, color: SUB, lineSpacingMultiple: 1.15 });
+        text(s, (it.startsWith("（") || it.startsWith("　") ? "" : "・") + it, { x: x + 0.22, y: 4.2 + j * 0.5, w: pw - 0.35, h: 0.45, fontSize: 11, color: SUB, lineSpacingMultiple: 1.15 });
       });
     });
     text(s, "BOOTHやSteamでの販売を目標に開発し、収益化を前提としています。汎用版の別売りがholo Indie採用と両立しない場合は行いません。", {
@@ -462,10 +465,7 @@ function build() {
       text(s, b, { x: x + 1.2, y: y + 0.72, w: 4.4, h: 0.75, fontSize: 11, color: SUB, lineSpacingMultiple: 1.25 });
     });
     text(s, "まずは審査版で、推しと話す毎日を体験してください。", {
-      x: M, y: 5.72, w: CW, h: 0.6, fontSize: 24, bold: true, align: "center",
-    });
-    text(s, "ミニゲームはおまけであり、許可・監修をお願いする中心項目には含めません。", {
-      x: M, y: 6.4, w: CW, h: 0.3, fontSize: 10.5, color: SUB, align: "center",
+      x: M, y: 5.85, w: CW, h: 0.6, fontSize: 24, bold: true, align: "center",
     });
   }
 }

@@ -11,6 +11,15 @@ const sourceRoot = process.env.PICO_CAPTURE_SOURCE || root;
 const uiRoot = path.join(sourceRoot, "ui");
 const userCharactersRoot = path.join(process.env.APPDATA || "", "PicoAgent", "characters");
 const mmdModels = new Map([["miko-mmd", path.join(userCharactersRoot, "miko-mmd")]]);
+// ひよりはLive2D公式サンプル。cargo xtask setup live2d-samples で取得したモデルを読み取り専用で配信する。
+const live2dModels = new Map([["hiyori", path.join(sourceRoot, "characters", "hiyori")]]);
+const models = new Map([...mmdModels, ...live2dModels]);
+const catalogEntries = [
+  { id: "miko-mmd", name: "さくらみこ", manifest: "miko-mmd/character.json" },
+  { id: "hiyori", name: "ひより", manifest: "hiyori/character.json" },
+];
+// --only=<キャラID> で撮影対象を絞る。ひよりだけ撮り直す場合は --only=hiyori --video。
+const only = process.argv.find(arg => arg.startsWith("--only="))?.slice("--only=".length);
 const output = path.join(root, "docs", "images");
 const voicedVideo = process.argv.includes("--voice-video");
 const voiceSample = path.join(root, "temp", "holo-indie-review-installer", "aivis-holo-demo.wav");
@@ -20,7 +29,8 @@ const { chromium } = await import(playwrightModule ? pathToFileURL(playwrightMod
 const sharp = createRequire(import.meta.url)("sharp");
 const types = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".json": "application/json", ".png": "image/png", ".webp": "image/webp", ".jpg": "image/jpeg", ".svg": "image/svg+xml", ".wasm": "application/wasm" };
 
-for (const [id, modelRoot] of mmdModels) {
+for (const [id, modelRoot] of models) {
+  if (only && only !== id) continue;
   if (!fs.existsSync(path.join(modelRoot, "character.json"))) throw new Error(`登録済みの${id}モデルが見つかりません`);
 }
 fs.mkdirSync(output, { recursive: true });
@@ -28,15 +38,17 @@ fs.mkdirSync(output, { recursive: true });
 const server = http.createServer((request, response) => {
   try {
     const name = decodeURIComponent(new URL(request.url, "http://localhost").pathname).replace(/^\//, "");
-    const modelId = [...mmdModels.keys()].find(id => name.startsWith(`assets/characters/${id}/`));
-    const base = modelId ? mmdModels.get(modelId) : uiRoot;
+    const modelId = [...models.keys()].find(id => name.startsWith(`assets/characters/${id}/`));
+    const base = modelId ? models.get(modelId) : uiRoot;
     const relative = modelId ? name.slice(`assets/characters/${modelId}/`.length) : name || "index.html";
     const file = path.resolve(base, relative);
     if (!file.startsWith(path.resolve(base) + path.sep) || !fs.statSync(file).isFile()) throw new Error("対象外のファイルです");
     let body = fs.readFileSync(file);
     if (name === "assets/characters/index.json") {
       const catalog = JSON.parse(body.toString("utf8"));
-      catalog.characters.push({ id: "miko-mmd", name: "さくらみこ", manifest: "miko-mmd/character.json" });
+      for (const entry of catalogEntries) {
+        if (!catalog.characters.some(character => character.id === entry.id)) catalog.characters.push(entry);
+      }
       body = Buffer.from(JSON.stringify(catalog));
     }
     response.writeHead(200, { "Content-Type": types[path.extname(file)] || "application/octet-stream", "Cache-Control": "no-store" });
@@ -47,11 +59,16 @@ const server = http.createServer((request, response) => {
   }
 });
 
-const history = [
-  { role: "user", content: "今日やることを一緒に整理して" },
-  { role: "assistant", content: "にゃっはろ～！予定の整理も調べものも、いっしょに進めようにぇ。" },
-];
-const mock = (layout, characterId) => `
+const replies = {
+  "miko-mmd": "にゃっはろ～！予定の整理も調べものも、いっしょに進めようにぇ。",
+  hiyori: "まかせて！予定の整理も調べものも、いっしょにやってみよう！",
+};
+const mock = (layout, characterId) => {
+  const history = [
+    { role: "user", content: "今日やることを一緒に整理して" },
+    { role: "assistant", content: replies[characterId] },
+  ];
+  return `
 window.__TAURI__ = {
   core: { invoke: (name, args = {}) => {
     if (name === "pet_init") return Promise.resolve({
@@ -90,6 +107,7 @@ window.__TAURI__ = {
     minimize: async () => {}, toggleMaximize: async () => {}, close: async () => {} }) },
   dpi: {},
 };`;
+};
 
 let browser;
 try {
@@ -97,11 +115,12 @@ try {
   browser = await chromium.launch({ args: ["--enable-unsafe-swiftshader", "--use-gl=swiftshader", "--ignore-gpu-blocklist"] });
   const base = `http://127.0.0.1:${server.address().port}/`;
   const scenes = [
-    { characterId: "miko-mmd", layout: "stream", width: 1280, height: 720, image: "holo-miko-stream.png", video: "holo-miko-motion.mp4", seconds: 7, fps: 30 },
+    { characterId: "miko-mmd", layout: "stream", width: 1280, height: 720, image: "holo-miko-stream.png", video: "holo-miko-motion.mp4", poster: "holo-miko-motion-poster.png", seconds: 7, fps: 30 },
     { characterId: "miko-mmd", layout: "pet", width: 900, height: 600 },
-  ];
-  for (const { characterId, layout, width, height, image, video, seconds, fps } of
-    (voicedVideo ? scenes.slice(0, 1) : scenes)) {
+    { characterId: "hiyori", layout: "stream", width: 1280, height: 720, video: "holo-hiyori-motion.mp4", poster: "holo-hiyori-motion-poster.png", seconds: 7, fps: 30 },
+  ].filter(scene => !only || scene.characterId === only);
+  for (const { characterId, layout, width, height, image, video, poster, seconds, fps } of
+    (voicedVideo ? scenes.filter(scene => scene.characterId === "miko-mmd").slice(0, 1) : scenes)) {
     const recording = voicedVideo && video ? fs.mkdtempSync(path.join(root, "temp", "holo-voice-video-")) : null;
     const context = await browser.newContext({ viewport: { width, height }, deviceScaleFactor: 1,
       ...(recording ? { recordVideo: { dir: recording, size: { width, height } } } : {}) });
@@ -122,10 +141,6 @@ try {
       await page.waitForTimeout(1200);
       if (errors.length) throw new Error(errors.join("\n"));
       if (image) await page.screenshot({ path: path.join(output, image) });
-      if (characterId === "miko-mmd" && layout === "stream") {
-        const chat = page.locator('[data-source="chat"]');
-        await chat.screenshot({ path: path.join(output, "holo-miko-chat.png") });
-      }
       if (characterId === "miko-mmd" && layout === "pet") {
         await page.setViewportSize({ width: 1280, height: 900 });
         await page.getByRole("button", { name: "遊ぶ" }).click();
@@ -162,7 +177,7 @@ try {
             await page.clock.runFor(next);
             const frame = await page.screenshot();
             fs.writeFileSync(path.join(frames, `f-${String(index).padStart(4, "0")}.png`), frame);
-            if (index === 0) fs.writeFileSync(path.join(output, "holo-miko-motion-poster.png"), frame);
+            if (index === 0) fs.writeFileSync(path.join(output, poster), frame);
           }
           execFileSync(process.env.SHOOT_FFMPEG || "ffmpeg", ["-y", "-loglevel", "error", "-framerate", String(fps), "-i", path.join(frames, "f-%04d.png"), "-c:v", "libx264", "-preset", "medium", "-crf", "18", "-pix_fmt", "yuv420p", "-an", "-movflags", "+faststart", path.join(output, video)], { stdio: "pipe" });
         } finally {
