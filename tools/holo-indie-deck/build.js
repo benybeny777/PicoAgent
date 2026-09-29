@@ -16,8 +16,8 @@ const OUT = path.join(ROOT, "temp", "HOLO-INDIE-PLAN.pptx");
 // pptxgenjs は WebP を埋め込めないため、掲載する画像だけ PNG へ変換して一時領域へ置く。
 fs.mkdirSync(path.join(ROOT, "temp"), { recursive: true });
 const IMG = fs.mkdtempSync(path.join(ROOT, "temp", "holo-indie-deck-"));
-// さくらみこところねを表示例にし、ひよりはLive2Dの動作例として紹介する。
-const USED = ["holo-miko-stream", "holo-korone-stream", "holo-miko-chat", "holo-indie-result"];
+// 画面例は審査版の主役であるさくらみこに統一する。
+const USED = ["holo-miko-stream", "holo-miko-chat", "holo-indie-result"];
 const imageSizes = new Map();
 
 async function prepareImages() {
@@ -122,9 +122,6 @@ function shot(s, name, o) {
   if (name.startsWith("holo-miko-")) {
     s.addNotes("さくらみこ公式MMDモデルをPicoAgentの実フロントで描画した画面。会話は撮影用の固定応答。モデル本体と利用者設定は変更していない。");
   }
-  if (name.startsWith("holo-korone-")) {
-    s.addNotes("利用者が追加した戌神ころねMMDモデルを実フロントで描画した画面。審査版には同梱しない。モデル本体と利用者設定は変更していない。");
-  }
   if (o.caption) {
     s.addText(o.caption, {
       x: o.x - 0.2, y: o.y + o.h + 0.12, w: o.w + 0.4, h: 0.26, isTextBox: true, margin: 0,
@@ -224,7 +221,7 @@ function build() {
   {
     const s = pres.addSlide();
     s.background = { color: ALT };
-    title(s, "FAN EXPERIENCE", "ファンが繰り返し遊ぶ体験");
+    title(s, "FAN EXPERIENCE", "毎日推しと過ごす体験");
     const steps = [
       ["起動", "PCを起動すると、キャラクターがデスクトップに現れて挨拶する"],
       ["会話", "作業の合間に話しかける。雑談にも、キャラクターとして答える"],
@@ -242,7 +239,7 @@ function build() {
         x: M + 0.78, y: y + 0.38, w: 5.6, h: 0.52, isTextBox: true, margin: 0, fontFace: JP, fontSize: 12, color: MUTED, lineSpacing: 18, valign: "top",
       });
     });
-    shot(s, "holo-korone-stream", { x: 7.35, y: 1.9, w: 5.2, h: 3.47, caption: "戌神ころね：利用者が追加したMMDモデル" });
+    shot(s, "holo-miko-stream", { x: 7.35, y: 1.9, w: 5.2, h: 3.47, caption: "さくらみこ：審査版に同梱するMMDモデル" });
     s.addText("キャラの追加数に固定上限はありません。利用条件と端末容量に応じて増やせます。", {
       x: 7.35, y: 5.8, w: 5.2, h: 0.55, isTextBox: true, margin: 0, fontFace: JP, fontSize: 11, color: MUTED,
     });
@@ -257,8 +254,6 @@ function build() {
     const demos = [
       { name: "holo-miko-motion", label: "さくらみこ｜MMD", x: M, y: 2.15, w: 5.8, h: 3.2625,
         body: "待機動作・まばたき・表情の変化", detail: "ホロライブ向けのキャラクター表示例" },
-      { name: "holo-hiyori-motion", label: "ひより｜Live2D", x: 6.85, y: 2.03, w: 5.75, h: 3.833333,
-        body: "滑らかな体の動き・髪の揺れ・まばたき", detail: "Live2Dの動作例（ホロライブのキャラクターではありません）" },
     ];
     for (const demo of demos) {
       s.addText(demo.label, { x: demo.x, y: 1.65, w: demo.w, h: 0.32, margin: 0,
@@ -277,10 +272,17 @@ function build() {
       s.addText(demo.detail, { x: demo.x, y: 6.4, w: demo.w, h: 0.42, margin: 0,
         fontFace: JP, fontSize: 11, color: MUTED });
     }
-    s.addText("スライドショーで▶再生。さくらみこはAivis音声あり、ひよりは無音。", {
+    s.addText("対応形式", { x: 6.85, y: 1.65, w: 5.75, h: 0.32, margin: 0,
+      fontFace: JP, fontSize: 18, bold: true, color: TEXT });
+    card(s, { x: 6.85, y: 2.03, w: 5.75, h: 3.83, fill: ALT, line: LINE, shadow: false });
+    s.addText("オリジナルPNGパラパラ漫画\nLive2D　／　MMD", { x: 7.2, y: 2.55, w: 5.05, h: 1.5,
+      margin: 0, fontFace: JP, fontSize: 22, bold: true, color: TEXT });
+    s.addText("VRMは過去の実装を再有効化して対応可能。\n審査版の同梱は、さくらみこMMDモデル1体です。", {
+      x: 7.2, y: 4.5, w: 5.05, h: 0.9, margin: 0, fontFace: JP, fontSize: 13, color: MUTED });
+    s.addText("スライドショーで▶再生。さくらみこの動画にはAivis音声が入っています。", {
       x: M, y: 7.0, w: 10.8, h: 0.25, margin: 0, fontFace: JP, fontSize: 10, color: MUTED,
     });
-    s.addNotes("PicoAgentの実フロント描画を録画。会話は撮影用固定応答。さくらみこはローカル登録の公式MMDモデル、ひよりは導入済みLive2Dモデル。モデル本体は変更せず、録画のみ埋め込み。ひよりは描画機能の参考例で、holo Indie審査ビルドへの同梱キャラクターではない。");
+    s.addNotes("PicoAgentの実フロント描画を録画。会話は撮影用固定応答。さくらみこはローカル登録の公式MMDモデル。モデル本体は変更せず、録画のみ埋め込み。");
     pageNo(s, 4);
   }
 
@@ -307,8 +309,8 @@ function build() {
         x: x + 0.28, y: y + 1.3, w: 2.85, h: 0.52, isTextBox: true, margin: 0, fontFace: JP, fontSize: 11, color: MUTED, lineSpacing: 15, valign: "top",
       });
     });
-    s.addText("PC操作や外部サービスとの連携は、安全のため既定では無効です。", {
-      x: M, y: 6.1, w: 6.9, h: 0.3, isTextBox: true, margin: 0, fontFace: JP, fontSize: 11, color: MUTED,
+    s.addText("PicoAgent本体は多機能。holo Indie向けには会話・音声・表情と遊びに絞る企画です。審査版には実務機能も残っており、専用版での削減範囲は試遊と監修を踏まえて決めます。", {
+      x: M, y: 6.1, w: 6.9, h: 0.8, isTextBox: true, margin: 0, fontFace: JP, fontSize: 11, color: MUTED,
     });
     shot(s, "holo-miko-chat", { x: 8.65, y: 1.25, w: 3.4, h: 4.25, caption: "さくらみこ：配信形式のチャット列" });
     pageNo(s, 5);
@@ -458,7 +460,7 @@ function build() {
     const platforms = [
       ["macOS・Linux　基本機能はある程度動作", "macOS（Apple Silicon）とUbuntu Linux x64向けのビルド経路があります。審査版はWindows向けで、他OSの配布前には実機QAと配布条件の確認が必要です。"],
       ["スマートフォン　中核ロジックを再利用して展開可能", "表示と処理を分離しているため、会話などの中核を再利用できます。スマホ向け画面、OS権限、音声・モデル実行、配布経路は別途実装・検証します。"],
-      ["SaaS　クラウド・オンプレミスを選択可能", "バックエンドはいずれにも配置できます。サービス提供には認証・認可を別途実装します。"],
+      ["現在はゲーミングPC・Mac向け、将来はSaaSも可能", "審査版はWindows向け。将来のSaaS化ではバックエンドをクラウド・オンプレミスのどちらにも配置できます。認証・認可は別途実装します。"],
     ];
     platforms.forEach(([heading, body], i) => {
       const y = 1.8 + i * 1.65;
@@ -476,17 +478,17 @@ function build() {
     s.addText("PROPOSAL & NEXT STEPS", {
       x: M, y: 0.5, w: CW, h: 0.26, isTextBox: true, margin: 0, fontFace: JP, fontSize: 12, bold: true, charSpacing: 2, color: MINT,
     });
-    s.addText("審査で提案したいこと", {
+    s.addText("審査でお願いしたいこと", {
       x: M, y: 0.8, w: CW, h: 0.6, isTextBox: true, margin: 0, fontFace: JP, fontSize: 28, bold: true, color: WHITE,
     });
-    s.addText("まず会話・反応・遊びを審査版で試していただき、ファン向けの面白さと公式キャラ表現の範囲を相談したいです。", {
+    s.addText("審査版で会話体験をご確認いただき、キャラ表現・音声・モデルの扱いをご相談したいです。", {
       x: M, y: 1.45, w: CW, h: 0.3, isTextBox: true, margin: 0, fontFace: JP, fontSize: 12, color: NIGHT_MUTED,
     });
     const next = [
-      ["鍵", "キャラ表現の監修", "人格ロックを実装し、口調・表情・話題の範囲を監修に合わせる"],
-      ["表", "AI表現の明示", "「AIによる生成であり、ご本人の発言ではない」旨をアプリ内に常に表示する"],
-      ["顔", "遊びの磨き込み", "試遊結果を踏まえ、会話やゲームに応じた反応と見せ場を増やす"],
-      ["声", "声の採用条件", "審査版はAivisの公開音声。本人の声は許諾を得て学習・登録すれば差し替え可能"],
+      ["鍵", "キャラ表現の監修", "口調・表情・話題など、キャラクター表現の範囲をご監修いただきたいです"],
+      ["声", "音声学習・利用の許可", "YouTube等の公開音声かご提供音声でのAI学習・利用許可。許諾後は本人の声に差し替え可能"],
+      ["像", "キャラモデルの提供・同梱許可", "モデル提供が難しければ、無償公開MMDモデルの同梱許可をご相談したいです"],
+      ["販", "販売条件", "収益化を前提とし、価格・販売方式は貴社方針に従います。別売りがholo Indie採用と両立しなければ行いません"],
     ];
     next.forEach(([icon, t, b], i) => {
       const x = M + (i % 2) * 6.05;
@@ -503,7 +505,7 @@ function build() {
     s.addText("人格ロックとAI生成の常時表示は、審査側の要件を受けて一般配布前に実装します。", {
       x: M, y: 6.4, w: CW, h: 0.3, isTextBox: true, margin: 0, fontFace: JP, fontSize: 12, color: NIGHT_MUTED,
     });
-    s.addText("収益化は目指します。価格・販売方式は審査と相談を踏まえて決めます。", {
+    s.addText("BOOTHやSteamでの販売を目標に開発し、収益化を前提としています。", {
       x: M, y: 6.8, w: CW, h: 0.3, isTextBox: true, margin: 0, fontFace: JP, fontSize: 12, color: NIGHT_MUTED,
     });
     pageNo(s, 10, true);

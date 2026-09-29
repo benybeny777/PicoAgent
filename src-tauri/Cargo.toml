@@ -1,6 +1,6 @@
 [package]
 name = "picoagent"
-version = "1.2.12"
+version = "1.2.13"
 description = "PicoAgent - コネクタ駆動のデスクトップペット"
 authors = ["PicoAgent"]
 edition = "2021"
