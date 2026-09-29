@@ -1242,12 +1242,23 @@ mod tests {
         pmx.extend(2.0f32.to_le_bytes());
         pmx.extend([8, 1, 0, 1, 1, 1, 1, 1, 1]);
         pmx.extend([0u8; 52]);
+        let texture = "tex/skin.png";
+        pmx[41..45].copy_from_slice(&1i32.to_le_bytes());
+        let mut reference = (texture.len() as i32).to_le_bytes().to_vec();
+        reference.extend(texture.as_bytes());
+        pmx.splice(45..45, reference);
         let source = dir.join("selected.pmx");
         std::fs::write(&source, &pmx).unwrap();
+        std::fs::create_dir_all(dir.join("tex")).unwrap();
+        std::fs::write(dir.join(texture), b"texture").unwrap();
         std::fs::write(dir.join("unrelated.txt"), b"private").unwrap();
         let destination = dir.join("copied");
         let selected = super::copy_selected_pmx(&source, &destination).unwrap();
         assert_eq!(std::fs::read(selected).unwrap(), pmx);
+        assert_eq!(
+            std::fs::read(destination.join(texture)).unwrap(),
+            b"texture"
+        );
         assert!(!destination.join("unrelated.txt").exists());
         std::fs::remove_dir_all(dir).unwrap();
     }
