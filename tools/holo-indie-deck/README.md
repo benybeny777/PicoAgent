@@ -17,24 +17,24 @@ node tools/holo-indie-deck/build.js          # temp/HOLO-INDIE-PLAN.pptx を生�
 
 Playwright をグローバル以外に置いている場合は `PLAYWRIGHT_MODULE=<playwright の index.mjs>`、Chromium を指定する場合は `CHROMIUM_PATH` を渡します。
 
-録画にはFFmpeg（H.264エンコーダ付き）、同期済みの`ui/assets/characters/hiyori/live2d/`、Live2D/MMDランタイム、`%APPDATA%/PicoAgent/characters/miko-mmd/character.json`とそのモデルが必要です。自動取得はしません。`PLAYWRIGHT_MODULE`でPlaywrightの`index.mjs`、`SHOOT_FFMPEG`でFFmpegを指定できます。別の作業ツリーに既存UI資産がある場合は`PICO_CAPTURE_SOURCE`にそのリポジトリの絶対パスを指定します。未指定時は現在のリポジトリを使用します。出力はこの生成ツールがあるリポジトリの`docs/images/`です。
+録画にはFFmpeg（H.264エンコーダ付き）、同期済みの`ui/assets/characters/hiyori/live2d/`、Live2D/MMDランタイム、`%APPDATA%/PicoAgent/characters/miko-mmd/character.json`と`korone-mmd/character.json`および各モデルが必要です。自動取得はしません。`PLAYWRIGHT_MODULE`でPlaywrightの`index.mjs`、`SHOOT_FFMPEG`でFFmpegを指定できます。別の作業ツリーに既存UI資産がある場合は`PICO_CAPTURE_SOURCE`にそのリポジトリの絶対パスを指定します。未指定時は現在のリポジトリを使用します。出力はこの生成ツールがあるリポジトリの`docs/images/`です。
 
 ## 掲載する画像と動画
 
-本体の画面例はさくらみこ公式MMDモデルで統一します。4枚目には、さくらみこのMMDとひよりのLive2Dを無音MP4として埋め込みます。さくらみこは7秒・30fps、ひよりは6秒・60fpsです。ひよりはLive2Dの動作例として紹介し、ホロライブのキャラクターや審査ビルドへの同梱キャラクターとは区別します。Googleスライドへ変換した後はMP4をDriveへアップロードし、静止画化した箇所をDrive動画へ置き換えます。スライドショーで各動画の▶を押すと再生します。編集画面やPDFでは動きません。この条件をファイル名と資料内に明記します。
+本体の画面例には、さくらみこと利用者が追加した戌神ころねのMMDモデルを使います。審査版に同梱する1体と、アプリで追加できるキャラ数は別です。4枚目には、さくらみこのMMDとひよりのLive2Dを無音MP4として埋め込みます。さくらみこは7秒・30fps、ひよりは6秒・60fpsです。ひよりはLive2Dの動作例として紹介し、ホロライブのキャラクターや審査ビルドへの同梱キャラクターとは区別します。Googleスライドへ変換した後はMP4をDriveへアップロードし、静止画化した箇所をDrive動画へ置き換えます。スライドショーで各動画の▶を押すと再生します。編集画面やPDFでは動きません。この条件をファイル名と資料内に明記します。
 
 | 素材 | 使用箇所 |
 |---|---|
 | `holo-miko-stream.png` | 表紙（さくらみこの配信表示） |
-| `holo-miko-pet.png` | 3枚目（さくらみこのペット表示） |
+| `holo-korone-stream.png` | 3枚目（ころねの配信表示） |
 | `holo-miko-chat.png` | 5枚目（さくらみこのチャット表示） |
 | `holo-miko-motion.mp4` と `holo-miko-motion-poster.png` | 4枚目（さくらみこの動作） |
 | `holo-hiyori-motion.mp4` と `holo-hiyori-motion-poster.png` | 4枚目（ひよりのLive2D動作） |
 | `holo-indie-result.webp` | 6枚目（おまけのミニゲーム） |
 
-`capture-current.mjs`は現行の実フロントを使い、バックエンド応答だけを撮影用に固定します。AIの実応答や実音声の検証ではありません。導入済みモデルだけを読み取り、さくらみこのPMX・テクスチャや利用者設定は変更しません。モデル本体はPPTにもGitにも追加せず、表示した画面と録画だけを保存します。動画はH.264・yuv420pで、外部リンクに依存せずPPT内へ埋め込みます。
+`capture-current.mjs`は現行の実フロントを使い、バックエンド応答だけを撮影用に固定します。AIの実応答や実音声の検証ではありません。導入済みモデルだけを読み取り、PMX・テクスチャや利用者設定は変更しません。モデル本体はPPTにもGitにも追加せず、表示した画面と録画だけを保存します。動画はH.264・yuv420pで、外部リンクに依存せずPPT内へ埋め込みます。
 
-`holo-indie-result.webp` はゲーム結果画面の既存資料です。ゲーム画面を変更した場合は現行 UI で撮り直し、スライドの画像も更新してください。
+`holo-indie-result.webp` は `capture-current.mjs` が現行ゲーム画面から撮影します。透明なペット画面には説明用の背景色を足さず、スライドには背景を持つ配信画面を掲載します。
 
 録画フレームとPowerPoint用の画像変換はリポジトリの`temp/`内に実行ごとの一時フォルダを作り、処理終了時に削除します。撮影は失敗時もブラウザを閉じ、一時フォルダを回収します。
 
