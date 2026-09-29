@@ -254,7 +254,7 @@ function build() {
     const demos = [
       { name: "holo-miko-motion", label: "さくらみこ｜MMD", x: M, y: 2.15, w: 5.8, h: 3.2625,
         body: "待機動作・まばたき・表情の変化", detail: "ホロライブ向けのキャラクター表示例" },
-      { name: "holo-hiyori-motion", label: "ひより｜Live2D（旧UI撮影）", x: 6.85, y: 2.03, w: 5.75, h: 3.833333,
+      { name: "holo-hiyori-motion", label: "ひより｜Live2D（旧UI撮影）", x: 6.85, y: 2.15, w: 5.8, h: 3.2625,
         body: "滑らかな体の動き・髪の揺れ・まばたき", detail: "Live2Dの動作例。審査版への同梱キャラではありません。" },
     ];
     for (const demo of demos) {
