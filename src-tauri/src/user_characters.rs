@@ -553,6 +553,10 @@ fn copy_selected_pmx(source: &Path, destination: &Path) -> Result<PathBuf> {
         }
         let relative = character_pack::safe_relative(&normalized, "PMXテクスチャ")?;
         let from = parent.join(&relative);
+        // 取り込み後の検証と同じ文言で、欠けたテクスチャ名を利用者へ示す。
+        if !from.is_file() {
+            bail!("PMXテクスチャがありません: {texture}");
+        }
         if !from.canonicalize()?.starts_with(&source_root) {
             bail!("PMXテクスチャがモデルフォルダ外を参照しています: {texture}");
         }
@@ -1260,6 +1264,11 @@ mod tests {
             b"texture"
         );
         assert!(!destination.join("unrelated.txt").exists());
+        std::fs::remove_file(dir.join(texture)).unwrap();
+        let missing = super::copy_selected_pmx(&source, &dir.join("missing"))
+            .unwrap_err()
+            .to_string();
+        assert!(missing.contains("PMXテクスチャがありません: tex/skin.png"));
         std::fs::remove_dir_all(dir).unwrap();
     }
 
