@@ -116,7 +116,7 @@ async function openApp({ layout, width, height, characterId, scenes, onboardingD
 async function edgeContact(page) {
   const box = await page.locator("[data-source=character]").boundingBox();
   // キャラの描画だけを撮る（他のソース・枠・キャラ上の小物を一時的に隠す）。
-  const style = await page.addStyleTag({ content: ".source:not([data-source=character]), #editLayer, #topWindowMenu, .relationship-button, .online-dot, .beta-badge { visibility: hidden; }" });
+  const style = await page.addStyleTag({ content: ".source:not([data-source=character]), #editLayer, #editToolbar, #topWindowMenu, .toast, .relationship-button, .online-dot, .beta-badge { visibility: hidden; }" });
   const png = await page.screenshot({ clip: box, omitBackground: true });
   await style.evaluate(node => node.remove());
   const probe = await browser.newPage();
@@ -177,6 +177,14 @@ for (const characterId of characters) {
     const edges = await edgeContact(page);
     await page.screenshot({ path: path.join(outDir, `${characterId}-${layout}.png`), omitBackground: true });
     report.push({ label, kind, framing, edges });
+    const idleCharacter = await page.locator('[data-source="character"]').boundingBox();
+    await page.mouse.move(idleCharacter.x + idleCharacter.width / 2, idleCharacter.y + idleCharacter.height / 2);
+    const idleEdit = await page.evaluate(() => ({
+      layerHidden: document.getElementById("editLayer").hidden,
+      gripHidden: getComputedStyle(document.querySelector(".source-grip")).display === "none",
+    }));
+    if (!idleEdit.layerHidden || !idleEdit.gripHidden) fail(label, `配置を押す前に編集枠・つまみが出ています ${JSON.stringify(idleEdit)}`);
+    else ok(`${label} 通常時は配置を選べない`);
     if (edges.total < 50) fail(label, `キャラが描かれていません（不透明画素 ${edges.total}）`);
     else if (edges.top > 0) fail(label, `キャラの上端が切れています（上端の接触 ${edges.top}px）`);
     else ok(`${label} 描画（${kind}）`);
@@ -263,6 +271,25 @@ for (const characterId of characters) {
     const full = await edgeContact(page);
     if (full.top > 0 || full.left > 0 || full.right > 0) fail(`${label}/full`, `全身構図で端が切れています ${JSON.stringify(full)}`);
     else ok(`${label} 全身構図`);
+    await page.evaluate(() => window.__emit("pet:layout-edit", "all"));
+    const editAlignment = await page.evaluate(() => {
+      const stage = document.getElementById("stage").getBoundingClientRect();
+      return [...document.querySelectorAll("#editLayer .edit-frame:not([hidden])")].map(frame => {
+        const source = document.querySelector(`[data-source="${frame.dataset.target}"]`)?.getBoundingClientRect();
+        const visible = source && {
+          left: Math.max(stage.left, source.left), top: Math.max(stage.top, source.top),
+          right: Math.min(stage.right, source.right), bottom: Math.min(stage.bottom, source.bottom),
+        };
+        const border = frame.getBoundingClientRect();
+        return { name: frame.dataset.target, aligned: visible && ["left", "top", "right", "bottom"].every(key => Math.abs(visible[key] - border[key]) <= 1) };
+      });
+    });
+    if (!editAlignment.length || editAlignment.some(item => !item.aligned)) fail(`${label}/edit`, `選択枠がソースとずれています ${JSON.stringify(editAlignment)}`);
+    else ok(`${label} 配置中の選択枠が表示範囲と一致`);
+    const editTools = await fullyInside(page, "#editToolbar");
+    if (!editTools.inside) fail(`${label}/edit`, `配置の操作部が画面外です ${JSON.stringify(editTools)}`);
+    if (characterId === characters[0]) await page.screenshot({ path: path.join(outDir, `${layout}-editing.png`), omitBackground: true });
+    await page.evaluate(() => window.__emit("pet:layout-edit", "character"));
     // つまみで縮小・拡大する（保存は pet_save_scene を通り、倍率ではなく矩形で届く）。
     for (const factor of [0.5, 1.8]) {
       const box = await page.locator("[data-source=character]").boundingBox();
@@ -271,13 +298,16 @@ for (const characterId of characters) {
       const handle = page.locator('.edit-frame[data-target="character"] .edit-handle[data-corner="top-left"]');
       if (!(await handle.count()) || !(await handle.isVisible())) { fail(label, "キャラに乗せてもつまみが出ません"); break; }
       const hb = await handle.boundingBox();
-      const targetX = box.x + box.width - box.width * factor;
-      const targetY = box.y + box.height - box.height * factor;
-      await page.mouse.move(hb.x + hb.width / 2, hb.y + hb.height / 2);
+      const startX = hb.x + hb.width / 2;
+      const startY = hb.y + hb.height / 2;
+      const targetX = startX + box.width * (1 - factor);
+      const targetY = startY + box.height * (1 - factor);
+      await page.mouse.move(startX, startY);
       await page.mouse.down();
       await page.mouse.move(targetX, targetY, { steps: 6 });
       await page.mouse.up();
       await page.waitForTimeout(600);
+      if (characterId === characters[0]) await page.screenshot({ path: path.join(outDir, `${layout}-resize-${factor}.png`), omitBackground: true });
       const after = await edgeContact(page);
       const entry = await page.evaluate(id => window.__saved?.[document.getElementById("petApp").dataset.layout]?.characters?.[id], characterId);
       if (!entry || !Number.isFinite(entry.w) || entry.zoom != null || entry.scale != null) fail(`${label}/resize`, `保存値が矩形になっていません ${JSON.stringify(entry)}`);
@@ -285,6 +315,8 @@ for (const characterId of characters) {
       else ok(`${label} 拡大縮小×${factor}（${Math.round(after.width)}×${Math.round(after.height)}）`);
     }
     await page.screenshot({ path: path.join(outDir, `${characterId}-${layout}-resized.png`), omitBackground: true });
+    await page.locator("#editToolbar").getByRole("button", { name: "完了" }).click();
+    if (!(await page.locator("#editLayer").evaluate(node => node.hidden))) fail(`${label}/edit`, "編集を終えても選択枠が残っています");
 
     // 右クリックはどこでも同じメニュー（文脈だけを渡す）。
     await page.mouse.click(10, 60); // 何も無い所
@@ -331,6 +363,28 @@ for (const layout of Object.keys(LAYOUTS)) {
   if (JSON.stringify(state.saved) !== JSON.stringify(scenes)) fail("saved-overflow", "表示補正が保存値を書き換えました");
   if (state.calls.length) fail("saved-overflow", "読み込みだけでシーンを保存しました");
   if (bounds.inside && !state.calls.length) ok("巨大な保存値は表示だけ収め、保存値を保つ");
+  await context.close();
+}
+
+// 保存矩形が画面外へ延びても、編集枠だけを見える範囲へ切って元の保存値を保つ。
+{
+  const scenes = { version: 1, stream: { sources: { background: {
+    anchor: "top-left", x: -100, y: -100, w: 1920, h: 1080,
+  } } } };
+  const { context, page } = await openApp({ layout: "stream", width: 1280, height: 720, characterId: "mugi", scenes });
+  await page.evaluate(() => window.__emit("pet:layout-edit", "all"));
+  const clipped = await page.evaluate(() => {
+    const stage = document.getElementById("stage").getBoundingClientRect();
+    const frame = document.querySelector('.edit-frame[data-target="background"]');
+    const rect = frame.getBoundingClientRect();
+    return { inside: rect.left >= stage.left && rect.top >= stage.top && rect.right <= stage.right && rect.bottom <= stage.bottom,
+      cornerHidden: frame.querySelector('[data-corner="top-left"]').hidden,
+      saved: window.__saved, saves: window.__calls.filter(call => call.name === "pet_save_scene").length };
+  });
+  if (!clipped.inside || !clipped.cornerHidden || clipped.saves || JSON.stringify(clipped.saved) !== JSON.stringify(scenes)) {
+    fail("stream/clipped-edit", `画面外の枠または保存値が不正です ${JSON.stringify(clipped)}`);
+  } else ok("stream/clipped-edit 画面外の枠は表示だけ切り、保存値を保つ");
+  await page.screenshot({ path: path.join(outDir, "stream-clipped-edit.png"), omitBackground: true });
   await context.close();
 }
 

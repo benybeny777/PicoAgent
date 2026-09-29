@@ -346,13 +346,15 @@
 
 /* 会話パネルの大きさを変えるつまみ（アンカーの反対側の角）。 */
 .source-grip {
+  display: none;
   position: absolute;
   width: 18px;
   height: 18px;
   opacity: 0;
   transition: opacity var(--dur-fast) var(--ease);
 }
-.chat:hover .source-grip, .source-grip:focus-visible { opacity: 1; }
+body.is-editing-all .source-grip { display: block; }
+body.is-editing-all .chat:hover .source-grip, body.is-editing-all .source-grip:focus-visible { opacity: 1; }
 .source-grip::before {
   content: "";
   position: absolute;
