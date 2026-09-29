@@ -10,7 +10,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..")
 const sourceRoot = process.env.PICO_CAPTURE_SOURCE || root;
 const uiRoot = path.join(sourceRoot, "ui");
 const userCharactersRoot = path.join(process.env.APPDATA || "", "PicoAgent", "characters");
-const mmdModels = new Map(["miko-mmd", "korone-mmd"].map(id => [id, path.join(userCharactersRoot, id)]));
+const mmdModels = new Map([["miko-mmd", path.join(userCharactersRoot, "miko-mmd")]]);
 const output = path.join(root, "docs", "images");
 const voicedVideo = process.argv.includes("--voice-video");
 const voiceSample = path.join(root, "temp", "holo-indie-review-installer", "aivis-holo-demo.wav");
@@ -37,7 +37,6 @@ const server = http.createServer((request, response) => {
     if (name === "assets/characters/index.json") {
       const catalog = JSON.parse(body.toString("utf8"));
       catalog.characters.push({ id: "miko-mmd", name: "さくらみこ", manifest: "miko-mmd/character.json" });
-      catalog.characters.push({ id: "korone-mmd", name: "戌神ころね", manifest: "korone-mmd/character.json" });
       body = Buffer.from(JSON.stringify(catalog));
     }
     response.writeHead(200, { "Content-Type": types[path.extname(file)] || "application/octet-stream", "Cache-Control": "no-store" });
@@ -100,8 +99,6 @@ try {
   const scenes = [
     { characterId: "miko-mmd", layout: "stream", width: 1280, height: 720, image: "holo-miko-stream.png", video: "holo-miko-motion.mp4", seconds: 7, fps: 30 },
     { characterId: "miko-mmd", layout: "pet", width: 900, height: 600 },
-    { characterId: "korone-mmd", layout: "stream", width: 1280, height: 720, image: "holo-korone-stream.png" },
-    { characterId: "hiyori", layout: "pet", width: 900, height: 600, video: "holo-hiyori-motion.mp4", seconds: 6, fps: 60 },
   ];
   for (const { characterId, layout, width, height, image, video, seconds, fps } of
     (voicedVideo ? scenes.slice(0, 1) : scenes)) {
@@ -165,7 +162,7 @@ try {
             await page.clock.runFor(next);
             const frame = await page.screenshot();
             fs.writeFileSync(path.join(frames, `f-${String(index).padStart(4, "0")}.png`), frame);
-            if (index === 0) fs.writeFileSync(path.join(output, `holo-${characterId === "miko-mmd" ? "miko" : "hiyori"}-motion-poster.png`), frame);
+            if (index === 0) fs.writeFileSync(path.join(output, "holo-miko-motion-poster.png"), frame);
           }
           execFileSync(process.env.SHOOT_FFMPEG || "ffmpeg", ["-y", "-loglevel", "error", "-framerate", String(fps), "-i", path.join(frames, "f-%04d.png"), "-c:v", "libx264", "-preset", "medium", "-crf", "18", "-pix_fmt", "yuv420p", "-an", "-movflags", "+faststart", path.join(output, video)], { stdio: "pipe" });
         } finally {
