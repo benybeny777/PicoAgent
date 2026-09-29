@@ -254,6 +254,8 @@ function build() {
     const demos = [
       { name: "holo-miko-motion", label: "さくらみこ｜MMD", x: M, y: 2.15, w: 5.8, h: 3.2625,
         body: "待機動作・まばたき・表情の変化", detail: "ホロライブ向けのキャラクター表示例" },
+      { name: "holo-hiyori-motion", label: "ひより｜Live2D（旧UI撮影）", x: 6.85, y: 2.03, w: 5.75, h: 3.833333,
+        body: "滑らかな体の動き・髪の揺れ・まばたき", detail: "Live2Dの動作例。審査版への同梱キャラではありません。" },
     ];
     for (const demo of demos) {
       s.addText(demo.label, { x: demo.x, y: 1.65, w: demo.w, h: 0.32, margin: 0,
@@ -272,14 +274,7 @@ function build() {
       s.addText(demo.detail, { x: demo.x, y: 6.4, w: demo.w, h: 0.42, margin: 0,
         fontFace: JP, fontSize: 11, color: MUTED });
     }
-    s.addText("対応形式", { x: 6.85, y: 1.65, w: 5.75, h: 0.32, margin: 0,
-      fontFace: JP, fontSize: 18, bold: true, color: TEXT });
-    card(s, { x: 6.85, y: 2.03, w: 5.75, h: 3.83, fill: ALT, line: LINE, shadow: false });
-    s.addText("オリジナルPNGパラパラ漫画\nLive2D　／　MMD", { x: 7.2, y: 2.55, w: 5.05, h: 1.5,
-      margin: 0, fontFace: JP, fontSize: 22, bold: true, color: TEXT });
-    s.addText("VRMは過去の実装を再有効化して対応可能。\n審査版の同梱は、さくらみこMMDモデル1体です。", {
-      x: 7.2, y: 4.5, w: 5.05, h: 0.9, margin: 0, fontFace: JP, fontSize: 13, color: MUTED });
-    s.addText("スライドショーで▶再生。さくらみこの動画にはAivis音声が入っています。", {
+    s.addText("スライドショーで▶再生。みこはAivis音声つき、ひよりは無音の動作例。", {
       x: M, y: 7.0, w: 10.8, h: 0.25, margin: 0, fontFace: JP, fontSize: 10, color: MUTED,
     });
     s.addNotes("PicoAgentの実フロント描画を録画。会話は撮影用固定応答。さくらみこはローカル登録の公式MMDモデル。モデル本体は変更せず、録画のみ埋め込み。");
