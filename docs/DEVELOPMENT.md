@@ -179,6 +179,7 @@ holo Indieの審査へ渡す候補は、リポジトリ直下の`holo Indie審�
 
 - `%APPDATA%\PicoAgent\characters\miko-mmd`に、公式配布元の`readme.txt`を含むさくらみこMMD登録データを用意します。出所と利用条件を確認できない場合はビルド前に停止します。
 - 配信・動画から学習した本人音声モデルやAIVMXは含めません。Aivis本体を同梱して読み上げを既定で有効にし、初回起動時にAivisHub公開モデル「まお」（ACML 1.0）を取得して仮音声で話します。仮音声は本人の声ではありません。専用Tauri設定のasset protocolは審査版の利用者領域だけを許可し、通常版のキャラクター領域へはアクセスしません。
+- 初期表示は配信形式です。さくらみこの会話動画は`capture-current.mjs --voice-video`で撮り、Aivis合成音声と画面内の口の動きを含めます。
 - 識別子`com.picoagent.holo-indie-review`の専用利用者領域へ導入し、通常版の設定、会話履歴、キャラクター、音声モデルを読みません。
 - 生成設定だけを軽く検査するときは`pwsh -File scripts/build-holo-indie-review-installer.ps1 -PrepareOnly -AllowStale`を使います。
 - 生成物は`temp\holo-indie-review-installer\PicoAgent_<版>_holo-Indie-Review_x64-setup.exe`です。holo Indie審査への限定共有専用であり、公開LP、公開Release、`latest.json`へ載せません。一般配布は許諾後に別の配布設定と実機検証で作ります。
@@ -373,7 +374,7 @@ NSIS アンインストーラは、インストール先またはPicoAgent管理
 | `tools/screenshots/shoot.mjs` | README 掲載画像（`docs/images/`）の撮影。実物の `ui/` を配信して `window.__TAURI__` だけモックし、ヘッドレス Chromium で描画する。合成ではなく実際の描画結果。使い方は `tools/screenshots/README.md` |
 | `tools/screenshots/review-board.mjs` | 全同梱キャラ×現行3形式の撮影画像を、拡大・絞り込み・所見記録ができる開発用画面にまとめる。撮影と結果は `temp/` 内に置く。使い方は `tools/screenshots/README.md` |
 | `tools/screenshots/native-inspect.mjs` | 起動中の実WebViewの状態取得・撮影。`noDefaults: true`でテーマ・省モーション・フォーカスを上書きせず接続し、一時画像は`temp/`へ保存する。検査用デバッグポートは終了後に設定から外す |
-| `tools/holo-indie-deck/build.js` | holo Indie説明資料の下書きPPTX（`temp/HOLO-INDIE-PLAN.pptx`）の生成。文面の正本は`docs/HOLO-INDIE-PLAN.md`で、提出物はDriveの動画付きGoogleスライド。さくらみこ・ひよりの現行画面と動画は同じ場所の `capture-current.mjs --video` で撮る（ミニゲーム結果画像は既存資料）。使い方は `tools/holo-indie-deck/README.md` |
+| `tools/holo-indie-deck/build.js` | holo Indie説明資料の下書きPPTX（`temp/HOLO-INDIE-PLAN.pptx`）の生成。文面の正本は`docs/HOLO-INDIE-PLAN.md`で、提出物はDriveの動画付きGoogleスライド。さくらみこの音声付き会話動画は同じ場所の `capture-current.mjs --voice-video` で撮る。ひよりの無音動画は導入済みLive2D実体がある環境で `--video` を使う。使い方は `tools/holo-indie-deck/README.md` |
 | `tools/ip-proposal-deck/build.js` | VTuber事務所へ送付する提案書PowerPoint（`docs/IP-PROPOSAL-VTUBER.pptx`）の生成。文面の正本は`docs/IP-PROPOSAL-VTUBER.md`で、PowerPointを直接編集しない。使い方は `tools/ip-proposal-deck/README.md` |
 | `src-tauri/src/tools/mod.rs` | スキル（ツール）の `Tool` トレイト・レジストリ本体 |
 | `skills/<スキル名>/mod.rs` | エージェント機能（スキル）コネクタ（trait 実装 + inventory 登録。ディレクトリを足すと自動登録）。`chitchat` は会話中にモデルへ提示しない内部スキル（`agent_callable=false`、アイドル雑談用） |

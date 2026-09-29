@@ -277,7 +277,7 @@ function build() {
       s.addText(demo.detail, { x: demo.x, y: 6.4, w: demo.w, h: 0.42, margin: 0,
         fontFace: JP, fontSize: 11, color: MUTED });
     }
-    s.addText("スライドショーで各動画をクリックして再生（音声なし）", {
+    s.addText("スライドショーで▶再生。さくらみこはAivis音声あり、ひよりは無音。", {
       x: M, y: 7.0, w: 10.8, h: 0.25, margin: 0, fontFace: JP, fontSize: 10, color: MUTED,
     });
     s.addNotes("PicoAgentの実フロント描画を録画。会話は撮影用固定応答。さくらみこはローカル登録の公式MMDモデル、ひよりは導入済みLive2Dモデル。モデル本体は変更せず、録画のみ埋め込み。ひよりは描画機能の参考例で、holo Indie審査ビルドへの同梱キャラクターではない。");
@@ -403,10 +403,10 @@ function build() {
     title(s, "REVIEW BUILD", "審査ビルドと、審査で見せる3分間");
     const rows = [
       ["対象OS", "Windows 10／11（x64）"],
-      ["同梱キャラ", "さくらみこ1体／追加数に固定上限なし"],
+      ["同梱キャラ", "さくらみこMMD1体"],
       ["AI", "同梱エンジンで端末内動作（初回にモデルを取得）"],
-      ["音声", "Aivisの「まお」で読み上げ（本人の声ではない）"],
-      ["初期表示", "ペット形式"],
+      ["音声", "AIの返答をAivisでその場で話す"],
+      ["初期表示", "配信形式"],
       ["導入先", "通常版とは別の領域。通常版の設定や履歴に触れない"],
     ];
     rows.forEach(([k, v], i) => {
@@ -420,6 +420,10 @@ function build() {
       s.addText(v, {
         x: M + 1.9, y, w: 4.15, h: 0.64, isTextBox: true, margin: 0, fontFace: JP, fontSize: 12, color: TEXT, valign: "middle",
       });
+    });
+    s.addText("対応：PNGパラパラ漫画／Live2D／MMD。VRMも過去の実装を再有効化して対応可能。", {
+      x: M, y: 6.4, w: 6.2, h: 0.5, isTextBox: true, margin: 0,
+      fontFace: JP, fontSize: 11, color: MUTED,
     });
     const demo = [
       ["30秒", "起動と挨拶", "キャラクターがデスクトップに現れて挨拶する"],
@@ -455,14 +459,14 @@ function build() {
     s.addText("今後の予定", {
       x: M, y: 0.8, w: CW, h: 0.6, isTextBox: true, margin: 0, fontFace: JP, fontSize: 28, bold: true, color: WHITE,
     });
-    s.addText("会話・音声・表情を中心に、実務機能の削減や専用版からの除外も検討します。対象は未定です。", {
+    s.addText("画面と処理は分離。SaaSとして構成でき、バックエンドはクラウド／オンプレミスに配置可能。認証・認可は別途実装。", {
       x: M, y: 1.45, w: CW, h: 0.3, isTextBox: true, margin: 0, fontFace: JP, fontSize: 12, color: NIGHT_MUTED,
     });
     const next = [
       ["鍵", "人格ロック", "公式キャラクターの人格・口調を、利用者が上書きできなくする"],
       ["表", "AI生成である旨の常時表示", "「AIによる生成であり、ご本人の発言ではない」旨をアプリ内に常に表示する"],
       ["顔", "キャラクターの反応を増やす", "会話やゲームの展開に応じた表情・ポーズ・固定の一言を、監修の範囲内で追加する"],
-      ["声", "Aivisで自由に話す", "審査版はAivisの仮音声でAIの返答を読み上げる。許諾済みの本人音声を学習・確認して登録すれば、本人の声を再現したAI音声へ差し替えられる"],
+      ["声", "Aivisで自由に話す", "AIが作った返答をAivisでその場で話す。本人の音声を許諾の下で学習・登録すれば、本人の声を再現したAI音声へ差し替えられる"],
     ];
     next.forEach(([icon, t, b], i) => {
       const x = M + (i % 2) * 6.05;

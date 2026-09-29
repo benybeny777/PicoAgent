@@ -66,7 +66,7 @@ $initialConfigPath = Join-Path $outputRoot 'config.holo-indie-review.json'
 
 $initialConfig = [ordered]@{
     PICOAGENT_CHARACTER       = $characterId
-    PICOAGENT_LAYOUT          = 'pet'
+    PICOAGENT_LAYOUT          = 'stream'
     PICOAGENT_PROVIDER        = 'local'
     PICOAGENT_TTS_ENABLED     = $true
     PICOAGENT_TTS_CHARACTER_OVERRIDES = @{
