@@ -174,6 +174,14 @@ function build() {
       { x: M, y: 5.35, w: 6, h: 1.0, isTextBox: true, margin: 0, fontFace: JP, fontSize: 13, color: NIGHT_MUTED, lineSpacing: 22 }
     );
     shot(s, "holo-miko-stream", { x: 7.55, y: 2.0, w: 5.05, h: 2.84, caption: SAMPLE, dark: true });
+    s.addText("開発の経緯", {
+      x: 7.55, y: 5.3, w: 5.05, h: 0.34, isTextBox: true, margin: 0,
+      fontFace: JP, fontSize: 15, bold: true, color: MINT,
+    });
+    s.addText("実際にPCで使う相棒として開発。特に大変だったキャラの見た目や動きづくりに、魅力あるIPコンテンツとの相性を感じ、応募を考えました。", {
+      x: 7.55, y: 5.7, w: 5.05, h: 0.9, isTextBox: true, margin: 0,
+      fontFace: JP, fontSize: 11.5, color: NIGHT_MUTED, lineSpacing: 19, valign: "top",
+    });
   }
 
   /* ---------- 2. 企画の要点 ---------- */
