@@ -1,6 +1,6 @@
-# holo Indie 応募説明資料の下書き生成ツール
+# holo Indie 応募企画書の下書き生成ツール
 
-holo Indie へ応募する作品 PicoAgent の説明資料の下書き `temp/HOLO-INDIE-PLAN.pptx`（全9枚）を生成します。提出物はDrive上の動画付きGoogleスライドです。下書きPPTXはGitにも提出先にも置きません。
+holo Indie へ応募する作品 PicoAgent の企画書の下書き `temp/HOLO-INDIE-PLAN.pptx`（全10枚）を生成します。提出物はDrive上の動画付きGoogleスライドです。下書きPPTXはGitにも提出先にも置きません。
 
 **応募作の本体は PicoAgent で、ミニゲーム「人間だとバレるな」はおまけです。** 企画書でもミニゲームは1枚だけで紹介します。
 
