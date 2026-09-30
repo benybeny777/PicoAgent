@@ -200,7 +200,7 @@ export function createChatSource(context) {
     },
     setStreamFontPx(px) {
       const requested = Number(px);
-      const size = Number.isInteger(requested) && requested >= 18 && requested <= 48 ? requested : 30;
+      const size = Number.isInteger(requested) && requested >= 18 && requested <= 48 ? requested : 22;
       element.style.setProperty("--stream-chat-font-size", `${size}px`);
       element.style.setProperty("--stream-chat-control-font-size", `${Math.round(size * 0.8)}px`);
       element.style.setProperty("--stream-chat-action-font-size", `${Math.round(size * 0.65)}px`);

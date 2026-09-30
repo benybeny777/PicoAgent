@@ -16,6 +16,7 @@ const bootScreen = await readFile(new URL("../../src-tauri/src/boot_screen.rs", 
 const windowSurface = await readFile(new URL("../../src-tauri/src/window_surface.rs", import.meta.url), "utf8");
 const lib = await readFile(new URL("../../src-tauri/src/lib.rs", import.meta.url), "utf8");
 const styles = await readFile(new URL("../../ui/components/boot.css", import.meta.url), "utf8");
+const windowStyles = await readFile(new URL("../../ui/components/window.css", import.meta.url), "utf8");
 const indexHtml = await readFile(new URL("../../ui/index.html", import.meta.url), "utf8");
 const startupStart = main.indexOf("(async () => {\n  // 起動画面のDOMを組み立ててから窓を表示する。");
 const startupEnd = main.indexOf("\n})().catch(error => {", startupStart);
@@ -76,6 +77,8 @@ test("起動画面を先に表示し仮キャラを隠したまま最終DOMへ�
   const frontendReady = commands.slice(commands.indexOf("pub fn pet_frontend_ready"), commands.indexOf("pub fn pet_boot_progress"));
   assert.ok(frontendReady.indexOf("crate::layout::restart_boot(&app)") < frontendReady.indexOf("window.show()"));
   assert.match(styles, /\.app\.is-booting \.boot-screen \{ display: grid; \}/);
+  assert.match(windowStyles, /\.app\.is-booting \.top-window-menu \{ display: none; \}/);
+  assert.match(styles, /\.boot-screen \{[\s\S]*?inset: 0;/);
   assert.match(frontendReady, /window\.set_always_on_top\(false\)/);
   const release = boot.slice(boot.indexOf("async release(status) {"));
   assert.ok(release.indexOf('app.classList.remove("is-booting")') < release.indexOf("await reveal()"));

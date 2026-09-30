@@ -55,7 +55,7 @@ const mock = (layout, characterId) => `
 window.__TAURI__ = {
   core: { invoke: (name, args = {}) => {
     if (name === "pet_init") return Promise.resolve({
-      up: true, providerId: "local", theme: "system", uiTheme: "glass", fontPx: "14", streamChatFontPx: "30", voiceVolume: "35",
+      up: true, providerId: "local", theme: "system", uiTheme: "glass", fontPx: "14", streamChatFontPx: "22", voiceVolume: "35",
       characterId: ${JSON.stringify(characterId)}, characterOverrides: {}, live2dSdkOverrides: {}, layout: ${JSON.stringify(layout)}, scenes: {},
       history: ${JSON.stringify(history)}, quickActions: "", napMinutes: "0", onboardingDone: true,
       relationshipMemoryEnabled: true, relationship: {}, bondLabel: "いっしょの相棒", gazeTrackingEnabled: false,

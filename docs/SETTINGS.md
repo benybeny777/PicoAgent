@@ -28,7 +28,7 @@
 | `PICOAGENT_STREAM_BACKGROUND_IMAGE` | 空 | 画面 | `custom` 配信背景としてアプリ管理領域へ取り込んだ画像パス |
 | `PICOAGENT_STREAM_DISPLAY` | `dashboard` | 画面 | 配信背景内ディスプレイ。`dashboard` / `game` / `clock` / `image` / `none` |
 | `PICOAGENT_STREAM_DISPLAY_IMAGE` | 空 | 画面 | `image` ディスプレイへ映す、アプリ管理領域へ取り込んだ画像パス |
-| `PICOAGENT_STREAM_CHAT_FONT_PX` | `30` | 画面 | 配信チャットの履歴・入力文字サイズ(px)。18〜48の整数。操作・状態文字も連動し、`pet:ui` で即反映。空欄は既定値 |
+| `PICOAGENT_STREAM_CHAT_FONT_PX` | `22` | 画面 | 配信チャットの履歴・入力文字サイズ(px)。18〜48の整数。操作・状態文字も連動し、`pet:ui` で即反映。空欄は既定値 |
 | `PICOAGENT_STREAM_PROFILES` | `{}` | キャラクター | キャラクターID別の配信表示上書き。背景、背景画像、画面内ディスプレイ、表示画像、字幕色を保持し、未設定キャラは共通の配信設定を使う。不正なID・選択肢・色は保存時に除去または安全な既定値へ正規化する |
 | `PICOAGENT_WINDOW_LAYOUTS` | `{}` | 内部UI | 表示形式ごとに覚えたウィンドウ寸法（`{"pet":{"w":900,"h":600}}`）。現在選べる形式の既定はミニ360×560／ペット900×600／配信1920×1080（フルHD）。旧 `chat` / `bar` / `workspace` / `widget` の保存値も保持する。旧 `talk` の保存寸法は `chat` の値がない場合に引き継ぐ。旧既定値と完全一致する保存値だけ新既定へ移し、手動調整値は保持する。位置は形式をまたいで共有する。設定画面には出さない |
 | `PICOAGENT_HOTKEY_ENABLED` | `true` | 画面 | グローバルホットキーを使う。OFF ですべてのホットキーを解除する |

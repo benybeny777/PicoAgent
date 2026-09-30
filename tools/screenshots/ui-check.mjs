@@ -47,7 +47,7 @@ window.__TAURI__ = {
   core: { invoke: (name, args = {}) => {
     window.__calls.push({ name, args: JSON.parse(JSON.stringify(args)) });
     if (name === "pet_init") return Promise.resolve({
-      up: true, providerId: "local", theme: "system", uiTheme: "glass", fontPx: "14", streamChatFontPx: "30", voiceVolume: "35",
+      up: true, providerId: "local", theme: "system", uiTheme: "glass", fontPx: "14", streamChatFontPx: "22", voiceVolume: "35",
       characterId: ${JSON.stringify(characterId)}, characterOverrides: {}, live2dSdkOverrides: {},
       layout: ${JSON.stringify(layout)}, scenes: window.__saved, history: ${JSON.stringify(history)},
       quickActions: "", napMinutes: "0", onboardingDone: ${JSON.stringify(onboardingDone)},
@@ -265,7 +265,7 @@ for (const characterId of characters) {
             controlFont: parseFloat(getComputedStyle(chat.querySelector('.reply-actions .chip')).fontSize),
             width: chat.getBoundingClientRect().width / document.getElementById('sceneRoot').getBoundingClientRect().width * 1920 };
         });
-        if (send.disabled || send.background === "none" || send.font < 30 || send.inputFont < 30 || send.controlFont < 24 || send.width < 720) {
+        if (send.disabled || send.background === "none" || send.font < 22 || send.inputFont < 22 || send.controlFont < 18 || send.width < 720) {
           fail(`${label}/chat`, `配信の入力・送信操作が見づらいか使えません ${JSON.stringify(send)}`);
         } else ok(`${label} 読める履歴文字と押せる送信ボタン`);
         await page.evaluate(() => window.__emit("pet:ui", { streamChatFontPx: "42" }));
@@ -278,7 +278,7 @@ for (const characterId of characters) {
         if (largerFont.body !== 42 || largerFont.input !== 42 || largerFont.controls !== 34) {
           fail(`${label}/chat-font`, `保存後の配信文字サイズが即反映されません ${JSON.stringify(largerFont)}`);
         } else ok(`${label} 配信文字サイズを再起動なしで変更`);
-        await page.evaluate(() => window.__emit("pet:ui", { streamChatFontPx: "30" }));
+        await page.evaluate(() => window.__emit("pet:ui", { streamChatFontPx: "22" }));
         await page.fill("#input", "");
         const subtitle = page.locator(".subtitle .reply");
         await subtitle.evaluate(node => { node.textContent = "字幕の文字をドラッグしても選択されないか確認します"; });

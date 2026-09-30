@@ -179,6 +179,7 @@ holo Indieの審査へ渡す候補は、リポジトリ直下の`holo Indie審�
 
 - `%APPDATA%\PicoAgent\characters\miko-mmd`に、公式配布元の`readme.txt`を含むさくらみこMMD登録データを用意します。出所と利用条件を確認できない場合はビルド前に停止します。
 - 配信・動画から学習した本人音声モデルやAIVMXは含めません。Aivis本体を同梱して読み上げを既定で有効にし、初回起動時にAivisHub公開モデル「まお」（ACML 1.0）を取得して仮音声で話します。仮音声は本人の声ではありません。専用Tauri設定のasset protocolは審査版の利用者領域だけを許可し、通常版のキャラクター領域へはアクセスしません。
+- 審査版を含むWindowsのインストーラ・アンインストーラにはアプリのICOを指定します。デスクトップ・スタートメニューのショートカットは、同じアイコンを埋め込んだアプリ本体を起動先にします。
 - 初期表示は配信形式です。さくらみこの会話動画は`capture-current.mjs --voice-video`で撮り、Aivis合成音声と画面内の口の動きを含めます。
 - 識別子`com.picoagent.holo-indie-review`の専用利用者領域へ導入し、通常版の設定、会話履歴、キャラクター、音声モデルを読みません。
 - 生成設定だけを軽く検査するときは`pwsh -File scripts/build-holo-indie-review-installer.ps1 -PrepareOnly -AllowStale`を使います。

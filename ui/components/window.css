@@ -23,8 +23,8 @@
   min-height: 0;
 }
 
-.app.is-booting .stage,
-.app.is-booting .top-window-menu-items { visibility: hidden; }
+.app.is-booting .stage { visibility: hidden; }
+.app.is-booting .top-window-menu { display: none; }
 
 /* 上端メニュー（常設のタイトルバー）。 */
 .top-window-menu {
