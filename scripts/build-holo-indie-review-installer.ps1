@@ -69,6 +69,7 @@ $initialConfig = [ordered]@{
     PICOAGENT_LAYOUT          = 'stream'
     PICOAGENT_PROVIDER        = 'local'
     PICOAGENT_TTS_ENABLED     = $true
+    PICOAGENT_ONBOARDING_DONE = $true
     PICOAGENT_TTS_CHARACTER_OVERRIDES = @{
         'miko-mmd' = @{
             speaker = '888753760'
@@ -93,9 +94,9 @@ $hook.Add('!macro NSIS_HOOK_POSTINSTALL')
 $hook.Add('  SetOverwrite off')
 $hook.Add("  SetOutPath `"`$APPDATA\$reviewDataRoot\characters\$characterId`"")
 $hook.Add("  File /r `"$characterSource\*`"")
-$hook.Add('  SetOverwrite on')
 $hook.Add("  SetOutPath `"`$APPDATA\$reviewDataRoot`"")
 $hook.Add("  File /oname=config.json `"$initialConfigPath`"")
+$hook.Add('  SetOverwrite on')
 $hook.Add('!macroend')
 [System.IO.File]::WriteAllText($hookPath, ($hook -join "`r`n") + "`r`n", [System.Text.UTF8Encoding]::new($true))
 
@@ -122,7 +123,10 @@ $config = [ordered]@{
             'resources/component-manifest.json'
         )
         windows   = [ordered]@{
-            nsis = [ordered]@{ installerHooks = ($hookPath -replace '\\', '/') }
+            nsis = [ordered]@{
+                languages = @('Japanese')
+                installerHooks = ($hookPath -replace '\\', '/')
+            }
         }
     }
 }
