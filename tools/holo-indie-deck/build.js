@@ -191,7 +191,7 @@ function build() {
     });
     const items = [
       { icon: "居", color: PINK, t: "ファンの居場所", b: "PCを開くたびに推しと会える。日常の短い時間が繰り返し楽しめる体験になる" },
-      { icon: "話", color: RED, t: "会話で反応が変わる", b: "話題と感情に応じて返答・表情が変化。次は何を話すか試したくなる" },
+      { icon: "話", color: RED, t: "反応が変わる会話", b: "話題と感情に応じて返答・表情が変化。次は何を話すか試したくなる" },
       { icon: "助", color: GOLD, t: "一緒に過ごす理由", b: "雑談に加え、調べものやタイマーを頼める。毎日立ち上げる理由がある" },
       { icon: "端", color: MINT, t: "自分だけの会話", b: "端末内のAIで会話。作者は会話ログを集めず、安心して話しかけられる" },
       { icon: "遊", color: "7A63C9", t: "配信にも見せ場", b: "会話の予想外の反応と、おまけの監査ゲームの講評を配信で共有できる" },
@@ -339,7 +339,7 @@ function build() {
         x: M + 1.6, y, w: 5.8, h: 0.5, isTextBox: true, margin: 0, fontFace: JP, fontSize: 12.5, color: TEXT, valign: "middle",
       });
     });
-    s.addText("配信では、時間に追われて書く様子、辛口な講評、信用度が一気に削れる瞬間が見せ場になります。設計の詳細は別紙（HOLO-INDIE-MINIGAME.md）にまとめています。", {
+    s.addText("配信では、時間に追われて書く様子、辛口な講評、信用度が一気に削れる瞬間が見せ場になります。", {
       x: M, y: 6.45, w: 7.3, h: 0.5, isTextBox: true, margin: 0, fontFace: JP, fontSize: 10.5, color: MUTED, lineSpacing: 16, valign: "top",
     });
     shot(s, "holo-indie-result", { x: 8.75, y: 1.2, w: 3.8, h: 4.18, caption: "問題の結果画面（キャラクター表示部を除く）" });
@@ -375,7 +375,7 @@ function build() {
     });
     const rx = M + 6.45;
     const others = [
-      ["秘", "会話を外へ出さない", "審査版は既定で端末内のAIで動作。作者は会話ログを収集しない"],
+      ["秘", "会話は端末内で処理", "審査版は端末内のAIで動作。Web検索時だけ検索語を外部へ送り、作者は会話ログを収集しない"],
       ["公", "公式素材の扱い", "審査版はさくらみこ1体とAivisを同梱。本人音声モデルは含めず、まおの仮音声を初回取得する"],
       ["次", "一般配布までに対応", "公式キャラクターの人格を上書きできない「人格ロック」と、AIによる生成である旨の常時表示"],
     ];
@@ -483,7 +483,7 @@ function build() {
       ["鍵", "キャラ表現の監修", "口調・表情・話題など、キャラクター表現の範囲をご監修いただきたいです"],
       ["声", "音声学習・利用の許可", "YouTube等の公開音声かご提供音声でのAI学習・利用許可。許諾後は本人の声に差し替え可能"],
       ["像", "キャラモデルの提供・同梱許可", "モデル提供が難しければ、無償公開MMDモデルの同梱許可をご相談したいです"],
-      ["販", "販売条件", "収益化を前提とし、価格・販売方式は貴社方針に従います。別売りがholo Indie採用と両立しなければ行いません"],
+      ["販", "販売条件", "BOOTH・Steamでの販売を目標に収益化を前提とし、価格・販売方式は貴社方針に従います。採用と両立しない別売りは行いません"],
     ];
     next.forEach(([icon, t, b], i) => {
       const x = M + (i % 2) * 6.05;
@@ -498,10 +498,7 @@ function build() {
       });
     });
     s.addText("人格ロックとAI生成の常時表示は、審査側の要件を受けて一般配布前に実装します。", {
-      x: M, y: 6.4, w: CW, h: 0.3, isTextBox: true, margin: 0, fontFace: JP, fontSize: 12, color: NIGHT_MUTED,
-    });
-    s.addText("BOOTHやSteamでの販売を目標に開発し、収益化を前提としています。", {
-      x: M, y: 6.8, w: CW, h: 0.3, isTextBox: true, margin: 0, fontFace: JP, fontSize: 12, color: NIGHT_MUTED,
+      x: M, y: 6.55, w: CW, h: 0.3, isTextBox: true, margin: 0, fontFace: JP, fontSize: 12, color: NIGHT_MUTED,
     });
     pageNo(s, 10, true);
   }
