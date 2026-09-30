@@ -87,6 +87,7 @@ $initialConfig = [ordered]@{
 )
 
 $hook = [System.Collections.Generic.List[string]]::new()
+$hook.Add("!define PICOAGENT_REVIEW_DATA_ROOT `"$reviewDataRoot`"")
 $hook.Add("!include `"$(Join-Path $root 'src-tauri\installer-hooks-lite.nsh')`"")
 $hook.Add('')
 $hook.Add('; holo Indie審査への限定共有用。通常版とは別の利用者領域へ配置する。')

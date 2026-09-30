@@ -28,13 +28,16 @@
 
 !macro NSIS_HOOK_PREUNINSTALL
   !insertmacro PICOAGENT_STOP_MANAGED_PROCESSES
-!macroend
-
-!macro NSIS_HOOK_POSTUNINSTALL
-  DetailPrint "PicoAgent が管理する同梱ランタイムを削除しています..."
+  DetailPrint "PicoAgent が管理する同梱ランタイムをまとめて削除しています..."
   RMDir /r "$INSTDIR\resources\bundled\whisper"
   RMDir /r "$INSTDIR\resources\bundled\aivis"
   RMDir /r "$INSTDIR\resources\bundled\engine"
+  ; Tauriが生成する個別Deleteの進捗表示を抑える。
+  SetDetailsPrint none
+!macroend
+
+!macro NSIS_HOOK_POSTUNINSTALL
+  SetDetailsPrint both
   RMDir /r "$TEMP\picoagent-aivis-runtime"
   RMDir /r "$TEMP\picoagent-aivis"
   RMDir /r "$TEMP\picoagent-engine"

@@ -1,8 +1,14 @@
 ; PicoAgent管理下の常駐プロセス1種を、実体パス一致だけで停止する。
 ; NAME は実行ファイル名、SUBDIR は同梱ディレクトリ名（engine / aivis / whisper）。
 ; インストール先と実行時ディレクトリ（%APPDATA%\PicoAgent\bundled\）の両方を見る。
+!ifdef PICOAGENT_REVIEW_DATA_ROOT
+  !define PICOAGENT_MANAGED_DATA_ROOT "${PICOAGENT_REVIEW_DATA_ROOT}"
+!else
+  !define PICOAGENT_MANAGED_DATA_ROOT "PicoAgent"
+!endif
+
 !macro PICOAGENT_STOP_BUNDLED_PROCESS NAME SUBDIR
-  nsExec::ExecToLog `powershell -NoProfile -ExecutionPolicy Bypass -Command "Get-CimInstance Win32_Process | Where-Object { $$_.Name -eq '${NAME}' -and ($$_.ExecutablePath -like '$INSTDIR\resources\bundled\${SUBDIR}\*' -or $$_.ExecutablePath -like '$APPDATA\PicoAgent\bundled\${SUBDIR}\*') } | ForEach-Object { Stop-Process -Id $$_.ProcessId -Force }"`
+  nsExec::ExecToLog `powershell -NoProfile -ExecutionPolicy Bypass -Command "Get-CimInstance Win32_Process | Where-Object { $$_.Name -eq '${NAME}' -and ($$_.ExecutablePath -like '$INSTDIR\resources\bundled\${SUBDIR}\*' -or $$_.ExecutablePath -like '$APPDATA\${PICOAGENT_MANAGED_DATA_ROOT}\bundled\${SUBDIR}\*') } | ForEach-Object { Stop-Process -Id $$_.ProcessId -Force }"`
 !macroend
 
 ; PicoAgentが管理する常駐プロセスだけを停止する共通処理。
@@ -28,13 +34,24 @@
 
 !macro NSIS_HOOK_PREUNINSTALL
   !insertmacro PICOAGENT_STOP_MANAGED_PROCESSES
+  DetailPrint "同梱ランタイムをまとめて削除しています..."
+  RMDir /r "$INSTDIR\resources\bundled\aivis"
+  RMDir /r "$INSTDIR\resources\bundled\engine"
+  RMDir /r "$INSTDIR\resources\bundled\whisper"
+  ; Tauriが生成する個別Deleteの進捗表示を抑え、削除済みファイルの列挙を短くする。
+  SetDetailsPrint none
 !macroend
 
 !macro NSIS_HOOK_POSTUNINSTALL
+  SetDetailsPrint both
   ; サイレントアンインストールと「いいえ」はユーザーデータと追加機能を残す。
   IfSilent picoagent_keep_user_data 0
   MessageBox MB_YESNO|MB_ICONQUESTION "設定、会話履歴、追加キャラクター、ダウンロード済みモデル、追加機能も削除しますか？ 再インストールする場合やバックアップしていない場合は「いいえ」を選んでください。" IDNO picoagent_keep_user_data
   DetailPrint "利用者が削除を選んだため、PicoAgent のユーザーデータを削除しています..."
+!ifdef PICOAGENT_REVIEW_DATA_ROOT
+  RMDir /r "$APPDATA\${PICOAGENT_REVIEW_DATA_ROOT}"
+  RMDir /r "$LOCALAPPDATA\${PICOAGENT_REVIEW_DATA_ROOT}"
+!else
   RMDir /r "$APPDATA\PicoAgent"
   RMDir /r "$LOCALAPPDATA\PicoAgent"
   RMDir /r "$APPDATA\com.picoagent.desktop"
@@ -43,6 +60,7 @@
   RMDir /r "$LOCALAPPDATA\com.picoagent.app"
   RMDir /r "$APPDATA\com.coda.app"
   RMDir /r "$LOCALAPPDATA\com.coda.app"
+!endif
   Goto picoagent_user_data_done
 picoagent_keep_user_data:
   DetailPrint "設定、会話履歴、追加キャラクター、ダウンロード済みモデル、追加機能を残しました。"
