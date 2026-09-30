@@ -27,9 +27,6 @@ import { createSender } from "../chat/send.js";
 import { openExternalUrl } from "../chat/markdown.js";
 import { createSources } from "../sources/index.js";
 
-// バックエンドへ「フロントを読み込めた」ことを最初に伝える。届かないと起動監視が診断画面へ切り替える。
-bridge.frontendReady();
-
 const LAYOUT_IDS = ["pet", "mascot", "stream"];
 const app = document.getElementById("petApp");
 const stageElement = document.getElementById("stage");
@@ -451,6 +448,8 @@ async function loadSceneDefinitions() {
 }
 
 (async () => {
+  // 起動画面のDOMを組み立ててから窓を表示する。以後の終了通知との順序も固定する。
+  await bridge.frontendReady();
   status.set("設定と履歴を読み込み中…", "boot");
   const [info, definitions] = await Promise.all([bridge.init(), loadSceneDefinitions()]);
   document.querySelector(".beta-badge")?.toggleAttribute("hidden", info.betaBuild !== true);
@@ -505,21 +504,16 @@ async function loadSceneDefinitions() {
       // 初回セットアップ中は待たせない（数GBの取得が終わるまで案内を出さないと何分も待たせる）。
       engine.waitUntilSettled().catch(error => logApp("error", "ローカルAIの起動確認に失敗しました", errorDetail(error)));
     }
-    if (!startupError && info.onboardingDone && startupGreeting) {
-      let enabled = false;
-      try { enabled = Boolean((await bridge.aivisStatus())?.enabled); }
-      catch (error) { logApp("warn", "音声モデル準備前の Aivis 状態取得に失敗しました", errorDetail(error)); }
-      if (enabled) {
+    if (!startupError && info.onboardingDone && info.ttsEnabled !== false) {
+      if (voice.enabled) {
         status.set("声を準備中…", "boot");
         try {
           await bridge.prepareVoiceModel();
-          preparedGreeting = await voice.prepare(startupGreeting);
+          if (startupGreeting) preparedGreeting = await voice.prepare(startupGreeting);
         } catch (error) {
           logApp("error", "音声モデルの準備に失敗しました", errorDetail(error));
           voiceError = "音声を準備できませんでした。設定の診断を確認してください";
         }
-      } else {
-        voice.setEnabled(false);
       }
     }
   } catch (error) {

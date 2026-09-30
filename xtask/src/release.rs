@@ -782,9 +782,18 @@ mod tests {
                 );
             }
             // 実体パスの限定は共通マクロ側で1か所にまとめる。
+            let runtime_root_is_limited = if name == "installer-hooks-lite.nsh" {
+                script.contains("$APPDATA\\${PICOAGENT_MANAGED_DATA_ROOT}\\bundled\\${SUBDIR}\\*")
+                    && script.contains("!define PICOAGENT_MANAGED_DATA_ROOT \"PicoAgent\"")
+                    && script.contains(
+                        "!define PICOAGENT_MANAGED_DATA_ROOT \"${PICOAGENT_REVIEW_DATA_ROOT}\"",
+                    )
+            } else {
+                script.contains("$APPDATA\\PicoAgent\\bundled\\${SUBDIR}\\*")
+            };
             assert!(
                 script.contains("$INSTDIR\\resources\\bundled\\${SUBDIR}\\*")
-                    && script.contains("$APPDATA\\PicoAgent\\bundled\\${SUBDIR}\\*"),
+                    && runtime_root_is_limited,
                 "{name}: 同梱プロセスの停止をインストール先と実行時ディレクトリへ限定していない"
             );
         }

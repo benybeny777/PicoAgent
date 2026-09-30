@@ -1,4 +1,4 @@
-// 起動の契約: 準備が整うまで窓を出さず、仮のキャラ・読込途中の描画を見せない。
+// 起動の契約: 準備中は起動画面を見せ、仮のキャラ・読込途中の描画を見せない。
 // フロントは ui/app/main.js（起動の手順）と ui/app/boot.js（起動画面と表示の確定）、
 // バックエンドは boot_screen.rs / layout.rs が持つ。
 import assert from "node:assert/strict";
@@ -17,7 +17,7 @@ const windowSurface = await readFile(new URL("../../src-tauri/src/window_surface
 const lib = await readFile(new URL("../../src-tauri/src/lib.rs", import.meta.url), "utf8");
 const styles = await readFile(new URL("../../ui/components/boot.css", import.meta.url), "utf8");
 const indexHtml = await readFile(new URL("../../ui/index.html", import.meta.url), "utf8");
-const startupStart = main.indexOf("(async () => {\n  status.set(");
+const startupStart = main.indexOf("(async () => {\n  // 起動画面のDOMを組み立ててから窓を表示する。");
 const startupEnd = main.indexOf("\n})().catch(error => {", startupStart);
 assert.ok(startupStart >= 0 && startupEnd > startupStart, "起動シーケンスを抽出できません");
 const startup = main.slice(startupStart, startupEnd);
@@ -25,7 +25,7 @@ const startup = main.slice(startupStart, startupEnd);
 test("セットアップ済みのlocal選択はAIと音声の準備完了まで起動画面を維持する", () => {
   assert.match(engine, /required = \(info\.providerId \|\| "local"\) === "local";/);
   assert.match(startup, /if \(engine\.required && info\.onboardingDone\) \{[\s\S]*?const state = await engine\.waitUntilSettled\(/);
-  assert.match(startup, /status\.set\("声を準備中…", "boot"\);[\s\S]*?await bridge\.prepareVoiceModel\(\);\s*\n\s*preparedGreeting = await voice\.prepare\(startupGreeting\);/);
+  assert.match(startup, /status\.set\("声を準備中…", "boot"\);[\s\S]*?await bridge\.prepareVoiceModel\(\);\s*\n\s*if \(startupGreeting\) preparedGreeting = await voice\.prepare\(startupGreeting\);/);
   // 初期化前・ローカルAIの準備前は送信させない。
   assert.match(engine, /if \(!initialized\) return "初期化完了後に送信できます";/);
   assert.match(engine, /if \(required && !ready\) return "ローカルAIの準備完了後に送信できます";/);
@@ -34,10 +34,10 @@ test("セットアップ済みのlocal選択はAIと音声の準備完了まで�
 test("初回セットアップはローカルAIの取得完了を待たない", () => {
   // 初回案内はローカルAIを使わない。数GBの取得を待たせると、初回だけ何分も案内へ入れないため、監視だけ始めて画面を返す。
   assert.match(startup, /\} else if \(engine\.required\) \{[\s\S]*?engine\.waitUntilSettled\(\)\.catch/);
-  assert.match(startup, /if \(!startupError && info\.onboardingDone && startupGreeting\) \{/);
+  assert.match(startup, /if \(!startupError && info\.onboardingDone && info\.ttsEnabled !== false\) \{/);
 });
 
-test("準備完了後に窓を出し、起動音声はその後に再生する", () => {
+test("準備完了後に配信画面へ切り替え、起動音声はその後に再生する", () => {
   const engineAt = startup.indexOf("await engine.waitUntilSettled(");
   const voiceAt = startup.indexOf("await bridge.prepareVoiceModel()");
   const speechAt = startup.indexOf("preparedGreeting = await voice.prepare(startupGreeting)");
@@ -56,7 +56,7 @@ test("準備完了後に窓を出し、起動音声はその後に再生する",
 
 test("ローカルAIがエラーなら音声準備へ進まず元のエラーを保つ", () => {
   assert.match(startup, /if \(state\?\.phase === "error"\) startupError = state\.message/);
-  assert.match(startup, /if \(!startupError && info\.onboardingDone && startupGreeting\) \{[\s\S]*?prepareVoiceModel/);
+  assert.match(startup, /if \(!startupError && info\.onboardingDone && info\.ttsEnabled !== false\) \{[\s\S]*?prepareVoiceModel/);
 });
 
 test("長いダウンロード中は進捗通知を続け通常画面で停止する", () => {
@@ -69,9 +69,14 @@ test("長いダウンロード中は進捗通知を続け通常画面で停止�
   assert.match(commands, /pub fn pet_boot_progress[\s\S]*?boot_screen::mark_progress/);
 });
 
-test("起動途中の仮キャラを表示せず最終DOMの後で窓を表示する", async () => {
+test("起動画面を先に表示し仮キャラを隠したまま最終DOMへ切り替える", async () => {
   const config = JSON.parse(await readFile(new URL("../../src-tauri/tauri.conf.json", import.meta.url), "utf8"));
   assert.equal(config.app.windows.find(w => w.label === "main").visible, false);
+  assert.ok(main.indexOf("const boot = createBoot(") < main.indexOf("await bridge.frontendReady();"));
+  const frontendReady = commands.slice(commands.indexOf("pub fn pet_frontend_ready"), commands.indexOf("pub fn pet_boot_progress"));
+  assert.ok(frontendReady.indexOf("crate::layout::restart_boot(&app)") < frontendReady.indexOf("window.show()"));
+  assert.match(styles, /\.app\.is-booting \.boot-screen \{ display: grid; \}/);
+  assert.match(frontendReady, /window\.set_always_on_top\(false\)/);
   const release = boot.slice(boot.indexOf("async release(status) {"));
   assert.ok(release.indexOf('app.classList.remove("is-booting")') < release.indexOf("await reveal()"));
   assert.match(release, /if \(backendFinished\) await reveal\(\);/);
@@ -79,7 +84,16 @@ test("起動途中の仮キャラを表示せず最終DOMの後で窓を表示�
   assert.ok(startup.indexOf("stage.layoutNow();") < startup.indexOf("await boot.release(status);"));
 });
 
-test("窓を出す入口を1つに保ち再試行経路でも描画を確定させる", () => {
+test("初回案内中はブラウザを操作でき、案内を閉じると最前面設定が戻る", () => {
+  const complete = commands.slice(commands.indexOf("pub fn pet_complete_onboarding"), commands.indexOf("pub fn pet_show_onboarding"));
+  const show = commands.slice(commands.indexOf("pub fn pet_show_onboarding"), commands.indexOf("pub fn settings_components_status"));
+  const finish = commands.slice(commands.indexOf("pub fn pet_finish_boot"), commands.indexOf("pub fn pet_reveal_main"));
+  assert.match(show, /main\.set_always_on_top\(false\)/);
+  assert.match(complete, /main\.set_always_on_top\(state\.config\.get_bool\("PICOAGENT_ALWAYS_ON_TOP", true\)\)/);
+  assert.match(finish, /if onboarding_done \{[\s\S]*?window\.set_always_on_top\(always_on_top\)/);
+});
+
+test("通常画面の表示入口を1つに保ち再試行経路でも描画を確定させる", () => {
   // 未描画canvasのまま窓を出さない保証を、初回・再試行のどちらでも通す。
   const reveal = boot.slice(boot.indexOf("async function reveal()"), boot.indexOf("async function finishBackend()"));
   assert.match(reveal, /try \{ beforeReveal\?\.\(\); \}/);
@@ -196,12 +210,9 @@ test("プロバイダ疎通は起動時の短い上限でfalseへ正規化する
   assert.match(commands, /current_up\(&state, SETTINGS_PROVIDER_PROBE_TIMEOUT\)/);
 });
 
-test("起動の合図は最初に送り、重い部品は使う時まで読まない", () => {
-  // main.js の先頭が frontendReady() を送る。届かないと起動監視が診断画面へ切り替える。
-  const lastImport = main.lastIndexOf("\nimport ");
-  const afterImports = main.slice(main.indexOf(";\n", lastImport) + 2);
-  const firstStatement = afterImports.replace(/^(\s*\/\/[^\n]*\n)*\s*/, "");
-  assert.ok(firstStatement.startsWith("bridge.frontendReady();"), "frontendReady が最初の処理ではありません");
+test("起動画面を作ってから起動の合図を送り、重い部品は使う時まで読まない", () => {
+  assert.ok(main.indexOf("const boot = createBoot(") < main.indexOf("await bridge.frontendReady();"));
+  assert.ok(startup.indexOf("await bridge.frontendReady();") < startup.indexOf("await Promise.all([bridge.init()"));
   // index.html は描画ライブラリ（PIXI・Live2D・MMD）を直接読み込まない（キャラの方式が決まってから読む）。
   assert.doesNotMatch(indexHtml, /vendor\//);
   assert.doesNotMatch(indexHtml, /moveable/);

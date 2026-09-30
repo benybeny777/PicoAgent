@@ -27,8 +27,18 @@ $characterId = 'miko-mmd'
 $reviewIdentifier = 'com.picoagent.holo-indie-review'
 $reviewDataRoot = "PicoAgent\instances\$reviewIdentifier"
 $reviewDataScope = $reviewDataRoot -replace '\\', '/'
-$characterRoot = Join-Path $env:APPDATA 'PicoAgent\characters'
-$characterSource = Join-Path $characterRoot $characterId
+$characterCandidates = @(
+    (Join-Path $env:APPDATA "PicoAgent\characters\$characterId")
+    (Join-Path $env:APPDATA "$reviewDataRoot\characters\$characterId")
+    (Join-Path $root "temp\holo-indie-review-installer\source\$characterId")
+)
+$characterSource = $characterCandidates | Where-Object {
+    (Test-Path -LiteralPath (Join-Path $_ 'character.json') -PathType Leaf) -and
+    (Test-Path -LiteralPath (Join-Path $_ 'mmd\readme.txt') -PathType Leaf)
+} | Select-Object -First 1
+if (-not $characterSource) {
+    throw "審査版に必要な公式MMDまたは利用条件が見つかりません: $($characterCandidates -join ', ')"
+}
 $characterJson = Join-Path $characterSource 'character.json'
 $licenseReadme = Join-Path $characterSource 'mmd\readme.txt'
 $missing = @(
@@ -69,6 +79,7 @@ $initialConfig = [ordered]@{
     PICOAGENT_LAYOUT          = 'stream'
     PICOAGENT_PROVIDER        = 'local'
     PICOAGENT_TTS_ENABLED     = $true
+    PICOAGENT_ONBOARDING_DONE = $true
     PICOAGENT_TTS_CHARACTER_OVERRIDES = @{
         'miko-mmd' = @{
             speaker = '888753760'
@@ -86,6 +97,7 @@ $initialConfig = [ordered]@{
 )
 
 $hook = [System.Collections.Generic.List[string]]::new()
+$hook.Add("!define PICOAGENT_REVIEW_DATA_ROOT `"$reviewDataRoot`"")
 $hook.Add("!include `"$(Join-Path $root 'src-tauri\installer-hooks-lite.nsh')`"")
 $hook.Add('')
 $hook.Add('; holo Indie審査への限定共有用。通常版とは別の利用者領域へ配置する。')
@@ -93,9 +105,9 @@ $hook.Add('!macro NSIS_HOOK_POSTINSTALL')
 $hook.Add('  SetOverwrite off')
 $hook.Add("  SetOutPath `"`$APPDATA\$reviewDataRoot\characters\$characterId`"")
 $hook.Add("  File /r `"$characterSource\*`"")
-$hook.Add('  SetOverwrite on')
 $hook.Add("  SetOutPath `"`$APPDATA\$reviewDataRoot`"")
 $hook.Add("  File /oname=config.json `"$initialConfigPath`"")
+$hook.Add('  SetOverwrite on')
 $hook.Add('!macroend')
 [System.IO.File]::WriteAllText($hookPath, ($hook -join "`r`n") + "`r`n", [System.Text.UTF8Encoding]::new($true))
 
@@ -122,7 +134,10 @@ $config = [ordered]@{
             'resources/component-manifest.json'
         )
         windows   = [ordered]@{
-            nsis = [ordered]@{ installerHooks = ($hookPath -replace '\\', '/') }
+            nsis = [ordered]@{
+                languages = @('Japanese')
+                installerHooks = ($hookPath -replace '\\', '/')
+            }
         }
     }
 }

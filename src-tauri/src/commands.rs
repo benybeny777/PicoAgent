@@ -947,6 +947,16 @@ pub fn pet_complete_onboarding(
     if state.set_relationship_context(relationship_prompt_context(&state.config, &relationship)) {
         state.reset_conversation();
     }
+    if let Some(main) = app.get_webview_window("main") {
+        if let Err(error) =
+            main.set_always_on_top(state.config.get_bool("PICOAGENT_ALWAYS_ON_TOP", true))
+        {
+            crate::log_paths::append_app_log(
+                &app,
+                &format!("最前面設定を戻せませんでした: {error}"),
+            );
+        }
+    }
     Ok(json!({ "ok": true, "relationship": relationship, "bondLabel": bond_label }))
 }
 
@@ -956,6 +966,8 @@ pub fn pet_show_onboarding(app: AppHandle) -> Result<(), String> {
     let main = app
         .get_webview_window("main")
         .ok_or_else(|| "メイン画面が見つかりません。".to_string())?;
+    main.set_always_on_top(false)
+        .map_err(|error| error.to_string())?;
     main.show().map_err(|error| error.to_string())?;
     main.emit("pet:show-onboarding", ())
         .map_err(|error| error.to_string())?;
@@ -3800,6 +3812,21 @@ pub fn pet_frontend_ready(app: AppHandle) {
             &format!("起動画面の寸法を適用できませんでした: {error}"),
         );
     }
+    // フロントが起動画面を組み立てた後は、その進捗を見せながらAIと音声を待つ。
+    if let Some(window) = app.get_webview_window("main") {
+        if let Err(error) = window.set_always_on_top(false) {
+            crate::log_paths::append_app_log(
+                &app,
+                &format!("起動中の最前面を解除できませんでした: {error}"),
+            );
+        }
+        if let Err(error) = window.show() {
+            crate::log_paths::append_app_log(
+                &app,
+                &format!("起動画面を表示できませんでした: {error}"),
+            );
+        }
+    }
 }
 
 /// 起動準備が進行中であることをバックエンドの停止監視へ伝える。
@@ -3827,11 +3854,25 @@ pub fn pet_save_scene(state: State<'_, AppState>, scenes: Value) -> Result<(), S
 /// 共通の起動画面から、ユーザーが保存している表示形式と寸法へ戻す。
 #[tauri::command]
 pub fn pet_finish_boot(app: AppHandle) -> Result<(), String> {
-    let id = {
+    let (id, onboarding_done, always_on_top) = {
         let state = app.state::<AppState>();
-        crate::layout::current(&state.config)
+        (
+            crate::layout::current(&state.config),
+            state.config.get_bool("PICOAGENT_ONBOARDING_DONE", false),
+            state.config.get_bool("PICOAGENT_ALWAYS_ON_TOP", true),
+        )
     };
     crate::layout::finish_boot(&app, &id)?;
+    if onboarding_done {
+        if let Some(window) = app.get_webview_window("main") {
+            if let Err(error) = window.set_always_on_top(always_on_top) {
+                crate::log_paths::append_app_log(
+                    &app,
+                    &format!("最前面設定を戻せませんでした: {error}"),
+                );
+            }
+        }
+    }
     // 通常寸法と位置へ戻せた後だけ完了扱いにする。失敗時はフロントから再試行でき、
     // 680x430の起動画面を完了状態として固定しない。
     crate::boot_screen::mark_finished(&app);
