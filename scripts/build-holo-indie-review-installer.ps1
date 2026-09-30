@@ -136,6 +136,8 @@ $config = [ordered]@{
         windows   = [ordered]@{
             nsis = [ordered]@{
                 languages = @('Japanese')
+                installerIcon = 'icons/icon.ico'
+                uninstallerIcon = 'icons/icon.ico'
                 installerHooks = ($hookPath -replace '\\', '/')
             }
         }

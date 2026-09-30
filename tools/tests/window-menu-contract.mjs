@@ -42,8 +42,9 @@ test("上端メニューのボタン操作をウィンドウドラッグが奪�
   assert.match(appBridge, /export const minimizeWindow = \(\) => api\.minimizeWindow\(\);/);
   assert.match(bridge, /minimizeWindow[\s\S]*?getCurrentWindow\(\)\.minimize\(\)/);
   assert.match(styles, /\.top-window-menu\s*\{[\s\S]*?position:\s*fixed/);
-  assert.match(styles, /\.app\.is-booting \.stage,\s*\n\.app\.is-booting \.top-window-menu-items \{ visibility: hidden; \}/,
-    "起動中は上端メニューから画面状態を変更できない");
+  assert.match(styles, /\.app\.is-booting \.stage \{ visibility: hidden; \}/);
+  assert.match(styles, /\.app\.is-booting \.top-window-menu \{ display: none; \}/,
+    "起動中は上端メニューを表示しない");
   const menuStyle = styles.match(/\.top-window-menu\s*\{[^}]*\}/)?.[0] || "";
   assert.doesNotMatch(menuStyle, /translateY|opacity:\s*0/);
   assert.equal(JSON.parse(config).app.windows[0].maximizable, true);

@@ -313,14 +313,71 @@ fn existing(path: PathBuf) -> Option<PathBuf> {
     }
 }
 
+fn validate_runtime_files(path: &Path) -> anyhow::Result<()> {
+    anyhow::ensure!(
+        path.is_file(),
+        "Aivis の実行ファイルがありません: {}",
+        path.display()
+    );
+    let root = path
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("Aivis の配置先を取得できません: {}", path.display()))?;
+    anyhow::ensure!(
+        root.join("engine_manifest.json").is_file(),
+        "Aivis の管理情報がありません: {}",
+        root.display()
+    );
+    #[cfg(windows)]
+    {
+        let internal = root.join("engine_internal");
+        let python_dll = std::fs::read_dir(&internal)?
+            .filter_map(Result::ok)
+            .any(|entry| {
+                let name = entry.file_name();
+                let name = name.to_string_lossy();
+                name.strip_prefix("python")
+                    .and_then(|tail| tail.strip_suffix(".dll"))
+                    .is_some_and(|version| {
+                        version.len() >= 2 && version.bytes().all(|byte| byte.is_ascii_digit())
+                    })
+                    && entry.path().is_file()
+            });
+        anyhow::ensure!(
+            python_dll,
+            "Aivis の Python DLL がありません: {}",
+            internal.display()
+        );
+    }
+    Ok(())
+}
+
+fn find_runtime(candidates: [PathBuf; 2]) -> anyhow::Result<Option<PathBuf>> {
+    for path in candidates {
+        if !path.exists() {
+            continue;
+        }
+        validate_runtime_files(&path)?;
+        return Ok(Some(path));
+    }
+    Ok(None)
+}
+
 fn runtime_engine_path(app: &tauri::AppHandle) -> Option<PathBuf> {
     let exe = if cfg!(windows) { "run.exe" } else { "run" };
-    [
+    let candidates = [
         crate::log_paths::bundled_dir(app).join("aivis").join(exe),
         crate::log_paths::data_dir(app).join("aivis").join(exe),
-    ]
-    .into_iter()
-    .find_map(existing)
+    ];
+    match find_runtime(candidates) {
+        Ok(path) => path,
+        Err(error) => {
+            append_log_best_effort(
+                app,
+                &format!("不完全な Aivis を使用せず、同梱物から修復します: {error}"),
+            );
+            None
+        }
+    }
 }
 
 fn resource_candidates(app: &tauri::AppHandle) -> Vec<PathBuf> {
@@ -855,6 +912,7 @@ fn stage_and_replace(app: &tauri::AppHandle, source: &Path, install: &Path) -> a
     copy_dir_all(source, &stage)?;
     let run = find_run_file(&stage)
         .ok_or_else(|| anyhow::anyhow!("準備した Aivis に run 実行ファイルが見つかりません。"))?;
+    validate_runtime_files(&run)?;
     ensure_executable(&run)?;
     replace_install_tree(&stage, install)
 }
@@ -1459,9 +1517,55 @@ fn terminate_managed_child(app: &tauri::AppHandle) {
 #[cfg(test)]
 mod tests {
     use super::{
-        interrupted_install_actions, replace_install_tree, validate_external_endpoint,
-        InterruptedAction,
+        find_runtime, interrupted_install_actions, replace_install_tree,
+        validate_external_endpoint, validate_runtime_files, InterruptedAction,
     };
+
+    #[cfg(windows)]
+    #[test]
+    fn 実行ファイルだけ残ったaivisを不完全と判定する() {
+        let dir = tempfile::tempdir().unwrap();
+        let run = dir.path().join("run.exe");
+        std::fs::write(&run, []).unwrap();
+        std::fs::write(dir.path().join("engine_manifest.json"), b"{}").unwrap();
+        let internal = dir.path().join("engine_internal");
+        std::fs::create_dir_all(&internal).unwrap();
+        std::fs::write(internal.join("python3.dll"), []).unwrap();
+        assert!(validate_runtime_files(&run).is_err());
+        std::fs::write(internal.join("python311.dll"), []).unwrap();
+        assert!(validate_runtime_files(&run).is_ok());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn aivis候補は優先順に確認し不完全な優先候補で止める() {
+        let dir = tempfile::tempdir().unwrap();
+        let high = dir.path().join("high");
+        let fallback = dir.path().join("fallback");
+        let high_run = high.join("run.exe");
+        let fallback_run = fallback.join("run.exe");
+        let create = |root: &std::path::Path| {
+            std::fs::create_dir_all(root.join("engine_internal")).unwrap();
+            std::fs::write(root.join("run.exe"), []).unwrap();
+            std::fs::write(root.join("engine_manifest.json"), b"{}").unwrap();
+            std::fs::write(root.join("engine_internal/python311.dll"), []).unwrap();
+        };
+        assert!(find_runtime([high_run.clone(), fallback_run.clone()])
+            .unwrap()
+            .is_none());
+        create(&fallback);
+        assert_eq!(
+            find_runtime([high_run.clone(), fallback_run.clone()]).unwrap(),
+            Some(fallback_run.clone())
+        );
+        create(&high);
+        assert_eq!(
+            find_runtime([high_run.clone(), fallback_run.clone()]).unwrap(),
+            Some(high_run.clone())
+        );
+        std::fs::remove_file(high.join("engine_internal/python311.dll")).unwrap();
+        assert!(find_runtime([high_run, fallback_run]).is_err());
+    }
 
     /// 前回の起動で入れ替え中に落ちた残りを、本体の有無に応じて戻すか消す。
     #[test]

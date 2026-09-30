@@ -797,7 +797,7 @@ pub async fn pet_init(app: AppHandle, state: State<'_, AppState>) -> Result<Valu
         "up": current_up(&state, STARTUP_PROVIDER_PROBE_TIMEOUT).await,
         "theme": state.config.get("PICOAGENT_THEME", "system"),
         "fontPx": state.config.get("PICOAGENT_BUBBLE_FONT_PX", "13"),
-        "streamChatFontPx": state.config.get("PICOAGENT_STREAM_CHAT_FONT_PX", "30"),
+        "streamChatFontPx": state.config.get("PICOAGENT_STREAM_CHAT_FONT_PX", "22"),
         "uiTheme": state.config.get("PICOAGENT_UI_THEME", "glass"),
         "voiceVolume": state.config.get("PICOAGENT_TTS_VOLUME", "35"),
         "characterId": character_id,
@@ -3338,7 +3338,7 @@ pub async fn settings_save(
         let stream = crate::stream_profile::resolve(&state.config, &active_character);
         let mut ui = json!({
             "fontPx": state.config.get("PICOAGENT_BUBBLE_FONT_PX", "13"),
-            "streamChatFontPx": state.config.get("PICOAGENT_STREAM_CHAT_FONT_PX", "30"),
+            "streamChatFontPx": state.config.get("PICOAGENT_STREAM_CHAT_FONT_PX", "22"),
             "theme": state.config.get("PICOAGENT_THEME", "system"),
             "uiTheme": state.config.get("PICOAGENT_UI_THEME", "glass"),
             "voiceVolume": state.config.get("PICOAGENT_TTS_VOLUME", "35"),

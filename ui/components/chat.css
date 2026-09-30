@@ -140,25 +140,25 @@
 /* 配信のチャット列では、回答欄は字幕のソースへ移る。 */
 .chat[data-variant="column"] {
   border-radius: var(--radius-lg);
-  font-size: var(--stream-chat-font-size, 30px);
+  font-size: var(--stream-chat-font-size, 22px);
 }
 .chat[data-variant="column"] .reply-home { display: none; }
 .chat[data-variant="column"] .history-item.assistant { margin-right: 0; }
 .chat[data-variant="column"] .history-item.user { margin-left: 6%; }
 .chat[data-variant="column"] .history-body { font-size: 1em; line-height: 1.55; }
-.chat[data-variant="column"] .history-empty { color: var(--text-muted); font-size: var(--stream-chat-control-font-size, 24px); }
-.chat[data-variant="column"] .history-role { font-size: var(--stream-chat-control-font-size, 24px); }
-.chat[data-variant="column"] .history-actions button { font-size: var(--stream-chat-action-font-size, 20px); }
+.chat[data-variant="column"] .history-empty { color: var(--text-muted); font-size: var(--stream-chat-control-font-size, 18px); }
+.chat[data-variant="column"] .history-role { font-size: var(--stream-chat-control-font-size, 18px); }
+.chat[data-variant="column"] .history-actions button { font-size: var(--stream-chat-action-font-size, 14px); }
 .chat[data-variant="column"] .reply-actions .chip { min-height: max(40px, 1.7em); }
 .chat[data-variant="column"] .reply-actions .chip,
 .chat[data-variant="column"] .quick-actions button,
 .chat[data-variant="column"] .composer-actions button,
-.chat[data-variant="column"] .history-tools input { font-size: var(--stream-chat-control-font-size, 24px); }
+.chat[data-variant="column"] .history-tools input { font-size: var(--stream-chat-control-font-size, 18px); }
 .chat[data-variant="column"] .history-tools input { height: max(44px, 1.8em); }
-.chat[data-variant="column"] .composer textarea { min-height: max(68px, 2.3em); font-size: var(--stream-chat-font-size, 30px); }
+.chat[data-variant="column"] .composer textarea { min-height: max(68px, 2.3em); font-size: var(--stream-chat-font-size, 22px); }
 .chat[data-variant="column"] .composer textarea::placeholder,
 .chat[data-variant="column"] .history-tools input::placeholder { color: var(--text-muted); }
-.chat[data-variant="column"] .status { font-size: var(--stream-chat-control-font-size, 24px); }
+.chat[data-variant="column"] .status { font-size: var(--stream-chat-control-font-size, 18px); }
 .chat[data-variant="column"] .composer-actions button { height: max(46px, 1.9em); }
 .chat[data-variant="column"] .composer-actions .primary { min-width: 92px; }
 .chat[data-variant="column"] .status.engine-error {

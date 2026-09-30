@@ -16,6 +16,8 @@ test("審査版は初回案内を飛ばし、日本語のインストーラで�
   assert.match(builder, /PICOAGENT_ONBOARDING_DONE\s*=\s*\$true/);
   assert.match(builder, /languages = @\('Japanese'\)/);
   assert.deepEqual(JSON.parse(config).bundle.windows.nsis.languages, ["Japanese"]);
+  assert.equal(JSON.parse(config).bundle.windows.nsis.installerIcon, "icons/icon.ico");
+  assert.match(builder, /installerIcon = 'icons\/icon\.ico'/);
   const hook = builder.slice(builder.indexOf("$hook = [System.Collections.Generic.List[string]]::new()"));
   assert.ok(hook.indexOf("!define PICOAGENT_REVIEW_DATA_ROOT") < hook.indexOf("!include"));
   assert.match(hook, /SetOverwrite off[\s\S]*?File \/oname=config\.json[\s\S]*?SetOverwrite on/);

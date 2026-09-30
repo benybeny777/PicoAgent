@@ -2434,7 +2434,7 @@ function bindStreamImagePicker(button, kind, label, onPicked, isAvailable = () =
 
 function streamSettingsField(values) {
   const wrapper = markSearchable(el("div", { className: "stream-settings" }), "配信 チャット 文字 サイズ 背景 ディスプレイ 画像 日付 時刻 LIVE");
-  wrapper.append(field("PICOAGENT_STREAM_CHAT_FONT_PX", "配信チャットの文字サイズ（18〜48px）", "number", values.PICOAGENT_STREAM_CHAT_FONT_PX ?? "30", "30"));
+  wrapper.append(field("PICOAGENT_STREAM_CHAT_FONT_PX", "配信チャットの文字サイズ（18〜48px）", "number", values.PICOAGENT_STREAM_CHAT_FONT_PX ?? "22", "22"));
   wrapper.append(selectField("PICOAGENT_STREAM_BACKGROUND", "配信背景", values.PICOAGENT_STREAM_BACKGROUND || "pastel", [
     { value: "pastel", label: "パステルスタジオ" },
     { value: "gaming", label: "落ち着いたゲーム部屋" },
