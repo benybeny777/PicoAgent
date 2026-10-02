@@ -4,6 +4,7 @@
 // フロントは `pet_daily_events` で期限到来分を取り出して声で知らせる。
 
 use std::collections::HashSet;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
 
 use chrono::{Duration, Local, NaiveDateTime};
@@ -41,11 +42,14 @@ pub struct PraiseEntry {
 }
 
 pub fn new_id(prefix: &str) -> String {
-    let millis = std::time::SystemTime::now()
+    static NEXT_ID: AtomicU64 = AtomicU64::new(1);
+    let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis())
+        .map(|d| d.as_nanos())
         .unwrap_or(0);
-    format!("{prefix}{millis}")
+    // 同じ時刻に並行登録されても、削除対象や通知済み判定のIDを共有しない。
+    let sequence = NEXT_ID.fetch_add(1, Ordering::Relaxed);
+    format!("{prefix}{nanos}-{sequence}")
 }
 
 pub fn now_local_minute() -> String {
@@ -162,6 +166,21 @@ mod tests {
     use super::{after_minutes, due_events, parse_local_minute, save_events, DailyEvent};
     use crate::config::Config;
     use chrono::{Duration, Local};
+
+    #[test]
+    fn 同時登録の通知idは重複しない() {
+        let ids: Vec<_> = std::thread::scope(|scope| {
+            let handles: Vec<_> = (0..8)
+                .map(|_| scope.spawn(|| (0..1000).map(|_| super::new_id("rm")).collect::<Vec<_>>()))
+                .collect();
+            handles
+                .into_iter()
+                .flat_map(|handle| handle.join().unwrap())
+                .collect()
+        });
+        let unique: std::collections::HashSet<_> = ids.iter().collect();
+        assert_eq!(unique.len(), ids.len());
+    }
 
     #[test]
     fn ローカル分時刻を解析する() {

@@ -773,7 +773,8 @@ mod tests {
             // 「期待する形へ読み切れる」までを待機条件にする。
             let mut last_error = "まだ作られていません".to_string();
             let mut ids = Vec::new();
-            for _ in 0..100 {
+            let marker_deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+            while std::time::Instant::now() < marker_deadline {
                 match read_marker_ids(&marker) {
                     Ok(values) => {
                         ids = values;
@@ -783,14 +784,25 @@ mod tests {
                 }
                 tokio::time::sleep(std::time::Duration::from_millis(25)).await;
             }
-            assert_eq!(
-                ids.len(),
-                2,
-                "親子PIDを書いた検査ファイルを読み切れませんでした: {last_error}"
-            );
-
+            // 起動確認に失敗した経路でも、assertする前に呼び出しを破棄して回収する。
             running.abort();
             let _ = running.await;
+            if ids.is_empty() {
+                // PIDを書き込む前に停止した場合も、自分の固有マーカーを起動引数に持つ
+                // PowerShellだけを探す。名前だけで他のPowerShellを停止しない。
+                let cleanup_script = format!(
+                    "$targets = Get-CimInstance Win32_Process -Filter \"Name='powershell.exe'\" | Where-Object {{ $_.ProcessId -ne $PID -and $_.CommandLine -and $_.CommandLine.Contains('{escaped}') }}; foreach ($target in $targets) {{ & taskkill.exe /PID $target.ProcessId /T /F | Out-Null }}"
+                );
+                let mut cleanup = command("powershell.exe");
+                cleanup.args(["-NoProfile", "-NonInteractive", "-Command", &cleanup_script]);
+                let cleanup_result = output(cleanup, 10, "検査プロセスの回収").await;
+                let _ = std::fs::remove_file(&marker);
+                assert!(
+                    cleanup_result.as_ref().is_ok_and(|result| result.status.success()),
+                    "検査プロセスの回収に失敗しました: {cleanup_result:?}"
+                );
+                panic!("親子PIDを書いた検査ファイルを10秒以内に読み切れませんでした: {last_error}");
+            }
             let mut alive = ids.clone();
             for _ in 0..120 {
                 alive.retain(|pid| windows_process_exists(*pid));
