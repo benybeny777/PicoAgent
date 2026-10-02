@@ -329,8 +329,17 @@ fn validate_runtime_files(path: &Path) -> anyhow::Result<()> {
     );
     #[cfg(windows)]
     {
+        use anyhow::Context as _;
         let internal = root.join("engine_internal");
-        let python_dll = std::fs::read_dir(&internal)?
+        // `run.exe` だけが残った配置ではこのフォルダ自体が無い。OSエラー文だけでは
+        // どの配置が欠けているか分からないため、パス付きの理由にする。
+        anyhow::ensure!(
+            internal.is_dir(),
+            "Aivis の内部フォルダがありません: {}",
+            internal.display()
+        );
+        let python_dll = std::fs::read_dir(&internal)
+            .with_context(|| format!("Aivis の内部フォルダを読めません: {}", internal.display()))?
             .filter_map(Result::ok)
             .any(|entry| {
                 let name = entry.file_name();
@@ -373,7 +382,7 @@ fn runtime_engine_path(app: &tauri::AppHandle) -> Option<PathBuf> {
         Err(error) => {
             append_log_best_effort(
                 app,
-                &format!("不完全な Aivis を使用せず、同梱物から修復します: {error}"),
+                &format!("不完全な Aivis を使用せず、入れ直します: {error}"),
             );
             None
         }
@@ -1529,6 +1538,8 @@ mod tests {
         std::fs::write(&run, []).unwrap();
         std::fs::write(dir.path().join("engine_manifest.json"), b"{}").unwrap();
         let internal = dir.path().join("engine_internal");
+        let missing = validate_runtime_files(&run).unwrap_err().to_string();
+        assert!(missing.contains("engine_internal"), "{missing}");
         std::fs::create_dir_all(&internal).unwrap();
         std::fs::write(internal.join("python3.dll"), []).unwrap();
         assert!(validate_runtime_files(&run).is_err());
