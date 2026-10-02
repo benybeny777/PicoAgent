@@ -38,7 +38,7 @@ const server = http.createServer((request, response) => {
 await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
 const base = `http://127.0.0.1:${server.address().port}/`;
 
-function mockScript({ layout, characterId = "mugi", scenes = {}, onboardingDone = true, history = [] }) {
+function mockScript({ layout, characterId = "mugi", scenes = {}, onboardingDone = true, history = [], uiTheme = "pastel" }) {
   return `
 window.__calls = [];
 window.__listeners = {};
@@ -47,7 +47,7 @@ window.__TAURI__ = {
   core: { invoke: (name, args = {}) => {
     window.__calls.push({ name, args: JSON.parse(JSON.stringify(args)) });
     if (name === "pet_init") return Promise.resolve({
-      up: true, providerId: "local", theme: "system", uiTheme: "glass", fontPx: "14", streamChatFontPx: "22", voiceVolume: "35",
+      up: true, providerId: "local", theme: "system", uiTheme: ${JSON.stringify(uiTheme)}, fontPx: "14", streamChatFontPx: "22", voiceVolume: "35",
       characterId: ${JSON.stringify(characterId)}, characterOverrides: {}, live2dSdkOverrides: {},
       layout: ${JSON.stringify(layout)}, scenes: window.__saved, history: ${JSON.stringify(history)},
       quickActions: "", napMinutes: "0", onboardingDone: ${JSON.stringify(onboardingDone)},
@@ -95,13 +95,13 @@ const report = [];
 const fail = (label, detail) => { failures.push(`${label}: ${detail}`); console.error(`NG ${label}: ${detail}`); };
 const ok = label => console.log(`OK ${label}`);
 
-async function openApp({ layout, width, height, characterId, scenes, onboardingDone, history }) {
+async function openApp({ layout, width, height, characterId, scenes, onboardingDone, history, uiTheme }) {
   const context = await browser.newContext({ viewport: { width, height }, deviceScaleFactor: 1 });
   const page = await context.newPage();
   const errors = [];
   page.on("pageerror", error => errors.push(String(error)));
   page.on("console", message => { if (message.type() === "error") errors.push(message.text()); });
-  await page.addInitScript(mockScript({ layout, characterId, scenes, onboardingDone, history }));
+  await page.addInitScript(mockScript({ layout, characterId, scenes, onboardingDone, history, uiTheme }));
   await page.goto(base);
   await page.waitForFunction(() => !document.getElementById("petApp").classList.contains("is-booting"), null, { timeout: 30000 });
   await page.waitForFunction(() => {
@@ -450,6 +450,27 @@ for (const [layout, [width, height]] of Object.entries(LAYOUTS)) {
   );
   await page.screenshot({ path: path.join(outDir, "pet-conversation.png"), omitBackground: true });
   if (errors.length) fail("send", errors.join(" / "));
+  await context.close();
+}
+
+// 保存後のイベントだけでUIモードが切り替わり、再起動せず形と色が変わることを確かめる。
+for (const [layout, [width, height]] of Object.entries(LAYOUTS)) {
+  const { context, page, errors } = await openApp({ layout, width, height, characterId: "mugi" });
+  for (const [mode, theme] of [["pastel", "system"], ["glass", "system"], ["glass", "light"], ["pastel", "light"], ["pastel", "dark"], ["pastel", "system"]]) {
+    await page.evaluate(({ uiTheme, theme }) => window.__emit("pet:ui", { theme, uiTheme }), { uiTheme: mode, theme });
+    const actual = await page.locator("[data-source=chat]").evaluate(node => ({
+      radius: getComputedStyle(node).borderTopLeftRadius,
+      mode: document.documentElement.dataset.uiTheme,
+      column: node.dataset.variant === "column",
+    }));
+    const radius = mode === "pastel" ? (actual.column ? "20px" : "24px") : (actual.column ? "10px" : "12px");
+    if (actual.mode !== mode || actual.radius !== radius) fail(`${layout}/${mode}`, `モード即反映が不一致 ${JSON.stringify(actual)}`);
+    else ok(`${layout}/${mode} UIモードを即反映`);
+    await page.waitForTimeout(300); // 色の切替アニメーション完了後の確定した見た目を撮る。
+    await page.screenshot({ path: path.join(outDir, `mode-${mode}-${layout}.png`), omitBackground: true });
+    await page.screenshot({ path: path.join(outDir, `mode-${mode}-${theme}-${layout}.png`), omitBackground: true });
+  }
+  if (errors.length) fail(`mode/${layout}`, errors.join(" / "));
   await context.close();
 }
 

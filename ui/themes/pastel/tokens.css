@@ -1,5 +1,10 @@
-/* pastel - 明るいパステルのテーマ。明暗は PICOAGENT_THEME に従い、`system` は OS の設定に追従する。 */
+/* pastel - 既定の可愛いモード。ローズ色と丸いパネル。明暗は PICOAGENT_THEME に従い、`system` は OS の設定に追従する。 */
 :root[data-ui-theme="pastel"] {
+  --radius-xl: 24px;
+  --radius-lg: 20px;
+  --radius-md: 16px;
+  --radius-sm: 10px;
+  --radius-pill: 999px;
   --surface: rgba(255, 250, 252, 0.84);
   --surface-strong: rgba(255, 255, 255, 0.96);
   --surface-raised: rgba(255, 255, 255, 0.97);
@@ -11,10 +16,10 @@
   --text: #3a2733;
   --text-muted: #7b6272;
   --text-faint: #a8909f;
-  --accent: #e0668b;
-  --accent-strong: #c94d73;
+  --accent: #bd3e68;
+  --accent-strong: #a93057;
   --accent-soft: rgba(224, 102, 139, 0.14);
-  --accent-gradient: linear-gradient(135deg, #ff9fb8 0%, #b9a2ff 100%);
+  --accent-gradient: linear-gradient(135deg, #cc4779 0%, #8461bf 100%);
   --on-accent: #ffffff;
   --danger: #cf3f5f;
   --danger-soft: rgba(207, 63, 95, 0.1);

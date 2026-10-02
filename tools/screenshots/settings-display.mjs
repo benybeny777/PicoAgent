@@ -680,6 +680,27 @@ try {
     }
   }
   if (tabOverflow.length) throw new Error(`設定タブが横にはみ出しています: ${tabOverflow.join(" / ")}`);
+  // UIモードは未設定時の可愛いを維持し、プレビュー・保存・再読込を同じ経路で検査する。
+  const modePage = await browser.newPage({ viewport: { width: 960, height: 760 } });
+  await modePage.addInitScript(mock);
+  await modePage.goto(`http://127.0.0.1:${port}/settings.html?tab=display`);
+  const modeSelect = modePage.locator('[data-setting-key="PICOAGENT_UI_THEME"] select');
+  await modeSelect.waitFor();
+  if (await modeSelect.inputValue() !== "pastel") throw new Error("未設定のUIモードが可愛いではありません");
+  for (const [mode, radius] of [["glass", "12px"], ["pastel", "24px"]]) {
+    await modeSelect.selectOption(mode);
+    const actual = await modePage.locator(".settings-panel-head").first().evaluate(node => ({
+      mode: document.documentElement.dataset.uiTheme, radius: getComputedStyle(node).borderTopLeftRadius,
+    }));
+    if (actual.mode !== mode || actual.radius !== radius) throw new Error(`UIモードのプレビューが不一致: ${JSON.stringify(actual)}`);
+    await modePage.locator("#save").click();
+    await modePage.waitForFunction(() => !document.getElementById("save").disabled);
+    await modePage.reload();
+    await modeSelect.waitFor();
+    if (await modeSelect.inputValue() !== mode) throw new Error(`UIモードの保存・再読込が不一致: ${mode}`);
+    await modePage.screenshot({ path: join(OUT, `mode-${mode}.png`) });
+  }
+  await modePage.close();
   const recoveryPage = await browser.newPage();
   await recoveryPage.addInitScript(mock);
   await recoveryPage.goto(`http://127.0.0.1:${port}/settings.html?load-failure=1`);

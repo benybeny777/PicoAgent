@@ -46,7 +46,7 @@ body {
   flex: none;
   width: 48px;
   height: 48px;
-  border-radius: 15px;
+  border-radius: var(--radius-lg);
   background: var(--accent-gradient);
   color: var(--on-accent);
   box-shadow: 0 9px 22px var(--accent-soft);
@@ -86,7 +86,7 @@ body {
   height: 43px;
   padding: 0 70px 0 42px;
   border: 1px solid var(--border-strong);
-  border-radius: 13px;
+  border-radius: var(--radius-md);
   background: var(--surface-sunken);
   color: var(--text);
   box-shadow: var(--highlight);
@@ -103,7 +103,7 @@ body {
   top: 5px;
   min-height: 33px;
   padding: 4px 10px;
-  border-radius: 9px;
+  border-radius: var(--radius-sm);
   background: var(--surface-hover);
   color: var(--text-muted);
 }
@@ -113,7 +113,7 @@ body {
   min-height: 25px;
   padding: 3px 10px;
   border: 1px solid var(--border);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--surface-sunken);
   color: var(--text-muted);
   font-size: 11px;
@@ -134,7 +134,7 @@ main {
   gap: 3px;
   padding: 12px 9px;
   border: 1px solid var(--border);
-  border-radius: 20px;
+  border-radius: var(--radius-xl);
   background: var(--surface);
   box-shadow: var(--shadow-soft), var(--highlight);
   backdrop-filter: var(--blur);
@@ -156,7 +156,7 @@ button.tab, .tab {
   min-height: 42px;
   padding: 5px 10px;
   border: 1px solid transparent;
-  border-radius: 12px;
+  border-radius: var(--radius-md);
   color: var(--text-muted);
   font-size: 12px;
   font-weight: 700;
@@ -175,7 +175,7 @@ button.tab.active, .tab.active {
   flex: none;
   width: 27px;
   height: 27px;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   background: var(--surface-sunken);
   color: var(--accent-strong);
   font-size: 15px;
@@ -191,7 +191,7 @@ button.tab.active, .tab.active {
   margin-bottom: 16px;
   padding: 21px 24px;
   border: 1px solid var(--border);
-  border-radius: 20px;
+  border-radius: var(--radius-xl);
   background:
     radial-gradient(circle at 96% 5%, var(--accent-soft), transparent 34%),
     var(--surface);
@@ -218,7 +218,7 @@ button.tab.active, .tab.active {
 .settings-panel-head p { margin: 7px 0 0; color: var(--text-muted); font-size: 12px; line-height: 1.55; }
 .section, .quick-settings {
   border: 1px solid var(--border);
-  border-radius: 19px;
+  border-radius: var(--radius-lg);
   background: var(--surface);
   box-shadow: var(--shadow-soft), var(--highlight);
   backdrop-filter: var(--blur);
@@ -236,7 +236,7 @@ button.tab.active, .tab.active {
   min-height: 83px;
   padding: 13px 46px 13px 15px;
   border: 1px solid var(--border);
-  border-radius: 13px;
+  border-radius: var(--radius-md);
   background: var(--surface-sunken);
   color: var(--text);
   box-shadow: var(--highlight);
@@ -257,7 +257,7 @@ button.tab.active, .tab.active {
 }
 .settings-intro {
   border-left-color: var(--accent);
-  border-radius: 5px 12px 12px 5px;
+  border-radius: var(--radius-sm) var(--radius-md) var(--radius-md) var(--radius-sm);
   background: var(--accent-soft);
   color: var(--text);
 }
@@ -287,7 +287,7 @@ footer .dirty-summary {
 footer .dirty-summary.dirty { border-color: var(--accent); background: var(--accent-soft); color: var(--text); }
 footer #resetChanges { border-color: var(--border-strong); background: var(--surface-sunken); color: var(--text); }
 footer #save { background: var(--accent-gradient); color: var(--on-accent); font-weight: 800; }
-footer button { border-radius: 11px; }
+footer button { border-radius: var(--radius-md); }
 footer button:focus-visible, .tab:focus-visible, .quick-settings-card:focus-visible,
 .search-shortcuts button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
@@ -299,7 +299,7 @@ body.searching .settings-panel-head { display: none; }
   body { height: auto; min-height: 100vh; }
   .settings-header { display: block; padding: 14px 16px; }
   .settings-heading { margin-bottom: 12px; }
-  .settings-mark { width: 38px; height: 38px; border-radius: 12px; font-size: 19px; }
+  .settings-mark { width: 38px; height: 38px; border-radius: var(--radius-md); font-size: 19px; }
   .settings-heading h1 { font-size: 19px; }
   .settings-heading .hint { display: none; }
   .settings-search input { width: 100%; }
@@ -313,16 +313,16 @@ body.searching .settings-panel-head { display: none; }
     max-height: none;
     padding: 6px;
     margin-bottom: 12px;
-    border-radius: 13px;
+    border-radius: var(--radius-md);
     overflow-x: auto;
     overflow-y: hidden;
   }
   .tab-group-heading { display: none; }
   button.tab, .tab { min-width: max-content; min-height: 39px; padding: 5px 10px; white-space: nowrap; }
   .tab-icon { width: 22px; height: 22px; font-size: 13px; }
-  .settings-panel-head { padding: 16px 18px; margin-bottom: 12px; border-radius: 16px; }
+  .settings-panel-head { padding: 16px 18px; margin-bottom: 12px; border-radius: var(--radius-lg); }
   .settings-panel-head h2 { font-size: 20px; }
-  .section, .quick-settings { padding: 16px; border-radius: 15px; }
+  .section, .quick-settings { padding: 16px; border-radius: var(--radius-lg); }
   footer { position: sticky; bottom: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto auto; padding: 9px 16px; }
   footer .status { grid-column: 1 / -1; min-height: 16px; }
   footer .dirty-summary { justify-self: start; }

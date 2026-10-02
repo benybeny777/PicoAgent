@@ -1054,11 +1054,12 @@ function setQuickSettingsSummary(tabId, summary) {
   if (node) node.textContent = summary;
 }
 
-function applySettingsTheme(value, uiTheme = document.documentElement.dataset.uiTheme || "glass") {
-  document.documentElement.dataset.uiTheme = uiTheme === "pastel" ? "pastel" : "glass";
+function applySettingsTheme(value, uiTheme = document.documentElement.dataset.uiTheme || "pastel") {
+  const mode = uiTheme === "glass" ? "glass" : "pastel";
+  document.documentElement.dataset.uiTheme = mode;
   const theme = value === "light" || value === "dark" ? value : "system";
   if (theme === "system") {
-    if (uiTheme === "glass") document.documentElement.dataset.theme = "dark";
+    if (mode === "glass") document.documentElement.dataset.theme = "dark";
     else document.documentElement.removeAttribute("data-theme");
   } else {
     document.documentElement.dataset.theme = theme;
@@ -3113,9 +3114,9 @@ async function render() {
     { value: "light", label: "通常" },
     { value: "dark", label: "ダーク" },
   ]));
-  displaySec.append(selectField("PICOAGENT_UI_THEME", "メイン画面の見た目", v.PICOAGENT_UI_THEME || "glass", [
-    { value: "glass", label: "すりガラス" },
-    { value: "pastel", label: "パステル" },
+  displaySec.append(selectField("PICOAGENT_UI_THEME", "UIモード", v.PICOAGENT_UI_THEME || "pastel", [
+    { value: "pastel", label: "可愛い（ローズ色・丸み）" },
+    { value: "glass", label: "かっこいい（シアン色・引き締まった形）" },
   ]));
   displaySec.append(field("PICOAGENT_BUBBLE_FONT_PX", "ペット・ミニの会話文字（px）", "text", v.PICOAGENT_BUBBLE_FONT_PX ?? "", "13"));
   displaySec.append(field("PICOAGENT_ALWAYS_ON_TOP", "常に手前に表示", "checkbox", v.PICOAGENT_ALWAYS_ON_TOP !== false));
@@ -3212,7 +3213,7 @@ async function render() {
     const selected = LAYOUT_CHOICES.find(item => item.id === event.target.value);
     setQuickSettingsSummary("display", selected?.label || event.target.value);
   });
-  applySettingsTheme(v.PICOAGENT_THEME || "system", v.PICOAGENT_UI_THEME || "glass");
+  applySettingsTheme(v.PICOAGENT_THEME || "system", v.PICOAGENT_UI_THEME || "pastel");
   inputs.get("PICOAGENT_THEME")?.addEventListener("change", event => {
     applySettingsTheme(event.target.value);
   });
