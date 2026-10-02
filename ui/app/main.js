@@ -265,7 +265,7 @@ function applyTheme(theme, uiTheme) {
     if (value === "system") delete document.documentElement.dataset.theme;
     else document.documentElement.dataset.theme = value;
   }
-  if (uiTheme != null) document.documentElement.dataset.uiTheme = UI_THEMES.includes(uiTheme) ? uiTheme : "glass";
+  if (uiTheme != null) document.documentElement.dataset.uiTheme = UI_THEMES.includes(uiTheme) ? uiTheme : "pastel";
 }
 
 function applyStreamAppearance(info) {

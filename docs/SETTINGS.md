@@ -12,7 +12,7 @@
 | `PICOAGENT_MODEL` | プロバイダ既定 | AIモデル | 選択中モデル。agent_cliは `claude` / `codex` で外部アプリ既定、`claude:<モデル>` / `codex:<モデル>` で明示選択。基本設定の選択欄から保存 |
 | `PICOAGENT_SYSTEM_PROMPT` | 既定プロンプト | AIモデル | system メッセージ |
 | `PICOAGENT_THEME` | `system` | 基本 | 表示テーマ。`system` はOS/システム設定に追従、`light` は通常、`dark` はダーク。`pet:ui` で即反映 |
-| `PICOAGENT_UI_THEME` | `glass` | 基本 | メイン画面の見た目のテーマ。`ui/themes/<名前>/tokens.css` の名前で、`glass`（ダーク基調のすりガラス）/ `pastel`（明るいパステル）。明暗は `PICOAGENT_THEME` で決まり、`glass` は `system` のときダークで表示する。`pet:ui` で即反映 |
+| `PICOAGENT_UI_THEME` | `pastel` | 基本 | メイン画面と設定画面のUIモード。`pastel`＝可愛い（ローズ色・丸いパネル）、`glass`＝かっこいい（シアン色・引き締まったパネル）。未設定は可愛い。既存の保存値は維持。明暗は `PICOAGENT_THEME` で決まり、`glass` は `system` のときダーク、`pastel` はOSに追従。保存後 `pet:ui` で即反映 |
 | `PICOAGENT_BUBBLE_FONT_PX` | `13` | 基本 | ペット・ミニのフキダシ文字サイズ(px)。`pet:ui` で即反映 |
 | `PICOAGENT_BUBBLE_WIDTH_PX` / `PICOAGENT_BUBBLE_HEIGHT_PX` / `PICOAGENT_BUBBLE_LEFT_PX` / `PICOAGENT_BUBBLE_TOP_PX` | （旧キー） | 内部UI | 旧版のフキダシ寸法・座標(px)。旧キー（シーン方式では読まない。値は削除せず残す。`PICOAGENT_SCENES` を参照） |
 | `PICOAGENT_WINDOW_WIDTH_PX` | （旧キー） | 内部UI | 旧版の共通ウィンドウ幅。現在は表示形式別の `PICOAGENT_WINDOW_LAYOUTS` を正本にする |
