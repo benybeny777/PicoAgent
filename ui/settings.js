@@ -4066,8 +4066,8 @@ async function render() {
   // プロバイダ変更でモデル候補を更新し、選択中プロバイダの設定だけ表示する。
   providerSelect.addEventListener("change", () => {
     v.PICOAGENT_PROVIDER = providerSelect.value;
-    loadModels(providerSelect.value, true);
     renderProviderConfig(providerSelect.value);
+    loadModels(providerSelect.value, true);
     updateModelFieldVisibility();
     updateDirtyState();
     applySettingsSearch();
@@ -4100,8 +4100,24 @@ function providerDefaultModel(providerId) {
 async function loadModels(providerId, applyProviderDefault = false) {
   const generation = ++modelLoadGeneration;
   const targetInput = modelInput;
+  const preferred = providerDefaultModel(providerId);
+  // 切替直後に保存しても前のAIのモデル名を送らない。一覧取得の成功を待たず、
+  // 描画済みスキーマの保存値・既定値で新しいAIのモデルを確定する。
+  if (applyProviderDefault && targetInput) targetInput.value = preferred;
   const initialModel = targetInput?.value;
   const isCurrent = () => generation === modelLoadGeneration && targetInput === modelInput;
+  const renderCliModels = models => {
+    if (providerId !== "agent_cli" || !cliModelSelect || !modelInput) return;
+    if (!modelInput.value) modelInput.value = preferred;
+    const choices = [...new Set([...models, modelInput.value].filter(Boolean))];
+    cliModelSelect.replaceChildren(...choices.map(value => el("option", {
+      value,
+      textContent: ["claude", "codex", "custom"].includes(value)
+        ? `${value}：アプリのデフォルト` : value.replace(":", "："),
+      selected: value === modelInput.value,
+    })));
+  };
+  if (applyProviderDefault) renderCliModels([]);
   modelOptions.innerHTML = "";
   statusEl.textContent = providerId === "ollama" ? "Ollama のモデル一覧を取得中…" : "";
   let models = [];
@@ -4117,7 +4133,6 @@ async function loadModels(providerId, applyProviderDefault = false) {
   if (!isCurrent()) return;
   for (const m of models) modelOptions.append(el("option", { value: m }));
   if (!modelInput) return;
-  const preferred = providerDefaultModel(providerId);
   if (modelInput.value !== initialModel) {
     // 一覧の取得中に手入力したモデル名は利用者の編集を優先する。
   } else if (applyProviderDefault) {
@@ -4125,16 +4140,7 @@ async function loadModels(providerId, applyProviderDefault = false) {
   } else if (providerId !== "agent_cli" && providerId === data.active.providerId && !models.includes(modelInput.value)) {
     modelInput.value = models.includes(preferred) ? preferred : (models[0] || modelInput.value);
   }
-  if (providerId === "agent_cli" && cliModelSelect) {
-    if (!modelInput.value) modelInput.value = preferred;
-    const choices = [...new Set([...models, modelInput.value].filter(Boolean))];
-    cliModelSelect.replaceChildren(...choices.map(value => el("option", {
-      value,
-      textContent: ["claude", "codex", "custom"].includes(value)
-        ? `${value}：アプリのデフォルト` : value.replace(":", "："),
-      selected: value === modelInput.value,
-    })));
-  }
+  renderCliModels(models);
   statusEl.textContent = providerId === "ollama"
     ? (models.length ? `${models.length}件の Ollama モデルを読み込みました。` : "Ollama のモデルが見つかりません。")
     : "";

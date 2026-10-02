@@ -17,7 +17,7 @@ function harness(listModels, value = "codex") {
     data: { active: { providerId: "agent_cli" } },
     providerDefaultModel: () => "codex",
     el: (tag, props) => ({ tag, ...props }),
-    updateDirtyState() {}, logApp() {}, errorDetail: String,
+    updateDirtyState() {}, logApp() {}, errorDetail: String, errorMessage: String,
   };
   vm.createContext(context);
   vm.runInContext(loadModels, context);
@@ -47,6 +47,52 @@ test("競合後に載せ直した草稿のAIを実行中AIで上書きしない"
   const draft = { PICOAGENT_PROVIDER: "openai" };
   assert.equal(renderedProvider({ ...latest, ...draft }, "local"), "openai");
   assert.equal(renderedProvider({}, "local"), "local");
+});
+
+test("モデル一覧の取得前に切替先AIのモデルを保存収集へ確定する", async () => {
+  let resolveModels;
+  const ctx = harness(() => new Promise(resolve => { resolveModels = resolve; }), "lfm25_2_6b");
+  ctx.data.values = {};
+  ctx.data.providers = [{ id: "ollama", defaultModel: "qwen3:8b" }];
+  ctx.inputs = new Map([
+    ["PICOAGENT_PROVIDER", { type: "select", value: "ollama" }],
+    ["PICOAGENT_MODEL", ctx.modelInput],
+    ["OLLAMA_MODEL", { type: "text", value: "gemma3" }],
+  ]);
+  ctx.cloneSettings = value => JSON.parse(JSON.stringify(value));
+  vm.runInContext(`const savedSnapshot = {}; const providerDraftValues = {};
+    const characterOverrides = {}, characterVoiceOverrides = {}, characterLive2dSdkOverrides = {}, characterStreamProfiles = {};
+    const alarmEditorState = null, scheduleEditorState = null;`, ctx);
+  vm.runInContext(settings.slice(settings.indexOf("function collect()"), settings.indexOf("// 再起動の確認画面")), ctx);
+  vm.runInContext(settings.slice(settings.indexOf("function providerDefaultModel("), settings.indexOf("async function loadModels(")), ctx);
+  const loading = ctx.loadModels("ollama", true);
+  assert.equal(ctx.collect().PICOAGENT_MODEL, "gemma3");
+  assert.equal(ctx.collect().OLLAMA_MODEL, "gemma3");
+  resolveModels(["別の候補モデル"]);
+  await loading;
+  assert.equal(ctx.modelInput.value, "別の候補モデル");
+});
+
+test("一覧取得の失敗でも前のAIのモデルへ戻らない", async () => {
+  const ctx = harness(async () => { throw new Error("一覧取得失敗"); }, "lfm25_2_6b");
+  ctx.providerDefaultModel = () => "gemma3";
+  await ctx.loadModels("ollama", true);
+  assert.equal(ctx.modelInput.value, "gemma3");
+  assert.match(ctx.statusEl.textContent, /モデル一覧を取得できませんでした/);
+});
+
+test("CLI切替は即座に既定モデルを表示し取得中の選び直しを保持する", async () => {
+  let resolveModels;
+  const ctx = harness(() => new Promise(resolve => { resolveModels = resolve; }), "lfm25_2_6b");
+  const loading = ctx.loadModels("agent_cli", true);
+  assert.equal(ctx.modelInput.value, "codex");
+  assert.equal(ctx.cliModelSelect.options[0].value, "codex");
+  assert.equal(ctx.cliModelSelect.options[0].selected, true);
+  ctx.modelInput.value = "codex:手入力モデル";
+  resolveModels(["codex", "claude"]);
+  await loading;
+  assert.equal(ctx.modelInput.value, "codex:手入力モデル");
+  assert.ok(ctx.cliModelSelect.options.find(option => option.value === "codex:手入力モデル").selected);
 });
 
 test("取得した新モデルを選択肢へ追加しアプリ既定を残す", async () => {
