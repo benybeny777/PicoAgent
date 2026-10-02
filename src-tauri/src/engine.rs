@@ -729,6 +729,7 @@ fn spawn_server(
     model: &PathBuf,
     candidate: &crate::engine_backend::BackendCandidate,
     projector: Option<&Path>,
+    start_generation: u64,
 ) -> anyhow::Result<()> {
     let server = &candidate.server;
     ensure_executable(server)?;
@@ -813,9 +814,9 @@ fn spawn_server(
         // ハンドルを失わないよう、poison 後も格納済み状態を引き継ぐ。
         Err(poisoned) => poisoned.into_inner(),
     };
-    if engine.stopping.load(Ordering::SeqCst) {
+    if !start_generation_is_current(engine.inner(), start_generation) {
         terminate_child(app, &mut child);
-        anyhow::bail!("終了処理中のため、起動したエンジンを停止しました");
+        anyhow::bail!("停止または再起動済みの処理のため、起動したエンジンを停止しました");
     }
     if slot.is_some() {
         terminate_child(app, &mut child);
@@ -831,10 +832,11 @@ pub async fn ensure_and_start(app: AppHandle) {
         return;
     };
     let generation = engine.start_generation.subscribe();
+    let start_generation = *generation.borrow();
     run_start_operation(
         engine.inner(),
         generation,
-        ensure_and_start_inner(app.clone()),
+        ensure_and_start_inner(app.clone(), start_generation),
     )
     .await;
 }
@@ -860,7 +862,11 @@ async fn run_start_operation(
     }
 }
 
-async fn ensure_and_start_inner(app: AppHandle) {
+fn start_generation_is_current(engine: &EngineState, generation: u64) -> bool {
+    !engine.stopping.load(Ordering::SeqCst) && *engine.start_generation.borrow() == generation
+}
+
+async fn ensure_and_start_inner(app: AppHandle, start_generation: u64) {
     if let Err(error) = ensure_local_model_selection(&app).await {
         set_status(
             &app,
@@ -967,7 +973,13 @@ async fn ensure_and_start_inner(app: AppHandle) {
             json!({ "phase": "starting", "message": format!("{}でローカルAIを起動しています", candidate.label) }),
         );
         VISION_READY.store(false, Ordering::SeqCst);
-        if let Err(error) = spawn_server(&app, &model, &candidate, projector.as_deref()) {
+        if let Err(error) = spawn_server(
+            &app,
+            &model,
+            &candidate,
+            projector.as_deref(),
+            start_generation,
+        ) {
             failures.push(format!("{}: {error}", candidate.label));
             continue;
         }
@@ -1118,6 +1130,25 @@ mod tests {
         remove_obsolete_model_files,
     };
     use crate::providers::local;
+
+    #[test]
+    fn 停止フラグ解除後も旧世代の子プロセス登録を拒否する() {
+        let engine = super::EngineState::new();
+        let old_generation = *engine.start_generation.borrow();
+        assert!(super::start_generation_is_current(&engine, old_generation));
+        engine
+            .stopping
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        engine.start_generation.send_modify(|value| *value += 1);
+        engine
+            .stopping
+            .store(false, std::sync::atomic::Ordering::SeqCst);
+        assert!(!super::start_generation_is_current(&engine, old_generation));
+        assert!(super::start_generation_is_current(
+            &engine,
+            *engine.start_generation.borrow()
+        ));
+    }
 
     #[test]
     fn 同じモデルの再取得でも一時ファイルは共有しない() {
