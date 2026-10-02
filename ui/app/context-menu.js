@@ -23,6 +23,7 @@ export function createContextMenu({ onCharacterAction, openExternalUrl }) {
     }
     return {
       editable,
+      editableValue: editable?.value,
       link,
       selectionText,
       editableRange: editable && typeof editable.selectionStart === "number"
@@ -47,10 +48,13 @@ export function createContextMenu({ onCharacterAction, openExternalUrl }) {
 
   async function copy(text) {
     try {
-      if (!(await copyText(text))) toast("コピーできませんでした", "error");
+      const copied = await copyText(text);
+      if (!copied) toast("コピーできませんでした", "error");
+      return copied;
     } catch (error) {
       logApp("warn", "コピーできませんでした", errorDetail(error));
       toast("コピーできませんでした", "error");
+      return false;
     }
   }
 
@@ -58,6 +62,12 @@ export function createContextMenu({ onCharacterAction, openExternalUrl }) {
     field.focus();
     field.setRangeText(text, start, end, "end");
     field.dispatchEvent(new Event("input", { bubbles: true }));
+  }
+
+  function editableUnchanged(state) {
+    if (state.editable.value === state.editableValue) return true;
+    toast("待機中に入力が変わったため操作を中止しました。もう一度右クリックしてください", "warn");
+    return false;
   }
 
   async function perform({ action, framing } = {}) {
@@ -68,15 +78,16 @@ export function createContextMenu({ onCharacterAction, openExternalUrl }) {
         break;
       case "cut":
         if (state?.editable && state.editableRange && state.selectionText) {
-          await copy(state.selectionText);
-          replaceSelection(state.editable, state.editableRange, "");
+          if (await copy(state.selectionText) && editableUnchanged(state)) {
+            replaceSelection(state.editable, state.editableRange, "");
+          }
         }
         break;
       case "paste":
         if (!state?.editable || !state.editableRange) break;
         try {
           const text = await navigator.clipboard.readText();
-          replaceSelection(state.editable, state.editableRange, text);
+          if (editableUnchanged(state)) replaceSelection(state.editable, state.editableRange, text);
         } catch (error) {
           logApp("warn", "クリップボードを読めませんでした", errorDetail(error));
           toast("クリップボードを読めませんでした。Ctrl+V で貼り付けてください", "warn");

@@ -156,6 +156,7 @@ export function createStage({ stageElement, sceneRoot, sources, character, toast
       const rect = index >= 0 ? rectOf(name, geometry) : null;
       const visible = Boolean(rect && rect.visible !== false && !(overrides.game && name !== "character"));
       source.element.hidden = !visible;
+      source.setVisible?.(visible);
       if (!visible) continue;
       Object.assign(source.element.style, {
         left: `${rect.left}px`,
@@ -239,6 +240,7 @@ export function createStage({ stageElement, sceneRoot, sources, character, toast
         id = "pet";
       }
       if (layoutId === id) { schedule(); return; }
+      events.emit("context-change");
       previews.clear();
       layoutId = id;
       overrides.expanded = false;
@@ -246,6 +248,7 @@ export function createStage({ stageElement, sceneRoot, sources, character, toast
       schedule();
     },
     setCharacter(id) {
+      if (characterId !== String(id || "")) events.emit("context-change");
       characterId = String(id || "");
       previews.clear();
       schedule();
@@ -303,8 +306,10 @@ export function createStage({ stageElement, sceneRoot, sources, character, toast
     },
     /** ソースの表示・非表示だけを切り替えて保存する。 */
     async setVisible(target, visible) {
-      const previous = saved[layoutId]?.sources?.[target] || {};
-      writeSaved(saved, layoutId, { source: target }, { ...previous, visible: Boolean(visible) });
+      if (target === "character" && !characterId) return;
+      const previous = savedFor(target) || {};
+      const key = target === "character" ? { characterId } : { source: target };
+      writeSaved(saved, layoutId, key, { ...previous, visible: Boolean(visible) });
       applyLayout();
       return persist();
     },
@@ -333,6 +338,7 @@ export function createStage({ stageElement, sceneRoot, sources, character, toast
     },
     /** バックエンドが保存値を書き換えた場合（位置とサイズのリセット）に写しを置き換える。 */
     replaceScenes(scenes) {
+      events.emit("context-reset");
       saved = cloneScenes(scenes);
       previews.clear();
       schedule();

@@ -110,6 +110,69 @@ test("設定保存は変更差分だけを送り内部状態を競合対象に�
   assert.match(bridge, /save: \(patch, baseRevisions\) => call\("settings_save", \{ patch, baseRevisions \}\)/);
 });
 
+test("競合の再表示で非表示AIの草稿と最新値を両方保持する", () => {
+  const context = vm.createContext({
+    inputs: new Map([["PICOAGENT_PROVIDER", { type: "select", value: "local" }]]),
+    cloneSettings: value => JSON.parse(JSON.stringify(value)),
+    data: { values: { PICOAGENT_PROVIDER: "local", OPENAI_MODEL: "草稿モデル", OTHER_PROVIDER_MODEL: "最新モデル" } },
+  });
+  vm.runInContext(`const providerDraftValues = {};
+    const savedSnapshot = { PICOAGENT_PROVIDER: "local", OPENAI_MODEL: "旧モデル", OTHER_PROVIDER_MODEL: "旧モデル" };
+    const characterOverrides = {}, characterVoiceOverrides = {}, characterLive2dSdkOverrides = {}, characterStreamProfiles = {};
+    const alarmEditorState = null, scheduleEditorState = null;`, context);
+  vm.runInContext(settings.slice(settings.indexOf("function collect()"), settings.indexOf("// 再起動の確認画面")), context);
+  assert.equal(context.collect().OPENAI_MODEL, "草稿モデル");
+  assert.equal(context.collect().OTHER_PROVIDER_MODEL, "最新モデル");
+});
+
+test("キャラ切替が途中で失敗しても旧キャラの欄と草稿を保つ", async () => {
+  for (const failAt of ["sdk", "framing"]) {
+    const persona = { value: "旧キャラの編集中人格" };
+    const speaker = { value: "111" };
+    const sdk = { value: "4", options: [{ disabled: false }, { disabled: true }] };
+    const context = vm.createContext({
+      document: { activeElement: null },
+      characterPersona: persona, characterSpeaker: speaker, characterLive2dSdkSelect: sdk,
+      characterLive2dSdkField: { hidden: false }, characterLive2dSdkHint: { textContent: "旧SDKの説明" },
+      characterSelect: { value: "new", setAttribute() {}, focus() {} },
+      characterCatalog: { characters: [{ id: "old", name: "旧キャラ" }, { id: "new", name: "新キャラ" }] },
+      statusEl: {}, setSettingsMutationBusy() {}, logApp() {}, errorDetail: String, errorMessage: String,
+      updateDirtyState() {}, refreshCharacterCards() {}, setQuickSettingsSummary() {}, updateCharacterVoiceContext() {},
+      async loadCharacterPersona() { persona.value = "新キャラの人格"; },
+      loadCharacterVoice() { speaker.value = "222"; },
+      async loadCharacterLive2dSdk() {
+        sdk.value = "5";
+        sdk.options[0].disabled = true;
+        if (failAt === "sdk") throw new Error("SDK読込失敗");
+      },
+      characterFramingEditor: { async load() { throw new Error("構図読込失敗"); } },
+      characterStreamProfileEditor: { load() {} },
+      saveCurrentCharacterPersona(id) { context.personas[id] = persona.value; },
+      saveCurrentCharacterVoice(id) { context.voices[id] = speaker.value; },
+      saveCurrentCharacterLive2dSdk(id) { context.sdks[id] = sdk.value; },
+      personas: {}, voices: {}, sdks: {},
+    });
+    vm.runInContext(`let previousCharacter = "old", displayedCharacterId = "old";
+      let characterSwitchQueue = Promise.resolve(), characterSwitchPending = 0;
+      let characterSwitchOwnsBusy = false, settingsMutationBusy = false, restoreCharacterSelectFocus = false;
+      const characterSwitchMessage = "キャラ設定を読み込み中…";`, context);
+    const captureStart = settings.indexOf("function captureCharacterSettingsFields()");
+    vm.runInContext(settings.slice(captureStart, settings.indexOf("function saveCurrentCharacterPersona(", captureStart)), context);
+    const queueStart = settings.indexOf("  function queueCharacterSwitch(");
+    vm.runInContext(settings.slice(queueStart, settings.indexOf('  characterSelect.addEventListener("change"', queueStart)), context);
+    await context.queueCharacterSwitch("new");
+    assert.equal(context.characterSelect.value, "old");
+    assert.equal(persona.value, "旧キャラの編集中人格");
+    assert.equal(speaker.value, "111");
+    assert.equal(sdk.value, "4");
+    assert.equal(sdk.options[0].disabled, false);
+    assert.equal(vm.runInContext("displayedCharacterId", context), "old");
+    assert.deepEqual(context.personas, { old: "旧キャラの編集中人格" });
+    assert.deepEqual(context.voices, { old: "111" });
+    assert.deepEqual(context.sdks, { old: "4" });
+  }
+});
+
 test("設定競合は草稿を捨てず最新値へ載せ直す", () => {
   const saveFlow = settings.slice(
     settings.indexOf('saveBtn.addEventListener("click"'),

@@ -24,6 +24,31 @@ function harness(listModels, value = "codex") {
   return context;
 }
 
+function renderedProvider(values, activeProviderId) {
+  const start = settings.indexOf('  const providerSelect = el("select");', settings.indexOf("async function render()"));
+  const end = settings.indexOf('  aiSec.append(registerInput(', start);
+  const context = vm.createContext({
+    v: values,
+    data: { active: { providerId: activeProviderId }, providers: [{ id: "local" }, { id: "ollama" }, { id: "openai" }] },
+    el: (tag, props = {}) => ({ tag, ...props, options: [], append(option) { this.options.push(option); } }),
+  });
+  vm.runInContext(`${settings.slice(start, end)}; globalThis.options = providerSelect.options;`, context);
+  return context.options.find(option => option.selected)?.value;
+}
+
+test("再起動をあとにしても保存済みのAIを設定画面へ戻す", () => {
+  assert.equal(renderedProvider({ PICOAGENT_PROVIDER: "ollama" }, "local"), "ollama");
+  assert.match(settings, /renderProviderConfig\(providerSelect\.value\);/);
+  assert.doesNotMatch(settings, /renderProviderConfig\(data\.active\.providerId\)/);
+});
+
+test("競合後に載せ直した草稿のAIを実行中AIで上書きしない", () => {
+  const latest = { PICOAGENT_PROVIDER: "ollama" };
+  const draft = { PICOAGENT_PROVIDER: "openai" };
+  assert.equal(renderedProvider({ ...latest, ...draft }, "local"), "openai");
+  assert.equal(renderedProvider({}, "local"), "local");
+});
+
 test("取得した新モデルを選択肢へ追加しアプリ既定を残す", async () => {
   const ctx = harness(async () => ["codex", "codex:future-model", "claude", "claude:opus"]);
   await ctx.loadModels("agent_cli");

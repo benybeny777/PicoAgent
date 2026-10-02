@@ -18,7 +18,7 @@ assert.notEqual(exposed, source, "ゲームモジュールの写しを作れま�
 const elements = new Map();
 const element = key => {
   if (!elements.has(key)) elements.set(key, {
-    value: "", dataset: {}, listeners: {}, attributes: {}, hidden: true,
+    value: "", dataset: {}, listeners: {}, attributes: {}, hidden: true, isConnected: true,
     addEventListener(name, callback) { this.listeners[name] = callback; },
     setAttribute(name, value) { this.attributes[name] = value; },
     focus() {}, querySelector: element, querySelectorAll: () => [],
@@ -58,6 +58,36 @@ function setup() {
   game.startSession("normal");
   return { game, element, timers, requests };
 }
+
+test("開始時のAI確認失敗は非同期後も開始ボタンを戻す", async () => {
+  elements.clear();
+  const game = createGame({ voice, stage });
+  game.open();
+  const button = element(".game-start");
+  const event = { currentTarget: button };
+  globalThis.picoagent.gameReady = async () => { throw new Error("未接続"); };
+  const pending = button.listeners.click(event);
+  event.currentTarget = null;
+  await pending;
+  assert.equal(button.disabled, false);
+  assert.equal(button.textContent, "監査を受ける");
+  assert.equal(game.state(), null);
+});
+
+test("ゲームを閉じた後に届いたAI確認結果では開始しない", async () => {
+  elements.clear();
+  timers.clear();
+  let resolveReady;
+  globalThis.picoagent.gameReady = () => new Promise(resolve => { resolveReady = resolve; });
+  const game = createGame({ voice, stage });
+  game.open();
+  const pending = element(".game-start").listeners.click({ currentTarget: element(".game-start") });
+  game.close();
+  resolveReady({ ready: true });
+  await pending;
+  assert.equal(game.state(), null);
+  assert.equal(timers.size, 0);
+});
 
 for (const expired of [false, true]) {
   test(`採点拒否後は同じ問題を修正して再提出できる（${expired ? "時間切れ" : "残時間あり"}）`, async () => {

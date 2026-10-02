@@ -131,6 +131,7 @@ export function createCharacterSource(context) {
     element,
     view,
     heart,
+    setVisible(visible) { context.host.setActive(visible); },
     setOnline(up) { online.dataset.up = String(Boolean(up)); },
     update({ rect, pixelRatio, layoutId }) {
       context.host.setLayout(layoutId, context.stage.currentFraming());

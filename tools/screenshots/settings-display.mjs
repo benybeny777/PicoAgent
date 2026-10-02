@@ -35,6 +35,7 @@ const settingsData = {
     PICOAGENT_CHARACTER: "mugi",
     PICOAGENT_LAYOUT: "stream",
     PICOAGENT_THEME: "dark",
+    PICOAGENT_STREAM_CHAT_FONT_PX: "30",
     PICOAGENT_CHARACTER_ZOOM: "1.55",
     PICOAGENT_STREAM_PROFILES: { mugi: { background: "simple", backgroundImage: "", display: "clock", displayImage: "", captionColor: "#a04070" } },
     PICOAGENT_ALWAYS_ON_TOP: true,

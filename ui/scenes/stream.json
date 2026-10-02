@@ -11,7 +11,7 @@
     "character": {
       "anchor": "bottom-right", "x": -685, "y": 0, "h": { "px": 800 }, "maxWidthFrac": 0.62
     },
-    "subtitle": { "anchor": "bottom-left", "x": 40, "y": -36, "w": 1240, "h": 168 },
+    "subtitle": { "anchor": "bottom-left", "x": 40, "y": -36, "w": 1124, "h": 168 },
     "chat": {
       "anchor": "top-right", "x": -12, "y": 16, "w": 720, "h": 1048,
       "options": { "variant": "column", "history": true }

@@ -70,6 +70,16 @@ test("配信の配置は描画方式によらず同じで、保存済み配置�
   assert.deepEqual([saved.y, saved.w, saved.h, saved.saved], [0, 600, 600, true]);
 });
 
+test("配信の既定字幕は会話列の手前で止まり、保存済み字幕幅は変更しない", () => {
+  const scene = scenes.stream;
+  const subtitle = toRect(resolvePlacement(scene.sources.subtitle, null, scene.size.w, scene.size.h), scene.size.w, scene.size.h);
+  const chat = toRect(resolvePlacement(scene.sources.chat, null, scene.size.w, scene.size.h), scene.size.w, scene.size.h);
+  assert.ok(subtitle.left + subtitle.width + 24 <= chat.left, "字幕が会話列の背後へ隠れています");
+  const custom = { anchor: "bottom-left", x: 40, y: -36, w: 1240, h: 168 };
+  const saved = resolvePlacement(scene.sources.subtitle, custom, scene.size.w, scene.size.h);
+  assert.equal(saved.w, 1240, "利用者が指定した字幕幅を変更しています");
+});
+
 test("最小の大きさを下回らず、窓外へ消えない", () => {
   assert.equal(fromRect({ left: 0, top: 0, width: 5, height: 5 }, "top-left", 100, 100).w, MIN_SIZE);
   const lost = keepReachable({ left: 5000, top: -5000, width: 200, height: 200 }, 800, 600);
