@@ -112,7 +112,7 @@ export function createAmbient({ chat, voice, host, motion, isBusy, isExpanded })
       toast(`「${label}」は日時を読めないため鳴りません。登録し直してください`, "error");
     }
     const events = Array.isArray(result?.events) ? result.events : [];
-    if (events.length) await say((events[0]?.text || "時間だよ。").trim());
+    if (events.length) await say(events.map(event => String(event?.text || "時間だよ。").trim()).join("\n"));
   }
 
   function clearSnooze(stop) {

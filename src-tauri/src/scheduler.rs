@@ -239,6 +239,11 @@ fn run_history_path(app: &AppHandle) -> anyhow::Result<PathBuf> {
 }
 
 pub fn load_run_history(app: &AppHandle) -> anyhow::Result<Vec<ScheduledRunRecord>> {
+    let _guard = crate::store::lock_state("schedule-runs");
+    load_run_history_unlocked(app)
+}
+
+fn load_run_history_unlocked(app: &AppHandle) -> anyhow::Result<Vec<ScheduledRunRecord>> {
     let path = run_history_path(app)?;
     let text = match std::fs::read_to_string(&path) {
         Ok(text) => text,
@@ -324,13 +329,15 @@ fn append_run_history(
         at: at.to_string(),
         body: result.to_string(),
     };
-    let mut records = match load_run_history(app) {
+    let _guard = crate::store::lock_state("schedule-runs");
+    let mut records = match load_run_history_unlocked(app) {
         Ok(records) => records,
         Err(error) => {
             crate::log_paths::append_app_log(
                 app,
                 &format!("スケジュール実行履歴を更新できません: {error}"),
             );
+            notify_scheduler_history_state(app, Some(&error.to_string()));
             return record;
         }
     };
@@ -341,6 +348,9 @@ fn append_run_history(
             app,
             &format!("スケジュール実行履歴の保存に失敗しました: {error}"),
         );
+        notify_scheduler_history_state(app, Some(&error.to_string()));
+    } else {
+        notify_scheduler_history_state(app, None);
     }
     record
 }
@@ -724,22 +734,77 @@ fn minutes_to_check(task: &ScheduledTask, now: DateTime<Local>) -> Vec<DateTime<
 /// 実行そのものはここで待たない。文字起こしのように 30 分かかりうるタスクを
 /// 検出ループの中で `await` すると、その間の tick が進まず、当該時間帯に予定
 /// されていた他タスクが（次の分に繰り越されないため）恒久的にスキップされる。
-fn take_due_tasks(app: &AppHandle, cfg: &Config) -> Vec<ScheduledTask> {
-    let now = Local::now();
+fn enqueue_due_tasks(
+    tx: &tokio::sync::mpsc::Sender<Vec<ScheduledTask>>,
+    cfg: &Config,
+    now: DateTime<Local>,
+) -> anyhow::Result<()> {
+    // 容量を確保できない間は発火状態を進めず、復旧後の追いつき検出へ残す。
+    let permit = tx.try_reserve().map_err(|error| {
+        anyhow::anyhow!("スケジュール実行キューを確保できません。予約の検出を再試行します: {error}")
+    })?;
+    let tasks = take_due_tasks_at(cfg, now)?;
+    if !tasks.is_empty() {
+        permit.send(tasks);
+    }
+    Ok(())
+}
+
+fn notify_scheduler_state(app: &AppHandle, error: Option<&str>) {
+    use std::sync::atomic::AtomicBool;
+    static FAILED: AtomicBool = AtomicBool::new(false);
+    notify_scheduler_background_state(app, "scheduler-state", error, &FAILED);
+}
+
+fn notify_scheduler_history_state(app: &AppHandle, error: Option<&str>) {
+    use std::sync::atomic::AtomicBool;
+    static FAILED: AtomicBool = AtomicBool::new(false);
+    notify_scheduler_background_state(app, "scheduler-history", error, &FAILED);
+}
+
+fn notify_scheduler_background_state(
+    app: &AppHandle,
+    key: &str,
+    error: Option<&str>,
+    previous: &std::sync::atomic::AtomicBool,
+) {
+    use std::sync::atomic::Ordering;
+    let failed = error.is_some();
+    if let Some(body) = error {
+        crate::log_paths::append_app_log(app, body);
+    }
+    if previous.swap(failed, Ordering::Relaxed) == failed {
+        return;
+    }
+    let body = error.unwrap_or("スケジュールの状態保存が復旧しました");
+    if let Err(error) = app.emit(
+        "pet:notice",
+        json!({
+        "kind": "background_failure", "key": key,
+        "title": "スケジュール実行", "body": body, "ok": !failed,
+            "at": Local::now().to_rfc3339(),
+        }),
+    ) {
+        crate::log_paths::append_app_log(
+            app,
+            &format!("スケジュールの状態を通知できません: {error}"),
+        );
+    }
+}
+
+fn take_due_tasks_at(cfg: &Config, now: DateTime<Local>) -> anyhow::Result<Vec<ScheduledTask>> {
     let minute_stamp = now.format("%Y-%m-%d %H:%M").to_string();
     // 読む→直す→書き戻すの間、task_scheduler スキルの更新と競合しないようにする。
     let _guard = crate::store::lock_state(CONFIG_KEY);
     // 読めなかった場合は空一覧で続けない（そのまま書き戻すと予約が全部消える）。
-    let mut tasks = match load(cfg) {
-        Ok(tasks) => tasks,
-        Err(error) => {
-            crate::log_paths::append_app_log(app, &format!("エラー: {error}"));
-            return Vec::new();
-        }
-    };
+    let mut tasks = load(cfg).map_err(anyhow::Error::msg)?;
     let mut changed = false;
     let mut due = Vec::new();
     for task in &mut tasks {
+        // 時計が戻った間は確認済み時刻を維持し、処理済み区間を再走査しない。
+        if checked_minute(&task.last_checked_minute).is_some_and(|previous| previous > now) {
+            continue;
+        }
         let minutes = minutes_to_check(task, now);
         for minute in minutes {
             if should_run_at(task, minute) {
@@ -757,14 +822,10 @@ fn take_due_tasks(app: &AppHandle, cfg: &Config) -> Vec<ScheduledTask> {
         }
     }
     if changed || !due.is_empty() {
-        if let Err(error) = save(cfg, &tasks) {
-            crate::log_paths::append_app_log(
-                app,
-                &format!("スケジュールタスク状態の保存に失敗しました: {error}"),
-            );
-        }
+        // 発火済み状態を保存できなければ実行せず、次の検出で再試行する。
+        save(cfg, &tasks)?;
     }
-    due
+    Ok(due)
 }
 
 /// 1タスクを実行し、ログ・実行履歴・通知へ反映する。
@@ -796,15 +857,17 @@ pub async fn rerun_task(
 pub fn start(app: AppHandle) {
     // 検出（tick）と実行（ワーカー）を分ける。実行は 1 本のワーカーで直列に処理するので、
     // 長時間タスクがあっても検出は止まらず、実行履歴の書き込みも競合しない。
-    let (tx, mut rx) = tokio::sync::mpsc::channel::<ScheduledTask>(64);
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<Vec<ScheduledTask>>(64);
 
     let worker_app = app.clone();
     tauri::async_runtime::spawn(async move {
-        while let Some(task) = rx.recv().await {
+        while let Some(tasks) = rx.recv().await {
             let Some(state) = worker_app.try_state::<crate::commands::AppState>() else {
                 continue;
             };
-            run_and_record(&worker_app, &state.config, task).await;
+            for task in tasks {
+                run_and_record(&worker_app, &state.config, task).await;
+            }
         }
     });
 
@@ -815,15 +878,10 @@ pub fn start(app: AppHandle) {
             let Some(state) = app.try_state::<crate::commands::AppState>() else {
                 continue;
             };
-            for task in take_due_tasks(&app, &state.config) {
-                // キューが詰まっている＝前のタスクが長引いている。取りこぼしを黙って
-                // 捨てず、ログに残してから次の機会に委ねる。
-                if let Err(error) = tx.try_send(task) {
-                    crate::log_paths::append_app_log(
-                        &app,
-                        &format!("スケジュール実行キューが埋まっているため見送りました: {error}"),
-                    );
-                }
+            // 1回の検出結果をまとめて送る。容量を先に確保してから発火状態を更新する。
+            match enqueue_due_tasks(&tx, &state.config, Local::now()) {
+                Ok(()) => notify_scheduler_state(&app, None),
+                Err(error) => notify_scheduler_state(&app, Some(&error.to_string())),
             }
         }
     });
@@ -890,6 +948,78 @@ mod tests {
         assert_eq!(loaded[0].last_run_minute, task.last_run_minute);
         assert_eq!(loaded[0].last_checked_minute, task.last_checked_minute);
         std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn 発火状態を保存できないと予約を実行キューへ渡さない() {
+        let cfg = Config::new();
+        cfg.set(
+            CONFIG_KEY,
+            &serde_json::to_string(&vec![固定時刻タスク("09:00")]).unwrap(),
+        );
+        let (tx, mut rx) = tokio::sync::mpsc::channel(1);
+        assert!(super::enqueue_due_tasks(&tx, &cfg, minute(1, 9, 0)).is_err());
+        assert!(rx.try_recv().is_err());
+        assert!(load(&cfg).unwrap()[0].last_run_minute.is_empty());
+    }
+
+    #[test]
+    fn 満杯のキューは発火状態を進めず復旧後に一括実行する() {
+        let (cfg, dir) = test_config("queue-full");
+        let tasks = (0..65)
+            .map(|index| {
+                let mut task = 固定時刻タスク("09:00");
+                task.id = format!("task{index}");
+                task.repeat = false;
+                task.last_checked_minute = "2026-07-01 08:59".into();
+                task
+            })
+            .collect::<Vec<_>>();
+        save(&cfg, &tasks).unwrap();
+        let (tx, mut rx) = tokio::sync::mpsc::channel(1);
+        tx.try_send(Vec::new()).unwrap();
+        assert!(super::enqueue_due_tasks(&tx, &cfg, minute(1, 9, 0)).is_err());
+        assert!(load(&cfg)
+            .unwrap()
+            .iter()
+            .all(|task| task.enabled && task.last_run_minute.is_empty()));
+        rx.try_recv().unwrap();
+        super::enqueue_due_tasks(&tx, &cfg, minute(1, 9, 1)).unwrap();
+        assert_eq!(rx.try_recv().unwrap().len(), 65);
+        super::enqueue_due_tasks(&tx, &cfg, minute(1, 9, 2)).unwrap();
+        assert!(rx.try_recv().is_err());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn 時計が戻っても確認済み時刻を後退させず同じ予定を再実行しない() {
+        let (cfg, dir) = test_config("clock-backward");
+        let mut task = cronタスク("* * * * *");
+        task.last_checked_minute = "2026-07-01 08:59".into();
+        save(&cfg, &[task]).unwrap();
+        assert_eq!(
+            super::take_due_tasks_at(&cfg, minute(1, 9, 0))
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(
+            super::take_due_tasks_at(&cfg, minute(1, 9, 1))
+                .unwrap()
+                .len(),
+            1
+        );
+        assert!(super::take_due_tasks_at(&cfg, minute(1, 8, 59))
+            .unwrap()
+            .is_empty());
+        assert_eq!(
+            load(&cfg).unwrap()[0].last_checked_minute,
+            "2026-07-01 09:01"
+        );
+        assert!(super::take_due_tasks_at(&cfg, minute(1, 9, 0))
+            .unwrap()
+            .is_empty());
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]
@@ -1025,13 +1155,13 @@ mod tests {
     fn 検出は実行を待たない構造である() {
         let source = include_str!("scheduler.rs");
         // 探索語をリテラルで書くと、この判定自身がソースに現れて空振りする。
-        let async_marker = concat!("async ", "fn take_due_tasks(");
+        let async_marker = concat!("async ", "fn take_due_tasks_at(");
         assert!(
-            source.contains("fn take_due_tasks(") && !source.contains(async_marker),
+            source.contains("fn take_due_tasks_at(") && !source.contains(async_marker),
             "take_due_tasks は同期関数のままにしてください（実行は別ワーカーへ渡す）"
         );
         assert!(
-            source.contains("tokio::sync::mpsc::channel::<ScheduledTask>"),
+            source.contains("tokio::sync::mpsc::channel::<Vec<ScheduledTask>>"),
             "実行は検出と切り離したキュー経由にしてください"
         );
     }

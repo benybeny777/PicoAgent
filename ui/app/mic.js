@@ -340,6 +340,7 @@ export function createMic({ chat, voice, motion, isBusy, canListen, onActivity, 
     if (!holding) return;
     holding = false;
     if (stream) await finish();
+    else if (starting) stopCapture(); // 許可待ちの長押しも離した時点で取り消す。
   });
   micButton.addEventListener("pointercancel", () => {
     if (holdTimer) { clearTimeout(holdTimer); holdTimer = null; }

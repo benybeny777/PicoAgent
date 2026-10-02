@@ -6,7 +6,7 @@
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Stdio};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Mutex;
 
 use serde_json::Map;
@@ -17,6 +17,7 @@ use crate::commands::AppState;
 use crate::providers::local;
 
 static VISION_READY: AtomicBool = AtomicBool::new(false);
+static DOWNLOAD_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 /// 画像を扱う全経路で、管理エンジンの起動完了を確かめる。
 pub fn ensure_vision_available(cfg: &crate::config::Config) -> anyhow::Result<()> {
@@ -80,6 +81,8 @@ pub struct EngineState {
     pub child: Mutex<Option<Child>>,
     /// `stop()` が呼ばれたら true に設定し、`ensure_and_start` がその後に spawn しないようにする。
     pub stopping: AtomicBool,
+    start_operation: tokio::sync::Mutex<()>,
+    start_generation: tokio::sync::watch::Sender<u64>,
 }
 
 impl EngineState {
@@ -88,6 +91,8 @@ impl EngineState {
             status: Mutex::new(json!({ "phase": "idle" })),
             child: Mutex::new(None),
             stopping: AtomicBool::new(false),
+            start_operation: tokio::sync::Mutex::new(()),
+            start_generation: tokio::sync::watch::channel(0).0,
         }
     }
 }
@@ -430,6 +435,14 @@ async fn cleanup_obsolete_preset_models(app: &AppHandle, dest: &Path) -> anyhow:
     remove_obsolete_model_files(dest, candidates, preset.size_bytes, preset.sha256).await
 }
 
+fn model_download_path(dest: &Path) -> PathBuf {
+    dest.with_extension(format!(
+        "part-{}-{}",
+        std::process::id(),
+        DOWNLOAD_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+    ))
+}
+
 // モデルをストリーミングダウンロード（進捗を emit）。
 async fn download_model(app: &AppHandle, dest: &PathBuf) -> anyhow::Result<()> {
     use sha2::{Digest, Sha256};
@@ -447,9 +460,34 @@ async fn download_model(app: &AppHandle, dest: &PathBuf) -> anyhow::Result<()> {
         anyhow::bail!("モデル取得に失敗: {} {}", res.status(), url);
     }
     let total = res.content_length().unwrap_or(0);
-    let tmp = dest.with_extension("part");
+    let tmp = model_download_path(dest);
+    // 起動世代の取消でfutureが破棄された場合も、取得途中のファイルを残さない。
+    struct CancelledDownloadCleanup {
+        path: PathBuf,
+        active: bool,
+    }
+    impl Drop for CancelledDownloadCleanup {
+        fn drop(&mut self) {
+            if self.active {
+                if let Err(error) = std::fs::remove_file(&self.path) {
+                    if error.kind() != std::io::ErrorKind::NotFound {
+                        crate::log_paths::log_detached(&format!(
+                            "中断したモデル取得の一時ファイルを削除できません: {} ({error})",
+                            self.path.display()
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    let mut cancelled_cleanup = CancelledDownloadCleanup {
+        path: tmp.clone(),
+        active: true,
+    };
     let result: anyhow::Result<()> = async {
-        let mut file = tokio::fs::File::create(&tmp).await?;
+        // 作成・公開は同期完了させ、取消後にファイルが現れることを防ぐ。
+        // 書込は非同期のまま固有の一時ファイルへ隔離し、次の取得と競合させない。
+        let mut file = tokio::fs::File::from_std(std::fs::File::create(&tmp)?);
         let mut received: u64 = 0;
         let mut digest = Sha256::new();
         let mut last_emit: i64 = -1;
@@ -487,12 +525,13 @@ async fn download_model(app: &AppHandle, dest: &PathBuf) -> anyhow::Result<()> {
                 preset.sha256
             );
         }
-        tokio::fs::rename(&tmp, dest).await?;
+        std::fs::rename(&tmp, dest)?;
         Ok(())
     }
     .await;
+    cancelled_cleanup.active = false;
     if let Err(error) = result {
-        match tokio::fs::remove_file(&tmp).await {
+        match std::fs::remove_file(&tmp) {
             Ok(()) => return Err(error),
             Err(cleanup) if cleanup.kind() == std::io::ErrorKind::NotFound => return Err(error),
             Err(cleanup) => {
@@ -774,6 +813,10 @@ fn spawn_server(
         // ハンドルを失わないよう、poison 後も格納済み状態を引き継ぐ。
         Err(poisoned) => poisoned.into_inner(),
     };
+    if engine.stopping.load(Ordering::SeqCst) {
+        terminate_child(app, &mut child);
+        anyhow::bail!("終了処理中のため、起動したエンジンを停止しました");
+    }
     if slot.is_some() {
         terminate_child(app, &mut child);
         anyhow::bail!("ローカルエンジンは既に起動中です");
@@ -784,6 +827,40 @@ fn spawn_server(
 
 // モデル取得→エンジン起動→ready 検知までを通しで行う（async タスクから呼ぶ）。
 pub async fn ensure_and_start(app: AppHandle) {
+    let Some(engine) = app.try_state::<EngineState>() else {
+        return;
+    };
+    let generation = engine.start_generation.subscribe();
+    run_start_operation(
+        engine.inner(),
+        generation,
+        ensure_and_start_inner(app.clone()),
+    )
+    .await;
+}
+
+/// 停止世代の通知で旧処理を取り消し、その解放後にだけ次の取得・起動を進める。
+async fn run_start_operation(
+    engine: &EngineState,
+    mut generation: tokio::sync::watch::Receiver<u64>,
+    operation: impl std::future::Future<Output = ()>,
+) {
+    let _operation = tokio::select! {
+        biased;
+        _ = generation.changed() => return,
+        guard = engine.start_operation.lock() => guard,
+    };
+    if engine.stopping.load(Ordering::SeqCst) || generation.has_changed().unwrap_or(true) {
+        return;
+    }
+    tokio::select! {
+        biased;
+        _ = generation.changed() => {},
+        _ = operation => {},
+    }
+}
+
+async fn ensure_and_start_inner(app: AppHandle) {
     if let Err(error) = ensure_local_model_selection(&app).await {
         set_status(
             &app,
@@ -1017,6 +1094,9 @@ fn terminate_managed_child(app: &AppHandle) {
 pub fn stop(app: &AppHandle) {
     if let Some(engine) = app.try_state::<EngineState>() {
         engine.stopping.store(true, Ordering::SeqCst);
+        engine.start_generation.send_modify(|generation| {
+            *generation = generation.wrapping_add(1);
+        });
         terminate_managed_child(app);
     }
 }
@@ -1038,6 +1118,57 @@ mod tests {
         remove_obsolete_model_files,
     };
     use crate::providers::local;
+
+    #[test]
+    fn 同じモデルの再取得でも一時ファイルは共有しない() {
+        let model = std::path::Path::new("models/model.gguf");
+        let first = super::model_download_path(model);
+        let second = super::model_download_path(model);
+        assert_ne!(first, second);
+        assert_eq!(first.parent(), model.parent());
+        assert!(first
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .starts_with("model.part-"));
+    }
+
+    #[tokio::test]
+    async fn 再起動は旧取得を取り消してから新取得を開始する() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let engine = std::sync::Arc::new(super::EngineState::new());
+        let active = std::sync::Arc::new(AtomicUsize::new(0));
+        struct Active(std::sync::Arc<AtomicUsize>);
+        impl Drop for Active {
+            fn drop(&mut self) {
+                self.0.fetch_sub(1, Ordering::SeqCst);
+            }
+        }
+        let (started, ready) = tokio::sync::oneshot::channel();
+        let old_engine = engine.clone();
+        let old_active = active.clone();
+        let old_generation = engine.start_generation.subscribe();
+        let old = tokio::spawn(async move {
+            super::run_start_operation(&old_engine, old_generation, async move {
+                old_active.fetch_add(1, Ordering::SeqCst);
+                let _guard = Active(old_active);
+                started.send(()).unwrap();
+                std::future::pending::<()>().await;
+            })
+            .await;
+        });
+        ready.await.unwrap();
+        // stop直後にclear_stoppingしても、旧購読者への取消通知は消えない。
+        engine.stopping.store(true, Ordering::SeqCst);
+        engine.start_generation.send_modify(|value| *value += 1);
+        engine.stopping.store(false, Ordering::SeqCst);
+        super::run_start_operation(&engine, engine.start_generation.subscribe(), async {
+            assert_eq!(active.load(Ordering::SeqCst), 0);
+        })
+        .await;
+        old.await.unwrap();
+        assert_eq!(active.load(Ordering::SeqCst), 0);
+    }
 
     #[tokio::test]
     async fn 画像資産は優先候補を検証し破損時に別候補へ降格しない() {

@@ -631,15 +631,6 @@ pub fn statuses(app: &AppHandle) -> Result<Vec<ComponentStatus>> {
 
 pub async fn remove(app: &AppHandle, id: &str) -> Result<Vec<ComponentStatus>> {
     anyhow::ensure!(COMPONENT_IDS.contains(&id), "未知の追加機能です: {id}");
-    if id == "character-maker" {
-        anyhow::ensure!(
-            !installed_dir(app, "video-wan").is_dir()
-                && !installed_dir(app, "video-ltx").is_dir()
-                && !installed_dir(app, "image-krea2").is_dir()
-                && !installed_dir(app, "video-ltx25").is_dir(),
-            "先に追加の画像・動画モデルを削除してください。共通Pythonを先に削除すると生成機能が使えなくなります"
-        );
-    }
     let info = manifest(app)?
         .components
         .remove(id)
@@ -650,6 +641,16 @@ pub async fn remove(app: &AppHandle, id: &str) -> Result<Vec<ComponentStatus>> {
     );
     let _operation = COMPONENT_OPERATION_LOCK.lock().await;
     cleanup_stale_install_stages(app).await?;
+    // 導入完了・中断復旧後の状態を排他内で検査し、待機中に追加された依存も保護する。
+    if id == "character-maker" {
+        anyhow::ensure!(
+            !installed_dir(app, "video-wan").is_dir()
+                && !installed_dir(app, "video-ltx").is_dir()
+                && !installed_dir(app, "image-krea2").is_dir()
+                && !installed_dir(app, "video-ltx25").is_dir(),
+            "先に追加の画像・動画モデルを削除してください。共通Pythonを先に削除すると生成機能が使えなくなります"
+        );
+    }
     if id == "aivis" {
         crate::aivis::stop(app);
     }
@@ -1170,6 +1171,14 @@ async fn install_media_model(
         "ローカル動画生成はWindows x64とApple Silicon Mac専用です（Intel Macは対象外）"
     );
     let nvfp4 = crate::generation_backend::is_nvfp4_component(id);
+    let bundled = crate::log_paths::bundled_dir(app);
+    std::fs::create_dir_all(&bundled)?;
+    // 専用ランタイムも大容量なので、取得・更新する前に全工程の必要容量を確かめる。
+    anyhow::ensure!(
+        free_disk_bytes(&bundled)? >= required_free,
+        "{}の導入に必要な空き容量がありません。動画モデルは取得していません",
+        definitions(id).map(|value| value.0).unwrap_or(id)
+    );
     if nvfp4 {
         install_modern_media_runtime(app, id, model).await?;
     }
@@ -1224,13 +1233,6 @@ async fn install_media_model(
         ),
         0,
         0,
-    );
-    let bundled = crate::log_paths::bundled_dir(app);
-    std::fs::create_dir_all(&bundled)?;
-    anyhow::ensure!(
-        free_disk_bytes(&bundled)? >= required_free,
-        "{}の導入に必要な空き容量がありません。動画モデルは取得していません",
-        definitions(id).map(|value| value.0).unwrap_or(id)
     );
     let stage =
         installed_dir(app, id).with_file_name(format!(".installing-{id}-{}", std::process::id()));
@@ -1994,6 +1996,46 @@ mod tests {
             assert!(definitions(id).is_some());
         }
         assert!(definitions("unknown").is_none());
+    }
+
+    #[test]
+    fn 共通python削除の依存検査は導入排他と中断復旧の後に行う() {
+        let source = include_str!("components.rs");
+        let remove = source
+            .split_once("pub async fn remove(")
+            .unwrap()
+            .1
+            .split_once("fn emit_progress(")
+            .unwrap()
+            .0;
+        let lock = remove
+            .find("COMPONENT_OPERATION_LOCK.lock().await")
+            .unwrap();
+        let recovery = remove
+            .find("cleanup_stale_install_stages(app).await?")
+            .unwrap();
+        let dependency = remove.find("if id == \"character-maker\"").unwrap();
+        let deletion = remove.find("std::fs::remove_dir_all(&target)").unwrap();
+        assert!(lock < recovery && recovery < dependency && dependency < deletion);
+    }
+
+    #[test]
+    fn 画像動画導入の空き容量は専用ランタイム取得前に確認する() {
+        let source = include_str!("components.rs");
+        let install = source
+            .split_once("async fn install_media_model(")
+            .unwrap()
+            .1
+            .split_once("fn stale_install_pid(")
+            .unwrap()
+            .0;
+        let capacity = install
+            .find("free_disk_bytes(&bundled)? >= required_free")
+            .unwrap();
+        let runtime = install
+            .find("install_modern_media_runtime(app, id, model).await?")
+            .unwrap();
+        assert!(capacity < runtime);
     }
 
     #[test]

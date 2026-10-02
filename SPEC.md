@@ -31,7 +31,7 @@ PicoAgent（コネクタ駆動デスクトップペット / Tauri）の現行仕
 | 中核 | エージェントループ（`src-tauri/src/agent.rs`） |
 
 - **中断**: 停止要求は生成ストリーム、再試行待機、並列ツール実行と競合させて即時に反映する。中断したツール呼び出しにも同じ `tool_call_id` の中断結果を補い、履歴の対応を崩さない。画面側は停止要求から `CANCEL_RELEASE_MS`（8秒）待っても送信が返らなければ、その送信を中断扱いにして待機表示・入力・再送を戻す（応答の来ない接続で固まったまま復帰できなくなるのを防ぐ）。
-- **予約の追いつき**: `last_checked_minute` から現在分までを調べ、スリープ・再起動中の未処理分は直近24時間を上限に実行する。時計が巻き戻っても過去予定を二重実行しない。
+- **予約の追いつき**: `last_checked_minute` から現在分までを調べ、スリープ・再起動中の未処理分は直近24時間を上限に実行する。時計が巻き戻っても過去予定を二重実行しない。発火状態を保存できなければ実行を止めて画面へ知らせる。実行キューが満杯でも未受付の予約を発火済みにせず、次の確認で受け付ける。
 - **復号不能シークレット**: 設定画面では暗号文を入力値として表示せず、空欄と理由を示す。再入力しないまま保存した場合は既存暗号文を保持する。
 
 ---
@@ -239,7 +239,7 @@ inventory::submit! { ProviderReg { make: || Box::new(MyProvider) } }
      - `llama-server -m <model> --host 127.0.0.1 --port <PICOAGENT_LOCAL_PORT> -c <PICOAGENT_LOCAL_CTX> -ngl <PICOAGENT_LOCAL_NGL> --jinja` を起動する（Windows は CREATE_NO_WINDOW）。`PICOAGENT_LOCAL_GPU_DEVICE`（`Vulkan1` / `CUDA0` など）は、名前が示すバックエンドと起動候補が一致するときだけ `--device <値>` を足す。
      - Qwen3.5 だけは内部推論を発話へ混ぜないよう `--chat-template-kwargs {"enable_thinking":false} --reasoning-budget 0` を足す。
      - 既定の同梱ビルドは Vulkan 版で、`-ngl 999` により全レイヤを GPU へ載せる（非対応環境では CPU へ落ちる）。`/health` が 200 になったら `engine:status {phase:"ready"}`。同じポートに既存の `llama-server` が残っていれば、`/v1/models` のモデルIDが要求中の GGUF と一致するときだけ再利用し、違えばエラーにして停止を促す。
-- 子プロセスは `RunEvent::Exit` で止める（`engine::stop`）。状態は `engine_status` でも取れる。
+- 子プロセスは `RunEvent::Exit` で止める（`engine::stop`）。状態は `engine_status` でも取れる。停止・再起動時は旧取得と起動監視を取り消し、旧処理の資源解放後だけ次の取得・起動を進める。
 - **設定画面**: 「モデル」欄（`PICOAGENT_MODEL`）でプリセットを選ぶと `local::model_url` が取得URLへ反映する。「AIモデル」は設定読込時だけ RAM を取得し、Windows NVIDIA では `nvidia-smi` で専用VRAM総量も取る（WMI `AdapterRAM` は uint32 で飽和するため使わない。NVIDIA 以外の VRAM は不明表示にして RAM で判定）。macOS は統合メモリとして RAM で、Ubuntu は `/proc/meminfo` で判定する。候補カードと系列／サイズ選択は `groupedModelField.setValue()` を共通入口にする。`settings_save` はローカル関連の変更（`PICOAGENT_MODEL` / `PICOAGENT_LOCAL_MODEL_PRESET` / `PICOAGENT_MODEL_URL` など）を再起動対象とし、再起動後に `ensure_and_start` を行う。
 
 ### AivisSpeech Engine 連携（`aivis.rs` / `pet_speak`）
@@ -285,7 +285,7 @@ inventory::submit! { ProviderReg { make: || Box::new(MyProvider) } }
 音声読み上げ（Aivis）は選択肢にせず、初回起動で自動導入する（選択式にすると多くの利用者が声の出ない状態で使い始めるため）。取得は案内表示も操作も待たせず裏で進め、導入全体が成功した場合だけ `PICOAGENT_TTS_ENABLED=true` を保存する。進捗は専用の画面を作らず起動画面の状態表示（`setStatus`）へ出し、通常画面へ戻ったあとはステータス行へ流す。ローカルモデルの取得中はそちらを優先して表示する。導入済み・取得不能・オフラインでは自動導入せず、失敗は理由と再導入先（設定 → 追加機能・更新）を出す。設定画面からの導入・更新では既存の読み上げON/OFFを変えない。
 
 - **版の表示**: Aivis は導入先の `engine_manifest.json` の版と `component-manifest.json` の `targetVersion` を比べ、「更新あり」「推奨版より新しい」「確認が必要」を出す。版確認の失敗はログへ残し、他の機能の表示は続ける。配布対象版と公式 Release リンクが一致しなければ状態取得を失敗させる。更新・確認件数は設定タブと基本設定の入口へ出す。
-- **操作**: 更新・推奨版への復帰・修復・削除は、維持または削除されるデータを画面内に示す二段階操作（10秒経過またはフォーカス移動で解除）。進捗は共通の部品で工程名と経過時間を出し、総量が分かれば実数パーセント、分からなければ不定バーにする。導入・更新・修復・削除はバックエンドの共通ロックで直列化する。`PicoAgent/aivis-userdata/` の音声モデル・辞書・設定には触れない。
+- **操作**: 更新・推奨版への復帰・修復・削除は、維持または削除されるデータを画面内に示す二段階操作（10秒経過またはフォーカス移動で解除）。進捗は共通の部品で工程名と経過時間を出し、総量が分かれば実数パーセント、分からなければ不定バーにする。導入・更新・修復・削除はバックエンドの共通ロックで直列化する。共通Pythonの削除可否は、同じ排他内で中断復旧を終えてから依存モデルの存在を検査する。`PicoAgent/aivis-userdata/` の音声モデル・辞書・設定には触れない。
 - **中断からの復旧**: 起動時と導入・削除の前に、導入操作と同じ排他の中で終了済みプロセスの途中データを処理する。単体更新の退避先（追加機能の `.backup-<id>-<pid>`、Aivis の `.backup-aivis-<pid>-<連番>`）は本体が無ければ旧版を戻し、あれば消す。Aivisは復元に成功してから後続の退避先を消し、復元失敗だけを理由に別の旧版を捨てない。共通Pythonとキャラ作成基盤の組更新は、片方だけ配置済みなら両方を旧版へ戻し、両方配置済みなら新版を維持する。復元に失敗したときは判断に必要な途中データを残し、導入・削除を続行しない。新版を配置できた後に旧版の掃除だけ失敗しても導入は成功として扱い、残りは次回片付ける。
   - NVFP4専用生成環境の`media-runtime-old`だけが残った場合は、利用者が導入を再実行したときに取得・空き容量検査より先に本体へ戻して実行検証する。実行できなければ退避先へ戻して停止し、既存本体がある場合は旧版で上書きしない。同意・対応環境の確認を省略せず、起動時に任意機能の取得を始めない。
 - **取得元**: 第三者ソフトウェアを PicoAgent の Release へ再アップロードしない。`component-manifest.json` は `version=2` / `policy=direct-upstream`、公式取得元表示、管理対象の `targetVersion` だけを持つ。`installMode=managed`（Aivis、Whisper、生成基盤と選んだモデル）は各公式配布元から `PicoAgent/bundled/<id>/` へ直接取得し、GitHub Release API のサイズと SHA-256 digest、固定モデルの SHA-256、HTTPS、上限サイズ、zip slip、展開容量を検査してから原子的に入れ替える。`installMode=external`（LibreOffice、Pandoc、FFmpeg、qpdf、Poppler、ImageMagick、ripgrep）は公式ページを表示するだけで、外部導入物を削除しない。
@@ -485,7 +485,7 @@ PicoAgent 自身と Git 管理するベンダの JavaScript は `eval()`／`Func
 |---|---|---|
 | `alarm` | 声で起こす目覚まし。add/list/remove/clear/enable/disable、時刻(HH:MM)・曜日・繰り返し・スヌーズ分数 | `crate::alarm` 経由で `PICOAGENT_ALARMS`。発火はフロントの20秒ポーリングが `pet_alarm_wake` を呼ぶ（詳細は[目覚まし](#目覚まし)） |
 | `task_scheduler` | 指定時刻または cron 風5フィールドで、許可済みコマンドまたは別スキルを定期実行 | 定義は `PICOAGENT_SCHEDULED_TASKS`、最終実行・確認分は内部キー `PICOAGENT_SCHEDULED_TASK_STATE`。バックエンド常駐タスクが30秒ごとに確認し、結果をログ・`app_data_dir/schedule-runs.json`・`pet:notice` へ送る |
-| `reminder` | 指定時刻または数分後に声で知らせる | `PICOAGENT_DAILY_EVENTS`。フロントの `pet_daily_events` ポーリングで通知 |
+| `reminder` | 指定時刻または数分後に声で知らせる | `PICOAGENT_DAILY_EVENTS`。フロントの `pet_daily_events` ポーリングで通知。同時に期限到来した通知は全件をまとめて表示・読み上げる。並行登録でもIDは重複させない |
 | `focus_timer` | 集中タイマーと作業見守り（終了時または指定間隔ごと） | `PICOAGENT_DAILY_EVENTS`。見守りは `repeat_minutes` で繰り返す |
 | `praise_log` | できたこと・進捗を保存して振り返る | `PICOAGENT_PRAISE_LOG`、最大100件 |
 | `daily_briefing` | おでかけ前チェック（天気と控えている通知） | `weather` を内部で呼ぶ |
