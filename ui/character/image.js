@@ -29,7 +29,7 @@ function framePaths(animation) {
 }
 
 /** 画像を1枚読む。壊れていても全体の準備完了を塞がないよう、失敗も時間切れも「読めなかった」で返す。 */
-function loadImage(url) {
+function loadImage(url, signal) {
   return new Promise(resolve => {
     const image = new Image();
     let finished = false;
@@ -39,9 +39,14 @@ function loadImage(url) {
       clearTimeout(timer);
       image.onload = null;
       image.onerror = null;
+      signal?.removeEventListener("abort", abort);
+      if (!ok) image.removeAttribute("src");
       resolve(ok && image.naturalWidth > 0 ? image : null);
     };
+    const abort = () => finish(false);
     const timer = setTimeout(() => finish(false), RESOURCE_TIMEOUT_MS);
+    if (signal?.aborted) { finish(false); return; }
+    signal?.addEventListener("abort", abort, { once: true });
     image.onload = () => finish(true);
     image.onerror = () => finish(false);
     image.decoding = "async";
@@ -113,6 +118,7 @@ export class ImageRenderer {
     this.pixelRatio = 1;
     this.framing = "bust";
     this.timers = new Set();
+    this.abort = new AbortController();
     this.springs = [];
     this.bodyMotion = null;
     this.loop = window.PicoFrameScheduler.createLoop(now => this.step(now));
@@ -122,7 +128,8 @@ export class ImageRenderer {
     this.pack = pack;
     this.animations = pack.animations;
     const idle = framePaths(this.animations.idle);
-    const first = await loadImage(packUrl(pack, idle[0] || "preview.png"));
+    const first = await loadImage(packUrl(pack, idle[0] || "preview.png"), this.abort.signal);
+    if (this.disposed) throw new Error("キャラ画像の読み込みを中断しました");
     if (!first) throw new Error("待機画像を読み込めません");
     this.images.set(packUrl(pack, idle[0] || "preview.png"), first);
     this.modelWidth = first.naturalWidth;
@@ -131,7 +138,7 @@ export class ImageRenderer {
     this.framingRects = framingRectsFor(this.content, pack);
     await Promise.all(idle.map(path => this.preload(path)));
     // 残りのモーションは表示を塞がず裏で温める。
-    setTimeout(() => {
+    this.later(() => {
       for (const animation of Object.values(this.animations)) framePaths(animation).forEach(path => this.preload(path));
     }, 120);
     const layerNames = ["base", "mouth_open", "mouth_closed", "blink_half", "blink_closed"];
@@ -152,11 +159,13 @@ export class ImageRenderer {
   }
 
   async preload(relative) {
+    if (this.disposed) return null;
     const url = packUrl(this.pack, relative);
     if (this.images.has(url)) return this.images.get(url);
-    const pending = loadImage(url);
+    const pending = loadImage(url, this.abort.signal);
     this.images.set(url, pending);
     const image = await pending;
+    if (this.disposed) return null;
     this.images.set(url, image);
     return image;
   }
@@ -379,6 +388,7 @@ export class ImageRenderer {
   }
 
   later(callback, ms) {
+    if (this.disposed) return 0;
     const id = setTimeout(() => {
       this.timers.delete(id);
       if (!this.disposed) callback();
@@ -429,6 +439,7 @@ export class ImageRenderer {
 
   dispose() {
     this.disposed = true;
+    this.abort.abort();
     this.loop.stop();
     for (const id of this.timers) clearTimeout(id);
     this.timers.clear();

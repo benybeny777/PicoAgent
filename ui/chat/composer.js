@@ -169,10 +169,9 @@ export function createComposer({ form, input, preview: previewBox, suggestions, 
     if (!isImage && files.length >= MAX_FILES) { toast(`ファイルは最大 ${MAX_FILES} 件まで`, "warn"); return; }
     try {
       const dataUrl = await readFile(file);
-      if (isImage) images.push(dataUrl);
-      else files.push({ name: file.name, dataUrl });
-      renderAttachments();
-      updateState();
+      // 同時に貼り付けたファイルやネイティブドロップも、読込完了時の残り枠で判定する。
+      const reason = composer.addLoaded({ kind: isImage ? "image" : "file", name: file.name, dataUrl });
+      if (reason) { toast(reason, "warn"); return; }
       toast(isImage ? "画像を添付しました" : `${preview(file.name, 18)} を添付`, "success");
     } catch (error) {
       logApp("error", "添付の読み込みに失敗しました", `${file.name}: ${errorDetail(error)}`);

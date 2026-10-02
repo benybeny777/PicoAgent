@@ -2100,6 +2100,21 @@ async function loadCharacterPersona(id) {
   characterPersona.value = characterOverrides[id] || defaultText;
 }
 
+function captureCharacterSettingsFields() {
+  const fields = [characterPersona, characterSpeaker, characterLive2dSdkSelect]
+    .filter(Boolean).map(field => ({ field, value: field.value }));
+  const sdkHidden = characterLive2dSdkField?.hidden;
+  const sdkHint = characterLive2dSdkHint?.textContent;
+  const sdkOptions = Array.from(characterLive2dSdkSelect?.options || [])
+    .map(option => ({ option, disabled: option.disabled }));
+  return () => {
+    for (const { field, value } of fields) field.value = value;
+    if (characterLive2dSdkField) characterLive2dSdkField.hidden = sdkHidden;
+    if (characterLive2dSdkHint) characterLive2dSdkHint.textContent = sdkHint;
+    for (const { option, disabled } of sdkOptions) option.disabled = disabled;
+  };
+}
+
 function saveCurrentCharacterPersona(id) {
   if (!characterPersona) return;
   const value = characterPersona.value;
@@ -3053,8 +3068,9 @@ async function render() {
   // --- 使うAI（AIモデルタブの先頭） ---
   const aiSec = section("使うAI");
   const providerSelect = el("select");
+  const configuredProviderId = v.PICOAGENT_PROVIDER || data.active.providerId;
   for (const p of data.providers) {
-    providerSelect.append(el("option", { value: p.id, textContent: p.label, selected: p.id === data.active.providerId }));
+    providerSelect.append(el("option", { value: p.id, textContent: p.label, selected: p.id === configuredProviderId }));
   }
   aiSec.append(registerInput(
     "PICOAGENT_PROVIDER",
@@ -3343,6 +3359,7 @@ async function render() {
     // 素早い連続選択でも、表示中の人格を読み終えてから次へ進む。並列に読むと、
     // 遅く完了した古い読込が新しいキャラの編集欄を上書きしてしまう。
     characterSwitchQueue = characterSwitchQueue.then(async () => {
+      const restoreFields = captureCharacterSettingsFields();
       try {
         saveCurrentCharacterPersona(displayedCharacterId);
         saveCurrentCharacterVoice(displayedCharacterId);
@@ -3352,14 +3369,17 @@ async function render() {
         await loadCharacterLive2dSdk(requestedCharacter);
         await characterFramingEditor?.load();
         characterStreamProfileEditor?.load();
-        previousCharacter = requestedCharacter;
-        displayedCharacterId = requestedCharacter;
         characterSelect.value = requestedCharacter;
         const selectedEntry = characterCatalog.characters.find(character => character.id === requestedCharacter);
         setQuickSettingsSummary("character", selectedEntry?.name || requestedCharacter);
         updateCharacterVoiceContext(requestedCharacter);
+        previousCharacter = requestedCharacter;
+        displayedCharacterId = requestedCharacter;
       } catch (error) {
         characterSelect.value = previousCharacter;
+        // 途中まで切り替えた欄を旧キャラへ持ち越すと、次の編集で旧キャラを上書きする。
+        restoreFields();
+        characterStreamProfileEditor?.load();
         logApp("warn", "キャラクター設定の切替に失敗しました", errorDetail(error));
         statusEl.textContent = `人格設定を読み込めませんでした: ${errorMessage(error)}`;
       }
@@ -4021,7 +4041,7 @@ async function render() {
       updateDirtyState();
     });
   }
-  renderProviderConfig(data.active.providerId);
+  renderProviderConfig(providerSelect.value);
   const multiAiSec = section("複数AIの使い方");
   multiAiSec.append(multiAiSettingsField(v));
   panels.providers.append(el("p", {
@@ -4122,7 +4142,8 @@ async function loadModels(providerId, applyProviderDefault = false) {
 }
 
 function collect() {
-  const patch = cloneSettings(savedSnapshot || data.values || {});
+  // 競合後に載せ直した非表示項目の草稿も、描画元の値から保持する。
+  const patch = cloneSettings({ ...(savedSnapshot || {}), ...(data.values || {}) });
   Object.assign(patch, providerDraftValues);
   for (const [key, input] of inputs) {
     patch[key] = input.type === "checkbox" ? input.checked : input.value;

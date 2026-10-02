@@ -87,7 +87,9 @@ fn normalize_source(value: &Value) -> Option<Value> {
 /// キャラは矩形と構図のどちらか片方だけでも覚える（構図だけ切り替えた場合など）。
 fn normalize_character(value: &Value) -> Option<Value> {
     let object = value.as_object()?;
-    let mut character = normalize_rect(object).unwrap_or_default();
+    let mut character = normalize_source(value)
+        .and_then(|source| source.as_object().cloned())
+        .unwrap_or_default();
     if let Some(framing) = object
         .get("framing")
         .and_then(Value::as_str)
@@ -230,6 +232,24 @@ mod tests {
                     }
                 }
             })
+        );
+    }
+
+    #[test]
+    fn キャラの表示状態と構図だけの保存も正規化して維持する() {
+        let normalized = normalize(&json!({
+            "pet": { "characters": {
+                "mugi": { "visible": false, "framing": "bust" },
+                "rin": { "framing": "upper" }
+            } }
+        }));
+        assert_eq!(
+            normalized["pet"]["characters"]["mugi"],
+            json!({ "visible": false, "framing": "bust" })
+        );
+        assert_eq!(
+            normalized["pet"]["characters"]["rin"],
+            json!({ "framing": "upper" })
         );
     }
 

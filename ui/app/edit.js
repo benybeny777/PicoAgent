@@ -18,6 +18,7 @@ export function createEditor({ layer, toolbar, stageElement, stage, host, toast,
   let drag = null;
   let wheelTimer = 0;
   let wheelTarget = "";
+  let wheelRect = null;
   const frames = new Map();
 
   function targets() {
@@ -98,6 +99,7 @@ export function createEditor({ layer, toolbar, stageElement, stage, host, toast,
     if (event.button !== 0) return;
     const handle = event.target instanceof Element ? event.target.closest(".edit-handle") : null;
     if (!mode) return;
+    flushWheel();
     event.preventDefault();
     event.stopPropagation();
     selected = name;
@@ -173,6 +175,7 @@ export function createEditor({ layer, toolbar, stageElement, stage, host, toast,
   }
 
   function reset(name) {
+    flushWheel(false);
     if (name === "character") stage.resetCharacter().catch(() => {});
     else stage.commit(name, null).catch(() => {});
   }
@@ -181,6 +184,7 @@ export function createEditor({ layer, toolbar, stageElement, stage, host, toast,
   function wheelResize(event, name) {
     if (!mode) return;
     event.preventDefault();
+    if (wheelTarget && wheelTarget !== name) flushWheel();
     const rect = stage.toWindow(stage.rectOf(name));
     const factor = Math.exp(-Math.sign(event.deltaY) * 0.06);
     let height = Math.max(MIN_SIZE, rect.height * factor);
@@ -190,10 +194,24 @@ export function createEditor({ layer, toolbar, stageElement, stage, host, toast,
     stage.preview(name, next);
     clearTimeout(wheelTimer);
     wheelTarget = name;
-    wheelTimer = setTimeout(() => { wheelTimer = 0; wheelTarget = ""; commit(name, next); }, 350);
+    wheelRect = next;
+    wheelTimer = setTimeout(flushWheel, 350);
+  }
+
+  function flushWheel(save = true) {
+    clearTimeout(wheelTimer);
+    const name = wheelTarget;
+    const rect = wheelRect;
+    wheelTimer = 0;
+    wheelTarget = "";
+    wheelRect = null;
+    if (!name) return;
+    if (save) commit(name, rect);
+    else stage.cancelPreview(name);
   }
 
   function nudge(dx, dy) {
+    flushWheel();
     const rect = stage.toWindow(stage.rectOf(selected));
     commit(selected, { ...rect, left: rect.left + dx, top: rect.top + dy });
   }
@@ -207,10 +225,14 @@ export function createEditor({ layer, toolbar, stageElement, stage, host, toast,
   toolbar.replaceChildren(title, sourceList, framingGroup, resetButton, doneButton);
   for (const [name, label] of [["full", "全身"], ["upper", "上半身"], ["bust", "胸上"]]) {
     const button = el("button", { type: "button", className: "chip", textContent: label, dataset: { framing: name } });
-    button.addEventListener("click", () => stage.setFraming(name).then(render).catch(() => {}));
+    button.addEventListener("click", () => {
+      flushWheel();
+      stage.setFraming(name).then(render).catch(() => {});
+    });
     framingGroup.append(button);
   }
   resetButton.addEventListener("click", () => {
+    flushWheel(false);
     if (mode === "all") stage.resetLayout().then(render).catch(() => {});
     else reset("character");
   });
@@ -275,10 +297,7 @@ export function createEditor({ layer, toolbar, stageElement, stage, host, toast,
         if (current.element.hasPointerCapture(current.pointerId)) current.element.releasePointerCapture(current.pointerId);
         stage.cancelPreview(current.name);
       }
-      clearTimeout(wheelTimer);
-      if (wheelTarget) stage.cancelPreview(wheelTarget);
-      wheelTimer = 0;
-      wheelTarget = "";
+      flushWheel();
       mode = "";
       document.body.classList.remove("is-editing");
       document.body.classList.remove("is-editing-all");
@@ -289,6 +308,7 @@ export function createEditor({ layer, toolbar, stageElement, stage, host, toast,
     attachGrip(name, grip) {
       grip.addEventListener("pointerdown", event => {
         if (event.button !== 0 || mode !== "all") return;
+        flushWheel();
         const placement = stage.placementOf(name);
         const { fx, fy } = anchorFactors(placement?.anchor || "top-left");
         const corner = `${fy === 1 ? "top" : "bottom"}-${fx === 1 ? "left" : "right"}`;
@@ -316,6 +336,8 @@ export function createEditor({ layer, toolbar, stageElement, stage, host, toast,
     },
   };
   stage.events.on("layout", render);
+  stage.events.on("context-change", () => editor.stop());
+  stage.events.on("context-reset", () => { flushWheel(false); editor.stop(); });
   stage.events.on("layout-change", () => editor.render());
   return editor;
 }

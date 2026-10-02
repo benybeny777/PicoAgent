@@ -20,6 +20,7 @@ export function createSender({ chat, voice, motion, notices, engine, relationshi
   let last = { text: "", images: [], files: [] };
   let releasePending = null;
   let cancelTimer = null;
+  let activeRequest = null;
   const taskRun = window.PicoTaskRun.createController({
     container: chat.taskRun,
     onCancel: button => sender.cancel(button),
@@ -51,11 +52,16 @@ export function createSender({ chat, voice, motion, notices, engine, relationshi
     releasePending = null;
   }
 
-  async function subscribe(requestRevision, jobId, job, stream) {
-    const alive = () => busy && requestRevision === revision;
+  async function subscribe(requestRevision, jobId, job, stream, cancelled) {
+    const alive = () => busy && requestRevision === revision && !cancelled();
     const unlisteners = [];
     const add = async (channel, handler) => {
-      try { unlisteners.push(await bridge.listen(channel, handler)); }
+      if (cancelled()) return;
+      try {
+        const release = await bridge.listen(channel, handler);
+        if (cancelled()) release();
+        else unlisteners.push(release);
+      }
       catch (error) { logApp("warn", `${channel} の購読に失敗しました`, errorDetail(error)); }
     };
     // 表示文言ではなく構造化イベントで、実際に動いたツールと成否を追跡する。
@@ -112,15 +118,18 @@ export function createSender({ chat, voice, motion, notices, engine, relationshi
     return () => unlisteners.forEach(release => release());
   }
 
-  async function readAttachments(files, requestRevision) {
+  async function readAttachments(files, requestRevision, released, cancelled) {
     let context = "";
     for (const file of files) {
-      if (requestRevision !== revision) return null;
+      if (requestRevision !== revision || cancelled()) return null;
       // ネイティブのドロップ由来の添付は実パスも伝え、スキルが直接使えるようにする。
       const label = file.path ? `${file.name}（パス: ${file.path}）` : file.name;
       try {
-        context += `[添付ファイル: ${label}]\n${await bridge.readFileContent(file.name, file.dataUrl)}\n\n`;
+        const content = await Promise.race([bridge.readFileContent(file.name, file.dataUrl), released]);
+        if (cancelled() || content?.releasedByCancel) return null;
+        context += `[添付ファイル: ${label}]\n${content}\n\n`;
       } catch (error) {
+        if (cancelled()) return null;
         logApp("warn", `ファイル読み込み失敗: ${file.name}`, errorDetail(error));
         context += `[添付ファイル: ${label}] (読み込みに失敗しました)\n\n`;
       }
@@ -149,6 +158,9 @@ export function createSender({ chat, voice, motion, notices, engine, relationshi
     const requestRevision = revision;
     const jobId = `chat-${Date.now()}-${requestRevision}`;
     const job = { state: "running", didWork: false, toolFailed: false, tools: new Set() };
+    const cancellation = { cancelled: false };
+    activeRequest = cancellation;
+    const cancelled = () => cancellation.cancelled;
     ambient.onUserActivity();
     busy = true;
     const request = composer.take();
@@ -167,13 +179,18 @@ export function createSender({ chat, voice, motion, notices, engine, relationshi
     taskRun.start();
     const stream = { buffer: "", frame: 0, lastAt: 0 };
     voice.beginStream();
-    const unsubscribe = await subscribe(requestRevision, jobId, job, stream);
+    const released = new Promise(resolve => { releasePending = resolve; });
+    let unsubscribe = () => {};
     try {
-      if (requestRevision !== revision) { job.state = "cancelled"; return; }
+      const subscription = subscribe(requestRevision, jobId, job, stream, cancelled);
+      const subscribed = await Promise.race([subscription, released]);
+      if (typeof subscribed === "function") unsubscribe = subscribed;
+      else { subscription.then(release => release()); job.state = "cancelled"; return; }
+      if (requestRevision !== revision || cancelled()) { job.state = "cancelled"; return; }
       let fileContext = "";
       if (request.files.length) {
         status.set("ファイルを読み込み中…", "send");
-        fileContext = await readAttachments(request.files, requestRevision);
+        fileContext = await readAttachments(request.files, requestRevision, released, cancelled);
         if (fileContext == null) { job.state = "cancelled"; return; }
       }
       const fullText = fileContext ? `${fileContext}${request.text || "このファイルについて教えて"}` : request.text;
@@ -181,15 +198,14 @@ export function createSender({ chat, voice, motion, notices, engine, relationshi
       if (isScreenshotQuery(request.text)) {
         try {
           status.set("画面を撮影中…", "send");
-          const shot = await bridge.captureScreen();
+          const shot = await Promise.race([bridge.captureScreen(), released]);
           if (shot?.dataUrl) images.push(shot.dataUrl);
         } catch (error) {
           logApp("warn", "スクリーンショット取得に失敗しました。", errorDetail(error));
         }
       }
-      if (requestRevision !== revision) { job.state = "cancelled"; return; }
+      if (requestRevision !== revision || cancelled()) { job.state = "cancelled"; return; }
       // 停止要求のあと応答が返らない場合に備え、打ち切りの合図と競走させる。
-      const released = new Promise(resolve => { releasePending = resolve; });
       const result = await Promise.race([images.length ? bridge.sendImage(fullText, images) : bridge.send(fullText), released]);
       if (result?.stale || requestRevision !== revision) {
         job.state = "cancelled";
@@ -243,6 +259,7 @@ export function createSender({ chat, voice, motion, notices, engine, relationshi
       chat.buttons.cancelSendButton.hidden = true;
       clearCancelRelease();
       busy = false;
+      if (activeRequest === cancellation) activeRequest = null;
       motion.setBusy(false);
       const failed = job.state === "failed";
       const cancelled = job.state === "cancelled";
@@ -276,6 +293,8 @@ export function createSender({ chat, voice, motion, notices, engine, relationshi
     updateButtons,
     /** 停止を要求する。応答が返らないまま待ち続けないよう、一定時間で画面側の待機を解除する。 */
     async cancel(button) {
+      if (!busy) return;
+      if (activeRequest) activeRequest.cancelled = true;
       if (button) button.disabled = true;
       status.set("停止を要求しています…", "send");
       if (cancelTimer) clearTimeout(cancelTimer);
@@ -328,4 +347,3 @@ export function createSender({ chat, voice, motion, notices, engine, relationshi
   chat.buttons.regenerateButton.addEventListener("click", event => { event.stopPropagation(); sender.regenerate(); });
   return sender;
 }
-

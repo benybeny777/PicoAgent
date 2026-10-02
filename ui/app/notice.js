@@ -42,6 +42,14 @@ function durableEntry(notice) {
   };
 }
 
+/** 遅延した進捗・一覧応答で完了状態を巻き戻さない。再試行の queued は新しい状態として受け取る。 */
+function staleDurable(previous, next) {
+  if (!previous) return false;
+  if (String(next.at) < String(previous.at)) return true;
+  return next.state === "running" && !["queued", "running"].includes(previous.state)
+    && String(next.at) <= String(previous.at);
+}
+
 export function createNotices({ panel, button, status, onRetryPrompt, onCancelJob }) {
   const entries = loadStored();
   let unread = 0;
@@ -156,6 +164,7 @@ export function createNotices({ panel, button, status, onRetryPrompt, onCancelJo
     const entry = durableEntry(notice);
     if (!entry.jobId) return;
     const index = entries.findIndex(item => item.kind === "durable_job" && item.jobId === entry.jobId);
+    if (index >= 0 && staleDurable(entries[index], entry)) return;
     const previousState = index >= 0 ? entries[index].state : "";
     if (index >= 0) entries.splice(index, 1);
     entries.unshift(entry);
@@ -206,6 +215,7 @@ export function createNotices({ panel, button, status, onRetryPrompt, onCancelJo
         entries.unshift(entry);
       }
       Object.assign(entry, patch, { kind: "job", jobId });
+      entries.length = Math.min(entries.length, LIMIT);
       changed();
     },
     toggle(open = panel.hidden) {
@@ -237,12 +247,19 @@ export function createNotices({ panel, button, status, onRetryPrompt, onCancelJo
         const jobs = await bridge.durableJobs();
         if (!Array.isArray(jobs)) return;
         const others = entries.filter(entry => entry.kind !== "durable_job");
-        const restored = jobs.slice(0, 20).map(job => durableEntry({
+        const restored = jobs.slice(0, 20).map(job => {
+          const entry = durableEntry({
           jobId: job.id, title: job.label, body: (job.error || job.result || job.step || "").split("\n")[0],
           ok: job.state !== "failed" && job.state !== "waiting_auth", state: job.state, progress: job.progress, at: job.updated_at,
-        }));
-        entries.splice(0, entries.length, ...others, ...restored);
+          });
+          const previous = entries.find(item => item.kind === "durable_job" && item.jobId === entry.jobId);
+          return staleDurable(previous, entry) ? previous : entry;
+        });
+        const restoredIds = new Set(restored.map(entry => entry.jobId));
+        const arriving = entries.filter(entry => entry.kind === "durable_job" && !restoredIds.has(entry.jobId));
+        entries.splice(0, entries.length, ...others, ...restored, ...arriving);
         entries.sort((a, b) => String(b.at).localeCompare(String(a.at)));
+        entries.length = Math.min(entries.length, LIMIT);
         changed();
       } catch (error) {
         logApp("warn", "永続ジョブ一覧を復元できませんでした", errorDetail(error));

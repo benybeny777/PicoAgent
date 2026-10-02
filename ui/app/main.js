@@ -339,6 +339,7 @@ async function loadCharacter(characterId, { speakGreeting = true } = {}) {
   // 読込失敗で代替キャラを表示した場合も、直前のキャラ用背景を残さない。
   if (appearance) applyStreamAppearance(appearance);
   loadedSignature = signatureOf(pack.id);
+  characterSource.element.style.visibility = ""; // 起動時の読込失敗後も、有効なキャラへ変更できれば表示を復旧する。
   if (greeting && speakGreeting) {
     chat.renderReply(greeting);
     voice.speak(greeting);

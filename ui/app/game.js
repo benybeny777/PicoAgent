@@ -446,18 +446,21 @@ export function createGame({ voice, stage }) {
         <button class="game-primary game-start" type="button">監査を受ける</button>
       </div>`;
     content.querySelector(".game-start").addEventListener("click", async event => {
+      const button = event.currentTarget;
       const difficulty = content.querySelector('input[name="gameDifficulty"]:checked')?.value || DEFAULT_DIFFICULTY;
-      event.currentTarget.disabled = true;
-      event.currentTarget.textContent = "AIを確認中…";
+      button.disabled = true;
+      button.textContent = "AIを確認中…";
       setStatus("採点するAIの準備を確認しています。", "busy");
       try {
         const readiness = await bridge.gameReady();
+        if (overlay.hidden || !button.isConnected) return;
         if (!readiness?.ready) throw new Error(readiness?.message || "AIへ接続できません。");
         startSession(difficulty);
       } catch (error) {
+        if (overlay.hidden || !button.isConnected) return;
         playTone("error");
-        event.currentTarget.disabled = false;
-        event.currentTarget.textContent = "監査を受ける";
+        button.disabled = false;
+        button.textContent = "監査を受ける";
         setStatus(error?.message || String(error), "error");
       }
     });

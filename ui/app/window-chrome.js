@@ -2,7 +2,12 @@
 
 import * as bridge from "./bridge.js";
 import { toast } from "./toast.js";
-import { el, errorDetail, logApp } from "./util.js";
+import { el, errorDetail, errorMessage, logApp, preview } from "./util.js";
+
+function reportFailure(message, error) {
+  logApp("error", message, errorDetail(error));
+  toast(`${message}: ${preview(errorMessage(error), 80)}`, "error");
+}
 
 function beginWindowDrag(event) {
   if (event.button !== 0) return;
@@ -23,7 +28,7 @@ function menuButton(button, open) {
     button.disabled = true;
     const rect = button.getBoundingClientRect();
     try { await open(Math.round(rect.left), Math.round(rect.bottom)); }
-    catch (error) { logApp("error", `${button.textContent}の一覧を開けませんでした`, errorDetail(error)); }
+    catch (error) { reportFailure(`${button.textContent}の一覧を開けませんでした`, error); }
     finally { button.disabled = false; }
   });
 }
@@ -63,13 +68,13 @@ export function createWindowChrome({ menu, bootScreen, stageElement, onEditLayou
     event.stopPropagation();
     settingsButton.disabled = true;
     try { await bridge.openSettings(); }
-    catch (error) { logApp("error", "設定画面を開けませんでした", errorDetail(error)); }
+    catch (error) { reportFailure("設定画面を開けませんでした", error); }
     finally { settingsButton.disabled = false; }
   });
   for (const [button, action, label] of [[minimize, bridge.minimizeWindow, "最小化"], [maximize, bridge.toggleMaximizeWindow, "最大化の切り替え"], [close, bridge.closeWindow, "閉じる"]]) {
     button.addEventListener("click", event => {
       event.stopPropagation();
-      action().catch(error => logApp("error", `${label}ができませんでした`, errorDetail(error)));
+      action().catch(error => reportFailure(`${label}ができませんでした`, error));
     });
   }
 
@@ -81,7 +86,7 @@ export function createWindowChrome({ menu, bootScreen, stageElement, onEditLayou
       if (event.button !== 0) return;
       event.preventDefault();
       event.stopPropagation();
-      bridge.startWindowResize(direction).catch(error => logApp("warn", "ウィンドウのサイズ変更を開始できませんでした", errorDetail(error)));
+      bridge.startWindowResize(direction).catch(error => reportFailure("ウィンドウのサイズ変更を開始できませんでした", error));
     });
     handles.append(handle);
   }

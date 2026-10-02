@@ -16,6 +16,22 @@ const mic = uiFile("app/mic.js");
 const panel = uiFile("chat/panel.js");
 const main = uiFile("app/main.js");
 const status = uiFile("app/status.js");
+
+for (const kind of ["image", "file"]) {
+  test(`同時に読む${kind}とネイティブ添付が競合しても4件の上限を守る`, async () => {
+    const readers = [];
+    globalThis.FileReader = class {
+      readAsDataURL() { readers.push(this); }
+    };
+    const { composer } = makeComposer();
+    const loading = Array.from({ length: 6 }, (_, index) => composer.addFile({ name: `${index}.txt`, type: kind === "image" ? "image/png" : "text/plain" }));
+    assert.equal(readers.length, 6);
+    assert.equal(composer.addLoaded({ kind, name: "ネイティブ", dataUrl: "native" }), "");
+    for (const [index, reader] of readers.entries()) reader.onload({ target: { result: `loaded-${index}` } });
+    await Promise.all(loading);
+    assert.equal(kind === "image" ? composer.images.length : composer.files.length, 4);
+  });
+}
 const notice = uiFile("app/notice.js");
 const markdown = uiFile("chat/markdown.js");
 
@@ -141,7 +157,7 @@ test("会話リセット後に旧質問の再生成や旧回答のコピーを�
 
 test("リセット前の進捗・ストリーム描画・通信結果は新しい会話へ戻さない", () => {
   const subscribe = send.slice(send.indexOf("async function subscribe("), send.indexOf("async function readAttachments("));
-  assert.match(subscribe, /const alive = \(\) => busy && requestRevision === revision;/);
+  assert.match(subscribe, /const alive = \(\) => busy && requestRevision === revision && !cancelled\(\);/);
   // どのイベントも最初に alive() を確かめる。
   for (const channel of ["pet:agent_status", "pet:agent_activity", "pet:stream_reset", "pet:stream_chunk"]) {
     const body = subscribe.slice(subscribe.indexOf(`add("${channel}"`));
@@ -159,11 +175,11 @@ test("リセット前の進捗・ストリーム描画・通信結果は新し�
 
 test("添付の読み込み中・画面取得後にリセットした質問を新しい会話へ送らない", () => {
   const attachments = send.slice(send.indexOf("async function readAttachments("), send.indexOf("function showFailure("));
-  assert.match(attachments, /for \(const file of files\) \{\s*\n\s*if \(requestRevision !== revision\) return null;/);
+  assert.match(attachments, /for \(const file of files\) \{\s*\n\s*if \(requestRevision !== revision \|\| cancelled\(\)\) return null;/);
   const submit = send.slice(send.indexOf("async function submit()"), send.indexOf("  const sender = {"));
   assert.match(submit, /if \(fileContext == null\) \{ job\.state = "cancelled"; return; \}/);
   const shot = submit.indexOf("bridge.captureScreen()");
-  const recheck = submit.indexOf('if (requestRevision !== revision) { job.state = "cancelled"; return; }', shot);
+  const recheck = submit.indexOf('if (requestRevision !== revision || cancelled()) { job.state = "cancelled"; return; }', shot);
   const sendAt = submit.indexOf("bridge.sendImage(fullText, images)");
   assert.ok(shot > 0 && recheck > shot && sendAt > recheck, "画面取得の後、送信の前にリセットを確かめ直していません");
 });
