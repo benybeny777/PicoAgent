@@ -114,7 +114,8 @@ graph LR
 | `<SBV2>\.venv\Scripts\python.exe scripts/select-voice-training-clips.py <quiet-sections\|measure\|select>` | 許諾済み音声からStyle-Bert-VITS2の学習断片を検査し、BGM・定常ノイズ・他人の声・破裂音・文字起こし不一致を除いた別名データセットを作る。工程は`rebuild-picoagent-character`スキル |
 | `<SBV2>\.venv\Scripts\python.exe scripts/clean-voice-training-pauses.py --source <元> --output <新>` | 選別済み学習データの発話の合間だけをsilero-vadで判定して減衰させた別名データセットを作り、合間の音量の前後値を`pause-cleaning.json`へ残す。合成時の間に出るノイズの原因対策。工程は`rebuild-picoagent-character`スキル |
 | `<SBV2>\.venv\Scripts\python.exe scripts/enhance-voice-training-chunks.py <pack\|deepfilter\|unpack>` | 選別済み学習データを9MB以下のWAVへ連結し、ハッシュ固定したDeepFilterNet 0.5.6でローカル一括補正してから、サンプルレート・長さ・モノラルを照合して元の断片へ切り戻し、-23LUFSへそろえた別名データセットを作る |
-| `<SBV2>\.venv\Scripts\python.exe scripts/check-synthesized-voice.py <sbv2\|aivis\|files>` | 学習済み音声モデルの合成結果を、クリップ・定常ノイズ・電子音・境界ノイズ・発音・話者類似度で検査する。`aivis`はPicoAgentと同じ`volumeScale`上限0.72で合成する |
+| `<SBV2>\.venv\Scripts\python.exe scripts/check-synthesized-voice.py <sbv2\|aivis\|files>` | 学習済み音声モデルの合成結果を、クリップ・定常ノイズ・電子音・境界ノイズ・発音・話者類似度で検査する。VAD外区間と測定区間の時刻を記録し、連続100ms以上の無音候補ごとにPSDを求めて集約する。区間は連結せず、無音不足は検査不能として不合格にする。`aivis`はPicoAgentと同じ`volumeScale`上限0.72で合成する |
+| `<SBV2>\.venv\Scripts\python.exe scripts/tests/test_voice_noise_measurement.py` | 既存SBV2環境でCPU合成WAVによる無音測定の回帰検査を行う。非連結PSDと旧連結経路の差、無音不足、完全無音を確認し、GPU・Whisperモデルは使用しない |
 | `node tools/check-lvs-character.mjs <temp内出力先> [確認URL]` | LocalVTuberStudio形式の目口・待機動作をPicoAgent実Canvasで検証 |
 | `cargo xtask character-quality` | 通常2Dの制作正本を画素検査する。独自リグ・Live2Dの画質は対象外。`--strict`は既知を含む全指摘を不合格、`--update-baseline`は既存指摘の削減のみ許可 |
 | `cargo xtask sync-characters` | `characters/`（正本）を配信用 `ui/assets/characters/` へ同期 |

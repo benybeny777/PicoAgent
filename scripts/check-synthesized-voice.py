@@ -103,9 +103,49 @@ def reference_centroid(path: Path) -> np.ndarray:
     return centroid / norm
 
 
+def continuous_regions(mask: np.ndarray) -> list[tuple[int, int]]:
+    changes = np.diff(np.r_[False, mask, False].astype(np.int8))
+    return list(zip(np.flatnonzero(changes == 1), np.flatnonzero(changes == -1)))
+
+
+def measure_gaps(x: np.ndarray, sr: int, speech: np.ndarray, guard: np.ndarray) -> dict:
+    from scipy.signal import medfilt, welch
+
+    outside = continuous_regions(~speech)
+    gaps = continuous_regions(~guard)
+    # 連続100ms未満の区間はPSDとノイズ床の根拠として使わない。
+    measured = [(a, b) for a, b in gaps if b - a >= int(0.1 * sr)]
+    times = lambda regions: [{"start_seconds": round(int(a) / sr, 6), "end_seconds": round(int(b) / sr, 6)} for a, b in regions]
+    result = {
+        "vad_outside_regions": times(outside), "guarded_gap_regions": times(gaps),
+        "noise_measured_regions": times(measured),
+        "gap_seconds": round(float(np.sum(~guard)) / sr, 3),
+        "noise_measured_seconds": round(sum(int(b - a) for a, b in measured) / sr, 3),
+        "noise_measurement_valid": bool(measured),
+        "noise_floor_dbfs": None, "tonal_peaks": None,
+    }
+    if not measured:
+        result["noise_measurement_error"] = "連続100ms以上の無音候補区間がありません"
+        return result
+    count = sum(int(b - a) for a, b in measured)
+    power = sum(float(np.sum(x[a:b] ** 2)) for a, b in measured) / count
+    result["noise_floor_dbfs"] = round(clips.db(power), 2)
+    nperseg = min(4096, min(int(b - a) for a, b in measured))
+    # 同一周波数格子で区間別PSDを長さ加重平均し、人工的な接続境界を作らない。
+    aggregate = None
+    for a, b in measured:
+        freqs, psd = welch(x[a:b], sr, nperseg=nperseg)
+        weighted = psd * int(b - a) / count
+        aggregate = weighted if aggregate is None else aggregate + weighted
+    band = (freqs > 60) & (freqs < 12000)
+    level = 10 * np.log10(aggregate[band] + 1e-20)
+    result["tonal_peaks"] = int(np.sum((level - medfilt(level, 51) > 12) & (level > -110)))
+    return result
+
+
 def inspect_wav(models, wav_path: Path, text: str, centroid: np.ndarray | None, judge_level: bool = True) -> dict:
     import torch
-    from scipy.signal import butter, medfilt, resample_poly, sosfilt, welch
+    from scipy.signal import butter, resample_poly, sosfilt
 
     x, sr = clips.load_mono(wav_path)
     result: dict = {"wav": str(wav_path), "text": text, "seconds": round(len(x) / sr, 3)}
@@ -132,20 +172,8 @@ def inspect_wav(models, wav_path: Path, text: str, centroid: np.ndarray | None, 
     hop = int(0.02 * sr)
     speech_db = [clips.db(p) for p in clips.frame_power(x[speech], hop)] if speech.any() else [-120.0]
     result["speech_median_dbfs"] = round(float(np.median(speech_db)), 2)
-    gap = x[~guard]
-    result["gap_seconds"] = round(len(gap) / sr, 3)
-    if len(gap) >= int(0.1 * sr):
-        result["noise_floor_dbfs"] = round(clips.db(float(np.mean(gap**2))), 2)
-        freqs, psd = welch(gap, sr, nperseg=min(4096, len(gap)))
-        band = (freqs > 60) & (freqs < 12000)
-        level = 10 * np.log10(psd[band] + 1e-20)
-        result["tonal_peaks"] = int(np.sum((level - medfilt(level, 51) > 12) & (level > -110)))
-    else:
-        # 語間がほぼ無い短文は、最も静かなフレームで代用する。
-        frames = [clips.db(p) for p in clips.frame_power(x, hop)]
-        result["noise_floor_dbfs"] = round(float(np.percentile(frames, 5)), 2)
-        result["tonal_peaks"] = 0
-    result["snr_db"] = round(result["speech_median_dbfs"] - result["noise_floor_dbfs"], 2)
+    result.update(measure_gaps(x, sr, speech, guard))
+    result["snr_db"] = round(result["speech_median_dbfs"] - result["noise_floor_dbfs"], 2) if result["noise_measurement_valid"] else None
     edge = int(0.03 * sr)
     result["head_dbfs"] = round(clips.db(float(np.mean(x[:edge] ** 2))), 2)
     result["tail_dbfs"] = round(clips.db(float(np.mean(x[-edge:] ** 2))), 2)
@@ -171,9 +199,11 @@ def inspect_wav(models, wav_path: Path, text: str, centroid: np.ndarray | None, 
         failures.append("clip")
     if judge_level and result["lufs"] < Limits.min_lufs:
         failures.append("too-quiet")
-    if result["noise_floor_dbfs"] > Limits.max_noise_floor_dbfs or result["snr_db"] < Limits.min_snr_db:
+    if not result["noise_measurement_valid"]:
+        failures.append("noise-unmeasurable")
+    elif result["noise_floor_dbfs"] > Limits.max_noise_floor_dbfs or result["snr_db"] < Limits.min_snr_db:
         failures.append("steady-noise")
-    if result["tonal_peaks"] > Limits.max_tonal_peaks:
+    if result["tonal_peaks"] is not None and result["tonal_peaks"] > Limits.max_tonal_peaks:
         failures.append("tonal-noise")
     if result["head_dbfs"] > Limits.max_edge_dbfs or result["tail_dbfs"] > Limits.max_edge_dbfs:
         failures.append("edge-noise")
@@ -296,8 +326,8 @@ def main() -> int:
         "passed": all(not r["failures"] for r in results),
         "max_true_peak_dbfs": max(r["true_peak_dbfs"] for r in results),
         "mean_lufs": round(float(np.mean([r["lufs"] for r in results])), 2),
-        "max_noise_floor_dbfs": max(r["noise_floor_dbfs"] for r in results),
-        "min_snr_db": min(r["snr_db"] for r in results),
+        "max_noise_floor_dbfs": max((r["noise_floor_dbfs"] for r in results if r["noise_floor_dbfs"] is not None), default=None),
+        "min_snr_db": min((r["snr_db"] for r in results if r["snr_db"] is not None), default=None),
         "max_kana_cer": max(r["kana_cer"] for r in results),
         "min_speaker_similarity": min((r.get("speaker_similarity", 1.0) for r in results)),
         "failures": {Path(r["wav"]).name: r["failures"] for r in results if r["failures"]},
