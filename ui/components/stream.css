@@ -67,9 +67,10 @@
   display: flex;
   align-items: stretch;
   padding: 14px 22px;
-  border-radius: 16px;
-  background: linear-gradient(135deg, rgba(255, 253, 248, 0.96), rgba(255, 238, 244, 0.94));
-  border: 1px solid rgba(213, 156, 172, 0.56);
+  border-radius: var(--radius-lg);
+  /* 字幕色は利用者が明るい面向けに選ぶため、どちらのUIモードでも明るい面を保つ。 */
+  background: var(--subtitle-bg);
+  border: 1px solid var(--subtitle-border);
   border-left: 6px solid var(--accent);
   box-shadow: 0 8px 24px rgba(60, 30, 50, 0.2);
   user-select: none;

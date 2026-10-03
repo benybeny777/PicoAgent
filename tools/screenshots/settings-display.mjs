@@ -698,7 +698,26 @@ try {
     await modePage.reload();
     await modeSelect.waitFor();
     if (await modeSelect.inputValue() !== mode) throw new Error(`UIモードの保存・再読込が不一致: ${mode}`);
-    await modePage.screenshot({ path: join(OUT, `mode-${mode}.png`) });
+    // 明暗はプレビューだけ切り替えて撮る（保存しない）。アクセント面の文字はモードの対比色を使う。
+    const themeSelect = modePage.locator('[data-setting-key="PICOAGENT_THEME"] select');
+    for (const theme of ["light", "dark"]) {
+      await themeSelect.selectOption(theme);
+      const colors = await modePage.evaluate(() => {
+        const probe = document.createElement("button");
+        probe.className = "genre-chip active";
+        document.body.append(probe);
+        const color = getComputedStyle(probe).color;
+        probe.remove();
+        const onAccent = document.createElement("span");
+        onAccent.style.color = "var(--on-accent)";
+        document.body.append(onAccent);
+        const expected = getComputedStyle(onAccent).color;
+        onAccent.remove();
+        return { color, expected };
+      });
+      if (colors.color !== colors.expected) throw new Error(`アクセント面の文字色がUIモードの対比色ではありません: ${mode}/${theme} ${JSON.stringify(colors)}`);
+      await modePage.screenshot({ path: join(OUT, `mode-${mode}-${theme}.png`) });
+    }
   }
   await modePage.close();
   const recoveryPage = await browser.newPage();

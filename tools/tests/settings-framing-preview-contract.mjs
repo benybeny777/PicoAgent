@@ -28,6 +28,24 @@ test("UIモードは可愛いを既定に既存のpastelとglassで選べる", (
   assert.match(css, /--pink: var\(--accent\)/);
 });
 
+test("設定画面のアクセント面と角丸はUIモードに従う", () => {
+  const css = readFileSync(new URL("../../ui/settings.css", import.meta.url), "utf8");
+  assert.match(css, /--on-pink: var\(--on-accent\)/);
+  // 明るいアクセント（暗い画面の可愛い・かっこいい）へ白文字を重ねると読めない。
+  for (const [, body] of css.matchAll(/\{([^{}]*)\}/g)) {
+    if (/background:\s*var\(--pink(-strong)?\)/.test(body)) assert.doesNotMatch(body, /color:\s*#fff/, body.trim());
+  }
+  // 可愛い固定の桃色と、モードの角丸を無視する固定値を残さない。
+  assert.doesNotMatch(css, /rgba\((233, ?138, ?182|242, ?126, ?145)/);
+  assert.doesNotMatch(css, /#ff9bc8/);
+  for (const [, value] of css.matchAll(/border-radius:\s*(\d+px)\s*;/g)) assert.equal(value, "999px", `固定の角丸: ${value}`);
+});
+
+test("設定タブの件数更新はアイコンを消さない", () => {
+  assert.doesNotMatch(settings, /getElementById\(["`]tab-[^)]*\)[^;\n]*\n?[^;\n]*\.textContent\s*=/);
+  assert.match(settings, /function setSettingsTabLabel\(tabId, label\) \{\n\s*const name = document\.querySelector\(`#tab-\$\{tabId\} \.tab-name`\);/);
+});
+
 test("設定のUIモードは未知値を可愛いへ戻し保存済みのかっこいいを尊重する", () => {
   const root = { dataset: {}, removeAttribute(name) { if (name === "data-theme") delete this.dataset.theme; } };
   const context = vm.createContext({ document: { documentElement: root } });

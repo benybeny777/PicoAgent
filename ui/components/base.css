@@ -119,15 +119,6 @@ input[type="search"]:focus, textarea:focus, select:focus {
 ::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: var(--radius-pill); }
 ::-webkit-scrollbar-track { background: transparent; }
 
-/* すりガラスのパネルの共通見た目。 */
-.glass {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  box-shadow: var(--shadow-panel), var(--highlight);
-  backdrop-filter: var(--blur);
-  -webkit-backdrop-filter: var(--blur);
-}
-
 /* トースト。操作ボタンの無いものはクリックを背後のデスクトップへ通す。 */
 .toast {
   position: fixed;

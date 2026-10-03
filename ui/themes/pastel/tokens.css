@@ -12,6 +12,7 @@
   --surface-hover: rgba(120, 70, 100, 0.08);
   --border: rgba(120, 70, 100, 0.14);
   --border-strong: rgba(120, 70, 100, 0.26);
+  --panel-border: rgba(224, 102, 139, 0.26);
   --highlight: inset 0 1px 0 rgba(255, 255, 255, 0.95);
   --text: #3a2733;
   --text-muted: #7b6272;
@@ -25,7 +26,7 @@
   --danger-soft: rgba(207, 63, 95, 0.1);
   --success: #2f9a78;
   --warn: #b7741b;
-  --user-bubble: rgba(143, 206, 176, 0.3);
+  --user-bubble: rgba(255, 182, 206, 0.36);
   --assistant-bubble: rgba(255, 255, 255, 0.7);
   --code-bg: rgba(120, 70, 100, 0.07);
   --scrim: rgba(255, 244, 248, 0.72);
@@ -34,6 +35,8 @@
   --blur: blur(16px) saturate(1.4);
   --menu-bg: rgba(255, 248, 251, 0.92);
   --character-glow: rgba(255, 159, 184, 0.34);
+  --subtitle-bg: linear-gradient(135deg, rgba(255, 253, 248, 0.96), rgba(255, 238, 244, 0.94));
+  --subtitle-border: rgba(213, 156, 172, 0.56);
   color-scheme: light;
 }
 
@@ -45,6 +48,7 @@
   --surface-hover: rgba(255, 255, 255, 0.08);
   --border: rgba(255, 220, 235, 0.12);
   --border-strong: rgba(255, 220, 235, 0.22);
+  --panel-border: rgba(255, 143, 174, 0.24);
   --highlight: inset 0 1px 0 rgba(255, 255, 255, 0.06);
   --text: #f8eaf1;
   --text-muted: #c8aebd;
@@ -58,7 +62,7 @@
   --danger-soft: rgba(255, 138, 158, 0.16);
   --success: #6fd7b1;
   --warn: #ffc27a;
-  --user-bubble: rgba(143, 206, 176, 0.2);
+  --user-bubble: rgba(255, 143, 174, 0.16);
   --assistant-bubble: rgba(255, 255, 255, 0.05);
   --code-bg: rgba(0, 0, 0, 0.3);
   --scrim: rgba(20, 12, 20, 0.64);
@@ -79,6 +83,7 @@
     --surface-hover: rgba(255, 255, 255, 0.08);
     --border: rgba(255, 220, 235, 0.12);
     --border-strong: rgba(255, 220, 235, 0.22);
+    --panel-border: rgba(255, 143, 174, 0.24);
     --highlight: inset 0 1px 0 rgba(255, 255, 255, 0.06);
     --text: #f8eaf1;
     --text-muted: #c8aebd;
@@ -92,7 +97,7 @@
     --danger-soft: rgba(255, 138, 158, 0.16);
     --success: #6fd7b1;
     --warn: #ffc27a;
-    --user-bubble: rgba(143, 206, 176, 0.2);
+    --user-bubble: rgba(255, 143, 174, 0.16);
     --assistant-bubble: rgba(255, 255, 255, 0.05);
     --code-bg: rgba(0, 0, 0, 0.3);
     --scrim: rgba(20, 12, 20, 0.64);
