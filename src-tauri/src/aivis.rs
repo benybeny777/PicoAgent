@@ -1526,9 +1526,12 @@ fn terminate_managed_child(app: &tauri::AppHandle) {
 #[cfg(test)]
 mod tests {
     use super::{
-        find_runtime, interrupted_install_actions, replace_install_tree,
-        validate_external_endpoint, validate_runtime_files, InterruptedAction,
+        interrupted_install_actions, replace_install_tree, validate_external_endpoint,
+        InterruptedAction,
     };
+    // 実行時ファイルの判定はWindows版AivisSpeechの配置だけを検査する。
+    #[cfg(windows)]
+    use super::{find_runtime, validate_runtime_files};
 
     #[cfg(windows)]
     #[test]
