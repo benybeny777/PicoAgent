@@ -2,7 +2,7 @@
 # Windows各版の正規ビルド入口を直列実行し、新規Releaseだけへ保存する。
 [CmdletBinding()]
 param(
-    [ValidateSet('All', 'Alpha', 'Partner', 'Review')][string]$Kind = 'All',
+    [ValidateSet('All', 'Alpha', 'Partner')][string]$Kind = 'All',
     [switch]$PublicAlpha,
     [switch]$PrepareOnly,
     [ValidatePattern('^[0-9a-f]{40}$')][string]$PreviousSourceCommit,
@@ -17,12 +17,11 @@ function Invoke-Checked {
     if ($LASTEXITCODE -ne 0) { throw "$File が失敗しました（終了コード $LASTEXITCODE）。後続の公開は停止します。" }
 }
 function Get-WindowsPlan {
-    param([string]$Selection, [string]$Version)
+    param([ValidateSet('All', 'Alpha', 'Partner')][string]$Selection, [string]$Version)
     if ($Version -notmatch '^\d+\.\d+\.\d+$') { throw '数値3桁の版が必要です。' }
     $all = @(
         [pscustomobject]@{ Kind = 'Alpha'; File = "PicoAgent_${Version}_x64-setup.exe"; Source = "src-tauri/target/release/bundle/nsis/PicoAgent_${Version}_x64-setup.exe" },
-        [pscustomobject]@{ Kind = 'Partner'; File = "PicoAgent_${Version}_Partner-MMD-Voice_x64-setup.exe"; Source = "temp/partner-installer/PicoAgent_${Version}_Partner-MMD-Voice_x64-setup.exe" },
-        [pscustomobject]@{ Kind = 'Review'; File = "PicoAgent_${Version}_holo-Indie-Review_x64-setup.exe"; Source = "temp/holo-indie-review-installer/PicoAgent_${Version}_holo-Indie-Review_x64-setup.exe" }
+        [pscustomobject]@{ Kind = 'Partner'; File = "PicoAgent_${Version}_Partner-MMD-Voice_x64-setup.exe"; Source = "temp/partner-installer/PicoAgent_${Version}_Partner-MMD-Voice_x64-setup.exe" }
     )
     @($all | Where-Object { $Selection -eq 'All' -or $_.Kind -eq $Selection })
 }
@@ -60,7 +59,7 @@ function Get-VersionNeutralContent {
 function Test-EffectiveChange {
     param([string]$Before, [string]$After)
     # 日本語パスをGitのCエスケープへ変換させない。差分行全体からversionを消さない。
-    $paths = @(Invoke-Checked git @('-c', 'core.quotepath=false', 'diff', '--name-only', '--no-renames', $Before, $After, '--', 'src-tauri', 'ui', 'skills', 'crates', 'characters', 'xtask', 'character-maker', 'distribution/release.json', 'scripts/build-partner-installer.ps1', 'scripts/build-holo-indie-review-installer.ps1'))
+    $paths = @(Invoke-Checked git @('-c', 'core.quotepath=false', 'diff', '--name-only', '--no-renames', $Before, $After, '--', 'src-tauri', 'ui', 'skills', 'crates', 'characters', 'xtask', 'character-maker', 'distribution/release.json', 'scripts/build-partner-installer.ps1'))
     $selfVersionFiles = @('src-tauri/tauri.conf.json', 'src-tauri/Cargo.toml', 'src-tauri/Cargo.lock', 'xtask/Cargo.toml', 'xtask/Cargo.lock')
     foreach ($path in $paths) {
         if ($path -notin $selfVersionFiles) { return $true }
@@ -79,7 +78,7 @@ function Test-EffectiveChange {
 # テストは関数だけを読み込み、外部コマンドを実行しない。
 if ($MyInvocation.InvocationName -eq '.') { return }
 if (-not $IsWindows) { throw 'Windows専用です。' }
-if ($PublicAlpha -and $Kind -ne 'Alpha') { throw '公開先の指定はAlpha単体だけに使えます。関係者・審査資産は公開できません。' }
+if ($PublicAlpha -and $Kind -ne 'Alpha') { throw '公開先の指定はAlpha単体だけに使えます。関係者資産は公開できません。' }
 $root = Split-Path -Parent $PSScriptRoot
 Push-Location -LiteralPath $root
 try {
@@ -93,7 +92,7 @@ try {
     $plan = @(Get-WindowsPlan $Kind $version)
     if ($Kind -eq 'All') {
         if ((Invoke-Checked gh @('api', 'repos/benybeny777/PicoAgent-Distribution', '--jq', '.visibility')).Trim() -ne 'public') { throw '公開Alphaの保存先を確認できません。' }
-        Write-Host '全種類: Alphaは公開先Draft、関係者版・審査版は非公開へ保存します。公開Alphaの最終公開は21側PR後です。'
+        Write-Host '全種類: Alphaは公開先Draft、関係者版は非公開へ保存します。公開Alphaの最終公開は21側PR後です。'
     }
     $repo = if ($PublicAlpha) { 'benybeny777/PicoAgent-Distribution' } else { 'benybeny777/PicoAgent' }
     $visibility = (Invoke-Checked gh @('api', "repos/$repo", '--jq', '.visibility')).Trim()
@@ -130,7 +129,6 @@ try {
         switch ($entry.Kind) {
             'Alpha' { Invoke-Checked cargo @('xtask', 'build-beta', '--bundles', 'nsis') }
             'Partner' { Invoke-Checked pwsh @('-NoProfile', '-File', 'scripts/build-partner-installer.ps1', '-SourceDir', $PartnerSourceDir) }
-            'Review' { Invoke-Checked pwsh @('-NoProfile', '-File', 'scripts/build-holo-indie-review-installer.ps1') }
         }
         $hash = Assert-Installer (Join-Path $root $entry.Source) $started
         $destination = Join-Path $runRoot $entry.File

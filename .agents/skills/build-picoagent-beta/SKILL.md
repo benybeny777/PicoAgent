@@ -43,8 +43,8 @@ description: PicoAgentの開発中アルファ版をWindows NSIS、macOSの.app�
 
 ## ビルド
 
-- Windowsのまとめ実行は`Windows全種類をビルドしてUP.bat`、個別は`Windows公開Alpha版をビルドしてUP.bat`／`Windows関係者版をビルドしてUP.bat`／`Windows審査版をビルドしてUP.bat`を使える。共通正本`scripts/publish-windows.ps1`は各既存ビルド入口を直列に呼び、MZ・時刻・SHAと再取得を検査する。最初は`-PrepareOnly`で新しい版・最新main・保存先のvisibility・直前版との実効差分を確かめる。不明なビルド元は確認して`-PreviousSourceCommit`で指定し、素材は`-PartnerSourceDir`で絶対パスも指定できる。
-- 全種類はAlphaだけ公開先Draft、関係者・審査は非公開の新規`v<版>-windows-private`へ分離する。既存数値版へ追加せず、Release作成後の失敗でバッチを最初から再実行するときも新patchを使う。公開先Draftまでの場合は終了コード2であり公開完了としない。21側の目的別PR・更新情報・Pages検証後に公開を完了する。詳細は`docs/DEVELOPMENT.md`のWindows各版手順を使う。
+- Windowsのまとめ実行は`Windows全種類をビルドしてUP.bat`、個別は`Windows公開Alpha版をビルドしてUP.bat`／`Windows関係者版をビルドしてUP.bat`を使える。共通正本`scripts/publish-windows.ps1`は各既存ビルド入口を直列に呼び、MZ・時刻・SHAと再取得を検査する。最初は`-PrepareOnly`で新しい版・最新main・保存先のvisibility・直前版との実効差分を確かめる。不明なビルド元は確認して`-PreviousSourceCommit`で指定し、素材は`-PartnerSourceDir`で絶対パスも指定できる。
+- 全種類はAlphaだけ公開先Draft、関係者版は非公開の新規`v<版>-windows-private`へ分離する。既存数値版へ追加せず、Release作成後の失敗でバッチを最初から再実行するときも新patchを使う。公開先Draftまでの場合は終了コード2であり公開完了としない。21側の目的別PR・更新情報・Pages検証後に公開を完了する。詳細は`docs/DEVELOPMENT.md`のWindows各版手順を使う。
 - 途中のmain更新でRelease作成前に停止したら、新旧コミットの全変更パスを確認する。文書だけでビルド入力が同一なら、今回の実行ディレクトリへ退避済みの成果物・元コミット・時刻・SHA-256を照合し、未完成の種類だけ正規入口から実行できる。アプリ・UI・資産・設定が変わっていたら全種類を再ビルドする。バッチに自動再開機能はないため、手動で回収する場合も3種類の成功・公開範囲・新規Release・再取得SHA照合を省略せず、PRへ停止原因と再開元を記録する。
 - 実効差分検査を変更したら`scripts/test-publish-windows.ps1`で、日本語の資産名、依存・モデルのversion更新、自パッケージ版だけの変更を区別できることを確認する。差分行全体からversionを消す方法へ戻さない。
 
