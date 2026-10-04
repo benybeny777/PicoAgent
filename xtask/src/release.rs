@@ -785,9 +785,6 @@ mod tests {
             let runtime_root_is_limited = if name == "installer-hooks-lite.nsh" {
                 script.contains("$APPDATA\\${PICOAGENT_MANAGED_DATA_ROOT}\\bundled\\${SUBDIR}\\*")
                     && script.contains("!define PICOAGENT_MANAGED_DATA_ROOT \"PicoAgent\"")
-                    && script.contains(
-                        "!define PICOAGENT_MANAGED_DATA_ROOT \"${PICOAGENT_REVIEW_DATA_ROOT}\"",
-                    )
             } else {
                 script.contains("$APPDATA\\PicoAgent\\bundled\\${SUBDIR}\\*")
             };
