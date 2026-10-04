@@ -1,4 +1,0 @@
-interface:
-  display_name: "PicoAgentコンテストPPT更新"
-  short_description: "社内AIコンテストPPTを明示された構成と訴求どおりに更新する"
-  default_prompt: "Use $update-picoagent-contest-presentation to update the PicoAgent internal AI contest PowerPoint according to the user-defined rules."
