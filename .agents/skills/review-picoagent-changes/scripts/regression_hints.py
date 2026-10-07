@@ -125,6 +125,8 @@ def collect(range_args: list[str]) -> tuple[list[str], dict[str, list[str]]]:
 
 
 def main() -> int:
+    # Windowsの既定コンソール（cp932）では差分中の絵文字を出せず落ちるため、出せない文字は置き換える
+    sys.stdout.reconfigure(errors="replace")
     range_args = parse_args(sys.argv[1:])
     files, added = collect(range_args)
     if not files:
