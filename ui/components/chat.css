@@ -45,6 +45,25 @@
   text-align: center;
 }
 
+/* 文字サイズ（「Aa」で開く1行）。パネルの中に置き、窓の外へはみ出さない。 */
+.font-size-panel {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+  padding: 4px 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-sunken);
+}
+.font-size-toggle[aria-expanded="true"] { background: var(--accent-soft); color: var(--accent-strong); border-color: var(--accent); }
+.font-size-label { margin-right: 2px; color: var(--text-muted); font-size: 11px; font-weight: 700; }
+.font-size-panel .chip { min-height: 24px; padding: 0 9px; }
+.font-size-value { min-width: 3.4em; color: var(--text); font-size: 12px; font-variant-numeric: tabular-nums; text-align: center; }
+.chat[data-variant="column"] .font-size-panel .chip,
+.chat[data-variant="column"] .font-size-label,
+.chat[data-variant="column"] .font-size-value { font-size: var(--stream-chat-action-font-size, 14px); }
+
 /* ── 回答欄 ── */
 .reply-home { flex: 1 1 auto; min-height: 0; display: flex; }
 .reply {

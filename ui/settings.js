@@ -3120,6 +3120,7 @@ async function render() {
   ]));
   displaySec.append(field("PICOAGENT_BUBBLE_FONT_PX", "ペット・ミニの会話文字（px）", "text", v.PICOAGENT_BUBBLE_FONT_PX ?? "", "13"));
   displaySec.append(field("PICOAGENT_ALWAYS_ON_TOP", "常に手前に表示", "checkbox", v.PICOAGENT_ALWAYS_ON_TOP !== false));
+  displaySec.append(field("PICOAGENT_TITLE_BAR_PINNED", "タイトルバーを常に表示（オフ: 上端へポインタを寄せたときだけ出す）", "checkbox", v.PICOAGENT_TITLE_BAR_PINNED === true));
   displaySec.append(streamSettingsField(v));
   displaySec.append(layoutResetField());
   // --- 操作（画面・操作タブ）: 普段の触り方に関わる項目だけを集める ---

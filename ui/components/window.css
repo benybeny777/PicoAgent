@@ -2,12 +2,14 @@
 .app {
   position: fixed;
   inset: 0;
+  /* タイトルバーの下端（窓座標）。--scene-view-top は stage.js がここへ当てるので、:root ではなくここで組む。 */
+  --chrome-bottom: calc(var(--scene-view-top, 0px) + var(--menu-height));
 }
 
-/* シーンは上端メニューの下いっぱい。ソースは left/top/width/height だけで置く（拡大しない）。 */
+/* シーンは、タイトルバーを常に表示するならその下、フロー表示なら窓いっぱい。ソースは left/top/width/height だけで置く（拡大しない）。 */
 .stage {
   position: absolute;
-  inset: var(--menu-height) 0 0 0;
+  inset: var(--stage-top) 0 0 0;
   overflow: hidden;
 }
 .stage.is-game { z-index: 215; pointer-events: none; overflow: visible; }
@@ -26,11 +28,16 @@
 .app.is-booting .stage { visibility: hidden; }
 .app.is-booting .top-window-menu { display: none; }
 
-/* 上端メニュー（常設のタイトルバー）。 */
+/* 上端メニュー（タイトルバー）。見えているシーンの真上へ、シーンと同じ幅で置く。
+   既定はシーンへ重ねて隠し（フロー表示）、上端へポインタを寄せたときだけ出す。
+   「常に表示」ではシーンの上へ高さを空けて常設する。 */
+.app.title-bar-floating { --stage-top: 0px; }
 .top-window-menu {
   position: fixed;
   z-index: 250;
-  inset: 0 0 auto 0;
+  top: var(--scene-view-top, 0px);
+  left: var(--scene-view-left, 0px);
+  width: var(--scene-view-width, 100%);
   height: var(--menu-height);
   display: flex;
   align-items: center;
@@ -41,13 +48,15 @@
   backdrop-filter: var(--blur);
   -webkit-backdrop-filter: var(--blur);
   user-select: none;
+  transition: opacity var(--dur) var(--ease);
 }
-/* 固定シーンを等倍率で収めた左右の余白へ、タイトルバーだけが伸びないようにする。 */
-.app.has-fixed-scene .top-window-menu {
-  left: var(--scene-view-left);
-  right: auto;
-  width: var(--scene-view-width);
+/* 隠している間も操作要素の位置は保ち（窓内に収まる検査と同じ矩形）、クリックだけ背後へ通す。 */
+.app.title-bar-floating:not(.title-bar-shown) .top-window-menu {
+  opacity: 0;
+  pointer-events: none;
 }
+.app.title-bar-floating .top-window-menu { box-shadow: var(--shadow-soft); }
+
 .top-window-menu-brand {
   flex: 0 0 auto;
   margin-right: var(--space-2);
@@ -83,11 +92,14 @@
 }
 .window-caption-controls button:hover { background: var(--surface-hover); color: var(--text); }
 .window-caption-controls .window-close:hover { background: #e5484d; color: #fff; }
+.window-caption-controls .window-pin { width: 36px; font-size: 12px; }
+.window-caption-controls .window-pin[aria-pressed="false"] { filter: grayscale(1); opacity: 0.6; }
+.window-caption-controls .window-pin[aria-pressed="true"] { box-shadow: inset 0 -2px 0 var(--accent); }
 
 /* 狭い窓ではキャラ選択 → 配置 → 表示の順に畳み、設定とウィンドウ操作は最後まで残す。 */
-@media (max-width: 420px) { .top-window-menu-items button:nth-child(3) { display: none; } }
-@media (max-width: 360px) { .top-window-menu-items button:nth-child(2) { display: none; } }
-@media (max-width: 300px) {
+@media (max-width: 456px) { .top-window-menu-items button:nth-child(3) { display: none; } }
+@media (max-width: 396px) { .top-window-menu-items button:nth-child(2) { display: none; } }
+@media (max-width: 336px) {
   .top-window-menu-items button:nth-child(1), .top-window-menu-items button:nth-child(4) { display: none; }
   .top-window-menu-brand { display: none; }
 }
@@ -107,7 +119,7 @@
 .drop-overlay {
   position: fixed;
   z-index: 300;
-  inset: var(--menu-height) 0 0 0;
+  inset: var(--stage-top) 0 0 0;
   display: grid;
   place-items: center;
   background: var(--scrim);

@@ -131,6 +131,7 @@ window.picoagent = {
   revealMain: () => call("pet_reveal_main"),
   // 配置編集（OBS風）の位置・倍率を設定へ保存する（確定時だけ呼ぶ）。
   saveScene: (scenes) => call("pet_save_scene", { scenes }),
+  saveUiPref: (key, value) => call("pet_save_ui_pref", { key, value }),
   // ウィンドウとフキダシの位置・サイズを既定へ戻す。
   resetLayout: () => call("pet_reset_layout"),
   aivisStatus: () => call("aivis_status"),

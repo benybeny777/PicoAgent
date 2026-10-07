@@ -802,6 +802,7 @@ pub async fn pet_init(app: AppHandle, state: State<'_, AppState>) -> Result<Valu
         "fontPx": state.config.get("PICOAGENT_BUBBLE_FONT_PX", "13"),
         "streamChatFontPx": state.config.get("PICOAGENT_STREAM_CHAT_FONT_PX", "22"),
         "uiTheme": state.config.get("PICOAGENT_UI_THEME", "pastel"),
+        "titleBarPinned": state.config.get_bool("PICOAGENT_TITLE_BAR_PINNED", false),
         "voiceVolume": state.config.get("PICOAGENT_TTS_VOLUME", "35"),
         "characterId": character_id,
         "characterOverrides": state.config.get_all().get("PICOAGENT_CHARACTER_OVERRIDES").cloned().unwrap_or_else(|| json!({})),
@@ -3368,6 +3369,7 @@ pub async fn settings_save(
             "streamChatFontPx": state.config.get("PICOAGENT_STREAM_CHAT_FONT_PX", "22"),
             "theme": state.config.get("PICOAGENT_THEME", "system"),
             "uiTheme": state.config.get("PICOAGENT_UI_THEME", "pastel"),
+            "titleBarPinned": state.config.get_bool("PICOAGENT_TITLE_BAR_PINNED", false),
             "voiceVolume": state.config.get("PICOAGENT_TTS_VOLUME", "35"),
             "chatterEnabled": state.config.get_bool("PICOAGENT_CHATTER_ENABLED", false),
             "chatterMinSecs": state.config.get("PICOAGENT_CHATTER_MIN_SECS", "90"),
@@ -3866,6 +3868,57 @@ pub fn pet_boot_progress(app: AppHandle) {
 ///
 /// つまみを離した・編集を閉じた・自動配置へ戻したなどの確定時だけ呼ぶ（ドラッグ中は書かない）。
 /// 保存値は `scene::normalize_checked` を通し、壊れた入力で既存の配置をまとめて失わないようにする。
+/// メイン画面から直接変える見た目の設定。ここに無いキーは保存しない。
+const MAIN_UI_PREF_KEYS: [&str; 3] = [
+    "PICOAGENT_BUBBLE_FONT_PX",
+    "PICOAGENT_STREAM_CHAT_FONT_PX",
+    "PICOAGENT_TITLE_BAR_PINNED",
+];
+
+/// メイン画面の見た目設定を検証し、保存する値へ正規化する。
+fn checked_main_ui_pref(key: &str, value: &Value) -> Result<Value, String> {
+    match key {
+        "PICOAGENT_BUBBLE_FONT_PX" => value
+            .as_str()
+            .and_then(|text| text.parse::<u8>().ok())
+            .filter(|size| (10..=28).contains(size))
+            .map(|size| json!(size.to_string()))
+            .ok_or_else(|| "会話の文字サイズは10〜28の整数で指定してください。".to_string()),
+        "PICOAGENT_STREAM_CHAT_FONT_PX" => {
+            if valid_stream_chat_font_px(value)
+                && value.as_str().is_some_and(|text| !text.is_empty())
+            {
+                Ok(value.clone())
+            } else {
+                Err("配信チャットの文字サイズは18〜48の整数で指定してください。".to_string())
+            }
+        }
+        "PICOAGENT_TITLE_BAR_PINNED" => value.as_bool().map(Value::Bool).ok_or_else(|| {
+            "タイトルバーの常時表示は true / false で指定してください。".to_string()
+        }),
+        _ => Err(format!(
+            "メイン画面から変更できない設定です: {key}（対象: {}）",
+            MAIN_UI_PREF_KEYS.join(", ")
+        )),
+    }
+}
+
+/// 会話の文字サイズ・タイトルバーの常時表示など、メイン画面で操作した見た目を保存する。
+#[tauri::command]
+pub fn pet_save_ui_pref(
+    state: State<'_, AppState>,
+    key: String,
+    value: Value,
+) -> Result<(), String> {
+    let normalized = checked_main_ui_pref(&key, &value)?;
+    let mut patch = Map::new();
+    patch.insert(key, normalized);
+    state
+        .config
+        .set_all(patch)
+        .map_err(|error| format!("表示設定の保存に失敗しました: {error}"))
+}
+
 #[tauri::command]
 pub fn pet_save_scene(state: State<'_, AppState>, scenes: Value) -> Result<(), String> {
     let _guard = crate::store::lock_state(crate::scene::CONFIG_KEY);
@@ -5143,14 +5196,35 @@ fn settings_tab(tab: Option<&str>) -> Option<&str> {
 #[cfg(test)]
 mod tests {
     use super::{
-        aivis_lip_sync_timeline, centered_window_position, compacted_conversation,
-        default_character_tts_voice, enable_tts_after_component_install, limit_aivis_volume,
-        multi_ai_context, parse_update_feed, preserve_unreadable_secrets, probe_with_timeout,
-        replace_auto_summary, resolved_judge_model, safe_wake_message, settings_tab, speech_text,
-        stable_persona_prompt, update_series_is_newer, update_status, valid_stream_chat_font_px,
-        validate_multi_ai_settings, verify_windows_installer, version_is_newer, AUTO_SUMMARY_BEGIN,
-        AUTO_SUMMARY_END, MAX_UPDATE_FEED_BYTES,
+        aivis_lip_sync_timeline, centered_window_position, checked_main_ui_pref,
+        compacted_conversation, default_character_tts_voice, enable_tts_after_component_install,
+        limit_aivis_volume, multi_ai_context, parse_update_feed, preserve_unreadable_secrets,
+        probe_with_timeout, replace_auto_summary, resolved_judge_model, safe_wake_message,
+        settings_tab, speech_text, stable_persona_prompt, update_series_is_newer, update_status,
+        valid_stream_chat_font_px, validate_multi_ai_settings, verify_windows_installer,
+        version_is_newer, AUTO_SUMMARY_BEGIN, AUTO_SUMMARY_END, MAX_UPDATE_FEED_BYTES,
     };
+
+    #[test]
+    fn メイン画面の見た目設定は許可したキーと範囲だけ保存する() {
+        use serde_json::json;
+        assert_eq!(
+            checked_main_ui_pref("PICOAGENT_BUBBLE_FONT_PX", &json!("16")).unwrap(),
+            json!("16")
+        );
+        for bad in [json!("9"), json!("29"), json!("1.5"), json!(""), json!(16)] {
+            assert!(checked_main_ui_pref("PICOAGENT_BUBBLE_FONT_PX", &bad).is_err());
+        }
+        assert!(checked_main_ui_pref("PICOAGENT_STREAM_CHAT_FONT_PX", &json!("30")).is_ok());
+        assert!(checked_main_ui_pref("PICOAGENT_STREAM_CHAT_FONT_PX", &json!("")).is_err());
+        assert!(checked_main_ui_pref("PICOAGENT_STREAM_CHAT_FONT_PX", &json!("50")).is_err());
+        assert_eq!(
+            checked_main_ui_pref("PICOAGENT_TITLE_BAR_PINNED", &json!(true)).unwrap(),
+            json!(true)
+        );
+        assert!(checked_main_ui_pref("PICOAGENT_TITLE_BAR_PINNED", &json!("true")).is_err());
+        assert!(checked_main_ui_pref("PICOAGENT_PROVIDER", &json!("openai")).is_err());
+    }
 
     #[test]
     fn 配信チャット文字は指定範囲の整数だけ保存する() {

@@ -469,6 +469,8 @@ flowchart LR
 
 - 文字サイズ・人格などの軽い設定は保存すると即反映。叩く AI・モデル・音声・キャラクターは確認のあと画面を読み込み直し、準備が揃ってから戻ります（「あとで」なら次回起動時）
 - 配信チャットの文字サイズは「画面・操作」で18〜48pxから選べます。ペット・ミニの会話文字とは別に保存し、変更はすぐ画面へ反映します。
+- 会話パネルの「Aa」（またはパネル上で Ctrl+ホイール、Ctrl + + / - / 0）でも、その場で文字サイズを変えられます。
+- タイトルバーは既定で隠れていて、画面の上端へポインタを寄せると出ます。タイトルバーの 📌 を押すと常に表示します。
 - API キーや token が要る項目には取得手順と公式リンクを表示し、Gmail / Slack / Google カレンダーは**接続テスト**で原因候補まで出します
 - 目覚ましとタスクスケジュールは JSON を直接書かず、専用フォームで編集できます
 
@@ -516,7 +518,7 @@ flowchart LR
 |---|---|
 | 叩く AI | `PICOAGENT_PROVIDER` / `PICOAGENT_MODEL` / `PICOAGENT_LOCAL_MODEL_PRESET` |
 | キャラクター | `PICOAGENT_CHARACTER` / `PICOAGENT_CHARACTER_OVERRIDES` / `PICOAGENT_RELATIONSHIP` |
-| 表示 | `PICOAGENT_THEME` / `PICOAGENT_LAYOUT` / `PICOAGENT_BUBBLE_FONT_PX` / `PICOAGENT_ALWAYS_ON_TOP` |
+| 表示 | `PICOAGENT_THEME` / `PICOAGENT_LAYOUT` / `PICOAGENT_BUBBLE_FONT_PX` / `PICOAGENT_ALWAYS_ON_TOP` / `PICOAGENT_TITLE_BAR_PINNED` |
 | 音声 | `PICOAGENT_TTS_ENABLED` / `PICOAGENT_TTS_VOLUME` |
 | 許可（共通） | `PICOAGENT_ALLOWED_ROOT` / `PICOAGENT_ALLOWED_PATHS` / `PICOAGENT_DENIED_PATHS` |
 | コマンド実行 | `PICOAGENT_COMMAND_ENABLED` / `PICOAGENT_COMMAND_ALLOWLIST` |

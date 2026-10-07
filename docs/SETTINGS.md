@@ -13,13 +13,14 @@
 | `PICOAGENT_SYSTEM_PROMPT` | 既定プロンプト | AIモデル | system メッセージ |
 | `PICOAGENT_THEME` | `system` | 基本 | 表示テーマ。`system` はOS/システム設定に追従、`light` は通常、`dark` はダーク。`pet:ui` で即反映 |
 | `PICOAGENT_UI_THEME` | `pastel` | 基本 | メイン画面と設定画面のUIモード。`pastel`＝可愛い（ローズ色・丸いパネル）、`glass`＝かっこいい（シアン色・引き締まったパネル）。未設定は可愛い。既存の保存値は維持。明暗は `PICOAGENT_THEME` で決まり、`glass` は `system` のときダーク、`pastel` はOSに追従。保存後 `pet:ui` で即反映 |
-| `PICOAGENT_BUBBLE_FONT_PX` | `13` | 基本 | ペット・ミニのフキダシ文字サイズ(px)。`pet:ui` で即反映 |
+| `PICOAGENT_BUBBLE_FONT_PX` | `13` | 基本 | ペット・ミニのフキダシ文字サイズ(px)。`pet:ui` で即反映。会話パネルの「Aa」・Ctrl+ホイールからも10〜28の整数で変更でき、`pet_save_ui_pref` で保存する |
 | `PICOAGENT_BUBBLE_WIDTH_PX` / `PICOAGENT_BUBBLE_HEIGHT_PX` / `PICOAGENT_BUBBLE_LEFT_PX` / `PICOAGENT_BUBBLE_TOP_PX` | （旧キー） | 内部UI | 旧版のフキダシ寸法・座標(px)。旧キー（シーン方式では読まない。値は削除せず残す。`PICOAGENT_SCENES` を参照） |
 | `PICOAGENT_WINDOW_WIDTH_PX` | （旧キー） | 内部UI | 旧版の共通ウィンドウ幅。現在は表示形式別の `PICOAGENT_WINDOW_LAYOUTS` を正本にする |
 | `PICOAGENT_WINDOW_HEIGHT_PX` | （旧キー） | 内部UI | 旧版の共通ウィンドウ高さ。現在は表示形式別の `PICOAGENT_WINDOW_LAYOUTS` を正本にする |
 | `PICOAGENT_WINDOW_LEFT_PX` / `PICOAGENT_WINDOW_TOP_PX` | 自動 | 内部UI | ウィンドウ左上の**仮想デスクトップ上の物理座標**(px)。アプリ終了時に保存し、起動時に復元する。マルチモニタでも同じディスプレイの同じ位置へ戻る。現在のディスプレイ構成のどこにも載らない場合は既定位置へ戻す |
 | `PICOAGENT_WINDOW_RIGHT_PX` / `PICOAGENT_WINDOW_BOTTOM_PX` | （旧キー） | 内部UI | 旧版が保存していた画面右端・下端からの相対オフセット。モニタ原点を持たないためマルチモニタでどのディスプレイに居たかを復元できず、絶対座標へ置き換えた。現在は書き込まず、「レイアウトを初期化」で他のレイアウトキーと一緒に掃除するだけ |
 | `PICOAGENT_ALWAYS_ON_TOP` | `true` | 基本 | 常に手前に表示 |
+| `PICOAGENT_TITLE_BAR_PINNED` | `false` | 画面 | メイン画面のタイトルバーを常に表示するか。`false`（既定）はシーンへ重ねて隠し、上端へポインタを寄せたときだけ出すフロー表示。タイトルバーのピン、または「画面・操作」で切り替え、`pet:ui` で即反映 |
 | `PICOAGENT_GAZE_TRACKING_ENABLED` | `false` | キャラクター | 視線追従。OFFではPNGの自動よそ見・マウス方向の顔差分と傾き・Live2Dのマウス追従を止め、常に正面へ戻す。ONでは顔付近のカーソルだけへ控えめに追従し、画面下など顔から離れた位置では追従しない。`pet:ui` で即反映 |
 | `PICOAGENT_CHARACTER_ZOOM` / `PICOAGENT_CHARACTER_FRAMING` / `PICOAGENT_LAYOUT_PLACEMENTS` / `PICOAGENT_CHARACTER_OFFSET_X` / `PICOAGENT_CHARACTER_OFFSET_Y` | （旧キー） | 内部UI | 旧版のキャラ拡大率・構図・配置編集の位置と倍率・立ち絵移動量。CSSの多段拡大を前提にした値のため新しい座標系へ写さない。旧キー（シーン方式では読まない。値は削除せず残す。`PICOAGENT_SCENES` を参照） |
 | `PICOAGENT_LAYOUT` | `pet` | 画面 | 表示形式（画面構成）。現在選べるのは `pet`（既定）/ `mascot` / `stream`。旧 `talk` / `chat` / `bar` / `workspace` / `widget` または未知の値が保存中なら表示時は `pet` へ丸め、旧形式の関連設定は保持する。設定画面のプレビューカードと右クリックメニュー「画面レイアウト」の両方から変更でき、再起動なしで反映する |
@@ -28,7 +29,7 @@
 | `PICOAGENT_STREAM_BACKGROUND_IMAGE` | 空 | 画面 | `custom` 配信背景としてアプリ管理領域へ取り込んだ画像パス |
 | `PICOAGENT_STREAM_DISPLAY` | `dashboard` | 画面 | 配信背景内ディスプレイ。`dashboard` / `game` / `clock` / `image` / `none` |
 | `PICOAGENT_STREAM_DISPLAY_IMAGE` | 空 | 画面 | `image` ディスプレイへ映す、アプリ管理領域へ取り込んだ画像パス |
-| `PICOAGENT_STREAM_CHAT_FONT_PX` | `22` | 画面 | 配信チャットの履歴・入力文字サイズ(px)。18〜48の整数。操作・状態文字も連動し、`pet:ui` で即反映。空欄は既定値 |
+| `PICOAGENT_STREAM_CHAT_FONT_PX` | `22` | 画面 | 配信チャットの履歴・入力文字サイズ(px)。18〜48の整数。操作・状態文字も連動し、`pet:ui` で即反映。空欄は既定値。会話パネルの「Aa」・Ctrl+ホイールからも2px刻みで変更できる |
 | `PICOAGENT_STREAM_PROFILES` | `{}` | キャラクター | キャラクターID別の配信表示上書き。背景、背景画像、画面内ディスプレイ、表示画像、字幕色を保持し、未設定キャラは共通の配信設定を使う。不正なID・選択肢・色は保存時に除去または安全な既定値へ正規化する |
 | `PICOAGENT_WINDOW_LAYOUTS` | `{}` | 内部UI | 表示形式ごとに覚えたウィンドウ寸法（`{"pet":{"w":900,"h":600}}`）。現在選べる形式の既定はミニ360×560／ペット900×600／配信1920×1080（フルHD）。旧 `chat` / `bar` / `workspace` / `widget` の保存値も保持する。旧 `talk` の保存寸法は `chat` の値がない場合に引き継ぐ。旧既定値と完全一致する保存値だけ新既定へ移し、手動調整値は保持する。位置は形式をまたいで共有する。設定画面には出さない |
 | `PICOAGENT_HOTKEY_ENABLED` | `true` | 画面 | グローバルホットキーを使う。OFF ですべてのホットキーを解除する |

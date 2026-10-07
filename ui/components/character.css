@@ -70,10 +70,10 @@
 .relationship-card {
   position: fixed;
   z-index: 240;
-  top: calc(var(--menu-height) + 10px);
+  top: calc(var(--chrome-bottom) + 10px);
   right: 12px;
   width: min(320px, calc(100vw - 24px));
-  max-height: calc(100vh - var(--menu-height) - 24px);
+  max-height: calc(100vh - var(--chrome-bottom) - 24px);
   overflow: auto;
   display: flex;
   flex-direction: column;

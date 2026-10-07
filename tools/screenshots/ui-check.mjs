@@ -7,6 +7,8 @@
 //   3. 最小サイズ（200×240）でも入力欄・送信・状態表示・ウィンドウ操作が窓の内側に完全に収まる。
 //   4. 右クリックはどこでも pet_menu を呼び、文脈（選択・入力欄・リンク・キャラ）だけを渡す。
 //   5. 配置の保存は pet_save_scene だけを通り、倍率を持たない矩形で届く。
+//   6. タイトルバーは見えているシーンの真上へ同じ幅で付き、フロー表示と常に表示を切り替えられる。
+//   7. 会話の文字サイズを会話パネルから変えられ、見せ方ごとの設定へ保存する。
 // 使い方:
 //   PLAYWRIGHT_MODULE=$(npm root -g)/playwright/index.mjs node tools/screenshots/ui-check.mjs
 // 結果の画像と JSON は temp/ui-check/ へ書く。失敗があれば終了コード1。
@@ -471,6 +473,79 @@ for (const [layout, [width, height]] of Object.entries(LAYOUTS)) {
     await page.screenshot({ path: path.join(outDir, `mode-${mode}-${theme}-${layout}.png`), omitBackground: true });
   }
   if (errors.length) fail(`mode/${layout}`, errors.join(" / "));
+  await context.close();
+}
+
+// タイトルバー: 見えているシーンの真上へ同じ幅で置き、既定のフロー表示は上端へ寄せたときだけ出す。
+// 📌 で常に表示へ切り替えると、シーンの上へ高さを空けて保存する。
+for (const [layout, width, height] of [["stream", 1000, 760], ["stream", 1280, 720], ["pet", 900, 600], ["mascot", 360, 560]]) {
+  const label = `titlebar/${layout}-${width}x${height}`;
+  const { context, page, errors } = await openApp({ layout, width, height });
+  const geometry = () => page.evaluate(() => {
+    const box = selector => { const rect = document.querySelector(selector).getBoundingClientRect(); return { left: Math.round(rect.left), top: Math.round(rect.top), right: Math.round(rect.right), bottom: Math.round(rect.bottom) }; };
+    const scene = document.getElementById("sceneRoot").getBoundingClientRect();
+    return {
+      menu: box(".top-window-menu"),
+      scene: { left: Math.round(scene.left), top: Math.round(scene.top), right: Math.round(scene.right) },
+      opacity: Number(getComputedStyle(document.querySelector(".top-window-menu")).opacity),
+      stageTop: Math.round(document.getElementById("stage").getBoundingClientRect().top),
+    };
+  });
+  await page.mouse.move(width / 2, height / 2);
+  await page.waitForTimeout(3400); // 起動直後の案内表示が終わるまで待つ。
+  let actual = await geometry();
+  const aligned = value => Math.abs(value.menu.left - value.scene.left) <= 1 && Math.abs(value.menu.right - value.scene.right) <= 1;
+  if (!aligned(actual) || Math.abs(actual.menu.top - actual.scene.top) > 1 || actual.stageTop !== 0 || actual.opacity !== 0) {
+    fail(label, `フロー表示の位置・非表示が不一致 ${JSON.stringify(actual)}`);
+  }
+  await page.mouse.move((actual.menu.left + actual.menu.right) / 2, actual.menu.top + 2);
+  await page.waitForTimeout(400);
+  if ((await geometry()).opacity !== 1) fail(label, "上端へ寄せてもタイトルバーが出ません");
+  await page.mouse.move(width / 2, height - 20);
+  await page.waitForTimeout(900);
+  if ((await geometry()).opacity !== 0) fail(label, "離れてもタイトルバーが隠れません");
+  await page.mouse.move((actual.menu.left + actual.menu.right) / 2, actual.menu.top + 2);
+  await page.waitForTimeout(400);
+  await page.locator(".window-pin").click();
+  await page.mouse.move(width / 2, height - 20);
+  await page.waitForTimeout(900);
+  actual = await geometry();
+  const saved = await page.evaluate(() => window.__calls.filter(call => call.name === "pet_save_ui_pref").map(call => call.args));
+  if (!aligned(actual) || actual.opacity !== 1 || Math.abs(actual.menu.bottom - actual.scene.top) > 1) fail(label, `常に表示でシーンの真上に常設されません ${JSON.stringify(actual)}`);
+  else if (JSON.stringify(saved) !== JSON.stringify([{ key: "PICOAGENT_TITLE_BAR_PINNED", value: true }])) fail(label, `常に表示の保存が不一致 ${JSON.stringify(saved)}`);
+  else ok(`${label} シーンへ吸着・フロー表示・常に表示`);
+  await page.screenshot({ path: path.join(outDir, `titlebar-pinned-${layout}-${width}x${height}.png`), omitBackground: true });
+  if (errors.length) fail(label, errors.join(" / "));
+  await context.close();
+}
+
+// 会話の文字サイズ: 「Aa」の −／＋／標準とCtrl+ホイールで即反映し、落ち着いてから見せ方ごとのキーへ保存する。
+for (const [layout, width, height, key, initial, step] of [["pet", 900, 600, "PICOAGENT_BUBBLE_FONT_PX", 14, 1], ["stream", 1280, 720, "PICOAGENT_STREAM_CHAT_FONT_PX", 22, 2]]) {
+  const label = `font/${layout}`;
+  const { context, page, errors } = await openApp({ layout, width, height });
+  const size = () => page.locator("[data-source=chat]").evaluate(node => node.style.getPropertyValue(node.dataset.variant === "column" ? "--stream-chat-font-size" : "--chat-font-size"));
+  await page.locator(".font-size-toggle").click();
+  await page.locator(".font-size-panel").waitFor();
+  await page.getByRole("button", { name: "文字を大きく" }).click();
+  await page.getByRole("button", { name: "文字を大きく" }).click();
+  const afterPlus = await size();
+  const chatBox = await page.locator("[data-source=chat]").boundingBox();
+  await page.mouse.move(chatBox.x + chatBox.width / 2, chatBox.y + chatBox.height / 2);
+  await page.keyboard.down("Control");
+  await page.mouse.wheel(0, 120);
+  await page.keyboard.up("Control");
+  const afterWheel = await size();
+  await page.waitForTimeout(900);
+  const saved = await page.evaluate(() => window.__calls.filter(call => call.name === "pet_save_ui_pref").map(call => call.args));
+  const panelBox = await page.locator(".font-size-panel").boundingBox();
+  const inside = panelBox && panelBox.x >= chatBox.x && panelBox.x + panelBox.width <= chatBox.x + chatBox.width + 1;
+  const expectedSaved = [{ key, value: String(initial + step) }];
+  if (afterPlus !== `${initial + step * 2}px` || afterWheel !== `${initial + step}px`) fail(label, `即反映が不一致 ${afterPlus} / ${afterWheel}`);
+  else if (JSON.stringify(saved) !== JSON.stringify(expectedSaved)) fail(label, `保存が不一致 ${JSON.stringify(saved)}`);
+  else if (!inside) fail(label, `文字サイズの操作が会話パネルからはみ出しています ${JSON.stringify(panelBox)}`);
+  else ok(`${label} 文字サイズの即反映と保存`);
+  await page.screenshot({ path: path.join(outDir, `font-${layout}.png`), omitBackground: true });
+  if (errors.length) fail(label, errors.join(" / "));
   await context.close();
 }
 
