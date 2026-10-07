@@ -132,10 +132,12 @@ async fn launch(app: &AppHandle, requested: &str) -> Result<Worker> {
         &script,
         include_str!("../resources/embedding-memory/worker.py").as_bytes(),
     )?;
+    // 診断ログは日付付きでログフォルダへ置き、保持期間の自動削除と診断情報の対象にする。
+    crate::log_paths::ensure_log_dir(app)?;
     let stderr = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
-        .open(crate::log_paths::data_dir(app).join("embedding-memory.log"))?;
+        .open(crate::log_paths::log_file(app, "embedding-memory.log"))?;
     let mut command = crate::tools::process::command(python);
     command
         .arg("-u")
@@ -187,23 +189,24 @@ async fn run(
         .unwrap_or_else(|| GENERATION.load(Ordering::SeqCst));
     let mut slot = WORKER.lock().await;
     drain_cleanup().await?;
+    let cancellation = CANCEL.notified();
+    tokio::pin!(cancellation);
+    // Notifyの登録を世代・終了の確認より先に済ませる。確認後に登録すると、その間の
+    // pause()の通知を取りこぼし、導入・起動が終わるまで設定保存や終了を待たせる。
+    cancellation.as_mut().enable();
     anyhow::ensure!(
         generation == GENERATION.load(Ordering::SeqCst),
         "記憶検索の設定または原本が変わったため中断しました"
+    );
+    anyhow::ensure!(
+        !EXITING.load(Ordering::SeqCst),
+        "終了中のため記憶検索を開始できません"
     );
     anyhow::ensure!(
         cfg.get_bool("PICOAGENT_MEMORY_ENABLED", true),
         "長期メモリが無効になったため検索を中断しました"
     );
     let requested = device(cfg)?;
-    let cancellation = CANCEL.notified();
-    tokio::pin!(cancellation);
-    // Notifyの登録を先に済ませ、導入中・通信中の設定変更や終了を取りこぼさない。
-    cancellation.as_mut().enable();
-    anyhow::ensure!(
-        !EXITING.load(Ordering::SeqCst),
-        "終了中のため記憶検索を開始できません"
-    );
     let operation = async {
         let mut worker = match slot.take() {
             Some(mut worker) if worker.requested != requested => {
@@ -317,7 +320,12 @@ pub fn prepare(app: AppHandle) {
         let generation = GENERATION.load(Ordering::SeqCst);
         let state = app.state::<crate::commands::AppState>();
         if state.config.get_bool("PICOAGENT_MEMORY_ENABLED", true) {
-            if let Err(error) = run(&app, &state.config, None).await {
+            let result = run(&app, &state.config, None).await;
+            if result.is_ok() {
+                // 以前の準備失敗を知らせた後なら復旧を伝え、次の同じ失敗も再通知できるようにする。
+                notify(&app, None);
+            }
+            if let Err(error) = result {
                 if generation != GENERATION.load(Ordering::SeqCst) || EXITING.load(Ordering::SeqCst)
                 {
                     return;

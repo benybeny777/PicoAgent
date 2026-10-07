@@ -4,7 +4,7 @@
 
 `memory.rs`が記憶原本と会話文脈、`memory_embedding.rs`が専用プロセスの直列通信・再利用・終了、`memory_embedding_install.rs`が固定資産と専用仮想環境の管理導入を担当する。Pythonの導入と検索スクリプトは`src-tauri/resources/embedding-memory/`に置き、`include_str!`で本体へ含める。重みとwheelは通常ビルドへ同梱・取得せず、長期メモリ有効時の初回起動で公式から導入する。
 
-実行時は`bundled/embedding-memory/{venv,model,install.json}`と共通`bundled/python`を使う。固定revision、全モデル資産のサイズとSHA-256/Git blob SHA、実埋め込み処理を確認してから導入完了を記録する。GPU構成変更や不完全配置は管理導入で修復する。記憶ベクトルは`app_data_dir/memory-vectors.json`、診断ログは`app_data_dir/embedding-memory.log`。記憶原本の更新は既存の`store::lock_state`を維持し、Pythonへは毎回のスナップショットだけを渡す。索引は本文を保存せずSHA-256と正規化ベクトルだけを保存し、原本の正本や同期先として使わない。通信失敗後は専用プロセスを破棄し、古い応答を次の質問へ流用しない。
+実行時は`bundled/embedding-memory/{venv,model,install.json}`と共通`bundled/python`を使う。固定revision、全モデル資産のサイズとSHA-256/Git blob SHA、実埋め込み処理を確認してから導入完了を記録する。GPU構成変更や不完全配置は管理導入で修復する。記憶ベクトルは`app_data_dir/memory-vectors.json`、診断ログはログフォルダの日付付き`embedding-memory.<YYYY-MM-DD>.log`（他のログと同じ1週間保持）。記憶原本の更新は既存の`store::lock_state`を維持し、Pythonへは毎回のスナップショットだけを渡す。索引は本文を保存せずSHA-256と正規化ベクトルだけを保存し、原本の正本や同期先として使わない。通信失敗後は専用プロセスを破棄し、古い応答を次の質問へ流用しない。
 
 ## Windows各版のビルドとアップロード
 

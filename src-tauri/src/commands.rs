@@ -3173,7 +3173,9 @@ pub async fn settings_save(
         || changed_text("PICOAGENT_RELATIONSHIP_CUSTOM", "");
     let memory_setting_changed = changed_bool("PICOAGENT_MEMORY_ENABLED", true)
         || changed_text("PICOAGENT_MEMORY_MAX_ITEMS", "80");
-    let memory_device_changed = changed_text("PICOAGENT_MEMORY_DEVICE", "gpu");
+    // 最大件数は検索プロセスの状態に関係しないため、モデルの再読込みを起こさない。
+    let memory_search_changed = changed_bool("PICOAGENT_MEMORY_ENABLED", true)
+        || changed_text("PICOAGENT_MEMORY_DEVICE", "gpu");
     let tts_runtime_changed = changed_bool("PICOAGENT_TTS_ENABLED", false)
         || changed_text("PICOAGENT_TTS_DEVICE", "auto")
         || changed_text("PICOAGENT_TTS_PORT", "11436")
@@ -3274,7 +3276,7 @@ pub async fn settings_save(
     }
     drop(schedule_guard);
 
-    if memory_device_changed || memory_setting_changed {
+    if memory_search_changed {
         crate::memory_embedding::reset()
             .await
             .map_err(|error| error.to_string())?;

@@ -81,7 +81,7 @@ pub async fn ensure(app: &AppHandle, requested: &str) -> Result<PathBuf> {
     ] {
         crate::store::write_atomic(&root.join(name), content.as_bytes())?;
     }
-    crate::components::run_component_command(
+    crate::components::run_labeled_command(
         &shared,
         &[
             &script.to_string_lossy(),
@@ -92,6 +92,7 @@ pub async fn ensure(app: &AppHandle, requested: &str) -> Result<PathBuf> {
             "--backend",
             backend,
         ],
+        "記憶検索環境の導入",
     )
     .await?;
     anyhow::ensure!(
