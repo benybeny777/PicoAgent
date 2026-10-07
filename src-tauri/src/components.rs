@@ -872,7 +872,7 @@ pub(crate) async fn ensure_shared_python(app: &AppHandle, uv: &Path) -> Result<P
     }
     std::fs::create_dir_all(&root)?;
     let runtime = root.join("runtime");
-    run_component_command(
+    run_labeled_command(
         uv,
         &[
             "python",
@@ -883,6 +883,7 @@ pub(crate) async fn ensure_shared_python(app: &AppHandle, uv: &Path) -> Result<P
             "--install-dir",
             &runtime.to_string_lossy(),
         ],
+        "記憶検索の共通Python導入",
     )
     .await?;
     let base = find_named_file(
@@ -899,7 +900,7 @@ pub(crate) async fn ensure_shared_python(app: &AppHandle, uv: &Path) -> Result<P
     if venv.exists() {
         std::fs::remove_dir_all(&venv)?;
     }
-    run_component_command(
+    run_labeled_command(
         uv,
         &[
             "venv",
@@ -908,12 +909,14 @@ pub(crate) async fn ensure_shared_python(app: &AppHandle, uv: &Path) -> Result<P
             &base.to_string_lossy(),
             "--relocatable",
         ],
+        "記憶検索の共通Python導入",
     )
     .await?;
     copy_dir_all(&venv, &root)?;
-    run_component_command(
+    run_labeled_command(
         &python,
         &["-c", "import sys; assert sys.version_info[:2] == (3,12)"],
+        "記憶検索の共通Python導入",
     )
     .await?;
     Ok(python)
@@ -1609,11 +1612,16 @@ fn configure_component_environment(
     Ok(())
 }
 
-pub(crate) async fn run_component_command(program: &Path, args: &[&str]) -> Result<()> {
+async fn run_component_command(program: &Path, args: &[&str]) -> Result<()> {
+    run_labeled_command(program, args, "キャラクター作成ランタイム導入").await
+}
+
+/// 時間切れ・起動失敗の文言に出す処理名を呼出元が指定する（記憶検索の導入を画像生成と誤表示しない）。
+pub(crate) async fn run_labeled_command(program: &Path, args: &[&str], label: &str) -> Result<()> {
     let mut command = crate::tools::process::command(program);
     command.args(args);
     configure_component_environment(&mut command, program)?;
-    let output = crate::tools::process::output(command, 7_200, "キャラクター作成ランタイム導入")
+    let output = crate::tools::process::output(command, 7_200, label)
         .await
         .map_err(anyhow::Error::msg)?;
     let stderr = String::from_utf8(output.stderr).unwrap_or_else(|error| {
