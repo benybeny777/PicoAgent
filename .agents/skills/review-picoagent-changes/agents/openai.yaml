@@ -1,0 +1,4 @@
+interface:
+  display_name: "PicoAgent レビュー"
+  short_description: "過去のデグレ台帳と照合して差分をレビューし、修正と回帰テストまで行う"
+  default_prompt: "Use $review-picoagent-changes to review the recent PicoAgent changes against the regression catalog, fix the findings with regression tests, and record them in the PR."
