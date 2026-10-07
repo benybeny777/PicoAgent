@@ -139,10 +139,11 @@ export function createStage({ stageElement, sceneRoot, sources, character, toast
     const def = definition();
     const geometry = sceneGeometry();
     const appElement = stageElement.closest(".app");
-    appElement?.classList.toggle("has-fixed-scene", geometry.fixed);
-    if (appElement && geometry.fixed) {
+    // タイトルバーは見えているシーンの真上へ同じ幅で置く（固定シーンの余白へ伸ばさない・離さない）。
+    if (appElement) {
       appElement.style.setProperty("--scene-view-left", `${geometry.offsetX}px`);
-      appElement.style.setProperty("--scene-view-width", `${geometry.width * geometry.scale}px`);
+      appElement.style.setProperty("--scene-view-top", `${geometry.offsetY}px`);
+      appElement.style.setProperty("--scene-view-width", geometry.fixed ? `${geometry.width * geometry.scale}px` : "100%");
     }
     sceneRoot.style.width = `${geometry.width}px`;
     sceneRoot.style.height = `${geometry.height}px`;

@@ -59,7 +59,7 @@
 .edit-toolbar {
   position: fixed;
   z-index: 255;
-  top: calc(var(--menu-height) + 8px);
+  top: calc(var(--chrome-bottom) + 8px);
   left: 50%;
   translate: -50% 0;
   width: max-content;

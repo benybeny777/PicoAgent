@@ -74,13 +74,16 @@ test("上端メニューとウィンドウ操作の失敗は理由を画面へ�
   const menu = dom.createElement("div");
   const factory = load("app/window-chrome.js", "createWindowChrome", {
     el, Element: menu.constructor, toast: text => alerts.push(text), logApp() {},
+    document: { addEventListener() {}, documentElement: { addEventListener() {} } },
     errorDetail: String, errorMessage: error => error.message, preview: value => value,
     bridge: { layoutMenu: reject, characterMenu: reject, openSettings: reject,
       minimizeWindow: reject, toggleMaximizeWindow: reject, closeWindow: reject, startWindowResize: reject },
   });
-  factory({ menu, stageElement: dom.createElement("div"), onEditLayout() {}, onGame() {}, listCharacters: async () => [] });
+  const appElement = { classList: { add() {}, remove() {}, toggle() {}, contains: () => false } };
+  factory({ menu, appElement, stageElement: dom.createElement("div"), onEditLayout() {}, onGame() {}, listCharacters: async () => [] });
   const items = menu.children[1].children;
-  const controls = menu.children[3].children;
+  // 📌（常に表示）は失敗しうる外部操作を持たないので、失敗通知の対象から外す。
+  const controls = [...menu.children[3].children].filter(button => button.className !== "window-pin");
   for (const button of [items[0], items[2], items[4], ...controls]) {
     const previous = alerts.length;
     await button.listeners.click[0]({ preventDefault() {}, stopPropagation() {} });

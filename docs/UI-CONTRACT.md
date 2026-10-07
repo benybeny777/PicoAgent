@@ -40,6 +40,7 @@
 | `pet_set_character_profile` | `characterId`, `profile`, `greeting` | 確定したキャラの配信表示 `{ streamBackground, streamBackgroundImage, streamDisplay, streamDisplayImage, streamCaptionColor }` |
 | `pet_user_characters` | なし | `{ characters: [{ id, name, description, path }] }`（利用者が追加したキャラ） |
 | `pet_save_scene` | `scenes` | なし。`PICOAGENT_SCENES` を正規化して保存する。壊れた入力は保存せずエラー |
+| `pet_save_ui_pref` | `key`, `value` | なし。メイン画面で変えた見た目だけを保存する。対象は `PICOAGENT_BUBBLE_FONT_PX`（10〜28の整数文字列）、`PICOAGENT_STREAM_CHAT_FONT_PX`（18〜48）、`PICOAGENT_TITLE_BAR_PINNED`（真偽値）。それ以外のキー・範囲外は保存せずエラー |
 | `pet_menu` | `context`（`{ selection, editable, link, character }` の真偽値）、`x`・`y`（窓内の論理座標） | なし。右クリック位置に統一メニューを出す |
 | `pet_layout_menu` | `x`, `y`（ウィンドウ左上基準の論理座標） | なし。上端メニュー「表示」の一覧 |
 | `pet_character_menu` | `x`, `y`, `characters`（`[{ id, name }]`） | なし。上端メニュー「キャラ選択」の一覧 |

@@ -133,11 +133,18 @@ bridge.on("pet:game-open", () => game.open());
 
 const chrome = createWindowChrome({
   menu: document.getElementById("topWindowMenu"),
+  appElement: app,
   bootScreen: document.getElementById("bootScreen"),
   stageElement,
   onEditLayout: () => (editor.mode === "all" ? editor.stop() : editor.start("all")),
   onGame: () => game.open(),
   listCharacters: async () => (await listCharacters()).entries.map(entry => ({ id: entry.id, name: entry.name || entry.id })),
+  onPinnedChange: pinned => {
+    bridge.saveUiPref("PICOAGENT_TITLE_BAR_PINNED", pinned).catch(error => {
+      logApp("error", "タイトルバーの表示設定を保存できませんでした", errorDetail(error));
+      toast(`タイトルバーの表示設定を保存できませんでした: ${errorMessage(error)}`, "error");
+    });
+  },
 });
 
 createContextMenu({
@@ -421,6 +428,7 @@ bridge.on("pet:show-onboarding", () => {
 bridge.on("pet:ui", ui => {
   if (!ui) return;
   applyTheme(ui.theme, ui.uiTheme);
+  if (ui.titleBarPinned != null) chrome.setPinned(ui.titleBarPinned === true);
   if (ui.fontPx != null) chat.setFontPx(ui.fontPx);
   if (ui.streamChatFontPx != null) chat.setStreamFontPx(ui.streamChatFontPx);
   if (ui.voiceVolume != null) voice.setVolume(ui.voiceVolume);
@@ -455,6 +463,7 @@ async function loadSceneDefinitions() {
   const [info, definitions] = await Promise.all([bridge.init(), loadSceneDefinitions()]);
   document.querySelector(".beta-badge")?.toggleAttribute("hidden", info.betaBuild !== true);
   applyTheme(info.theme, info.uiTheme);
+  chrome.setPinned(info.titleBarPinned === true);
   if (info.fontPx != null) chat.setFontPx(info.fontPx);
   if (info.streamChatFontPx != null) chat.setStreamFontPx(info.streamChatFontPx);
   if (info.voiceVolume != null) voice.setVolume(info.voiceVolume);
@@ -526,6 +535,7 @@ async function loadSceneDefinitions() {
     stage.layoutNow();
     await boot.release(status);
     status.clear("boot");
+    chrome.introduce();
   }
   if (startupGreeting) chat.renderReply(startupGreeting);
   if (preparedGreeting) voice.playPrepared(preparedGreeting);

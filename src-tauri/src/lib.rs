@@ -196,6 +196,7 @@ pub fn run() {
             commands::pet_reveal_main,
             commands::pet_reset_layout,
             commands::pet_save_scene,
+            commands::pet_save_ui_pref,
             menu::pet_menu,
             menu::pet_layout_menu,
             menu::pet_character_menu,

@@ -6,6 +6,7 @@
 // 画面読み上げへ知らせるのは回答欄と状態行だけ（パネル全体や履歴を生きた領域にすると繰り返し読まれる）。
 
 import { createComposer } from "./composer.js";
+import { createFontSizeControl } from "./font-size.js";
 import { createHistory } from "./history.js";
 import { renderMarkdown } from "./markdown.js";
 import { createPager } from "./pager.js";
@@ -23,6 +24,7 @@ export function createChatSource(context) {
   const stopButton = el("button", { type: "button", className: "chip", textContent: "停止", title: "読み上げを停止", hidden: true }, [], { "aria-label": "読み上げを停止" });
   const expandButton = el("button", { type: "button", className: "chip", textContent: "拡大", title: "会話パネルを拡大" }, [], { "aria-label": "会話パネルを拡大" });
   const actions = el("div", { className: "reply-actions" }, [noticeButton, copyButton, regenerateButton, replayButton, stopButton, expandButton], { role: "group", "aria-label": "回答操作" });
+
   const noticePanel = el("div", { className: "notice-panel", hidden: true }, [], { role: "region", "aria-label": "アクションセンター" });
 
   // ── 履歴 ────────────────────────────────────────────────
@@ -64,6 +66,25 @@ export function createChatSource(context) {
   const status = createStatus(statusElement, { onBootText: text => context.boot?.status(text) });
   let variant = "bubble";
   let lastAssistantText = "";
+
+  // ── 文字サイズ（見た目の適用はここ、保存は font-size.js） ─────────
+  function applyFontPx(size) {
+    element.style.setProperty("--chat-font-size", `${size}px`);
+    // 状態表示は補助の1行。会話文字を大きくしても上限を設け、入力欄を窓外へ押し出さない。
+    element.style.setProperty("--status-font-size", `${Math.min(18, Math.max(9, Math.round(size * 0.72)))}px`);
+  }
+  function applyStreamFontPx(size) {
+    element.style.setProperty("--stream-chat-font-size", `${size}px`);
+    element.style.setProperty("--stream-chat-control-font-size", `${Math.round(size * 0.8)}px`);
+    element.style.setProperty("--stream-chat-action-font-size", `${Math.round(size * 0.65)}px`);
+  }
+  const fontSize = createFontSizeControl({
+    panel: element,
+    variant: () => variant,
+    apply: (kind, px) => (kind === "column" ? applyStreamFontPx(px) : applyFontPx(px)),
+  });
+  actions.append(fontSize.toggle);
+  actions.after(fontSize.popover);
   let tailWanted = false;
 
   const markdownHandlers = {
@@ -194,22 +215,21 @@ export function createChatSource(context) {
     setFontPx(px) {
       const size = parseFloat(px);
       if (!Number.isFinite(size) || size <= 0) return;
-      element.style.setProperty("--chat-font-size", `${size}px`);
-      // 状態表示は補助の1行。会話文字を大きくしても上限を設け、入力欄を窓外へ押し出さない。
-      element.style.setProperty("--status-font-size", `${Math.min(18, Math.max(9, Math.round(size * 0.72)))}px`);
+      applyFontPx(size);
+      fontSize.setSize("bubble", size);
     },
     setStreamFontPx(px) {
       const requested = Number(px);
       const size = Number.isInteger(requested) && requested >= 18 && requested <= 48 ? requested : 22;
-      element.style.setProperty("--stream-chat-font-size", `${size}px`);
-      element.style.setProperty("--stream-chat-control-font-size", `${Math.round(size * 0.8)}px`);
-      element.style.setProperty("--stream-chat-action-font-size", `${Math.round(size * 0.65)}px`);
+      applyStreamFontPx(size);
+      fontSize.setSize("column", size);
     },
     update({ options, expanded }) {
       const nextVariant = options.variant === "column" ? "column" : "bubble";
       if (nextVariant !== variant) pager.cancel();
       variant = nextVariant;
       element.dataset.variant = variant;
+      fontSize.refresh();
       element.dataset.compact = String(Boolean(options.compact));
       element.classList.toggle("expanded", Boolean(expanded));
       history.setVisible(variant === "column" || Boolean(expanded));
