@@ -16,6 +16,7 @@ description: PicoAgentの差分・PR・直近マージ・指定範囲を、過�
    - 未コミット変更 → `origin/main` との差分と作業ツリー。
 2. `git fetch origin main` してから `git log --oneline <範囲>` と `git diff --stat <範囲>` で規模を掴む。画像・`character.json`・生成物は差分を読まず、参照と寸法だけを確認する。
 3. 既に未コミット変更がある場合は利用者または別エージェントの作業として扱い、巻き戻さない。
+4. レビューは作業中のエージェント自身で完結させる。CodexとClaudeは互いを起動せず、相互レビューは利用者が担当と範囲を明示した場合だけ行う（`AGENTS.md`）。
 
 ## 準備する
 
@@ -24,10 +25,10 @@ description: PicoAgentの差分・PR・直近マージ・指定範囲を、過�
 3. 読む節を決める。
 
    ```sh
-   python3 .agents/skills/review-picoagent-changes/scripts/regression_hints.py <範囲>
+   uv run --python 3.12 python .agents/skills/review-picoagent-changes/scripts/regression_hints.py <範囲>
    ```
 
-   Pythonが直接使えない環境では `uv run --python 3.12 python ...` を使う。出力は手掛かりで、該当なしでも下の共通観点は省略しない。
+   `python3` を直接使える環境ではそれでもよい。出力は手掛かりで、該当なしでも下の共通観点は省略しない。
 4. `references/regression-catalog.md` の該当節を読む。各節の「固定済み」は機械検査が既にある範囲なので、手で再検査せず検査の穴だけを見る。
 
 ## 読む
@@ -75,7 +76,7 @@ description: PicoAgentの差分・PR・直近マージ・指定範囲を、過�
 2. `cargo test --manifest-path src-tauri/Cargo.toml --lib`（xtaskを変えたら `cargo test --manifest-path xtask/Cargo.toml` も）
 3. UIを変えたら `node --test tools/tests/*.mjs` と `node --check <変更したJS>`
 4. `cfg`・featureを変えたら他OSのtargetでも `cargo clippy --all-targets -- -D warnings` を確かめる。clippyは件数だけでなく出力の中身を読む。
-5. 最終確認は `cargo xtask verify`。Claude Code on the webのコンテナではgit-lfsが無くキャラクター素材の検査が落ちるため、その失敗が素材由来であることを確かめてPR本文の未確認へ書く。
+5. 最終確認は `cargo xtask verify`。git-lfsが無い環境（Claude Code on the webのコンテナなど）ではキャラクター素材の検査が落ちるため、その失敗が素材由来であることを確かめてPR本文の未確認へ書く。
 6. 画面の見た目・配置・起動表示が変わる場合は `verify-picoagent-ui` を使う。GUIを起動できない環境では、コードで判断した範囲と利用者の目視に委ねる範囲を分けて書く。
 
 ## 記録する
