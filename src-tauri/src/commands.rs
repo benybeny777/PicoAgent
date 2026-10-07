@@ -1822,9 +1822,16 @@ pub async fn pet_send(
     // セマンティックメモリ: クエリに関連するメモリを今回のリクエスト向けに絞り込み、
     // 今回の convo の system メッセージのみ更新する（state.memory_context は変えない）。
     {
-        let semantic_ctx = crate::memory::context_for_query(&app, &state.config, &text)
-            .await
-            .map_err(|error| error.to_string())?;
+        // フォールバック許可: 意味検索を使えない間（初回導入中・オフライン・非対応構成）も
+        // 会話は止めず、system文脈に入っている言及回数順の記憶で応答し、理由を画面へ出す。
+        let semantic_ctx = match crate::memory::context_for_query(&app, &state.config, &text).await
+        {
+            Ok(context) => context,
+            Err(error) => {
+                crate::memory_embedding::report_fallback(&app, &error);
+                String::new()
+            }
+        };
         let base_ctx = state.memory_context.lock().unwrap().clone();
         if !semantic_ctx.is_empty() && semantic_ctx != base_ctx {
             if let Some(sys) = convo.iter_mut().find(|m| m.role == "system") {

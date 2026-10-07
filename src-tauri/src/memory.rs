@@ -185,10 +185,9 @@ pub async fn context_for_query(
     }
     let docs: Vec<String> = store.items.iter().map(|item| item.text.clone()).collect();
     let order = crate::memory_embedding::search(app, cfg, &docs, query, generation).await?;
-    anyhow::ensure!(
-        generation == crate::memory_embedding::generation(),
-        "記憶が更新されたため検索を中断しました"
-    );
+    if generation != crate::memory_embedding::generation() {
+        return Err(crate::memory_embedding::interrupted());
+    }
     let lines: Vec<String> = order
         .into_iter()
         .take(MAX_CONTEXT_ITEMS)
