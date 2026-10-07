@@ -185,6 +185,11 @@ for (const characterId of characters) {
     await page.screenshot({ path: path.join(outDir, `${characterId}-${layout}.png`), omitBackground: true });
     report.push({ label, kind, framing, edges });
     const idleCharacter = await page.locator('[data-source="character"]').boundingBox();
+    if (layout === "mascot") {
+      const chat = await page.locator('[data-source="chat"]').boundingBox();
+      if (chat.y + chat.height > idleCharacter.y + 1) fail(label, "既定のミニ表示でフキダシがキャラの頭へ重なります");
+      else ok(`${label} フキダシと頭の間に余白がある`);
+    }
     await page.mouse.move(idleCharacter.x + idleCharacter.width / 2, idleCharacter.y + idleCharacter.height / 2);
     const idleEdit = await page.evaluate(() => ({
       layerHidden: document.getElementById("editLayer").hidden,
@@ -324,6 +329,15 @@ for (const characterId of characters) {
     if (!editTools.inside) fail(`${label}/edit`, `配置の操作部が画面外です ${JSON.stringify(editTools)}`);
     if (characterId === characters[0]) await page.screenshot({ path: path.join(outDir, `${layout}-editing.png`), omitBackground: true });
     await page.evaluate(() => window.__emit("pet:layout-edit", "character"));
+    // 横長モデルは両端が画面外へ出るため、ホイールで枠を収めてからつまみを検査する。
+    const firstHandle = page.locator('.edit-frame[data-target="character"] .edit-handle[data-corner="top-left"]');
+    for (let attempt = 0; attempt < 20 && !(await firstHandle.isVisible()); attempt++) {
+      const box = await page.locator("[data-source=character]").boundingBox();
+      await page.mouse.move(Math.max(1, Math.min(width - 1, box.x + box.width / 2)), box.y + box.height / 2);
+      await page.mouse.wheel(0, 120);
+      await page.waitForTimeout(60);
+    }
+    await page.waitForTimeout(400);
     // つまみで縮小・拡大する（保存は pet_save_scene を通り、倍率ではなく矩形で届く）。
     for (const factor of [0.5, 1.8]) {
       const box = await page.locator("[data-source=character]").boundingBox();

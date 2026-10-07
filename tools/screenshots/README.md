@@ -4,7 +4,7 @@
 
 `node tools/screenshots/review-board.mjs --capture` で、同梱の全キャラを現行3形式（ペット・ミニ・配信）で順に撮影し、`temp/visual-review/index.html` に目視確認画面を作る。画像を拡大し、キャラ・形式・状態で絞り込める。各組み合わせの「問題なし／要修正」と所見はブラウザ内に保存され、JSONとして書き出せる。既存の会話、設定、Windows WebView2 の撮影結果へのリンクもまとめる。撮影済み画像だけから画面を作り直す場合は `--capture` を省く。`PLAYWRIGHT_MODULE` は下記の `ui-check.mjs` と同じ指定を使う。`%APPDATA%/PicoAgent/characters/` の追加キャラも一覧へ載る。MMDなど実機で撮影するキャラは `temp/visual-review/native/<キャラID>-<pet|mascot|stream>.png` に画像を置いてから画面を再生成する。追加キャラの画像はヘッドレスでは撮影しない。
 
-シーン方式の現行画面（ペット・ミニ・配信）の受入には、まず `tools/screenshots/ui-check.mjs` を使う。`PLAYWRIGHT_MODULE` に開発用 Playwright の `index.mjs` を指定して実行すると、3形式の画素・完全包含・右クリック・保存値と、全形式の拡大復元を `temp/ui-check/` で確認できる。通常時の編集枠非表示、配置中の枠とソースの一致、画面外の保存矩形を表示だけ切ることも撮影・検査する。可愛い・かっこいいの即反映と明暗も全形式で確かめ、`mode-<pastel|glass>-<system|light|dark>-<形式>.png` を残す。`UI_CHECK_CHARACTERS` と `UI_CHECK_LAYOUTS` でキャラ検査の対象を絞れる。設定側のモード初期値・プレビュー・保存・再読込は `settings-display.mjs` が検査し、`temp/settings-check/mode-<pastel|glass>.png` を残す。いずれもバックエンドは模擬ブリッジであり、OSや実AIの確認とは分ける。`docs/images/layout-shot-{pet,mascot,stream}.webp` は同検査の実画面PNGから作成する。以下の `shoot.mjs` 手順は旧画面の撮影設定を含むため、新しい画面で再利用するときは対象を確認する。
+シーン方式の現行画面（ペット・ミニ・配信）の受入には、まず `tools/screenshots/ui-check.mjs` を使う。`PLAYWRIGHT_MODULE` に開発用 Playwright の `index.mjs` を指定して実行すると、3形式の画素・完全包含・右クリック・保存値と、全形式の拡大復元を `temp/ui-check/` で確認できる。通常時の編集枠非表示、配置中の枠とソースの一致、画面外の保存矩形を表示だけ切ることも撮影・検査する。可愛い・かっこいいの即反映と明暗も全形式で確かめ、`mode-<pastel|glass>-<system|light|dark>-<形式>.png` を残す。`UI_CHECK_CHARACTERS` と `UI_CHECK_LAYOUTS` でキャラ検査の対象を絞れる。設定側のモード初期値・プレビュー・保存・再読込と、アクセント面の文字がモードの対比色（`--on-accent`）になることは `settings-display.mjs` が検査し、`temp/settings-check/mode-<pastel|glass>-<light|dark>.png` を残す。いずれもバックエンドは模擬ブリッジであり、OSや実AIの確認とは分ける。`docs/images/layout-shot-{pet,mascot,stream}.webp` は同検査の実画面PNGから作成する。以下の `shoot.mjs` 手順は旧画面の撮影設定を含むため、新しい画面で再利用するときは対象を確認する。
 
 `docs/images/` に置いている README 掲載画像を再生成するツールです。通常プレビューは**透過つきの
 アニメーション WebP**（無限ループ）、7形式の比較画像は1フレームの透過 WebPです。
@@ -139,6 +139,8 @@ Remove-Item Env:SHOOT_SITE_GALLERY
 WebView2の9222番デバッグポートを検査用に開いた後、`node tools/screenshots/native-inspect.mjs state`で状態を取得し、`node tools/screenshots/native-inspect.mjs screenshot`で`temp/native-state.png`へ撮影する。`PLAYWRIGHT_MODULE`は上記と共通（Playwright 1.62.0で検証）。追加の実機検査スクリプトは同ファイルの`withNativePage(async page => { ... })`を使う。
 
 実アプリへの接続は`noDefaults: true`を指定し、OS由来のテーマ・省モーション・フォーカスを保つ。接続後に`emulateMedia`で戻す方法では、接続直後に右のチャット欄が一瞬白くなる。ヘッドレスの比較撮影でテーマを明示する操作と、利用中の実アプリへの接続を混同しない。画像は作業ツリーの`temp/`へ保存し、終了時は接続を必ず閉じる。検査のために開いたデバッグポートは終了後に設定から外す。
+
+メインと設定は`webview/main`と`webview/settings`の別プロファイル・別WebView2プロセスを使う。同時に検査する場合は、一時設定のデバッグポートを`--remote-debugging-port=0`にし、各プロファイルの`EBWebView/DevToolsActivePort`の先頭行から実ポートを読む。固定9222を両方へ渡すと設定側へ接続できない。`NATIVE_DEBUG_PORT`に実ポート、`NATIVE_WINDOW=settings`に対象を指定すると、同じ`native-inspect.mjs`で設定画面も検査できる。スクリプトからは`withNativePage(action, { port, target: "settings" })`を使う。検査アプリは別identifier・検証専用設定で起動し、利用者の設定や履歴を使わない。起動前に指定モニターの座標を窓設定へ入れ、他のアプリへのフォーカス移動にも注意する。
 
 ## Live2D の絵について
 
