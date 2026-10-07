@@ -1243,8 +1243,7 @@ function buildComponentManager() {
     list.innerHTML = "";
     const attentionCount = items.filter(item => item.updateAvailable || item.newerThanTarget || item.versionUnknown).length;
     const updateCount = items.filter(item => item.updateAvailable).length;
-    const componentTab = document.getElementById("tab-components");
-    if (componentTab) componentTab.textContent = `追加機能・更新${attentionCount ? `（${attentionCount}）` : ""}`;
+    setSettingsTabLabel("components", `追加機能・更新${attentionCount ? `（${attentionCount}）` : ""}`);
     setQuickSettingsSummary("components", updateCount
       ? `${updateCount}件の更新があります`
       : (attentionCount ? `${attentionCount}件の確認が必要です` : "導入・修復・更新を管理"));
@@ -1399,13 +1398,18 @@ function buildComponentManager() {
     logApp("warn", "追加機能の進捗を受け取れませんでした", errorDetail(error));
   });
   refresh().catch(error => {
-    const componentTab = document.getElementById("tab-components");
-    if (componentTab) componentTab.textContent = "追加機能・更新（要確認）";
+    setSettingsTabLabel("components", "追加機能・更新（要確認）");
     setQuickSettingsSummary("components", "状態を確認できません");
     list.innerHTML = "";
     list.append(el("p", { className: "hint", textContent: `状態を確認できません: ${errorMessage(error)}` }));
   });
   return sec;
+}
+
+// タブ名だけを書き換える。ボタン全体の textContent を替えるとアイコンが消える。
+function setSettingsTabLabel(tabId, label) {
+  const name = document.querySelector(`#tab-${tabId} .tab-name`);
+  if (name) name.textContent = label;
 }
 
 function createTabs(items) {

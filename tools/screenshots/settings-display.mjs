@@ -698,9 +698,41 @@ try {
     await modePage.reload();
     await modeSelect.waitFor();
     if (await modeSelect.inputValue() !== mode) throw new Error(`UIモードの保存・再読込が不一致: ${mode}`);
-    await modePage.screenshot({ path: join(OUT, `mode-${mode}.png`) });
+    // 明暗はプレビューだけ切り替えて撮る（保存しない）。アクセント面の文字はモードの対比色を使う。
+    const themeSelect = modePage.locator('[data-setting-key="PICOAGENT_THEME"] select');
+    for (const theme of ["light", "dark"]) {
+      await themeSelect.selectOption(theme);
+      const colors = await modePage.evaluate(() => {
+        const probe = document.createElement("button");
+        probe.className = "genre-chip active";
+        document.body.append(probe);
+        const color = getComputedStyle(probe).color;
+        probe.remove();
+        const onAccent = document.createElement("span");
+        onAccent.style.color = "var(--on-accent)";
+        document.body.append(onAccent);
+        const expected = getComputedStyle(onAccent).color;
+        onAccent.remove();
+        return { color, expected };
+      });
+      if (colors.color !== colors.expected) throw new Error(`アクセント面の文字色がUIモードの対比色ではありません: ${mode}/${theme} ${JSON.stringify(colors)}`);
+      await modePage.screenshot({ path: join(OUT, `mode-${mode}-${theme}.png`) });
+    }
   }
   await modePage.close();
+  // 実機で返る長い警告でも、保存操作が縦につぶれたり窓から出たりしない。
+  for (const width of [960, 720, 400]) {
+    await page.setViewportSize({ width, height: 760 });
+    await page.evaluate(() => {
+      document.getElementById("status").textContent = "保存しました。ホットキーを登録できませんでした: CommandOrControl+Alt+H（他のアプリが同じキーを使っている可能性があります）: HotKey already registered: ".repeat(4);
+    });
+    const buttons = await page.locator("footer button").evaluateAll(nodes => nodes.map(node => {
+      const rect = node.getBoundingClientRect();
+      return { width: rect.width, height: rect.height, inside: rect.left >= 0 && rect.right <= innerWidth, textFits: node.scrollWidth <= node.clientWidth };
+    }));
+    if (buttons.some(button => !button.inside || !button.textFits || button.width < 80)) throw new Error(`長い警告で保存操作がつぶれます: ${width} ${JSON.stringify(buttons)}`);
+    if (width === 960 && buttons.some(button => button.height > 60)) throw new Error("通常幅で保存ボタンの文字が縦に並びます");
+  }
   const recoveryPage = await browser.newPage();
   await recoveryPage.addInitScript(mock);
   await recoveryPage.goto(`http://127.0.0.1:${port}/settings.html?load-failure=1`);

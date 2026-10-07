@@ -5,20 +5,25 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
 
-export async function withNativePage(action) {
+export async function withNativePage(action, options = {}) {
+  const port = Number(options.port ?? process.env.NATIVE_DEBUG_PORT ?? 9222);
+  const target = options.target ?? process.env.NATIVE_WINDOW ?? "main";
+  if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error("実WebViewの検査ポートが不正です。");
+  if (!["main", "settings"].includes(target)) throw new Error("検査対象はmainまたはsettingsです。");
   const modulePath = process.env.PLAYWRIGHT_MODULE;
   const { chromium } = await import(modulePath ? pathToFileURL(modulePath).href : "playwright");
   // 接続後のemulateMedia解除では、接続開始から解除までに白いフレームが出る。
-  const browser = await chromium.connectOverCDP("http://127.0.0.1:9222", { noDefaults: true });
+  const browser = await chromium.connectOverCDP(`http://127.0.0.1:${port}`, { noDefaults: true });
   try {
     const pages = browser.contexts().flatMap(context => context.pages());
     const page = pages.find(page => {
       const url = new URL(page.url());
+      if (target === "settings") return url.pathname === "/settings.html";
       return url.pathname === "/index.html"
         || url.hostname === "picoboot.localhost"
         || (url.hostname === "127.0.0.1" && url.port === "1430" && url.pathname === "/");
     });
-    if (!page) throw new Error("PicoAgentのメイン画面が見つかりません。");
+    if (!page) throw new Error(`PicoAgentの${target === "settings" ? "設定" : "メイン"}画面が見つかりません。`);
     return await action(page);
   } finally {
     await browser.close();

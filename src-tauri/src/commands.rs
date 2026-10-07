@@ -2933,7 +2933,10 @@ pub(crate) fn encrypt_existing_secrets(app: &AppHandle, config: &Config) {
 }
 
 #[tauri::command]
-pub async fn settings_load(state: State<'_, AppState>) -> Result<Value, String> {
+pub async fn settings_load(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> Result<Value, String> {
     let provider_id = state.provider_id.lock().unwrap().clone();
     let model = state.model.lock().unwrap().clone();
     let value_revisions = state.config.value_revisions();
@@ -2990,7 +2993,7 @@ pub async fn settings_load(state: State<'_, AppState>) -> Result<Value, String> 
         "product": {
             "name": "PicoAgent",
             "version": env!("CARGO_PKG_VERSION"),
-            "identifier": "com.picoagent.desktop",
+            "identifier": app.config().identifier,
         },
         "license": crate::license::status(&state.config),
         "values": values,
