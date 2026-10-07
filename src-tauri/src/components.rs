@@ -38,7 +38,8 @@ const WHISPER_MODEL_SHA256: &str =
     "1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b";
 static RUNTIME_ROOT: OnceLock<PathBuf> = OnceLock::new();
 static CHARACTER_MAKER_ASSETS: OnceLock<PathBuf> = OnceLock::new();
-static COMPONENT_OPERATION_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+pub(crate) static COMPONENT_OPERATION_LOCK: tokio::sync::Mutex<()> =
+    tokio::sync::Mutex::const_new(());
 
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -332,17 +333,21 @@ pub(crate) fn generation_platform_supported() -> bool {
 }
 
 /// nvidia-smiがCUDA対応GPUを報告するか。NVIDIAの既存判定を変えない。
-#[cfg(windows)]
-async fn nvidia_cuda_ready() -> bool {
-    let mut command = crate::tools::process::command("nvidia-smi.exe");
+#[cfg(any(windows, target_os = "linux"))]
+pub(crate) async fn nvidia_cuda_ready() -> bool {
+    let mut command = crate::tools::process::command(if cfg!(windows) {
+        "nvidia-smi.exe"
+    } else {
+        "nvidia-smi"
+    });
     command.args(["--query-gpu=name", "--format=csv,noheader"]);
     crate::tools::process::output(command, 10, "NVIDIA GPU確認")
         .await
         .is_ok_and(|output| output.status.success() && !output.stdout.is_empty())
 }
 
-#[cfg(not(windows))]
-async fn nvidia_cuda_ready() -> bool {
+#[cfg(not(any(windows, target_os = "linux")))]
+pub(crate) async fn nvidia_cuda_ready() -> bool {
     false
 }
 
@@ -655,7 +660,10 @@ pub async fn remove(app: &AppHandle, id: &str) -> Result<Vec<ComponentStatus>> {
         crate::aivis::stop(app);
     }
     let target = installed_dir(app, id);
-    let shared_python = (id == "character-maker").then(|| shared_python_dir(app));
+    // 標準の記憶検索が使う共通Pythonは画像生成機能だけの削除で消さない。
+    let shared_python = (id == "character-maker"
+        && !installed_dir(app, "embedding-memory").join("venv").is_dir())
+    .then(|| shared_python_dir(app));
     let label = definitions(id).map(|item| item.0).unwrap_or(id).to_string();
     emit_progress(app, id, "remove", "削除中…", 0, 0);
     tokio::task::spawn_blocking(move || {
@@ -727,6 +735,13 @@ pub async fn install(
             definitions(id).map(|item| item.0).unwrap_or(id)
         );
     }
+    // 共通Pythonの交換前に検索を止める。導入排他を先に取ると検索の準備と相互待ちになる。
+    let replacing_python = ids.iter().any(|id| id == "character-maker");
+    let _search_guard = if replacing_python {
+        Some(crate::memory_embedding::pause().await?)
+    } else {
+        None
+    };
     let _operation = COMPONENT_OPERATION_LOCK.lock().await;
     cleanup_stale_install_stages(app).await?;
     for id in ids {
@@ -796,7 +811,112 @@ fn uv_asset() -> Option<UvAsset> {
             archive: UvArchive::TarGz,
         });
     }
+    if cfg!(all(target_os = "linux", target_arch = "x86_64")) {
+        return Some(UvAsset {
+            url: "https://github.com/astral-sh/uv/releases/download/0.12.11/uv-x86_64-unknown-linux-gnu.tar.gz",
+            cache_name: "uv.tar.gz.part", executable: "uv", size: 19_422_570,
+            sha256: "4ae93e0f148a18434cc094072547cec88912fc4a72b984183c7d0d0e9586cb5e",
+            archive: UvArchive::TarGz,
+        });
+    }
+    if cfg!(all(target_os = "linux", target_arch = "aarch64")) {
+        return Some(UvAsset {
+            url: "https://github.com/astral-sh/uv/releases/download/0.12.11/uv-aarch64-unknown-linux-gnu.tar.gz",
+            cache_name: "uv.tar.gz.part", executable: "uv", size: 18_589_830,
+            sha256: "e9933d907fb9cd27d606d819bbded419f2844c0e2efc98225ecfa409288eb28d",
+            archive: UvArchive::TarGz,
+        });
+    }
     None
+}
+
+/// 記憶検索の導入用uvを公式固定資産から取得し、サイズとSHA-256を検証する。
+pub(crate) async fn acquire_embedding_uv(app: &AppHandle) -> Result<PathBuf> {
+    let asset = uv_asset().context("この環境向けのPython管理ツール配布がありません")?;
+    let root = crate::log_paths::bundled_dir(app).join("embedding-install-tools");
+    std::fs::create_dir_all(&root)?;
+    let archive = root.join(asset.cache_name);
+    download_to(
+        app,
+        crate::tools::http::client(),
+        DownloadSpec {
+            id: "embedding-memory",
+            url: asset.url,
+            destination: &archive,
+            expected_size: asset.size,
+            max_size: 30_000_000,
+            message: "記憶検索のPython管理ツールを取得中…",
+        },
+    )
+    .await?;
+    verify_sha256(&archive, asset.sha256)?;
+    let unpack = root.join("uv");
+    if unpack.exists() {
+        std::fs::remove_dir_all(&unpack)?;
+    }
+    let kind = asset.archive;
+    tokio::task::spawn_blocking(move || match kind {
+        UvArchive::Zip => extract_zip(&archive, &unpack),
+        UvArchive::TarGz => extract_tar_gz(&archive, &unpack),
+    })
+    .await??;
+    find_named_file(&root.join("uv"), asset.executable, 0).context("Python管理ツールがありません")
+}
+
+/// 呼出元がCOMPONENT_OPERATION_LOCKを保持し、画像モデルを取得せず共通Pythonだけ導入する。
+pub(crate) async fn ensure_shared_python(app: &AppHandle, uv: &Path) -> Result<PathBuf> {
+    let root = shared_python_dir(app);
+    let python = python_executable(&root);
+    if python.is_file() {
+        return Ok(python);
+    }
+    std::fs::create_dir_all(&root)?;
+    let runtime = root.join("runtime");
+    run_component_command(
+        uv,
+        &[
+            "python",
+            "install",
+            "3.12.13",
+            "--no-bin",
+            "--no-registry",
+            "--install-dir",
+            &runtime.to_string_lossy(),
+        ],
+    )
+    .await?;
+    let base = find_named_file(
+        &runtime,
+        if cfg!(windows) {
+            "python.exe"
+        } else {
+            "python3.12"
+        },
+        0,
+    )
+    .context("共通Python 3.12.13が見つかりません")?;
+    let venv = crate::log_paths::bundled_dir(app).join("embedding-install-tools/python-venv");
+    if venv.exists() {
+        std::fs::remove_dir_all(&venv)?;
+    }
+    run_component_command(
+        uv,
+        &[
+            "venv",
+            &venv.to_string_lossy(),
+            "--python",
+            &base.to_string_lossy(),
+            "--relocatable",
+        ],
+    )
+    .await?;
+    copy_dir_all(&venv, &root)?;
+    run_component_command(
+        &python,
+        &["-c", "import sys; assert sys.version_info[:2] == (3,12)"],
+    )
+    .await?;
+    Ok(python)
 }
 
 /// tar.gzをOS標準のtarで展開する（macOS）。
@@ -922,6 +1042,8 @@ async fn install_character_maker(app: &AppHandle) -> Result<()> {
                 "python",
                 "install",
                 "3.12.13",
+                "--no-bin",
+                "--no-registry",
                 "--install-dir",
                 &python_store.to_string_lossy(),
             ],
@@ -1487,7 +1609,7 @@ fn configure_component_environment(
     Ok(())
 }
 
-async fn run_component_command(program: &Path, args: &[&str]) -> Result<()> {
+pub(crate) async fn run_component_command(program: &Path, args: &[&str]) -> Result<()> {
     let mut command = crate::tools::process::command(program);
     command.args(args);
     configure_component_environment(&mut command, program)?;

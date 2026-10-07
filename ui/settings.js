@@ -3132,6 +3132,11 @@ async function render() {
     field("PICOAGENT_HOTKEY_HIDE", "隠す／戻すキー", "text", v.PICOAGENT_HOTKEY_HIDE ?? "", "CommandOrControl+Alt+H"),
   ]));
   global.append(field("PICOAGENT_MEMORY_ENABLED", "会話から好みや継続指示を暗黙的に覚える", "checkbox", v.PICOAGENT_MEMORY_ENABLED !== false));
+  global.append(selectField("PICOAGENT_MEMORY_DEVICE", "長期メモリ検索の実行先", v.PICOAGENT_MEMORY_DEVICE || "gpu", [
+    { value: "gpu", label: "GPU優先（標準・非対応環境はCPU）" },
+    { value: "cpu", label: "CPU（会話モデルのVRAMを優先）" },
+  ]));
+  global.append(el("p", { className: "hint", textContent: "EmbeddingGemma 2で意味の近い記憶を探します。初回はモデルと実行環境を取得します。GPUでは追加のVRAM、CPUではRAMを使います。" }));
   global.append(field("PICOAGENT_MEMORY_MAX_ITEMS", "長期メモリの最大件数", "text", v.PICOAGENT_MEMORY_MAX_ITEMS ?? "", "80"));
   global.append(field("PICOAGENT_PROJECT_RULES_AUTO_CAPTURE", "強く言い渡した作法を作業フォルダのAGENTS.mdへ自動で追記する", "checkbox", v.PICOAGENT_PROJECT_RULES_AUTO_CAPTURE === true));
   // AIの振る舞いを変える項目は変更頻度が低いので、使うAIの下で閉じておく。
