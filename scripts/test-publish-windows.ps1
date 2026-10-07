@@ -8,8 +8,10 @@ function Assert-Rejected([scriptblock]$Action, [string]$Label) {
     Assert-True $rejected $Label
 }
 $plan = @(Get-WindowsPlan All '1.2.3')
-Assert-True ($plan.Count -eq 3 -and @($plan.File | Select-Object -Unique).Count -eq 3) '全種類のファイル名は重複せず3件'
-foreach ($kind in 'Alpha', 'Partner', 'Review') { Assert-True (@(Get-WindowsPlan $kind '1.2.3').Count -eq 1) "$kind 単体は1件だけ" }
+Assert-True ($plan.Count -eq 2 -and @($plan.File | Select-Object -Unique).Count -eq 2) '全種類のファイル名は重複せず2件'
+foreach ($kind in 'Alpha', 'Partner') { Assert-True (@(Get-WindowsPlan $kind '1.2.3').Count -eq 1) "$kind 単体は1件だけ" }
+Assert-Rejected { Get-WindowsPlan Review '1.2.3' } '移行済みの審査版指定は空計画へせず拒否'
+Assert-Rejected { Get-WindowsPlan Unknown '1.2.3' } '不明な種類を拒否'
 Assert-Rejected { Get-WindowsPlan All '../1' } '不正な版を拒否'
 $testRoot = Join-Path (Split-Path $PSScriptRoot) "temp/publish-test-$([guid]::NewGuid().ToString('N'))"
 New-Item -ItemType Directory $testRoot | Out-Null

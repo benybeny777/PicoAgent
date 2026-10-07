@@ -124,6 +124,12 @@
           return;
         }
         renderItems(response.items);
+        const search = response.search;
+        if (search?.phase === "ready") {
+          status.textContent += ` 記憶検索: ${search.device === "cpu" ? "CPU" : "GPU"}。`;
+        } else if (search?.message) {
+          status.textContent += ` ${search.message}`;
+        }
       } catch (error) {
         if (!manager.isConnected) return;
         logApp("warn", "長期メモリ一覧の読み込みに失敗しました", errorDetail(error));

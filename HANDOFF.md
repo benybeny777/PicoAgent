@@ -13,6 +13,14 @@
 - 音声の最終聴感・画像動画の実機受入残件は`docs/TASKS.md`を参照する。採用済み音声モデル・比較素材・既存の`output/`は変更しない。モデルを再取得せず、HFトークンを表示しない。
 - 配布・リリースは今回のマージと別作業とする。
 
+## 保護している未統合作業
+
+- `codex/dev-data-isolation`: PR整理の依頼によりDraft PR #411を閉じた。保存先分離の設計と枝は保持し、実装は未着手。worktreeは`C:/Users/benyb/.codex/worktrees/dev-data-isolation/20_PicoAgent`。再開時は閉じたPRの設計を確認する。
+- `fix/ui-mode-visual-polish`: PR整理の依頼によりDraft PR #422を閉じた。未マージのUI修正はリモート枝に保持している。再開時は現行mainへ必要な差分だけ移植して再検証する。
+- `codex/isolate-managed-runtime-data`と`codex/krea-ltx25-lowvram`: 対応PRのマージ後にも枝の先端が異なり、未統合の差分がある。worktreeはそれぞれ`temp/news-summary-reliability`と`temp/krea-ltx25-lowvram`。古い枝全体を再マージせず、必要な差分だけ現行mainへ移植する。
+- `codex/pr-322-plan`: 元worktreeのパスがなく、未統合の差分があるため枝を保護している。再開前に内容を確認する。
+- ホロ関連の正本は別リポジトリ`C:/00_PG/PicoAgent-holo`。旧`temp/holo-explanation-video`はdetached HEADで、未コミットの文書・スライド・生成スクリプトが残る。ファイルは削除していないため、必要なら移行先との差分を確認して再開する。企画改訂案は移行先のPR #1と`codex/holo-proposal-preserved`に保存済み。
+
 ## 再開時の順序
 
 1. `AGENTS.md`と`git status --short --branch`を確認する。

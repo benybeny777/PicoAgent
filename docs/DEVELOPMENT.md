@@ -1,17 +1,22 @@
 # PicoAgent 開発・配布ガイド
 
+## 標準の長期メモリ検索
+
+`memory.rs`が記憶原本と会話文脈、`memory_embedding.rs`が専用プロセスの直列通信・再利用・終了、`memory_embedding_install.rs`が固定資産と専用仮想環境の管理導入を担当する。Pythonの導入と検索スクリプトは`src-tauri/resources/embedding-memory/`に置き、`include_str!`で本体へ含める。重みとwheelは通常ビルドへ同梱・取得せず、長期メモリ有効時の初回起動で公式から導入する。
+
+実行時は`bundled/embedding-memory/{venv,model,install.json}`と共通`bundled/python`を使う。固定revision、全モデル資産のサイズとSHA-256/Git blob SHA、実埋め込み処理を確認してから導入完了を記録する。GPU構成変更や不完全配置は管理導入で修復する。記憶ベクトルは`app_data_dir/memory-vectors.json`、診断ログはログフォルダの日付付き`embedding-memory.<YYYY-MM-DD>.log`（他のログと同じ1週間保持）。記憶原本の更新は既存の`store::lock_state`を維持し、Pythonへは毎回のスナップショットだけを渡す。索引は本文を保存せずSHA-256と正規化ベクトルだけを保存し、原本の正本や同期先として使わない。通信失敗後は専用プロセスを破棄し、古い応答を次の質問へ流用しない。
+
 ## Windows各版のビルドとアップロード
 
 PowerShell 7、Rust/Tauri、認証済みの`gh`、各版の許諾済み同梱素材を用意する。新しい数値版を採番してPRをマージした、追跡変更のない最新`origin/main`から実行する。バッチ自身は採番・マージ・任意モデル取得をしない。
 
-- `Windows全種類をビルドしてUP.bat`: Alpha・関係者・holo Indie審査の3種類。
+- `Windows全種類をビルドしてUP.bat`: Alpha・関係者の2種類。
 - `Windows公開Alpha版をビルドしてUP.bat`: Alphaだけ。
 - `Windows関係者版をビルドしてUP.bat`: 関係者版だけ。
-- `Windows審査版をビルドしてUP.bat`: 審査版だけ。
 
 共通本体は`scripts/publish-windows.ps1`。`-PrepareOnly`はネットワークで版・権限・ビルド元を確認するが、ビルドやアップロードはしない。既存Release本文の`source_commit`から直前版を特定できない場合は、記録を照合して`-PreviousSourceCommit <40桁SHA>`を指定する。関係者版の初期設定素材は`-PartnerSourceDir <フォルダーの絶対パス>`でも指定できる。実効差分では日本語パスも検出し、採番だけの違いとして除外するのは本体・xtaskの`[package]`の版、対応lock内の自packageの版、Tauri設定の最上位`version`だけに限定する。依存やモデルの版更新は除外しない。
 
-全種類ではAlphaだけを公開リポジトリ`benybeny777/PicoAgent-Distribution`の`v<版>`へ、関係者・審査の2種類を非公開`benybeny777/PicoAgent`の`v<版>-windows-private`へ分離する。単体の関係者・審査も同じprivateタグ体系を使う。同じ数値版が存在したら、後日追加・差し替えはせず新patchの採番を求めて止まる。起動中アプリ・管理エンジンがある場合も、利用者が終了するまで止める。
+全種類ではAlphaだけを公開リポジトリ`benybeny777/PicoAgent-Distribution`の`v<版>`へ、関係者版を非公開`benybeny777/PicoAgent`の`v<版>-windows-private`へ分離する。単体の関係者版も同じprivateタグ体系を使う。同じ数値版が存在したら、後日追加・差し替えはせず新patchの採番を求めて止まる。起動中アプリ・管理エンジンがある場合も、利用者が終了するまで止める。
 
 全成果物のビルド時刻・MZ・SHA-256を確認した後だけ新規Draft Releaseを作り、認証付き再取得で照合する。全選択先の検証成功後に非公開側だけDraftを解除する。途中失敗では後続公開を止め、残ったDraftを自動削除・追加更新しない。原因を確認して次のpatch版で全対象を作り直す。
 
@@ -174,18 +179,6 @@ cargo xtask update-feed src-tauri\target\release\bundle\nsis\PicoAgent_<版>_x64
 - 生成物は `temp\partner-installer\PicoAgent_<版>_Partner-MMD-Voice_x64-setup.exe` です。公開LP・公開Release・`latest.json` へは載せません。
 - 配布済みの版は[非公開Release一覧](https://github.com/benybeny777/PicoAgent/releases)にあります。指定した関係者以外へ転送・公開しないでください。
 
-### holo Indie審査への限定共有版（Windows）
-
-holo Indieの審査へ渡す候補は、リポジトリ直下の`holo Indie審査版インストーラをビルド.bat`で生成します（本体は`scripts/build-holo-indie-review-installer.ps1`。PowerShell 7が必要）。通常版、関係者版、審査版を同じ成果物として扱いません。
-
-- `%APPDATA%\PicoAgent\characters\miko-mmd`に、公式配布元の`readme.txt`を含むさくらみこMMD登録データを用意します。出所と利用条件を確認できない場合はビルド前に停止します。
-- 配信・動画から学習した本人音声モデルやAIVMXは含めません。Aivis本体を同梱して読み上げを既定で有効にし、初回起動時にAivisHub公開モデル「まお」（ACML 1.0）を取得して仮音声で話します。仮音声は本人の声ではありません。専用Tauri設定のasset protocolは審査版の利用者領域だけを許可し、通常版のキャラクター領域へはアクセスしません。
-- 審査版を含むWindowsのインストーラ・アンインストーラにはアプリのICOを指定します。デスクトップ・スタートメニューのショートカットは、同じアイコンを埋め込んだアプリ本体を起動先にします。
-- 初期表示は配信形式です。さくらみこの会話動画は`capture-current.mjs --voice-video`で撮り、Aivis合成音声と画面内の口の動きを含めます。
-- 識別子`com.picoagent.holo-indie-review`の専用利用者領域へ導入し、通常版の設定、会話履歴、キャラクター、音声モデルを読みません。
-- 生成設定だけを軽く検査するときは`pwsh -File scripts/build-holo-indie-review-installer.ps1 -PrepareOnly -AllowStale`を使います。
-- 生成物は`temp\holo-indie-review-installer\PicoAgent_<版>_holo-Indie-Review_x64-setup.exe`です。holo Indie審査への限定共有専用であり、公開LP、公開Release、`latest.json`へ載せません。一般配布は許諾後に別の配布設定と実機検証で作ります。
-
 ### macOS版のビルド（未署名アルファ）
 
 macOSバンドルはmacOS実機でだけ作れます。WindowsやLinuxからのクロスビルドはできません。**配布対象はApple Siliconだけで、Intel Macは対象外です。**
@@ -222,7 +215,7 @@ macOS固有の注意点は次のとおりです。
 
 版番号はSemVerで管理します。通常の更新は同じ`major.minor`系列の`patch`を自動加算し、`minor`と`major`は製品管理者の明示指示がある場合だけ上げます。公開中の`latest.json`を起点に`cargo xtask bump-version <種別>`が3か所の版を同期するため、個別ファイルへ版番号を手入力しません。同じ版のRelease資産も上書きしません。patch番号もLP、アプリ、ファイル名、Releaseへ正確に表示します。起動時の自動確認はpatchだけなら通知せず、利用者が設定から「更新を確認」を実行した場合はpatchも案内し、手動でダウンロード・適用できます。`major.minor`が上がった場合は起動時にも通知します。アルファ期間中は表示名と更新説明へ`Alpha`を付けます。
 
-初期販売はBOOTHとSteamを想定します。公開GitHubにはソースや第三者ソフトを置かず、`distribution/site/` の公開LP、Windows無料版、最新版情報 `latest.json`、サポート／プライバシー／利用条件、紹介資料 `PicoAgent-Intro.pptx` だけを置きます。LPの主画面例は完成済み2DのむぎとLive2Dのひよりを使い、別のキャラ一覧ページでは取得済みのLive2D公式サンプルも非同梱の動作例として紹介します。公開配布Repoへの同期は販売時の明示作業で、Releaseに実インストーラがない間はLPも取得導線も「準備中」と表示します。BOOTH購入者は `PA1.` で始まる署名済みキーを設定の「製品情報・ライセンス」へ登録するとPro機能が有効になります。秘密署名鍵は `%APPDATA%\PicoAgent-vendor\license-signing.key` に置き、Gitへ含めません。Steam版は将来Steamworksの所有確認へ追加対応する方針です。
+初期販売はBOOTHとSteamを想定します。公開GitHubにはソースや第三者ソフトを置かず、`distribution/site/` の公開LP、Windows無料版、最新版情報 `latest.json`、サポート／プライバシー／利用条件 だけを置きます。LPの主画面例は完成済み2DのむぎとLive2Dのひよりを使い、別のキャラ一覧ページでは取得済みのLive2D公式サンプルも非同梱の動作例として紹介します。公開配布Repoへの同期は販売時の明示作業で、Releaseに実インストーラがない間はLPも取得導線も「準備中」と表示します。BOOTH購入者は `PA1.` で始まる署名済みキーを設定の「製品情報・ライセンス」へ登録するとPro機能が有効になります。秘密署名鍵は `%APPDATA%\PicoAgent-vendor\license-signing.key` に置き、Gitへ含めません。Steam版は将来Steamworksの所有確認へ追加対応する方針です。
 
 設定の「製品情報・ライセンス」には「更新を確認」と「アップデート」があります。公開Gitの `latest.json` で新しい版を確認し、Windows x64インストーラの配布Repo内URL・サイズ・SHA-256が揃い、取得物がPE形式の場合だけ起動します。更新情報自体も256KBを上限とし、HTTP異常や破損は設定欄へ表示します。オフライン時は起動時確認を黙って見送り、手動確認では見送ったことだけを同じ欄へ表示します。
 
@@ -305,7 +298,7 @@ NSIS インストーラは、ファイルをコピーする前にインストー
 
 **アンインストール**
 
-NSIS アンインストーラは、インストール先またはPicoAgent管理データ配下で動く本体・ローカルAI・Aivis・Whisperだけを実体パスで特定して止め、同梱ランタイムのディレクトリを先にまとめて削除します。生成される個別ファイル削除の表示は抑え、PicoAgent専用の一時ファイルも削除します。PC上の同名プロセスは停止しません。設定・会話履歴・追加キャラ・ダウンロード済みモデルは削除前に確認し、**既定の「いいえ」とサイレントアンインストールでは残します**。削除を明示した場合だけ、通常版は`%APPDATA%\PicoAgent\` / `%LOCALAPPDATA%\PicoAgent\` と現行・旧識別子のデータを削除します。holo Indie審査版は専用の`PicoAgent\instances\com.picoagent.holo-indie-review`だけを削除し、通常版データへ触れません。
+NSIS アンインストーラは、インストール先またはPicoAgent管理データ配下で動く本体・ローカルAI・Aivis・Whisperだけを実体パスで特定して止め、同梱ランタイムのディレクトリを先にまとめて削除します。生成される個別ファイル削除の表示は抑え、PicoAgent専用の一時ファイルも削除します。PC上の同名プロセスは停止しません。設定・会話履歴・追加キャラ・ダウンロード済みモデルは削除前に確認し、**既定の「いいえ」とサイレントアンインストールでは残します**。削除を明示した場合だけ、通常版は`%APPDATA%\PicoAgent\` / `%LOCALAPPDATA%\PicoAgent\` と現行・旧識別子のデータを削除します。
 
 **署名・自動更新**
 
@@ -378,7 +371,6 @@ NSIS アンインストーラは、インストール先またはPicoAgent管理
 | `tools/screenshots/shoot.mjs` | README 掲載画像（`docs/images/`）の撮影。実物の `ui/` を配信して `window.__TAURI__` だけモックし、ヘッドレス Chromium で描画する。合成ではなく実際の描画結果。使い方は `tools/screenshots/README.md` |
 | `tools/screenshots/review-board.mjs` | 全同梱キャラ×現行3形式の撮影画像を、拡大・絞り込み・所見記録ができる開発用画面にまとめる。撮影と結果は `temp/` 内に置く。使い方は `tools/screenshots/README.md` |
 | `tools/screenshots/native-inspect.mjs` | 起動中の実WebViewの状態取得・撮影。`noDefaults: true`でテーマ・省モーション・フォーカスを上書きせず接続し、一時画像は`temp/`へ保存する。検査用デバッグポートは終了後に設定から外す |
-| `tools/holo-indie-deck/build.js` | holo Indie説明資料の下書きPPTX（`temp/HOLO-INDIE-PLAN.pptx`）の生成。文面の正本は`docs/HOLO-INDIE-PLAN.md`で、提出物はDriveの動画付きGoogleスライド。さくらみこの音声付き会話動画は同じ場所の `capture-current.mjs --voice-video` で撮る。ひよりの無音動画は導入済みLive2D実体がある環境で `--video` を使う。使い方は `tools/holo-indie-deck/README.md` |
 | `tools/ip-proposal-deck/build.js` | VTuber事務所へ送付する提案書PowerPoint（`docs/IP-PROPOSAL-VTUBER.pptx`）の生成。文面の正本は`docs/IP-PROPOSAL-VTUBER.md`で、PowerPointを直接編集しない。使い方は `tools/ip-proposal-deck/README.md` |
 | `src-tauri/src/tools/mod.rs` | スキル（ツール）の `Tool` トレイト・レジストリ本体 |
 | `skills/<スキル名>/mod.rs` | エージェント機能（スキル）コネクタ（trait 実装 + inventory 登録。ディレクトリを足すと自動登録）。`chitchat` は会話中にモデルへ提示しない内部スキル（`agent_callable=false`、アイドル雑談用） |

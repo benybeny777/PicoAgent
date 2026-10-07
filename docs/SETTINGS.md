@@ -40,6 +40,7 @@
 | `PICOAGENT_QUICK_ACTIONS` | 空 | 画面 | 入力欄上のクイック操作を上書きする（1行1件「ラベル\|送る文章」。空なら既定の8件） |
 | `PICOAGENT_UPDATE_CHECK_ENABLED` | `true` | 更新 | 起動時に公開配布Gitの `latest.json` を確認し、新しければ通知する。オフライン時は通知しない |
 | `PICOAGENT_MEMORY_ENABLED` | `true` | 基本 | 会話から好み・自己情報・継続指示を暗黙的に長期メモリへ保存する |
+| `PICOAGENT_MEMORY_DEVICE` | `gpu` | 基本 | 標準のEmbeddingGemma 2記憶検索の実行先。`gpu`はCUDA/MPS優先、非対応構成はCPU。`cpu`はCPU固定。保存後に検索プロセスへ反映する |
 | `PICOAGENT_PROJECT_RULES_AUTO_CAPTURE` | `false` | 基本 | 強く言い渡された作法を作業フォルダの `AGENTS.md` へ自動で追記する（既定は無効。利用者のフォルダにあるファイルを書き換えるため） |
 | `PICOAGENT_PLANNING_ENABLED` | `false` | 基本 | 複雑な質問（120文字超・疑問符2個以上・手順系語）をサブタスクへ自動分解するプランニングステップを有効化する |
 | `PICOAGENT_SELF_EVAL_ENABLED` | `false` | 基本 | 回答が短すぎる・拒否パターンを含む場合に1回再生成する自己評価ステップを有効化する |

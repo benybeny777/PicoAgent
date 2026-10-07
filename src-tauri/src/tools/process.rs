@@ -445,7 +445,7 @@ async fn output_worker(
 /// stdout/stderr のパイプを握ると、呼び出し元へ戻った後も Tokio ランタイムの終了が
 /// 孫の寿命まで待たされるため、`taskkill /T` でツリーごと止める。
 #[cfg(windows)]
-async fn terminate_process_tree(child: &mut Child, label: &str) -> Result<(), String> {
+pub async fn terminate_process_tree(child: &mut Child, label: &str) -> Result<(), String> {
     let pid = child
         .id()
         .ok_or_else(|| format!("{label}のプロセスIDを取得できません"))?;
@@ -474,7 +474,7 @@ async fn terminate_process_tree(child: &mut Child, label: &str) -> Result<(), St
 }
 
 #[cfg(not(windows))]
-async fn terminate_process_tree(child: &mut Child, label: &str) -> Result<(), String> {
+pub async fn terminate_process_tree(child: &mut Child, label: &str) -> Result<(), String> {
     child
         .kill()
         .await

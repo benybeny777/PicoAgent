@@ -673,7 +673,10 @@ pub fn clear_conversation_and_history(app: &AppHandle) -> Result<(), String> {
     let character_id = active_character_id(&state);
     crate::history::clear(app, &character_id)
         .map_err(|error| format!("会話履歴を削除できません: {error}"))?;
-    crate::memory::clear(app).map_err(|error| format!("長期メモリを削除できません: {error}"))?;
+    tauri::async_runtime::block_on(crate::memory_embedding::reset_for_edit(|| {
+        crate::memory::clear(app)
+    }))
+    .map_err(|error| format!("長期メモリを削除できません: {error}"))?;
     state.bump_conversation_epoch();
     state.pending_command.lock().unwrap().take();
     state.recent_chatter.lock().unwrap().clear();
@@ -1820,7 +1823,16 @@ pub async fn pet_send(
     // セマンティックメモリ: クエリに関連するメモリを今回のリクエスト向けに絞り込み、
     // 今回の convo の system メッセージのみ更新する（state.memory_context は変えない）。
     {
-        let semantic_ctx = crate::memory::context_for_query(&app, &state.config, &text);
+        // フォールバック許可: 意味検索を使えない間（初回導入中・オフライン・非対応構成）も
+        // 会話は止めず、system文脈に入っている言及回数順の記憶で応答し、理由を画面へ出す。
+        let semantic_ctx = match crate::memory::context_for_query(&app, &state.config, &text).await
+        {
+            Ok(context) => context,
+            Err(error) => {
+                crate::memory_embedding::report_fallback(&app, &error);
+                String::new()
+            }
+        };
         let base_ctx = state.memory_context.lock().unwrap().clone();
         if !semantic_ctx.is_empty() && semantic_ctx != base_ctx {
             if let Some(sys) = convo.iter_mut().find(|m| m.role == "system") {
@@ -3102,6 +3114,11 @@ pub async fn settings_save(
     state: State<'_, AppState>,
     app: tauri::AppHandle,
 ) -> Result<Value, String> {
+    if let Some(value) = patch.get("PICOAGENT_MEMORY_DEVICE") {
+        if !matches!(value.as_str(), Some("gpu" | "cpu")) {
+            return Err("記憶検索の実行先はGPU優先またはCPUを選んでください".to_string());
+        }
+    }
     if let Some(value) = patch.get("PICOAGENT_STREAM_CHAT_FONT_PX") {
         if !valid_stream_chat_font_px(value) {
             return Err("配信チャットの文字サイズは18〜48の整数で指定してください。".to_string());
@@ -3164,6 +3181,9 @@ pub async fn settings_save(
         || changed_text("PICOAGENT_RELATIONSHIP_CUSTOM", "");
     let memory_setting_changed = changed_bool("PICOAGENT_MEMORY_ENABLED", true)
         || changed_text("PICOAGENT_MEMORY_MAX_ITEMS", "80");
+    // 最大件数は検索プロセスの状態に関係しないため、モデルの再読込みを起こさない。
+    let memory_search_changed = changed_bool("PICOAGENT_MEMORY_ENABLED", true)
+        || changed_text("PICOAGENT_MEMORY_DEVICE", "gpu");
     let tts_runtime_changed = changed_bool("PICOAGENT_TTS_ENABLED", false)
         || changed_text("PICOAGENT_TTS_DEVICE", "auto")
         || changed_text("PICOAGENT_TTS_PORT", "11436")
@@ -3263,6 +3283,13 @@ pub async fn settings_save(
         }
     }
     drop(schedule_guard);
+
+    if memory_search_changed {
+        crate::memory_embedding::reset()
+            .await
+            .map_err(|error| error.to_string())?;
+        crate::memory_embedding::prepare(app.clone());
+    }
 
     // モデル DL・エンジン/Aivis 起動・キャラ読込など重い反映は実行中に行わず、
     // 再起動して起動シーケンス（ローディング画面）でまとめて反映する（フキダシに

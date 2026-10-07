@@ -6,6 +6,7 @@
 |---|---|---|
 | デスクトップ基盤 | Tauri、Rustクレート、WebView2 | Cargo.lockと同梱ライセンス一覧を生成し、表示方法を確定 |
 | ローカル推論 | llama.cpp、利用者が取得するGGUFモデル | 実行ファイルのライセンス表示、モデルごとの規約同意・帰属 |
+| 標準の記憶検索 | EmbeddingGemma 2、SentenceTransformers、Transformers、PyTorch、TorchVision、Pillow、uv、Python | 公式から管理導入。EmbeddingGemma 2とSentenceTransformers／TransformersはApache 2.0、PyTorch／TorchVisionはBSD系、PillowはMIT-CMU、uvはMIT／Apache 2.0、PythonはPSF。導入wheelのライセンスを保持し、取得元・固定版は実装と導入記録を参照 |
 | 音声 | AivisSpeech Engine、音声モデル、whisper.cpp | Aivis／Whisper本体は公式配布元から直接取得。各音声・認識モデルの商用条件と表示を確認 |
 | Live2D | Cubism Core、PIXI、pixi-live2d-display、利用者モデル | 拡張性アプリ審査・契約、指定ロゴ・文言、SDKとモデルの条件 |
 | 文書・メディア | LibreOffice、Pandoc、FFmpeg、qpdf、Poppler、ImageMagick、ripgrep | 販売物へ再配布せず各公式ページと設定手順を案内。ライセンスは一律ではないため、実際に使う版・ビルド・依存物ごとに確認する |

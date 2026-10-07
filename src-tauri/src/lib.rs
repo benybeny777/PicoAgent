@@ -34,6 +34,8 @@ mod license;
 mod log_paths;
 mod mcp;
 mod memory;
+mod memory_embedding;
+mod memory_embedding_install;
 mod menu;
 mod message;
 mod migration;
@@ -397,6 +399,7 @@ pub fn run() {
                 let handle = app.handle().clone();
                 tauri::async_runtime::spawn(engine::ensure_and_start(handle));
             }
+            memory_embedding::prepare(app.handle().clone());
             if state.config.get_bool("PICOAGENT_TTS_ENABLED", false) {
                 let handle = app.handle().clone();
                 // 先行起動は同梱リソースの実行時ディレクトリへのコピー（同梱版で約0.8GB）を
@@ -465,6 +468,7 @@ pub fn run() {
             hotkey::release(app_handle);
             aivis::stop(app_handle);
             engine::stop(app_handle);
+            memory_embedding::stop(app_handle);
             mcp::client::stop_all();
             tools::run_command::jobs::stop_all();
             // browser_control が起動したブラウザも一緒に閉じる（残すとデバッグポートが開いたままになる）。
