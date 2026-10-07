@@ -46,6 +46,14 @@ export function createEditor({ layer, toolbar, stageElement, stage, host, toast,
 
   function render() {
     const wanted = new Set(targets());
+    layer.hidden = wanted.size === 0;
+    toolbar.hidden = !mode;
+    const chrome = document.querySelector(".top-window-menu");
+    const obstacles = [toolbar, chrome].filter(element => element && !element.hidden
+      && (element === toolbar || mode === "all" || Number(getComputedStyle(element).opacity) > 0))
+      .map(element => element.getBoundingClientRect());
+    const overlaps = rect => obstacles.some(other => rect.left < other.right && rect.right > other.left
+      && rect.top < other.bottom && rect.bottom > other.top);
     for (const [name, frame] of frames) frame.hidden = !wanted.has(name);
     const viewport = stageElement.getBoundingClientRect();
     for (const name of wanted) {
@@ -68,12 +76,17 @@ export function createEditor({ layer, toolbar, stageElement, stage, host, toast,
       };
       frame.hidden = visible.right <= visible.left || visible.bottom <= visible.top;
       if (frame.hidden) continue;
-      frame.classList.toggle("is-top-clipped", bounds.top < viewport.top);
+      const moveLeft = (visible.left + visible.right) / 2 - 15;
+      frame.classList.toggle("is-top-clipped", bounds.top < viewport.top
+        || overlaps({ left: moveLeft, right: moveLeft + 30, top: visible.top + 8, bottom: visible.top + 38 }));
       for (const handle of frame.querySelectorAll(".edit-handle")) {
         const corner = handle.dataset.corner;
         const x = corner.endsWith("left") ? bounds.left : bounds.right;
         const y = corner.startsWith("top") ? bounds.top : bounds.bottom;
-        handle.hidden = x < viewport.left || x > viewport.right || y < viewport.top || y > viewport.bottom;
+        const left = corner.endsWith("left") ? x : x - 14;
+        const top = corner.startsWith("top") ? y : y - 14;
+        handle.hidden = x < viewport.left || x > viewport.right || y < viewport.top || y > viewport.bottom
+          || overlaps({ left, right: left + 14, top, bottom: top + 14 });
       }
       frame.classList.toggle("is-selected", name === selected);
       frame.classList.add("is-body-draggable");

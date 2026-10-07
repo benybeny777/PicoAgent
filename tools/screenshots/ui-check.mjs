@@ -311,6 +311,7 @@ for (const characterId of characters) {
     if (full.top > 0 || full.left > 0 || full.right > 0) fail(`${label}/full`, `全身構図で端が切れています ${JSON.stringify(full)}`);
     else ok(`${label} 全身構図`);
     await page.evaluate(() => window.__emit("pet:layout-edit", "all"));
+    if (await page.locator(".reply-actions").isVisible()) fail(`${label}/edit`, "配置操作と会話操作が同時に重なります");
     const editAlignment = await page.evaluate(() => {
       const stage = document.getElementById("stage").getBoundingClientRect();
       return [...document.querySelectorAll("#editLayer .edit-frame:not([hidden])")].map(frame => {
@@ -327,6 +328,16 @@ for (const characterId of characters) {
     else ok(`${label} 配置中の選択枠が表示範囲と一致`);
     const editTools = await fullyInside(page, "#editToolbar");
     if (!editTools.inside) fail(`${label}/edit`, `配置の操作部が画面外です ${JSON.stringify(editTools)}`);
+    const hiddenGrips = await page.evaluate(() => {
+      const obstacles = [document.querySelector(".top-window-menu"), document.getElementById("editToolbar")]
+        .map(element => element.getBoundingClientRect());
+      return [...document.querySelectorAll('.edit-frame[data-target="chat"] .edit-move,.edit-frame[data-target="chat"] .edit-handle')]
+        .filter(element => element.getClientRects().length).filter(element => {
+          const rect = element.getBoundingClientRect();
+          return obstacles.some(other => rect.left < other.right && rect.right > other.left && rect.top < other.bottom && rect.bottom > other.top);
+        }).map(element => element.className);
+    });
+    if (hiddenGrips.length) fail(`${label}/edit`, `会話枠のつまみが上端の操作部に隠れます: ${hiddenGrips.join("、")}`);
     if (characterId === characters[0]) await page.screenshot({ path: path.join(outDir, `${layout}-editing.png`), omitBackground: true });
     await page.evaluate(() => window.__emit("pet:layout-edit", "character"));
     // 横長モデルは両端が画面外へ出るため、ホイールで枠を収めてからつまみを検査する。
@@ -515,6 +526,14 @@ for (const [layout, width, height] of [["stream", 1000, 760], ["stream", 1280, 7
   await page.mouse.move((actual.menu.left + actual.menu.right) / 2, actual.menu.top + 2);
   await page.waitForTimeout(400);
   if ((await geometry()).opacity !== 1) fail(label, "上端へ寄せてもタイトルバーが出ません");
+  const obscuredActions = await page.evaluate(() => {
+    const bar = document.querySelector(".top-window-menu").getBoundingClientRect();
+    return [...document.querySelectorAll(".reply-actions button")].filter(button => {
+      const rect = button.getBoundingClientRect();
+      return rect.left < bar.right && rect.right > bar.left && rect.top < bar.bottom && rect.bottom > bar.top;
+    }).map(button => button.textContent);
+  });
+  if (obscuredActions.length) fail(label, `タイトルバーが会話操作を隠します: ${obscuredActions.join("、")}`);
   await page.mouse.move(width / 2, height - 20);
   await page.waitForTimeout(900);
   if ((await geometry()).opacity !== 0) fail(label, "離れてもタイトルバーが隠れません");

@@ -6,7 +6,7 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
-  padding: 12px 14px 12px;
+  padding: calc(12px + var(--chat-chrome-inset, 0px)) 14px 12px;
   border-radius: var(--radius-xl);
   background: var(--surface);
   border: 1px solid var(--panel-border);
@@ -27,6 +27,9 @@
   flex: 0 0 auto;
 }
 .reply-actions .chip { min-height: 26px; padding: 0 clamp(6px, 2.4cqi, 11px); font-size: clamp(10px, 3cqi, 12px); }
+/* 配置用の操作列と会話用の操作列を同時に重ねない。終了すると会話操作を戻す。 */
+body.is-editing .reply-actions,
+body.is-editing .font-size-panel { display: none; }
 .notice-toggle { position: relative; }
 .notice-toggle[data-count]:not([data-count=""])::after {
   content: attr(data-count);
