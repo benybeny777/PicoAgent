@@ -2,7 +2,7 @@
 // Pythonが所有するモデルと索引、Rustが所有する原本・通信・終了処理を分ける。
 
 use std::process::Stdio;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Mutex;
 use std::time::Duration;
 
@@ -21,6 +21,33 @@ static GENERATION: AtomicU64 = AtomicU64::new(0);
 static FAILURE: Mutex<String> = Mutex::new(String::new());
 static STATUS: Mutex<Option<Value>> = Mutex::new(None);
 static CLEANUP: Mutex<Vec<tauri::async_runtime::JoinHandle<Result<()>>>> = Mutex::new(Vec::new());
+/// 進行中の準備（導入とモデル起動）の数。設定保存と会話の両方から重ねて始まりうるため数で持つ。
+/// 会話側の検索は1つでも進行中なら待たない。
+static PREPARING: AtomicUsize = AtomicUsize::new(0);
+
+/// 失敗ではなく、検索を使わずに応答してよい理由。利用者への失敗通知と状態表示を変えるために区別する。
+#[derive(Debug)]
+pub enum Skipped {
+    /// 準備中。会話を導入完了まで待たせない。
+    Preparing,
+    /// 記憶の編集・設定変更・終了で意図的に中断した。
+    Interrupted,
+}
+
+impl std::fmt::Display for Skipped {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Preparing => "長期メモリ検索を準備中です",
+            Self::Interrupted => "記憶の更新・設定変更・終了のため記憶検索を中断しました",
+        })
+    }
+}
+
+impl std::error::Error for Skipped {}
+
+pub fn interrupted() -> anyhow::Error {
+    anyhow::Error::new(Skipped::Interrupted)
+}
 
 struct Worker {
     child: Option<Child>,
@@ -180,33 +207,51 @@ async fn run(
     cfg: &Config,
     query: Option<(&[String], &str, u64)>,
 ) -> Result<Vec<usize>> {
-    anyhow::ensure!(
-        !EXITING.load(Ordering::SeqCst),
-        "終了中のため記憶検索を開始できません"
-    );
+    if EXITING.load(Ordering::SeqCst) {
+        return Err(interrupted());
+    }
     let generation = query
         .map(|(_, _, generation)| generation)
         .unwrap_or_else(|| GENERATION.load(Ordering::SeqCst));
-    let mut slot = WORKER.lock().await;
+    let mut slot = if query.is_some() {
+        // 会話側は準備（初回導入は数分）の完了を待たない。待ち始めた後に準備が
+        // 始まった場合も拾えるよう、短い間隔でロック取得と準備状態を見直す。
+        loop {
+            if PREPARING.load(Ordering::SeqCst) > 0 {
+                return Err(Skipped::Preparing.into());
+            }
+            if let Ok(slot) = tokio::time::timeout(Duration::from_millis(250), WORKER.lock()).await
+            {
+                break slot;
+            }
+        }
+    } else {
+        WORKER.lock().await
+    };
     drain_cleanup().await?;
     let cancellation = CANCEL.notified();
     tokio::pin!(cancellation);
     // Notifyの登録を世代・終了の確認より先に済ませる。確認後に登録すると、その間の
     // pause()の通知を取りこぼし、導入・起動が終わるまで設定保存や終了を待たせる。
     cancellation.as_mut().enable();
-    anyhow::ensure!(
-        generation == GENERATION.load(Ordering::SeqCst),
-        "記憶検索の設定または原本が変わったため中断しました"
-    );
-    anyhow::ensure!(
-        !EXITING.load(Ordering::SeqCst),
-        "終了中のため記憶検索を開始できません"
-    );
+    if generation != GENERATION.load(Ordering::SeqCst) || EXITING.load(Ordering::SeqCst) {
+        return Err(interrupted());
+    }
     anyhow::ensure!(
         cfg.get_bool("PICOAGENT_MEMORY_ENABLED", true),
         "長期メモリが無効になったため検索を中断しました"
     );
     let requested = device(cfg)?;
+    if query.is_some()
+        && slot
+            .as_ref()
+            .is_none_or(|worker| worker.requested != requested)
+    {
+        // 導入・起動は会話の外で行う。旧実行先のプロセスは準備側が閉じて起動し直す。
+        drop(slot);
+        prepare(app.clone());
+        return Err(Skipped::Preparing.into());
+    }
     let operation = async {
         let mut worker = match slot.take() {
             Some(mut worker) if worker.requested != requested => {
@@ -231,15 +276,14 @@ async fn run(
             Vec::new()
         };
         *slot = Some(worker);
-        anyhow::ensure!(
-            generation == GENERATION.load(Ordering::SeqCst),
-            "記憶検索の設定または原本が変わったため中断しました"
-        );
+        if generation != GENERATION.load(Ordering::SeqCst) {
+            return Err(interrupted());
+        }
         Ok(order)
     };
     tokio::select! {
         result = operation => result,
-        _ = &mut cancellation => anyhow::bail!("記憶検索を中断しました"),
+        _ = &mut cancellation => Err(interrupted()),
     }
 }
 
@@ -299,34 +343,63 @@ pub async fn search(
     generation: u64,
 ) -> Result<Vec<usize>> {
     let result = run(app, cfg, Some((docs, query, generation))).await;
-    match &result {
-        Ok(_) => notify(app, None),
-        Err(error) => {
-            if generation != GENERATION.load(Ordering::SeqCst) || EXITING.load(Ordering::SeqCst) {
-                return result;
-            }
-            let message = format!("長期メモリ検索に失敗しました: {error:#}");
-            set_status("error", &message, "");
-            notify(app, Some(&message));
-            crate::log_paths::append_app_log(app, &message);
-        }
+    if result.is_ok() {
+        notify(app, None);
     }
     result
 }
 
+/// 意味検索を使えずに通常の記憶文脈（言及回数順）で応答するとき、理由を画面へ出す。
+/// 意図的な中断は失敗ではないので知らせない。準備中は状態表示を「準備中」のまま残す。
+pub fn report_fallback(app: &AppHandle, error: &anyhow::Error) {
+    let message = match error.downcast_ref::<Skipped>() {
+        Some(Skipped::Interrupted) => return,
+        Some(Skipped::Preparing) => {
+            // 準備の失敗を通知済みなら、会話のたびに「準備中」と交互に出して煩くしない。
+            if !FAILURE.lock().unwrap().is_empty() {
+                return;
+            }
+            "長期メモリ検索を準備中のため、言及回数の多い記憶で応答しました".to_string()
+        }
+        None => {
+            let message = format!(
+                "長期メモリ検索に失敗したため、言及回数の多い記憶で応答しました: {error:#}"
+            );
+            set_status("error", &message, "");
+            message
+        }
+    };
+    notify(app, Some(&message));
+    crate::log_paths::append_app_log(app, &message);
+}
+
 pub fn prepare(app: AppHandle) {
     use tauri::Manager;
+    // 起動前に数えておき、直後の会話が準備の開始前にロックを取って二重に準備を始めないようにする。
+    PREPARING.fetch_add(1, Ordering::SeqCst);
+    struct Prepared;
+    impl Drop for Prepared {
+        fn drop(&mut self) {
+            PREPARING.fetch_sub(1, Ordering::SeqCst);
+        }
+    }
+    let prepared = Prepared;
     tauri::async_runtime::spawn(async move {
+        let _prepared = prepared;
         let generation = GENERATION.load(Ordering::SeqCst);
         let state = app.state::<crate::commands::AppState>();
-        if state.config.get_bool("PICOAGENT_MEMORY_ENABLED", true) {
-            let result = run(&app, &state.config, None).await;
-            if result.is_ok() {
-                // 以前の準備失敗を知らせた後なら復旧を伝え、次の同じ失敗も再通知できるようにする。
-                notify(&app, None);
-            }
-            if let Err(error) = result {
-                if generation != GENERATION.load(Ordering::SeqCst) || EXITING.load(Ordering::SeqCst)
+        if !state.config.get_bool("PICOAGENT_MEMORY_ENABLED", true) {
+            return;
+        }
+        let result = run(&app, &state.config, None).await;
+        drop(_prepared);
+        match result {
+            // 以前の準備失敗を知らせた後なら復旧を伝え、次の同じ失敗も再通知できるようにする。
+            Ok(_) => notify(&app, None),
+            Err(error) => {
+                if generation != GENERATION.load(Ordering::SeqCst)
+                    || EXITING.load(Ordering::SeqCst)
+                    || error.downcast_ref::<Skipped>().is_some()
                 {
                     return;
                 }
