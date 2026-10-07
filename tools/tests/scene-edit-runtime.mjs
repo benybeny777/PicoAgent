@@ -113,7 +113,7 @@ function editorFixture() {
   const factory = moduleFactory("edit.js", "createEditor", {
     anchorFactors: model.anchorFactors, SOURCE_LABELS: {}, Element,
     el: (_tag, props = {}, children = []) => Object.assign(new Element(), props, { children }),
-    document: { body: new Element(), addEventListener() {} }, window: { devicePixelRatio: 1 },
+    document: { body: new Element(), querySelector: () => null, addEventListener() {} }, window: { devicePixelRatio: 1 },
     HTMLInputElement: class {}, HTMLTextAreaElement: class {},
     setTimeout: callback => { const id = ++timerId; timers.set(id, callback); return id; },
     clearTimeout: id => timers.delete(id),

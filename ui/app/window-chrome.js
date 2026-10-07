@@ -106,10 +106,41 @@ export function createWindowChrome({ menu, appElement, bootScreen, stageElement,
   let editing = false;
   let hideTimer = 0;
   const shown = () => appElement.classList.contains("title-bar-shown");
+  let clearanceFrame = 0;
+  function updateChatClearance() {
+    clearanceFrame = 0;
+    const chat = appElement.querySelector(".chat");
+    if (!chat) return;
+    const rect = chat.getBoundingClientRect();
+    const bar = menu.getBoundingClientRect();
+    const overlaps = shown() && rect.left < bar.right && rect.right > bar.left && rect.top < bar.bottom;
+    const scale = chat.offsetWidth ? rect.width / chat.offsetWidth : 1;
+    const inset = overlaps ? Math.max(0, (bar.bottom + 6 - rect.top) / scale - 12) : 0;
+    const value = `${inset}px`;
+    if (chat.style.getPropertyValue("--chat-chrome-inset") !== value) chat.style.setProperty("--chat-chrome-inset", value);
+  }
+  function queueChatClearance() {
+    if (!clearanceFrame) clearanceFrame = requestAnimationFrame(updateChatClearance);
+  }
+  const clearanceObserver = new ResizeObserver(queueChatClearance);
+  clearanceObserver.observe(appElement);
+  clearanceObserver.observe(menu);
+  const chat = appElement.querySelector(".chat");
+  if (chat) clearanceObserver.observe(chat);
+  const visibilityObserver = new MutationObserver(queueChatClearance);
+  visibilityObserver.observe(appElement, { attributes: true, attributeFilter: ["class", "style"] });
+  visibilityObserver.observe(menu, { attributes: true, attributeFilter: ["style"] });
+  window.addEventListener("pagehide", () => {
+    clearanceObserver.disconnect();
+    visibilityObserver.disconnect();
+    cancelAnimationFrame(clearanceFrame);
+    clearTimeout(hideTimer);
+  }, { once: true });
   function show() {
     clearTimeout(hideTimer);
     hideTimer = 0;
     appElement.classList.add("title-bar-shown");
+    queueChatClearance();
   }
   function hideSoon(delay = HIDE_DELAY_MS) {
     clearTimeout(hideTimer);
@@ -119,6 +150,7 @@ export function createWindowChrome({ menu, appElement, bootScreen, stageElement,
       const listOpen = layoutButton.disabled || characterButton.disabled;
       if (pinned || editing || listOpen || menu.querySelector(":focus-visible")) { if (listOpen) hideSoon(); return; }
       appElement.classList.remove("title-bar-shown");
+      queueChatClearance();
     }, delay);
   }
   function applyPinned(next) {
