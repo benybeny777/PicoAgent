@@ -61,6 +61,7 @@ export function createVoice({ motion, lipSync, pager, status, onCancelVisible, o
   let volume = 0.35; // PICOAGENT_TTS_VOLUME の既定(35)。設定適用前に鳴る音を100%にしない
   let enabled = null; // 読み上げが有効か（pet_speak の結果から覚える）。false のとき合成を要求しない
   let current = null;
+  let cancelPlayback = null;
   let session = 0;
   let failureNotified = false;
   let streamSpeech = null;
@@ -86,13 +87,16 @@ export function createVoice({ motion, lipSync, pager, status, onCancelVisible, o
   async function prepare(text) {
     const speech = String(text ?? "").trim();
     if (!speech) return null;
+    const voiceSession = session;
     try {
       const result = await bridge.speak(speech);
+      if (voiceSession !== session) return null;
       if (result?.enabled === false) enabled = false;
       else if (result?.enabled) { enabled = true; failureNotified = false; }
       if (!result?.enabled || result.skipped || !result.audio?.length) return null;
       return result;
     } catch (error) {
+      if (voiceSession !== session) return null;
       notifyFailure(error);
       return null;
     }
@@ -131,10 +135,15 @@ export function createVoice({ motion, lipSync, pager, status, onCancelVisible, o
       const done = () => {
         if (settled) return;
         settled = true;
+        if (cancelPlayback === done) cancelPlayback = null;
+        audio.pause();
+        audio.removeAttribute("src");
+        audio.load();
         URL.revokeObjectURL(url);
         if (current === audio) current = null;
         resolve();
       };
+      cancelPlayback = done;
       audio.addEventListener("ended", done, { once: true });
       audio.addEventListener("pause", done, { once: true });
       audio.addEventListener("error", () => {
@@ -164,6 +173,7 @@ export function createVoice({ motion, lipSync, pager, status, onCancelVisible, o
     const playing = current;
     current = null;
     playing?.pause();
+    cancelPlayback?.();
     streamSpeech = null;
     onCancelVisible(false);
     endSpeaking();
@@ -260,6 +270,7 @@ export function createVoice({ motion, lipSync, pager, status, onCancelVisible, o
     const playing = current;
     current = null;
     playing?.pause();
+    cancelPlayback?.();
     const voiceSession = ++session;
     onCancelVisible(true);
     try {

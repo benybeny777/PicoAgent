@@ -337,6 +337,7 @@ async function loadCharacter(characterId, { speakGreeting = true } = {}) {
   const { pack, greeting } = loaded;
   characterName = pack.name;
   stage.setCharacter(pack.id);
+  characterSource.element.dataset.characterId = pack.id;
   chrome.setCharacterName(pack.name);
   characterSource.element.title = `${pack.name}：右クリックでメニュー`;
   renderCharacterOptions(pack);

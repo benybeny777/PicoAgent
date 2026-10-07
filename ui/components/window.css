@@ -33,6 +33,7 @@
    「常に表示」ではシーンの上へ高さを空けて常設する。 */
 .app.title-bar-floating { --stage-top: 0px; }
 .top-window-menu {
+  container: window-menu / inline-size;
   position: fixed;
   z-index: 250;
   top: var(--scene-view-top, 0px);
@@ -70,6 +71,7 @@
 }
 .top-window-menu-items { display: flex; gap: 2px; min-width: 0; overflow: hidden; }
 .top-window-menu-items button {
+  flex: 0 0 auto;
   height: 24px;
   padding: 0 9px;
   border-radius: var(--radius-sm);
@@ -84,7 +86,7 @@
 .top-window-menu-items button[aria-pressed="true"] { background: var(--surface-hover); color: var(--text); }
 .top-window-menu-items button[aria-pressed="true"] { box-shadow: inset 0 -2px 0 var(--accent); }
 .top-window-menu-drag { flex: 1 1 auto; align-self: stretch; }
-.window-caption-controls { display: flex; align-self: stretch; }
+.window-caption-controls { display: flex; flex: 0 0 auto; align-self: stretch; }
 .window-caption-controls button {
   width: 44px;
   color: var(--text-muted);
@@ -97,11 +99,16 @@
 .window-caption-controls .window-pin[aria-pressed="true"] { box-shadow: inset 0 -2px 0 var(--accent); }
 
 /* 狭い窓ではキャラ選択 → 配置 → 表示の順に畳み、設定とウィンドウ操作は最後まで残す。 */
-@media (max-width: 456px) { .top-window-menu-items button:nth-child(3) { display: none; } }
-@media (max-width: 396px) { .top-window-menu-items button:nth-child(2) { display: none; } }
-@media (max-width: 336px) {
+@container window-menu (max-width: 600px) { .top-window-menu-items button:nth-child(3) { display: none; } }
+@container window-menu (max-width: 456px) {
+  .top-window-menu-items button:nth-child(2) { display: none; }
+  .top-window-menu-brand { display: none; }
+}
+@container window-menu (max-width: 336px) {
   .top-window-menu-items button:nth-child(1), .top-window-menu-items button:nth-child(4) { display: none; }
   .top-window-menu-brand { display: none; }
+  .window-caption-controls button { width: 34px; }
+  .window-caption-controls .window-pin { width: 28px; }
 }
 
 /* 枠なしウィンドウの8方向リサイズ領域。 */

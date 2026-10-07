@@ -106,7 +106,7 @@ test("会話ジョブを繰り返してもアクションセンターは直近50
 test("起動で非表示になったキャラは有効なキャラの読込成功後に再表示する", async () => {
   const source = uiFile("app/main.js");
   const body = source.slice(source.indexOf("async function loadCharacter("), source.indexOf("function localStorageVariant("));
-  const characterSource = { element: { style: { visibility: "hidden" } } };
+  const characterSource = { element: { dataset: {}, style: { visibility: "hidden" } } };
   const context = vm.createContext({
     loadedSignature: "", signatureOf: id => id, characterOverrides: {}, sdkOverrides: {}, characterName: "",
     voice: { stop() {} }, host: { load: async () => ({ pack: { id: "mugi", name: "むぎ", manifest: {} }, greeting: "" }) },
@@ -117,8 +117,10 @@ test("起動で非表示になったキャラは有効なキャラの読込成�
   vm.runInContext(body + "\nthis.load = loadCharacter;", context);
   await context.load("mugi");
   assert.equal(characterSource.element.style.visibility, "");
+  assert.equal(characterSource.element.dataset.characterId, "mugi");
   characterSource.element.style.visibility = "hidden";
   context.host.load = async () => { throw new Error("読込失敗"); };
   await assert.rejects(context.load("missing"), /読込失敗/);
   assert.equal(characterSource.element.style.visibility, "hidden");
+  assert.equal(characterSource.element.dataset.characterId, "mugi");
 });

@@ -148,8 +148,15 @@ window.__TAURI__ = {
       return [];
     }
     if (name === "pet_list_downloaded_models") return { totalLabel: "2GB", models: [{ name: "gemma-test.gguf", label: "Gemma", sizeLabel: "2GB", active: false }] };
-    if (name === "settings_list_models") return args.id === "agent_cli"
-      ? ["claude", "claude:opus", "claude:sonnet", "codex", "codex:future-model"] : [];
+    if (name === "settings_list_models") {
+      if (location.search.includes("slow-models")) {
+        window.__modelListPending = true;
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        window.__modelListPending = false;
+      }
+      return args.id === "agent_cli"
+        ? ["claude", "claude:opus", "claude:sonnet", "codex", "codex:future-model"] : [];
+    }
     if (name === "settings_check_update") return { status: "available", downloadReady: true, message: "1.1.0を利用できます。" };
     if (name === "engine_status") return { phase: "ready" };
     if (name === "aivis_status") return { enabled: true, up: true };
@@ -683,9 +690,24 @@ try {
   // UIモードは未設定時の可愛いを維持し、プレビュー・保存・再読込を同じ経路で検査する。
   const modePage = await browser.newPage({ viewport: { width: 960, height: 760 } });
   await modePage.addInitScript(mock);
-  await modePage.goto(`http://127.0.0.1:${port}/settings.html?tab=display`);
+  await modePage.goto(`http://127.0.0.1:${port}/settings.html?tab=display&slow-models`);
   const modeSelect = modePage.locator('[data-setting-key="PICOAGENT_UI_THEME"] select');
   await modeSelect.waitFor();
+  await modePage.waitForFunction(() => window.__modelListPending === true);
+  const loadingState = await modeSelect.evaluate(node => {
+    node.focus();
+    return {
+      inert: document.getElementById("form").inert,
+      saveDisabled: document.getElementById("save").disabled,
+      inputFocused: document.activeElement === node,
+    };
+  });
+  if (!loadingState.inert || !loadingState.saveDisabled || loadingState.inputFocused) {
+    throw new Error(`初期値の読込中に設定を編集できます: ${JSON.stringify(loadingState)}`);
+  }
+  // 入力欄はキャラやモデルの読込より先に描画される。初期値の確定前に選択すると
+  // 未保存変更の検査にならないため、保存操作が有効になるまで待つ。
+  await modePage.waitForFunction(() => !document.getElementById("save").disabled);
   if (await modeSelect.inputValue() !== "pastel") throw new Error("未設定のUIモードが可愛いではありません");
   for (const [mode, radius] of [["glass", "12px"], ["pastel", "24px"]]) {
     await modeSelect.selectOption(mode);
@@ -697,6 +719,7 @@ try {
     await modePage.waitForFunction(() => !document.getElementById("save").disabled);
     await modePage.reload();
     await modeSelect.waitFor();
+    await modePage.waitForFunction(() => !document.getElementById("save").disabled);
     if (await modeSelect.inputValue() !== mode) throw new Error(`UIモードの保存・再読込が不一致: ${mode}`);
     // 明暗はプレビューだけ切り替えて撮る（保存しない）。アクセント面の文字はモードの対比色を使う。
     const themeSelect = modePage.locator('[data-setting-key="PICOAGENT_THEME"] select');

@@ -49,12 +49,12 @@ async function main() {
       url: location.href,
       layout: document.querySelector("#petApp")?.dataset.layout,
       booting: document.querySelector("#petApp")?.classList.contains("is-booting"),
-      character: document.querySelector("#character")?.dataset.characterId,
-      renderKind: document.querySelector("#character")?.dataset.renderKind,
+      character: document.querySelector('[data-source="character"]')?.dataset.characterId,
+      renderKind: document.querySelector(".character-view")?.dataset.renderKind,
       viewport: [innerWidth, innerHeight, devicePixelRatio],
       position: await window.__TAURI__.window.getCurrentWindow().outerPosition(),
       dark: matchMedia("(prefers-color-scheme: dark)").matches,
-      panelColor: getComputedStyle(document.documentElement).getPropertyValue("--panel-bg").trim(),
+      panelColor: getComputedStyle(document.querySelector(".chat") || document.documentElement).backgroundColor,
     })), null, 2));
   });
 }

@@ -2433,6 +2433,10 @@ function layoutResetField() {
 
 function bindStreamImagePicker(button, kind, label, onPicked, isAvailable = () => true) {
   button.addEventListener("click", async () => {
+    if (settingsMutationBusy || !isAvailable()) return;
+    // 画像の選択・取り込み中にキャラ切替や設定復元を許すと、完了した画像が別の
+    // キャラや再描画後の入力へ入る。取り込み結果を元の編集欄へ反映するまで固定する。
+    setSettingsMutationBusy(true);
     button.disabled = true;
     statusEl.textContent = `${label}を選択しています…`;
     try {
@@ -2448,6 +2452,7 @@ function bindStreamImagePicker(button, kind, label, onPicked, isAvailable = () =
       statusEl.textContent = `${label}を取り込めませんでした: ${errorMessage(error)}`;
     } finally {
       button.disabled = !isAvailable();
+      setSettingsMutationBusy(false);
     }
   });
 }
@@ -3036,6 +3041,9 @@ async function render() {
   ++modelLoadGeneration;
   providerDraftValues = {};
   renderingSettings = true;
+  // 初期値の読込途中で入力すると、最後のスナップショットへ編集が混ざって
+  // 保存対象から消える。キャラ・モデルまで揃う間はフォーム全体の操作を止める。
+  form.inert = true;
   form.innerHTML = "";
   inputs.clear();
   inputWrappers.clear();
@@ -4086,6 +4094,7 @@ async function render() {
   await loadModels(providerSelect.value);
   applySettingsSearch();
   renderingSettings = false;
+  form.inert = settingsMutationBusy;
   updateDirtyState();
   if (requestedSettingsTab === "character-add") activateSettingsTab("character-register");
 }
@@ -4249,10 +4258,28 @@ function confirmRestart() {
   });
 }
 
+function validateSettingsNumberFields() {
+  const fields = [
+    ["PICOAGENT_STREAM_CHAT_FONT_PX", "display", "配信チャットの文字サイズ"],
+    ["PICOAGENT_TTS_VOLUME", "voice", "音声・ゲーム効果音の音量"],
+  ];
+  for (const [key, tabId, label] of fields) {
+    const input = inputs.get(key);
+    if (!input || input.checkValidity()) continue;
+    // 別タブや検索で隠れた入力にはブラウザの警告が出せない。入力欄を先に見せる。
+    if (settingsSearch) settingsSearch.value = "";
+    if (clearSettingsSearch) clearSettingsSearch.hidden = true;
+    activateSettingsTab(tabId);
+    statusEl.textContent = `${label}の入力内容を確認してください。`;
+    input.reportValidity();
+    return false;
+  }
+  return true;
+}
+
 saveBtn.addEventListener("click", async () => {
   if (settingsMutationBusy || !savedSnapshot) return;
-  const streamFontInput = inputs.get("PICOAGENT_STREAM_CHAT_FONT_PX");
-  if (streamFontInput && !streamFontInput.reportValidity()) return;
+  if (!validateSettingsNumberFields()) return;
   setSettingsMutationBusy(true);
   statusEl.textContent = "保存中…";
   try {
@@ -4383,6 +4410,7 @@ document.addEventListener("keydown", event => {
   }
   catch (error) {
     renderingSettings = false;
+    form.inert = false;
     data = null;
     savedSnapshot = null;
     saveBtn.disabled = true;

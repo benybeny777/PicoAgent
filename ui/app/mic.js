@@ -38,6 +38,7 @@ export function createMic({ chat, voice, motion, isBusy, canListen, onActivity, 
   const loopButton = buttons.voiceLoopButton;
   let stream = null;
   let starting = false;
+  let transcribing = false;
   let startRequest = 0;
   let context = null;
   let node = null;
@@ -102,6 +103,11 @@ export function createMic({ chat, voice, motion, isBusy, canListen, onActivity, 
   function stopCapture() {
     startRequest += 1;
     starting = false;
+    if (transcribing) {
+      transcribing = false;
+      status.setBusy(isBusy());
+    }
+    status.clear("mic");
     micButton.disabled = false;
     session += 1;
     if (interimTimer) { clearInterval(interimTimer); interimTimer = null; }
@@ -155,6 +161,7 @@ export function createMic({ chat, voice, motion, isBusy, canListen, onActivity, 
       return;
     }
     status.set(hadInterim ? "文字起こしを確定中…" : "文字起こし中…", "mic");
+    transcribing = true;
     status.setBusy(true);
     try {
       const data = await blobToDataUrl(new Blob([encodeWav(recorded, rate)], { type: "audio/wav" }));
@@ -175,6 +182,7 @@ export function createMic({ chat, voice, motion, isBusy, canListen, onActivity, 
       else toast("確定に失敗したため途中結果を残しました", "warn");
     } finally {
       if (isCurrent()) {
+        transcribing = false;
         status.setBusy(isBusy());
         status.clear("mic");
         if (hasTranscript) {
@@ -186,7 +194,7 @@ export function createMic({ chat, voice, motion, isBusy, canListen, onActivity, 
   }
 
   async function start() {
-    if (stream || starting) return;
+    if (stream || starting || transcribing) return;
     cancelPendingSubmit("録音を再開するため音声送信を取り消しました");
     const request = ++startRequest;
     starting = true;
@@ -300,7 +308,7 @@ export function createMic({ chat, voice, motion, isBusy, canListen, onActivity, 
     continuousTimer = setTimeout(async () => {
       continuousTimer = null;
       if (!continuous) return;
-      if (isBusy() || voice.speaking || stream || !canListen()) {
+      if (isBusy() || voice.speaking || stream || starting || transcribing || submitTimer || !canListen()) {
         scheduleContinuous(Math.min(delay * 2, CONTINUOUS_MAX_MS));
         return;
       }
@@ -313,7 +321,8 @@ export function createMic({ chat, voice, motion, isBusy, canListen, onActivity, 
     event.stopPropagation();
     setContinuous(!continuous);
     if (!continuous) {
-      if (stream) stopCapture();
+      stopCapture();
+      cancelPendingSubmit();
       toast("連続会話を終了しました", "success");
       return;
     }
@@ -356,14 +365,14 @@ export function createMic({ chat, voice, motion, isBusy, canListen, onActivity, 
   document.addEventListener("visibilitychange", () => {
     if (!document.hidden || !continuous) return;
     setContinuous(false);
-    if (stream) stopCapture();
+    stopCapture();
     cancelPendingSubmit("画面が非表示になったため音声送信を取り消しました");
   });
   window.addEventListener("beforeunload", () => {
     if (continuousTimer) clearTimeout(continuousTimer);
     if (submitTimer) clearTimeout(submitTimer);
     if (holdTimer) clearTimeout(holdTimer);
-    if (stream) stopCapture();
+    stopCapture();
   });
 
   return {

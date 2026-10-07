@@ -23,6 +23,7 @@ export function createBoot({ app, screen, beforeReveal }) {
   let lastText = "";
   let progressTimer = null;
   let backendFinished = false;
+  let revealed = false;
   let finishPromise = null;
   let retryTimer = null;
   let retryDelay = 1500;
@@ -41,28 +42,31 @@ export function createBoot({ app, screen, beforeReveal }) {
     try { beforeReveal?.(); }
     catch (error) { logApp("warn", "表示前の描画確定に失敗しました", errorDetail(error)); }
     await bridge.revealMain();
+    revealed = true;
   }
 
   async function finishBackend() {
-    if (backendFinished) return;
-    if (!finishPromise) {
+    if (!backendFinished && !finishPromise) {
       finishPromise = bridge.finishBoot()
         .then(() => { backendFinished = true; })
         .finally(() => { finishPromise = null; });
     }
-    await finishPromise;
+    if (finishPromise) await finishPromise;
     if (released) await reveal();
   }
 
   function scheduleRetry(status) {
-    if (backendFinished || retryTimer) return;
-    status.setSticky("位置・寸法の復旧中…", "pending");
+    if ((backendFinished && revealed) || retryTimer) return;
+    // 復旧は自分の一時表示だけを管理し、AIのエラーや後から出た操作状態を奪わない。
+    if (status.owner === "boot" || status.owner === "boot-recovery" || (!status.owner && !status.text)) {
+      status.set(backendFinished ? "画面表示の復旧中…" : "位置・寸法の復旧中…", "boot-recovery");
+    }
     retryTimer = setTimeout(async () => {
       retryTimer = null;
       try {
         await finishBackend();
         retryDelay = 1500;
-        status.setSticky("");
+        status.clear("boot-recovery");
       } catch (error) {
         logApp("warn", "起動後の位置・寸法を再試行できませんでした", errorDetail(error));
         retryDelay = Math.min(retryDelay * 2, RETRY_MAX_MS);
@@ -104,7 +108,12 @@ export function createBoot({ app, screen, beforeReveal }) {
       }
       released = true;
       app.classList.remove("is-booting");
-      if (backendFinished) await reveal();
+      try {
+        if (backendFinished) await reveal();
+      } catch (error) {
+        logApp("warn", "通常画面を表示できませんでした", errorDetail(error));
+        scheduleRetry(status);
+      }
     },
   };
 }
