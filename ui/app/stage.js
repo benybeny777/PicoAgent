@@ -196,26 +196,48 @@ export function createStage({ stageElement, sceneRoot, sources, character, toast
     });
   }
 
-  /** キャラを窓からはみ出す大きさにしたら、アンカー側を固定して窓を広げる（`pet` / `mascot`）。 */
+  /** キャラを窓からはみ出す大きさにしたら、画面上の矩形を固定して窓を広げる（`pet` / `mascot`）。 */
   async function growWindowFor(target) {
     const geometry = sceneGeometry();
     if (geometry.fixed || target !== "character") return;
-    const rect = toRect(placementOf("character", geometry), geometry.width, geometry.height);
+    const placement = placementOf("character", geometry);
+    const rect = toRect(placement, geometry.width, geometry.height);
+    const growingLayout = layoutId;
+    const growingCharacter = characterId;
+    const previous = savedFor("character");
     const overflowLeft = Math.max(0, -rect.left);
     const overflowTop = Math.max(0, -rect.top);
     const overflowRight = Math.max(0, rect.left + rect.width - geometry.width);
     const overflowBottom = Math.max(0, rect.top + rect.height - geometry.height);
     if (!(overflowLeft || overflowTop || overflowRight || overflowBottom)) return;
-    const maxWidth = Math.max(geometry.width, window.screen?.availWidth || geometry.width);
-    const maxHeight = Math.max(geometry.height, window.screen?.availHeight || geometry.height);
-    const width = Math.min(maxWidth, Math.ceil(geometry.width + overflowLeft + overflowRight));
-    const height = Math.min(maxHeight, Math.ceil(geometry.height + overflowTop + overflowBottom));
+    // 固定タイトルバーが占める分も窓寸法へ含める。シーン座標と窓座標はいずれも論理px。
+    const chromeWidth = Math.max(0, (window.innerWidth || geometry.width) - geometry.width);
+    const chromeHeight = Math.max(0, (window.innerHeight || geometry.height) - geometry.height);
+    const currentWidth = geometry.width + chromeWidth;
+    const currentHeight = geometry.height + chromeHeight;
+    const maxWidth = Math.max(currentWidth, window.screen?.availWidth || currentWidth);
+    const maxHeight = Math.max(currentHeight, window.screen?.availHeight || currentHeight);
+    const width = Math.min(maxWidth, Math.ceil(currentWidth + overflowLeft + overflowRight));
+    const height = Math.min(maxHeight, Math.ceil(currentHeight + overflowTop + overflowBottom));
+    const leftDelta = Math.ceil(overflowLeft);
+    const topDelta = Math.ceil(overflowTop);
     try {
       if (overflowLeft || overflowTop) {
-        await bridge.moveAndResizeWindow(Math.ceil(overflowLeft), Math.ceil(overflowTop), width, height);
+        await bridge.moveAndResizeWindow(leftDelta, topDelta, width, height);
       } else {
         await bridge.setWindowSize(width, height);
       }
+      // 拡張した辺へアンカーが追従して再びはみ出さないよう、元の画面上の位置を保存し直す。
+      // 他ソースの保存値は維持する。待機中に別キャラ・形式・配置へ変わった場合も上書きしない。
+      if (layoutId !== growingLayout || characterId !== growingCharacter || savedFor("character") !== previous) return;
+      const value = {
+        ...previous,
+        ...fromRect({ ...rect, left: rect.left + leftDelta, top: rect.top + topDelta },
+          placement.anchor, width - chromeWidth, height - chromeHeight),
+      };
+      value.framing ||= savedFraming();
+      writeSaved(saved, growingLayout, { characterId: growingCharacter }, value);
+      applyLayout();
     } catch (error) {
       logApp("warn", "キャラの大きさに合わせてウィンドウを広げられませんでした", errorDetail(error));
     }

@@ -23,6 +23,7 @@ test("設定のJSONが不正でも保存失敗後に入力と復元を操作で�
   vm.runInContext(settings.slice(settings.indexOf("function updateDirtyStateNow()"), settings.indexOf("// collect()と全設定")), context);
   vm.runInContext("const dirtyStateScheduler = { flush: updateDirtyStateNow };", context);
   vm.runInContext(settings.slice(settings.indexOf("function setSettingsMutationBusy("), settings.indexOf("function nodeSearchText(")), context);
+  vm.runInContext(settings.slice(settings.indexOf("function validateSettingsNumberFields()"), settings.indexOf('saveBtn.addEventListener("click"')), context);
   vm.runInContext(settings.slice(settings.indexOf('saveBtn.addEventListener("click"'), settings.indexOf('resetChangesBtn?.addEventListener("click"')), context);
   context.updateDirtyStateNow();
   assert.equal(resetChangesBtn.disabled, false);

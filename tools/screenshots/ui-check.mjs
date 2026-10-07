@@ -78,7 +78,7 @@ window.__TAURI__ = {
     return Promise.resolve(() => { const index = list.indexOf(callback); if (index >= 0) list.splice(index, 1); });
   } },
   window: { getCurrentWindow: () => ({
-    setFullscreen: async () => {}, setSize: async () => {}, scaleFactor: async () => 1,
+    setFullscreen: async () => {}, setSize: size => window.__resizeWindow(size), scaleFactor: async () => 1,
     outerPosition: async () => ({ x: 0, y: 0 }), setPosition: async () => {},
     startResizeDragging: async () => {}, minimize: async () => {}, toggleMaximize: async () => {}, close: async () => {},
   }) },
@@ -98,9 +98,11 @@ const fail = (label, detail) => { failures.push(`${label}: ${detail}`); console.
 const ok = label => console.log(`OK ${label}`);
 
 async function openApp({ layout, width, height, characterId, scenes, onboardingDone, history, uiTheme }) {
-  const context = await browser.newContext({ viewport: { width, height }, deviceScaleFactor: 1 });
+  // 窓とモニターは別の寸法。キャラ拡大時の窓拡張も実ブリッジと同じく検査する。
+  const context = await browser.newContext({ viewport: { width, height }, screen: { width: 1920, height: 1080 }, deviceScaleFactor: 1 });
   const page = await context.newPage();
   const errors = [];
+  await page.exposeFunction("__resizeWindow", size => page.setViewportSize({ width: Math.round(size.width), height: Math.round(size.height) }));
   page.on("pageerror", error => errors.push(String(error)));
   page.on("console", message => { if (message.type() === "error") errors.push(message.text()); });
   await page.addInitScript(mockScript({ layout, characterId, scenes, onboardingDone, history, uiTheme }));
@@ -157,9 +159,17 @@ async function fullyInside(page, selector) {
     const element = document.querySelector(sel);
     if (!element || element.hidden || !element.getClientRects().length) return { present: false };
     const rect = element.getBoundingClientRect();
+    let inside = rect.left >= -0.5 && rect.top >= -0.5 && rect.right <= innerWidth + 0.5 && rect.bottom <= innerHeight + 0.5;
+    // 窓内にあっても、親の overflow で切れていれば操作できない。
+    for (let parent = element.parentElement; parent; parent = parent.parentElement) {
+      const style = getComputedStyle(parent);
+      const bounds = parent.getBoundingClientRect();
+      if (["hidden", "clip", "auto", "scroll"].includes(style.overflowX)) inside &&= rect.left >= bounds.left - 0.5 && rect.right <= bounds.right + 0.5;
+      if (["hidden", "clip", "auto", "scroll"].includes(style.overflowY)) inside &&= rect.top >= bounds.top - 0.5 && rect.bottom <= bounds.bottom + 0.5;
+    }
     return {
       present: true,
-      inside: rect.left >= -0.5 && rect.top >= -0.5 && rect.right <= innerWidth + 0.5 && rect.bottom <= innerHeight + 0.5,
+      inside,
       rect: { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom },
     };
   }, selector);
@@ -407,6 +417,22 @@ for (const layout of Object.keys(LAYOUTS)) {
     else if (!result.inside) fail(label, `${selector} が窓の外へ出ています ${JSON.stringify(result.rect)}`);
   }
   ok(`${label} 最小サイズの収まり`);
+  await context.close();
+}
+
+// タイトルバーの幅は固定シーンでは窓幅より狭くなる。親で切れず設定と全ウィンドウ操作を押せる。
+for (const layout of Object.keys(LAYOUTS)) {
+  const { context, page } = await openApp({ layout, width: 900, height: 600, characterId: "mugi" });
+  for (const [width, height] of [[200, 240], [360, 560], [400, 600], [480, 600], [620, 600], [900, 240]]) {
+    await page.setViewportSize({ width, height });
+    await page.waitForTimeout(120);
+    await page.evaluate(() => document.querySelector("#petApp").classList.add("title-bar-shown"));
+    for (const selector of ["#topWindowMenu .top-window-menu-items button:last-child", "#topWindowMenu .window-pin", "#topWindowMenu .window-caption-controls button:nth-child(2)", "#topWindowMenu .window-caption-controls button:nth-child(3)", "#topWindowMenu .window-close"]) {
+      const result = await fullyInside(page, selector);
+      if (!result.present || !result.inside) fail(`${layout}/${width}x${height}`, `${selector} が隠れるか切れています ${JSON.stringify(result)}`);
+    }
+    await page.screenshot({ path: path.join(outDir, `menu-${layout}-${width}x${height}.png`), omitBackground: true });
+  }
   await context.close();
 }
 
