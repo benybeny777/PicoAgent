@@ -28,6 +28,10 @@ export function createStage({ stageElement, sceneRoot, sources, character, toast
   let frame = 0;
   let lastLayout = null;
   let saveQueue = Promise.resolve();
+  let saveGeneration = 0;
+  let growthQueue = Promise.resolve();
+  let growthShiftX = 0;
+  let growthShiftY = 0;
 
   const definition = () => definitions[layoutId] || definitions.pet || { sources: {}, order: [] };
   const fixedSize = def => (def.size && typeof def.size === "object" ? def.size : null);
@@ -187,7 +191,12 @@ export function createStage({ stageElement, sceneRoot, sources, character, toast
 
   function persist() {
     const snapshot = cloneScenes(saved);
-    const operation = saveQueue.catch(() => undefined).then(() => bridge.saveScene(snapshot));
+    const generation = saveGeneration;
+    const operation = saveQueue.catch(() => undefined).then(() => {
+      // バックエンドで配置を戻した後に、まだ未送信だった古い保存を送り直さない。
+      if (generation !== saveGeneration) return;
+      return bridge.saveScene(snapshot);
+    });
     saveQueue = operation;
     return operation.catch(error => {
       logApp("error", "画面配置を保存できませんでした", errorDetail(error));
@@ -197,50 +206,69 @@ export function createStage({ stageElement, sceneRoot, sources, character, toast
   }
 
   /** キャラを窓からはみ出す大きさにしたら、画面上の矩形を固定して窓を広げる（`pet` / `mascot`）。 */
-  async function growWindowFor(target) {
-    const geometry = sceneGeometry();
-    if (geometry.fixed || target !== "character") return;
-    const placement = placementOf("character", geometry);
-    const rect = toRect(placement, geometry.width, geometry.height);
+  function growWindowFor(target) {
+    const requestedGeometry = sceneGeometry();
+    if (requestedGeometry.fixed || target !== "character") return Promise.resolve();
+    const placement = placementOf("character", requestedGeometry);
+    const requestedRect = toRect(placement, requestedGeometry.width, requestedGeometry.height);
     const growingLayout = layoutId;
     const growingCharacter = characterId;
     const previous = savedFor("character");
-    const overflowLeft = Math.max(0, -rect.left);
-    const overflowTop = Math.max(0, -rect.top);
-    const overflowRight = Math.max(0, rect.left + rect.width - geometry.width);
-    const overflowBottom = Math.max(0, rect.top + rect.height - geometry.height);
-    if (!(overflowLeft || overflowTop || overflowRight || overflowBottom)) return;
-    // 固定タイトルバーが占める分も窓寸法へ含める。シーン座標と窓座標はいずれも論理px。
-    const chromeWidth = Math.max(0, (window.innerWidth || geometry.width) - geometry.width);
-    const chromeHeight = Math.max(0, (window.innerHeight || geometry.height) - geometry.height);
-    const currentWidth = geometry.width + chromeWidth;
-    const currentHeight = geometry.height + chromeHeight;
-    const maxWidth = Math.max(currentWidth, window.screen?.availWidth || currentWidth);
-    const maxHeight = Math.max(currentHeight, window.screen?.availHeight || currentHeight);
-    const width = Math.min(maxWidth, Math.ceil(currentWidth + overflowLeft + overflowRight));
-    const height = Math.min(maxHeight, Math.ceil(currentHeight + overflowTop + overflowBottom));
-    const leftDelta = Math.ceil(overflowLeft);
-    const topDelta = Math.ceil(overflowTop);
-    try {
-      if (overflowLeft || overflowTop) {
-        await bridge.moveAndResizeWindow(leftDelta, topDelta, width, height);
-      } else {
-        await bridge.setWindowSize(width, height);
+    const shiftX = growthShiftX;
+    const shiftY = growthShiftY;
+    const generation = saveGeneration;
+    const current = () => generation === saveGeneration && layoutId === growingLayout
+      && characterId === growingCharacter && savedFor("character") === previous;
+    const operation = growthQueue.then(async () => {
+      // 待機中に上書きされたサイズは送らず、すでに送った窓操作の完了後に次を処理する。
+      if (!current()) return;
+      const geometry = sceneGeometry();
+      const rect = { ...requestedRect,
+        left: requestedRect.left + growthShiftX - shiftX,
+        top: requestedRect.top + growthShiftY - shiftY };
+      const overflowLeft = Math.max(0, -rect.left);
+      const overflowTop = Math.max(0, -rect.top);
+      const overflowRight = Math.max(0, rect.left + rect.width - geometry.width);
+      const overflowBottom = Math.max(0, rect.top + rect.height - geometry.height);
+      if (!(overflowLeft || overflowTop || overflowRight || overflowBottom)
+          && geometry.width === requestedGeometry.width && geometry.height === requestedGeometry.height
+          && shiftX === growthShiftX && shiftY === growthShiftY) return;
+      // 固定タイトルバーが占める分も窓寸法へ含める。シーン座標と窓座標はいずれも論理px。
+      const chromeWidth = Math.max(0, (window.innerWidth || geometry.width) - geometry.width);
+      const chromeHeight = Math.max(0, (window.innerHeight || geometry.height) - geometry.height);
+      const currentWidth = geometry.width + chromeWidth;
+      const currentHeight = geometry.height + chromeHeight;
+      const maxWidth = Math.max(currentWidth, window.screen?.availWidth || currentWidth);
+      const maxHeight = Math.max(currentHeight, window.screen?.availHeight || currentHeight);
+      const width = Math.min(maxWidth, Math.ceil(currentWidth + overflowLeft + overflowRight));
+      const height = Math.min(maxHeight, Math.ceil(currentHeight + overflowTop + overflowBottom));
+      const leftDelta = Math.ceil(overflowLeft);
+      const topDelta = Math.ceil(overflowTop);
+      try {
+        if (overflowLeft || overflowTop) {
+          await bridge.moveAndResizeWindow(leftDelta, topDelta, width, height);
+          growthShiftX += leftDelta;
+          growthShiftY += topDelta;
+        } else if (overflowRight || overflowBottom) {
+          await bridge.setWindowSize(width, height);
+        }
+        // 拡張した辺へアンカーが追従して再びはみ出さないよう、元の画面上の位置を保存し直す。
+        // 他ソースの保存値は維持する。待機中に別キャラ・形式・配置へ変わった場合も上書きしない。
+        if (!current()) return;
+        const value = {
+          ...previous,
+          ...fromRect({ ...rect, left: rect.left + leftDelta, top: rect.top + topDelta },
+            placement.anchor, width - chromeWidth, height - chromeHeight),
+        };
+        value.framing ||= savedFraming();
+        writeSaved(saved, growingLayout, { characterId: growingCharacter }, value);
+        applyLayout();
+      } catch (error) {
+        logApp("warn", "キャラの大きさに合わせてウィンドウを広げられませんでした", errorDetail(error));
       }
-      // 拡張した辺へアンカーが追従して再びはみ出さないよう、元の画面上の位置を保存し直す。
-      // 他ソースの保存値は維持する。待機中に別キャラ・形式・配置へ変わった場合も上書きしない。
-      if (layoutId !== growingLayout || characterId !== growingCharacter || savedFor("character") !== previous) return;
-      const value = {
-        ...previous,
-        ...fromRect({ ...rect, left: rect.left + leftDelta, top: rect.top + topDelta },
-          placement.anchor, width - chromeWidth, height - chromeHeight),
-      };
-      value.framing ||= savedFraming();
-      writeSaved(saved, growingLayout, { characterId: growingCharacter }, value);
-      applyLayout();
-    } catch (error) {
-      logApp("warn", "キャラの大きさに合わせてウィンドウを広げられませんでした", errorDetail(error));
-    }
+    });
+    growthQueue = operation.catch(() => undefined);
+    return operation;
   }
 
   const stage = {
@@ -253,6 +281,7 @@ export function createStage({ stageElement, sceneRoot, sources, character, toast
     sources,
 
     load(defs, scenes) {
+      saveGeneration++;
       definitions = defs;
       saved = cloneScenes(scenes);
       schedule();
@@ -304,6 +333,7 @@ export function createStage({ stageElement, sceneRoot, sources, character, toast
      * `windowRect` が null なら、そのソースの保存値を捨てて既定へ戻す。
      */
     async commit(target, windowRect, extra = {}) {
+      const generation = saveGeneration;
       previews.delete(target);
       const geometry = sceneGeometry();
       const key = target === "character" ? { characterId } : { source: target };
@@ -325,6 +355,7 @@ export function createStage({ stageElement, sceneRoot, sources, character, toast
       }
       applyLayout();
       await growWindowFor(target);
+      if (generation !== saveGeneration) return;
       return persist();
     },
     /** ソースの表示・非表示だけを切り替えて保存する。 */
@@ -354,6 +385,7 @@ export function createStage({ stageElement, sceneRoot, sources, character, toast
     },
     /** この形式の保存値をすべて捨てる（配置編集の「既定へ戻す」）。 */
     async resetLayout() {
+      saveGeneration++;
       delete saved[layoutId];
       previews.clear();
       applyLayout();
@@ -361,6 +393,7 @@ export function createStage({ stageElement, sceneRoot, sources, character, toast
     },
     /** バックエンドが保存値を書き換えた場合（位置とサイズのリセット）に写しを置き換える。 */
     replaceScenes(scenes) {
+      saveGeneration++;
       events.emit("context-reset");
       saved = cloneScenes(scenes);
       previews.clear();

@@ -35,6 +35,7 @@ const inputs = new Map(); // key -> input 要素
 const inputWrappers = new Map(); // key -> field/card 要素
 let savedSnapshot = null; // 最後に読み込んだ、または保存できた設定値
 let providerDraftValues = {}; // 非表示へ切り替えたAI設定の未保存入力。
+let providerModelDraftValues = {}; // Ollama・CLI共通のモデル欄も、切替先ごとの草稿を保持する。
 let renderingSettings = false;
 let characterOverrides = {};
 let characterVoiceOverrides = {};
@@ -2937,6 +2938,8 @@ function buildCharacterMaker(registerInstalledCharacter) {
       disabled: character.stages?.complete?.status !== "complete",
     });
     installButton.addEventListener("click", async () => {
+      if (settingsMutationBusy) return;
+      setSettingsMutationBusy(true);
       try {
         const result = await window.picoagent.settings.characterMakerInstall(character.characterId);
         if (!result.updated) await registerInstalledCharacter(result.id);
@@ -2945,6 +2948,8 @@ function buildCharacterMaker(registerInstalledCharacter) {
           : `${result.name}を追加して選びました。「保存」で反映します。`;
       } catch (error) {
         status.textContent = `PicoAgentへ反映できませんでした: ${errorMessage(error)}`;
+      } finally {
+        setSettingsMutationBusy(false);
       }
     });
     const previewButton = el("button", {
@@ -3040,6 +3045,7 @@ function buildCharacterMaker(registerInstalledCharacter) {
 async function render() {
   ++modelLoadGeneration;
   providerDraftValues = {};
+  providerModelDraftValues = {};
   renderingSettings = true;
   // 初期値の読込途中で入力すると、最後のスナップショットへ編集が混ざって
   // 保存対象から消える。キャラ・モデルまで揃う間はフォーム全体の操作を止める。
@@ -3767,7 +3773,7 @@ async function render() {
   const discoveryInstall = el("button", { className: "primary", type: "button", textContent: "選んだモデルを追加" });
   let discoverySelected = null;
   discoveryInstall.addEventListener("click", async () => {
-    if (!discoverySelected) return;
+    if (settingsMutationBusy || !discoverySelected) return;
     const id = discoveryId.value.trim();
     const name = discoveryName.value.trim();
     if (!discoveryTerms.checked) { discoveryStatus.textContent = "配布元の利用条件を確認してください。"; return; }
@@ -3776,6 +3782,7 @@ async function render() {
       discoveryStatus.textContent = `キャラクターID ${id} は既に使われています。`;
       return;
     }
+    setSettingsMutationBusy(true);
     discoveryInstall.disabled = true;
     discoveryStatus.textContent = `${discoverySelected.kind === "mmd" ? "MMD" : "Live2D"}モデルを確認して追加しています…`;
     try {
@@ -3791,6 +3798,7 @@ async function render() {
       discoveryStatus.textContent = `追加できませんでした: ${errorMessage(error)}`;
     } finally {
       discoveryInstall.disabled = false;
+      setSettingsMutationBusy(false);
     }
   });
   discoveryForm.append(
@@ -3853,6 +3861,8 @@ async function render() {
   const officialLinks = el("div", { className: "setup-guide-links" },
     LIVE2D_SAMPLE_LINKS.map(([label, href]) => officialModelLink(label, href, live2dStatus)));
   async function installRawLive2d(folder) {
+    if (settingsMutationBusy) return;
+    setSettingsMutationBusy(true);
     live2dStatus.textContent = "選択中…";
     try {
       if (!termsInput.checked) throw new Error("配布元の利用条件とモデルの利用権を確認してください。");
@@ -3874,6 +3884,8 @@ async function render() {
       live2dStatus.textContent = `${added.name}（${added.id}）を追加して選びました。「保存」で反映します。`;
     } catch (error) {
       live2dStatus.textContent = `追加できませんでした: ${errorMessage(error)}`;
+    } finally {
+      setSettingsMutationBusy(false);
     }
   }
 
@@ -3890,6 +3902,8 @@ async function render() {
   const mmdNameInput = el("input", { type: "text", value: "マイMMD", maxLength: 80 });
   // `terms` を渡した導線（ホロライブ公式MMD）は、配布元の規約を確認したチェックを必須にする。
   async function installRawMmd(folder, { idInput = mmdIdInput, nameInput = mmdNameInput, terms = null, status = addStatus } = {}) {
+    if (settingsMutationBusy) return;
+    setSettingsMutationBusy(true);
     status.textContent = "選択中…";
     try {
       if (terms && !terms.checked) throw new Error("ホロライブの利用規約と二次創作ガイドラインを確認してください。");
@@ -3907,6 +3921,8 @@ async function render() {
       status.textContent = `${added.name}（${added.id}）を追加して選びました。「保存」で反映します。`;
     } catch (error) {
       status.textContent = `追加できませんでした: ${errorMessage(error)}`;
+    } finally {
+      setSettingsMutationBusy(false);
     }
   }
   const rawMmdButtons = el("div", { className: "character-add-actions" }, [
@@ -3948,6 +3964,9 @@ async function render() {
   ].map(text => el("li", { textContent: text })));
 
   async function installCharacterPack(folder) {
+    if (settingsMutationBusy) return;
+    // 追加完了まで元のフォームを保持し、設定復元後の別フォームへ登録しない。
+    setSettingsMutationBusy(true);
     addStatus.textContent = "選択中…";
     try {
       const picked = await window.picoagent.settings.pickCharacterPack(folder);
@@ -3962,6 +3981,8 @@ async function render() {
     } catch (error) {
       // 検証で弾いた理由をそのまま見せる（何を直せばよいか分かるようにする）。
       addStatus.textContent = `追加できませんでした: ${errorMessage(error)}`;
+    } finally {
+      setSettingsMutationBusy(false);
     }
   }
   const addButtons = el("div", { className: "character-add-actions" }, [
@@ -4083,7 +4104,10 @@ async function render() {
   panels.diagnostics.append(buildProductInfoSection(), buildDiagnosticsSection());
 
   // プロバイダ変更でモデル候補を更新し、選択中プロバイダの設定だけ表示する。
+  let displayedProviderId = providerSelect.value;
   providerSelect.addEventListener("change", () => {
+    rememberProviderModelDraft(displayedProviderId);
+    displayedProviderId = providerSelect.value;
     v.PICOAGENT_PROVIDER = providerSelect.value;
     renderProviderConfig(providerSelect.value);
     loadModels(providerSelect.value, true);
@@ -4099,7 +4123,19 @@ async function render() {
   if (requestedSettingsTab === "character-add") activateSettingsTab("character-register");
 }
 
+function rememberProviderModelDraft(providerId) {
+  if (!modelInput || !["ollama", "agent_cli"].includes(providerId)) return;
+  providerModelDraftValues[providerId] = modelInput.value;
+  if (providerId === "ollama") {
+    // 汎用欄の編集をOllama固有キーにも移してから、サービスの欄を非表示へする。
+    const input = inputs.get("OLLAMA_MODEL");
+    if (input) input.value = modelInput.value;
+    providerDraftValues.OLLAMA_MODEL = modelInput.value;
+  }
+}
+
 function providerDefaultModel(providerId) {
+  if (Object.hasOwn(providerModelDraftValues, providerId)) return providerModelDraftValues[providerId];
   const provider = data.providers.find(p => p.id === providerId);
   if (!provider) return "";
   if (providerId === "ollama") return inputs.get("OLLAMA_MODEL")?.value || provider.defaultModel || "";
@@ -4121,6 +4157,7 @@ async function loadModels(providerId, applyProviderDefault = false) {
   const generation = ++modelLoadGeneration;
   const targetInput = modelInput;
   const preferred = providerDefaultModel(providerId);
+  const preserveProviderDraft = Object.hasOwn(providerModelDraftValues, providerId);
   // 切替直後に保存しても前のAIのモデル名を送らない。一覧取得の成功を待たず、
   // 描画済みスキーマの保存値・既定値で新しいAIのモデルを確定する。
   if (applyProviderDefault && targetInput) targetInput.value = preferred;
@@ -4156,7 +4193,7 @@ async function loadModels(providerId, applyProviderDefault = false) {
   if (modelInput.value !== initialModel) {
     // 一覧の取得中に手入力したモデル名は利用者の編集を優先する。
   } else if (applyProviderDefault) {
-    modelInput.value = models.includes(preferred) ? preferred : (models[0] || preferred || modelInput.value);
+    if (!preserveProviderDraft) modelInput.value = models.includes(preferred) ? preferred : (models[0] || preferred || modelInput.value);
   } else if (providerId !== "agent_cli" && providerId === data.active.providerId && !models.includes(modelInput.value)) {
     modelInput.value = models.includes(preferred) ? preferred : (models[0] || modelInput.value);
   }
@@ -4280,6 +4317,8 @@ function validateSettingsNumberFields() {
 saveBtn.addEventListener("click", async () => {
   if (settingsMutationBusy || !savedSnapshot) return;
   if (!validateSettingsNumberFields()) return;
+  // 保存開始前に確定したモデルを、遅れて完了する候補一覧で差し替えない。
+  ++modelLoadGeneration;
   setSettingsMutationBusy(true);
   statusEl.textContent = "保存中…";
   try {

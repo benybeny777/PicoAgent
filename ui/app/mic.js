@@ -62,6 +62,19 @@ export function createMic({ chat, voice, motion, isBusy, canListen, onActivity, 
   let interimIndex = 0;
   let interimTexts = [];
   let interimBase = "";
+  let publishedDraft = "";
+  let draftChanged = false;
+
+  function applyTranscript(text) {
+    if (draftChanged || composer.value !== publishedDraft) {
+      if (!draftChanged) toast("入力が編集されたため、文字起こしで上書きしません", "warn");
+      draftChanged = true;
+      return false;
+    }
+    composer.setValue(text);
+    publishedDraft = composer.value;
+    return true;
+  }
 
   function setListening(on) {
     micButton.classList.toggle("recording", on);
@@ -87,8 +100,9 @@ export function createMic({ chat, voice, motion, isBusy, canListen, onActivity, 
       if (text) {
         interimTexts.push(text);
         const joined = interimTexts.join(" ");
-        composer.setValue(interimBase ? `${interimBase} ${joined}` : joined);
-        status.set("🎙 録音中…（認識中の文はあとで確定します）", "mic");
+        if (applyTranscript(interimBase ? `${interimBase} ${joined}` : joined)) {
+          status.set("🎙 録音中…（認識中の文はあとで確定します）", "mic");
+        }
       }
     } catch (error) {
       // Whisper 未設定などで失敗したら、この録音では逐次変換を止める（停止時の一括変換に任せる）。
@@ -135,9 +149,14 @@ export function createMic({ chat, voice, motion, isBusy, canListen, onActivity, 
     if (!continuous || !composer.value.trim() || isBusy()) return;
     if (submitTimer) clearTimeout(submitTimer);
     status.set("1.5秒後に送信（Escで取消）", "mic");
+    const queuedDraft = composer.value;
     submitTimer = setTimeout(() => {
       submitTimer = null;
       status.clear("mic");
+      if (composer.value !== queuedDraft) {
+        toast("入力が編集されたため音声の自動送信を取り消しました", "warn");
+        return;
+      }
       if (continuous && composer.value.trim() && !isBusy()) composer.form.requestSubmit();
     }, 1500);
   }
@@ -154,7 +173,7 @@ export function createMic({ chat, voice, motion, isBusy, canListen, onActivity, 
     const current = session;
     const request = startRequest;
     const isCurrent = () => current === session && request === startRequest;
-    let hasTranscript = hadInterim;
+    let hasTranscript = hadInterim && !draftChanged && composer.value === publishedDraft;
     if (recorded.reduce((sum, chunk) => sum + chunk.length, 0) / rate < 0.4) {
       status.clear("mic");
       toast("録音が短すぎました", "warn");
@@ -170,15 +189,16 @@ export function createMic({ chat, voice, motion, isBusy, canListen, onActivity, 
       if (!isCurrent()) return;
       const text = String(result?.text ?? "").trim();
       if (text) {
-        hasTranscript = true;
-        composer.setValue(base ? `${base} ${text}` : text);
-        composer.focus();
-        toast("文字起こししました", "success");
+        hasTranscript = applyTranscript(base ? `${base} ${text}` : text);
+        if (hasTranscript) {
+          composer.focus();
+          toast("文字起こししました", "success");
+        }
       }
     } catch (error) {
       if (!isCurrent()) return;
       logApp("error", "音声入力に失敗しました", errorDetail(error));
-      if (!hadInterim) toast(preview(error?.message || error || "文字起こしに失敗しました", 60), "error");
+      if (!hasTranscript) toast(preview(error?.message || error || "文字起こしに失敗しました", 60), "error");
       else toast("確定に失敗したため途中結果を残しました", "warn");
     } finally {
       if (isCurrent()) {
@@ -278,6 +298,8 @@ export function createMic({ chat, voice, motion, isBusy, canListen, onActivity, 
       status.set("🎙 録音中…（マイクをもう一度クリックで停止）", "mic");
       const current = ++session;
       interimBase = composer.value.trim();
+      publishedDraft = composer.value;
+      draftChanged = false;
       interimTexts = [];
       interimIndex = 0;
       interimTimer = setInterval(() => transcribeInterim(current), 3000);

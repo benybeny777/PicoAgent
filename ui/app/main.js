@@ -183,16 +183,29 @@ buttons.expandButton.addEventListener("click", event => {
 });
 
 /** 「拡大」: ウィンドウを全画面にし、会話パネルをキャラを避けた残りいっぱいへ広げて履歴を出す。 */
+let fullscreenQueue = Promise.resolve();
+let expandedGeneration = 0;
+let confirmedExpanded = false;
 async function setExpanded(on) {
   if (stage.expanded === on) return;
+  const generation = ++expandedGeneration;
   stage.setExpanded(on);
   buttons.expandButton.textContent = on ? "戻す" : "拡大";
-  try { await bridge.setFullscreen(on); }
+  // ネイティブ窓への変更は順番に送る。古い失敗で最新の操作を巻き戻さない。
+  const operation = fullscreenQueue.catch(() => undefined).then(async () => {
+    if (generation !== expandedGeneration) return;
+    await bridge.setFullscreen(on);
+    confirmedExpanded = on;
+  });
+  fullscreenQueue = operation;
+  try { await operation; }
   catch (error) {
-    stage.setExpanded(!on);
-    buttons.expandButton.textContent = on ? "拡大" : "戻す";
+    if (generation !== expandedGeneration) return;
+    stage.setExpanded(confirmedExpanded);
+    buttons.expandButton.textContent = confirmedExpanded ? "戻す" : "拡大";
     status.flash(`全画面切替に失敗: ${errorMessage(error)}`, 4000);
   }
+  if (generation !== expandedGeneration) return;
   if (!on) setTimeout(() => ambient.flushNotice(), 0);
 }
 
@@ -217,15 +230,20 @@ async function handleNativeDrop(paths) {
   ambient.markActivity();
   let added = 0;
   const failures = [];
-  for (const path of (paths || []).slice(0, 8)) {
-    try {
-      const reason = composer.addLoaded(await bridge.readDroppedPath(path));
-      if (reason) failures.push(reason);
-      else added += 1;
-    } catch (error) {
-      logApp("warn", "ドロップファイルの読み込みに失敗しました", `${path}: ${errorDetail(error)}`);
-      failures.push(errorMessage(error));
+  const release = composer.beginAttachmentLoad();
+  try {
+    for (const path of (paths || []).slice(0, 8)) {
+      try {
+        const reason = composer.addLoaded(await bridge.readDroppedPath(path));
+        if (reason) failures.push(reason);
+        else added += 1;
+      } catch (error) {
+        logApp("warn", "ドロップファイルの読み込みに失敗しました", `${path}: ${errorDetail(error)}`);
+        failures.push(errorMessage(error));
+      }
     }
+  } finally {
+    release();
   }
   if (added > 0) {
     composer.open();
@@ -288,6 +306,8 @@ let characterOverrides = {};
 let sdkOverrides = {};
 let loadedSignature = "";
 let characterName = "キャラクター";
+let characterLoadGeneration = 0;
+let characterLoads = 0;
 
 function renderCharacterOptions(pack) {
   const extra = relationship.extra;
@@ -330,29 +350,48 @@ function signatureOf(characterId) {
 }
 
 async function loadCharacter(characterId, { speakGreeting = true } = {}) {
-  if (signatureOf(characterId) === loadedSignature) return null;
-  voice.stop(); // 切替前のキャラの合成待ち・再生音声を新しい姿へ持ち越さない
-  const loaded = await host.load(characterId, { overrides: characterOverrides, sdkOverrides });
-  if (!loaded) return null;
-  const { pack, greeting } = loaded;
-  characterName = pack.name;
-  stage.setCharacter(pack.id);
-  characterSource.element.dataset.characterId = pack.id;
-  chrome.setCharacterName(pack.name);
-  characterSource.element.title = `${pack.name}：右クリックでメニュー`;
-  renderCharacterOptions(pack);
-  motion.rest();
-  // 挨拶も渡す（短い挨拶へモデルを呼ばず返すとき、全キャラ共通の定型文にしないため）。
-  const appearance = await bridge.setCharacterProfile(pack.id, personaText(pack.manifest, characterOverrides[pack.id]), greeting);
-  // 読込失敗で代替キャラを表示した場合も、直前のキャラ用背景を残さない。
-  if (appearance) applyStreamAppearance(appearance);
-  loadedSignature = signatureOf(pack.id);
-  characterSource.element.style.visibility = ""; // 起動時の読込失敗後も、有効なキャラへ変更できれば表示を復旧する。
-  if (greeting && speakGreeting) {
-    chat.renderReply(greeting);
-    voice.speak(greeting);
+  const generation = ++characterLoadGeneration;
+  const signature = signatureOf(characterId);
+  if (!characterLoads && signature === loadedSignature) return null;
+  characterLoads++;
+  try {
+    characterSource.element.style.visibility = "hidden";
+    host.setDisplayReady(false);
+    status.set("選択中のキャラクターを読み込み中…", "character-load");
+    voice.stop(); // 切替前のキャラの合成待ち・再生音声を新しい姿へ持ち越さない
+    const loaded = await host.load(characterId, { overrides: characterOverrides, sdkOverrides });
+    if (!loaded || generation !== characterLoadGeneration) return null;
+    const { pack, greeting } = loaded;
+    characterName = pack.name;
+    stage.setCharacter(pack.id);
+    characterSource.element.dataset.characterId = pack.id;
+    chrome.setCharacterName(pack.name);
+    characterSource.element.title = `${pack.name}：右クリックでメニュー`;
+    renderCharacterOptions(pack);
+    motion.rest();
+    // 挨拶も渡す（短い挨拶へモデルを呼ばず返すとき、全キャラ共通の定型文にしないため）。
+    const appearance = await bridge.setCharacterProfile(pack.id, personaText(pack.manifest, characterOverrides[pack.id]), greeting);
+    if (generation !== characterLoadGeneration) return null;
+    // 人格登録まで確定したキャラの背景へ切り替え、直前のキャラ用背景を残さない。
+    if (appearance) applyStreamAppearance(appearance);
+    loadedSignature = signature;
+    host.setDisplayReady(true);
+    characterSource.element.style.visibility = ""; // 起動時の読込失敗後も、有効なキャラへ変更できれば表示を復旧する。
+    status.clear("character-load");
+    if (greeting && speakGreeting) {
+      chat.renderReply(greeting);
+      voice.speak(greeting);
+    }
+    return pack;
+  } catch (error) {
+    if (generation !== characterLoadGeneration) return null;
+    loadedSignature = "";
+    characterSource.element.style.visibility = "hidden";
+    status.set(`キャラクターを読み込めません: ${errorMessage(error)}。設定からキャラを確認してください`, "character-load");
+    throw error;
+  } finally {
+    characterLoads--;
   }
-  return pack;
 }
 
 function localStorageVariant(characterId) {
@@ -367,6 +406,8 @@ host.events.on("fallback", ({ kind }) => {
 // ── 表示形式 ─────────────────────────────────────────────────
 function applyLayout(id) {
   const layout = LAYOUT_IDS.includes(id) ? id : "pet";
+  // シーンの拡大を解除する時は、窓の全画面状態と操作ボタンも一緒に戻す。
+  if (stage.layoutId !== layout && stage.expanded) setExpanded(false);
   app.dataset.layout = layout;
   stage.setLayout(layout);
   editor.render();
@@ -561,6 +602,7 @@ async function loadSceneDefinitions() {
 })().catch(error => {
   logApp("error", "起動初期化に失敗しました", errorDetail(error));
   characterSource.element.style.visibility = "hidden";
+  host.setDisplayReady(false);
   status.setSticky(`起動初期化に失敗: ${errorMessage(error)}`, "error");
   boot.release(status);
 });

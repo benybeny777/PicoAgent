@@ -40,10 +40,11 @@ function environment(file, factory, extra) {
 function micHarness(media = async () => ({ getTracks: () => [{ stop() {} }] })) {
   const transcript = deferred();
   let acquired = 0;
+  let submitted = 0;
   let processor;
   const busy = [];
   const composer = { value: "", focus() {}, open() {}, resetNavigation() {},
-    setValue(text) { this.value = text; }, form: { requestSubmit() {} } };
+    setValue(text) { this.value = text; }, form: { requestSubmit() { submitted += 1; } } };
   const env = environment("app/mic.js", "createMic", {
     navigator: { mediaDevices: { getUserMedia: () => { acquired += 1; return media(); } } },
     bridge: { transcribeAudio: () => transcript.promise }, blobToDataUrl: async () => "録音",
@@ -64,6 +65,7 @@ function micHarness(media = async () => ({ getTracks: () => [{ stop() {} }] })) 
   const clickLoop = () => loopButton.handlers.get("click")({ stopPropagation() {} });
   return { ...env, mic, composer, transcript, busy, clickLoop,
     get acquired() { return acquired; },
+    get submitted() { return submitted; },
     record() { processor.onaudioprocess({ inputBuffer: { getChannelData: () => new Float32Array(16000) } }); },
     clickMic() { return micButton.handlers.get("click")({ stopPropagation() {} }); } };
 }
@@ -121,24 +123,26 @@ function voiceHarness() {
   const revoked = [];
   const audio = [];
   const messages = [];
+  const speaking = [];
   const env = environment("app/voice.js", "createVoice", {
     bridge: { speak: () => synth.promise },
     URL: { createObjectURL: () => "音声URL", revokeObjectURL: url => revoked.push(url) },
     Audio: class {
       constructor() { this.paused = true; audio.push(this); }
-      addEventListener() {}
-      play() { return new Promise(() => {}); }
+      handlers = new Map();
+      addEventListener(name, callback) { this.handlers.set(name, callback); }
+      play() { return new Promise((_, reject) => { this.rejectPlay = reject; }); }
       pause() { this.paused = true; }
       removeAttribute() {}
       load() {}
     },
   });
   const voice = env.factory({
-    motion: { setSpeaking() {} }, lipSync: { attach() {}, detach() {} },
-    pager: { cancel() {} }, status: { set: text => messages.push(text), clear() {} },
+    motion: { setSpeaking: value => speaking.push(value) }, lipSync: { attach() {}, detach() {} },
+    pager: { cancel() {}, timed() {} }, status: { set: text => messages.push(text), flash: text => messages.push(text), clear() {} },
     onCancelVisible() {},
   });
-  return { ...env, voice, synth, revoked, audio, messages };
+  return { ...env, voice, synth, revoked, audio, messages, speaking };
 }
 
 test("音声再生の開始待ちで停止しても待機PromiseとObject URLを直ちに解放する", async () => {
@@ -161,4 +165,66 @@ test("音声設定を無効へ変更した後の古い合成結果は有効状�
   assert.equal(await preparation, null);
   assert.equal(env.voice.enabled, false);
   assert.deepEqual(env.messages, []);
+});
+
+test("文字起こしの確定待ちで編集した下書きは遅延結果で上書きも自動送信もしない", async () => {
+  const env = micHarness();
+  env.clickLoop();
+  await env.tick(450);
+  env.record();
+  const finish = env.clickMic();
+  await Promise.resolve();
+  env.composer.setValue("手で編集した大事な下書き");
+  env.transcript.resolve({ text: "音声認識の結果" });
+  await finish;
+  assert.equal(env.composer.value, "手で編集した大事な下書き");
+  assert.equal([...env.timers.values()].some(timer => timer.delay === 1500), false);
+  env.clickLoop();
+});
+
+test("音声の自動送信待ちで下書きを変更したら編集内容を勝手に送らない", async () => {
+  const env = micHarness();
+  env.clickLoop();
+  await env.tick(450);
+  env.record();
+  const finish = env.clickMic();
+  env.transcript.resolve({ text: "認識した本文" });
+  await finish;
+  env.composer.setValue("まだ送らない編集途中の本文");
+  await env.tick(1500);
+  assert.equal(env.submitted, 0);
+  assert.equal(env.composer.value, "まだ送らない編集途中の本文");
+  env.clickLoop();
+});
+
+test("音声の再生拒否は画面へ理由を出し停止後の古い拒否は表示しない", async () => {
+  for (const cancelled of [false, true]) {
+    const env = voiceHarness();
+    const playing = env.voice.playPrepared({ audio: [1] });
+    if (cancelled) env.voice.stop();
+    env.audio[0].rejectPlay(new Error("音声デバイスを開けません"));
+    await playing;
+    assert.equal(env.messages.some(text => /音声を再生できません.*音声デバイス/.test(text)), !cancelled);
+    assert.equal(env.revoked.length, 1);
+  }
+});
+
+test("音声が終わった瞬間に口パクを止め次の合成待ちへ持ち越さない", async () => {
+  const env = voiceHarness();
+  const playing = env.voice.playPrepared({ audio: [1] });
+  env.audio[0].paused = false;
+  env.audio[0].handlers.get("playing")();
+  assert.equal(env.speaking.at(-1), true);
+  env.audio[0].handlers.get("ended")();
+  assert.equal(env.speaking.at(-1), false);
+  await playing;
+});
+
+test("消音で次の字幕を出すときは以前の再生待ちと音声URLを解放する", async () => {
+  const env = voiceHarness();
+  const playing = env.voice.playPrepared({ audio: [1] });
+  env.voice.setVolume(0);
+  await env.voice.speak("次の本文");
+  assert.equal(env.revoked.length, 1);
+  await playing;
 });

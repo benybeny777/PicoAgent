@@ -97,3 +97,45 @@ test("同時に期限が来た全リマインダーを一つの通知として�
   assert.deepEqual(prepared, displayed);
   assert.deepEqual(history, displayed);
 });
+
+test("通知の音声準備中に入力を開いても待機通知を失わず次の機会に表示する", async () => {
+  let resolveSpeech;
+  let first = true;
+  const displayed = [];
+  const composer = { isOpen: true };
+  const env = environment("app/ambient.js", "createAmbient");
+  const ambient = env.factory({
+    chat: { composer, status: { clear() {} }, history: { add() {} }, showAnswer: text => displayed.push(text) },
+    voice: { speaking: false, prepare: () => first ? new Promise(resolve => { resolveSpeech = resolve; first = false; }) : Promise.resolve(null) },
+    host: { sleeping: false }, motion: {}, isBusy: () => false, isExpanded: () => false,
+  });
+  await ambient.say("必ず知らせるリマインダー");
+  composer.isOpen = false;
+  const flushing = ambient.flushNotice();
+  composer.isOpen = true;
+  resolveSpeech(null);
+  await flushing;
+  assert.deepEqual(displayed, []);
+  composer.isOpen = false;
+  await ambient.flushNotice();
+  assert.deepEqual(displayed, ["必ず知らせるリマインダー"]);
+});
+
+test("キャラ切替前に生成を始めた雑談は遅れて届いても新キャラの画面へ出さない", async () => {
+  let resolveChatter;
+  const displayed = [];
+  const env = environment("app/ambient.js", "createAmbient", {
+    bridge: { idleChatter: () => new Promise(resolve => { resolveChatter = resolve; }) },
+  });
+  const ambient = env.factory({
+    chat: { composer: { isOpen: false }, status: { clear() {} }, history: { add() {} }, showAnswer: text => displayed.push(text) },
+    voice: { speaking: false, prepare: async () => null }, host: { sleeping: false }, motion: {},
+    isBusy: () => false, isExpanded: () => false,
+  });
+  ambient.applyChatter({ chatterEnabled: true, chatterMinSecs: 30, chatterMaxSecs: 30 });
+  const old = [...env.timers.values()][0]();
+  ambient.reset();
+  resolveChatter({ enabled: true, reply: "旧キャラの雑談" });
+  await old;
+  assert.deepEqual(displayed, []);
+});

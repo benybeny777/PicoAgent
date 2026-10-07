@@ -53,6 +53,7 @@ function staleDurable(previous, next) {
 export function createNotices({ panel, button, status, onRetryPrompt, onCancelJob }) {
   const entries = loadStored();
   let unread = 0;
+  let clearRevision = 0;
   const list = el("div", { className: "notice-list" });
   const clear = el("button", { type: "button", className: "chip", textContent: "消去" });
   panel.replaceChildren(el("div", { className: "notice-head" }, [el("strong", { textContent: "アクションセンター" }), clear]), list);
@@ -225,17 +226,24 @@ export function createNotices({ panel, button, status, onRetryPrompt, onCancelJo
     close() { panel.hidden = true; },
     /** 前回までのスケジュール実行履歴を一覧へ戻す。 */
     async loadScheduleRuns() {
+      const revision = clearRevision;
       try {
         const runs = await bridge.scheduleRuns();
-        if (!Array.isArray(runs)) return;
+        if (!Array.isArray(runs) || revision !== clearRevision) return;
         const others = entries.filter(entry => entry.kind !== "schedule");
         const scheduled = runs.slice(0, 20).map(run => ({
           kind: "schedule", title: String(run.title || "スケジュール"), body: String(run.body || ""), ok: run.ok !== false,
           taskId: run.task_id ? String(run.task_id) : "", runId: run.id ? String(run.id) : "", at: run.at || "",
         }));
-        entries.splice(0, entries.length, ...scheduled, ...others);
+        const restored = scheduled.map(entry => {
+          const previous = entry.runId && entries.find(item => item.kind === "schedule" && item.runId === entry.runId);
+          return previous && String(previous.at) > String(entry.at) ? previous : entry;
+        });
+        const restoredIds = new Set(restored.map(entry => entry.runId).filter(Boolean));
+        const arriving = entries.filter(entry => entry.kind === "schedule" && (!entry.runId || !restoredIds.has(entry.runId)));
+        entries.splice(0, entries.length, ...others, ...restored, ...arriving);
+        entries.sort((a, b) => String(b.at).localeCompare(String(a.at)));
         entries.length = Math.min(entries.length, LIMIT);
-        unread = 0;
         changed();
       } catch (error) {
         logApp("warn", "スケジュール実行履歴の読み込みに失敗しました", errorDetail(error));
@@ -243,9 +251,10 @@ export function createNotices({ panel, button, status, onRetryPrompt, onCancelJo
     },
     /** 前回から残っている永続ジョブを戻す（起動前に流れたイベントは受け取れないため）。 */
     async loadDurableJobs() {
+      const revision = clearRevision;
       try {
         const jobs = await bridge.durableJobs();
-        if (!Array.isArray(jobs)) return;
+        if (!Array.isArray(jobs) || revision !== clearRevision) return;
         const others = entries.filter(entry => entry.kind !== "durable_job");
         const restored = jobs.slice(0, 20).map(job => {
           const entry = durableEntry({
@@ -273,6 +282,7 @@ export function createNotices({ panel, button, status, onRetryPrompt, onCancelJo
   });
   clear.addEventListener("click", event => {
     event.stopPropagation();
+    clearRevision += 1;
     entries.length = 0;
     unread = 0;
     changed();

@@ -166,9 +166,9 @@ test("リセット前の進捗・ストリーム描画・通信結果は新し�
   // 予約済みの描画フレームも、描く直前に確かめ直す。
   assert.match(subscribe, /const paint = \(\) => \{\s*\n\s*if \(!alive\(\)\) \{ stream\.frame = 0; return; \}/);
   const submit = send.slice(send.indexOf("async function submit()"), send.indexOf("  const sender = {"));
-  assert.match(submit, /if \(result\?\.stale \|\| requestRevision !== revision\) \{\s*\n\s*job\.state = "cancelled";/);
+  assert.match(submit, /if \(result\?\.stale \|\| requestRevision !== revision \|\| cancelled\(\)\) \{\s*\n\s*job\.state = "cancelled";/);
   // 通信失敗も、リセット済みなら新しい会話へ書き戻さない（通常の失敗は表示する）。
-  assert.match(submit, /\} catch \(error\) \{\s*\n\s*if \(requestRevision !== revision\) \{ job\.state = "cancelled"; return; \}\s*\n\s*job\.state = "failed";[\s\S]*?showFailure\(`応答に失敗しました: \$\{errorMessage\(error\)\}`\);/);
+  assert.match(submit, /\} catch \(error\) \{\s*\n\s*if \(requestRevision !== revision\) \{ job\.state = "cancelled"; return; \}\s*\n\s*if \(cancelled\(\)\) \{ job\.state = "cancelled"; return; \}\s*\n\s*job\.state = "failed";[\s\S]*?showFailure\(`応答に失敗しました: \$\{errorMessage\(error\)\}`\);/);
   // 履歴と終了操作は、回答を出した後でもリセット済みなら渡さない。
   assert.ok(submit.indexOf('if (requestRevision !== revision) { job.state = "cancelled"; return; }\n      chat.history.add("assistant", reply);') > 0);
 });
@@ -198,7 +198,8 @@ test("停止要求のあと応答が返らなくても画面の待機を解除�
   const cancel = send.slice(send.indexOf("async cancel(button) {"));
   assert.ok(cancel.indexOf("cancelTimer = setTimeout(") < cancel.indexOf("await bridge.cancel()"),
     "cancel IPC自体が返らない場合にも備え、待機解除の見張りを先に開始してください");
-  assert.match(cancel, /releasePending\(\{ stale: true, releasedByCancel: true \}\)/);
+  assert.match(cancel, /const release = releasePending;/);
+  assert.match(cancel, /release\(\{ stale: true, releasedByCancel: true \}\)/);
   assert.match(send, /const released = new Promise\(resolve => \{ releasePending = resolve; \}\);/);
   assert.match(send, /Promise\.race\(\[images\.length \? bridge\.sendImage\(fullText, images\) : bridge\.send\(fullText\), released\]\)/);
   assert.match(send, /if \(result\?\.releasedByCancel\) status\.flash\("停止しました/);

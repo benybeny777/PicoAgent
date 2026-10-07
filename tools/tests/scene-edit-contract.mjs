@@ -26,7 +26,7 @@ test("配置は設定（PICOAGENT_SCENES）へ保存し、正規化はバック�
   assert.match(bridge, /saveScene: \(scenes\) => call\("pet_save_scene", \{ scenes \}\)/);
   // 保存は1か所（stage の persist）だけで、順番に1件ずつ送る（古い写しで新しい保存を上書きしない）。
   assert.equal((uiFile("app/stage.js").match(/bridge\.saveScene\(/g) || []).length, 1);
-  assert.match(stage, /const operation = saveQueue\.catch\(\(\) => undefined\)\.then\(\(\) => bridge\.saveScene\(snapshot\)\);/);
+  assert.match(stage, /const operation = saveQueue\.catch\(\(\) => undefined\)\.then\(\(\) => \{[\s\S]*?if \(generation !== saveGeneration\) return;[\s\S]*?return bridge\.saveScene\(snapshot\);/);
   // webview の localStorage へは置かない（WebViewデータの初期化・再インストールで消える）。
   assert.doesNotMatch(edit + stage, /localStorage/);
 });
@@ -60,8 +60,9 @@ test("形式・キャラを切り替えたら、編集中の一時値を持ち�
 });
 
 test("キャラを窓からはみ出す大きさにしたら窓を広げる（ペット・ミニ）", () => {
-  const grow = section(stage, "async function growWindowFor(target)", "\n  }\n");
-  assert.match(grow, /if \(geometry\.fixed \|\| target !== "character"\) return;/);
+  const grow = section(stage, "function growWindowFor(target)", "\n  const stage =");
+  assert.match(grow, /if \(requestedGeometry\.fixed \|\| target !== "character"\) return Promise\.resolve\(\);/);
+  assert.match(grow, /const operation = growthQueue\.then\(async \(\) => \{/);
   assert.match(grow, /bridge\.moveAndResizeWindow\(/);
   assert.match(grow, /bridge\.setWindowSize\(width, height\)/);
 });

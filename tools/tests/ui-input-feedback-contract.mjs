@@ -19,7 +19,7 @@ test("設定のJSONが不正でも保存失敗後に入力と復元を操作で�
     logApp() {}, errorDetail: String, errorMessage: error => error?.message || String(error),
     window: { picoagent: { settings: { save() { saves++; } } } },
   });
-  vm.runInContext("let renderingSettings = false; let savedSnapshot = {}; let settingsMutationBusy = false;", context);
+  vm.runInContext("let renderingSettings = false; let savedSnapshot = {}; let settingsMutationBusy = false; let modelLoadGeneration = 0;", context);
   vm.runInContext(settings.slice(settings.indexOf("function updateDirtyStateNow()"), settings.indexOf("// collect()と全設定")), context);
   vm.runInContext("const dirtyStateScheduler = { flush: updateDirtyStateNow };", context);
   vm.runInContext(settings.slice(settings.indexOf("function setSettingsMutationBusy("), settings.indexOf("function nodeSearchText(")), context);
@@ -48,7 +48,7 @@ test("モデル一覧の逆順応答と古い失敗は現在の選択を上書�
       updateDirtyState() {}, logApp() {}, errorDetail: String, errorMessage: error => error?.message || String(error),
       window: { picoagent: { settings: { listModels() { return new Promise((resolve, reject) => pending.push({ resolve, reject })); } } } },
     });
-    vm.runInContext("let modelLoadGeneration = 0; const cliModelSelect = null;", context);
+    vm.runInContext("let modelLoadGeneration = 0; const cliModelSelect = null; const providerModelDraftValues = {};", context);
     vm.runInContext(settings.slice(settings.indexOf("async function loadModels("), settings.indexOf("function collect()")), context);
     const old = context.loadModels("a", true);
     const current = context.loadModels("b", true);

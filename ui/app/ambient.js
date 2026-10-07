@@ -73,7 +73,8 @@ export function createAmbient({ chat, voice, host, motion, isBusy, isExpanded })
 
   async function flushNotice() {
     if (!queue.length || !canShow()) return;
-    await say(queue.shift(), { enqueue: false });
+    // 音声の準備待ちで入力が開いた場合も、未表示の通知を再び待機列へ戻す。
+    await say(queue.shift());
   }
 
   function scheduleChatter() {
@@ -84,16 +85,18 @@ export function createAmbient({ chat, voice, host, motion, isBusy, isExpanded })
 
   async function fireChatter() {
     chatterTimer = null;
+    const requestRevision = revision;
     // 入力中・応答中・読み上げ中・全画面表示中・居眠り中は割り込まず、次の機会に回す。
     if (!canShow() || host.sleeping) { scheduleChatter(); return; }
     try {
       const result = await bridge.idleChatter();
+      if (requestRevision !== revision) return;
       if (result?.enabled === false) { chatter.enabled = false; return; }
       await say(result?.reply || "");
     } catch (error) {
-      logApp("warn", "自発雑談の取得に失敗しました", errorDetail(error));
+      if (requestRevision === revision) logApp("warn", "自発雑談の取得に失敗しました", errorDetail(error));
     } finally {
-      scheduleChatter();
+      if (requestRevision === revision) scheduleChatter();
     }
   }
 

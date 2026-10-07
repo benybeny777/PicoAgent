@@ -109,7 +109,8 @@ test("起動で非表示になったキャラは有効なキャラの読込成�
   const characterSource = { element: { dataset: {}, style: { visibility: "hidden" } } };
   const context = vm.createContext({
     loadedSignature: "", signatureOf: id => id, characterOverrides: {}, sdkOverrides: {}, characterName: "",
-    voice: { stop() {} }, host: { load: async () => ({ pack: { id: "mugi", name: "むぎ", manifest: {} }, greeting: "" }) },
+    characterLoadGeneration: 0, characterLoads: 0, status: { set() {}, clear() {} }, errorMessage: String,
+    voice: { stop() {} }, host: { setDisplayReady() {}, load: async () => ({ pack: { id: "mugi", name: "むぎ", manifest: {} }, greeting: "" }) },
     stage: { setCharacter() {} }, chrome: { setCharacterName() {} }, characterSource,
     renderCharacterOptions() {}, motion: { rest() {} }, personaText: () => "人格",
     bridge: { setCharacterProfile: async () => ({}) }, applyStreamAppearance() {},
