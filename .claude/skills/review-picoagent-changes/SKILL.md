@@ -1,6 +1,6 @@
 ---
 name: review-picoagent-changes
-description: PicoAgentの差分・PR・直近マージを過去のデグレ台帳と照合してレビューし、修正と回帰テストまで行う依頼で使う。
+description: PicoAgentの差分・PR・直近マージを過去のデグレ台帳と照合してレビューし、修正と回帰テストまで行う依頼と、見た目や会話の指摘を再発しない形で直す依頼で使う。
 ---
 
 # 共通スキル正本の案内

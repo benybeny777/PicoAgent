@@ -10,7 +10,7 @@
 | `build-picoagent-beta` | 開発中アルファ版のビルド・検証・公開 |
 | `rebuild-picoagent-character` | キャラクター追加、高精細化、モーション、単一世代、READMEプレビュー |
 | `verify-picoagent-ui` | 実WebViewの画面崩れ、レイヤー、ドラッグ、レイアウト、PNG／Live2D QA |
-| `review-picoagent-changes` | 差分・PR・直近マージのレビュー（過去のデグレ台帳との照合、修正、回帰テスト） |
+| `review-picoagent-changes` | 差分・PR・直近マージのレビュー、見た目・会話の指摘の再発防止（過去のデグレ台帳との照合、修正、回帰テスト） |
 | `prepare-picoagent-release` | 配布前のコード、資産、文書、監査、ローカルテスト、Git確認 |
 
 Claude Codeが自動認識する`.claude/skills/<名前>/SKILL.md`には、同名の共通スキル正本を読む指示だけを置きます。実際の手順を追加・修正するときは、このフォルダの正本だけを編集してください。名前一致、参照先、frontmatter、自動認識ファイル本文の肥大化は`cargo xtask verify`が検査します。
