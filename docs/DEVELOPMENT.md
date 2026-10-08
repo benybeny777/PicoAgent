@@ -350,7 +350,7 @@ NSIS アンインストーラは、インストール先またはPicoAgent管理
 | `src-tauri/src/user_characters.rs` | 自分で追加したキャラクターの導入・一覧・削除（`app_data_dir/characters/<id>/`）。zip は zip slip と件数・容量を検査しながら展開し、検証を通ってから `rename` で確定する。削除は OS のゴミ箱へ移動。`user_characters::guard` が、検証規則のコピーが CLI 側へ復活していないか、キャラクターID判定の写しが増えていないか、`character_pack.rs` が `crate::` のアプリ内部へ依存していないか（xtask のビルドが壊れる）を検出する |
 | `src-tauri/src/project_rules.rs` | **作業フォルダの`AGENTS.md`を案件の作法としてsystem文へ載せる**（許可ルート直下1枚。`project`スキルがルートを切り替えると作法も入れ替わる）。本文は利用者の指示ではなく「フォルダに置かれていた文章」として扱い、上位ルール・確認・許可・外部送信制限を上書きできないことを毎回明示する。読み書きは`project`の`rules_show` / `rules_save`。`PICOAGENT_PROJECT_RULES_AUTO_CAPTURE=true`のとき、強く言い渡された作法を専用見出しへ自動追記し、通知から取り消せる（既定は無効。利用者のフォルダを書き換えるため） |
 | `src-tauri/src/user_skills.rs` / `skills/user_skill/mod.rs` | 利用者追加の`SKILL.md`を検証・原子的保存し、チャットから作成・更新・適用する。Markdownは指示だけを持ち、実操作は既存Toolの許可・確認境界を通す |
-| `src-tauri/src/bundle_scope.rs` | **配布物の範囲を固定する設計ガード**（テスト専用）。製品に入るのは `ui/` を写した `ui-dist/` と `bundle.resources` の2経路だけ。開発用のツール・ドキュメント・撮影用画像（`tools/` `docs/` `scripts/` `xtask/`）が混ざらないよう、リソース指定・配信元・`ui/` に置ける拡張子を allowlist で固定する。CSPの`unsafe-eval`へ依存できるのはGit管理外のLive2D用PIXIだけとし、追跡JavaScriptの`eval`／`Function`コンストラクタも拒否する |
+| `src-tauri/src/bundle_scope.rs` | **配布物の範囲を固定する設計ガード**（テスト専用）。製品に入るのは `ui/` を写した `ui-dist/` と `bundle.resources` の2経路だけ。開発用のツール・ドキュメント・撮影用画像（`tools/` `docs/` `xtask/`）が混ざらないよう（`scripts/` は製品の学習処理6本だけを明示許可）、リソース指定・配信元・`ui/` に置ける拡張子を allowlist で固定する。CSPの`unsafe-eval`へ依存できるのはGit管理外のLive2D用PIXIだけとし、追跡JavaScriptの`eval`／`Function`コンストラクタも拒否する |
 | `src-tauri/src/guard_scan.rs` | **設計ガードの走査範囲の正本**（テスト専用）。`all_sources()` がスキルとバックエンド `src-tauri/src/` の全ソースを返す。スキル側は `mod.rs` だけでなく `skills/<スキル名>/*.rs` の補助モジュール（`run_command/jobs.rs` など）も含める（`mod.rs` だけ見ると、補助モジュールへ書いた違反を見逃す）。各ガードが自前でディレクトリを歩くと範囲がずれて違反を見逃すため、`guard_scan::guard` のメタガードが自前走査を検出 |
 | `src-tauri/src/store.rs` | **アプリ状態ファイル永続化の共通層**。`write_atomic()` / `write_json_atomic()` が「一時ファイル → `sync_all` → `rename`」で原子的に書き換え、途中で落ちても既存データを壊さない。`quarantine_corrupt()` は読めなかったファイルを `.corrupt-<日時>` へ退避する。`store::guard` のテストが `fs::write` の直接使用を検出 |
 | `src-tauri/src/tools/process.rs` | **外部プロセス実行の共通層**。`command()` が Windows のコンソール窓抑止・`kill_on_drop`・stdio 既定を適用し、`output()` / `output_text()` / `output_or_install_hint()` がタイムアウト付きで実行し、打ち切り時はプロセスツリーごと回収する。外部コマンドの存在確認は `resolve_executable()` / `has_executable()` に集約する（`sh -lc "command -v ..."` はログインシェルがPATHを組み直すため、GUIアプリが実際にspawnするPATHと食い違う）。`tools::process::guard` のテストが `Command::new` の直接使用と、自前の `tokio::time::timeout(..., .output()/.wait())` を検出 |
@@ -438,3 +438,17 @@ NSIS アンインストーラは、インストール先またはPicoAgent管理
 ---
 
 LVSリグの静止フォールバックは、連番世代を持たず、`animations.idle`の`framePaths`が`["source.png"]`、`fps`と`frames`が1の構成だけを受理する。`sync-characters`はLVSリグ本体に加え、キャラ直下のリンクでないPNG実体を復号検査する。他状態、複数フレーム、旧世代フォルダ、通常2Dの実行レイヤー宣言を混ぜない。通常2Dのlossless WebP単一世代検査は維持する。
+
+### Windowsの音声・人格学習
+
+実行の所有者はsrc-tauri/src/character_learning.rs、設定UIはui/character-learning-settings.js。素材と結果の記録はapp_data/character-learning、管理runtimeはbundled/voice-training。原音や既存キャラを上書きせず、編集後の草稿を既存の人格・声上書き設定へ渡すため新しい永続設定キーはない。
+
+scripts/character-learning-worker.pyはprepare/train/aivis-qaを提供する。正規scripts/train-voice-model.ps1と品質測定を再利用し、GPU使用工程を親の単一実行排他内へ置く。進捗・失敗をstatus.jsonへ保存し、取消は親が所有したプロセスツリーを回収してから実行排他を解放する。声の採用条件はSBV2とAivisの両QA合格・異なる2文の完了試聴・利用者了承。人格は4000文字までの草稿と実在原文引用を検証する。
+
+scripts/setup-character-learning-runtime.pyは共有Python3.12から専用venvを作る。公式上流SBV2 2.7.0の旧Torch制約はBlackwell非対応なので、sync-dev-orgの固定commitに単GPU/Silero互換patchを固定し、Torch2.10/CUDA12.8と依存・学習/QAモデルrevisionを記録する。stageと確定位置のoffline/CUDA/CLIプローブに成功するまでinstalled扱いにしない。失敗stageは診断として保管し、次回成功時に同一導入先の所有記録があるstageだけを回収する。詳細はスクリプト内の固定値とruntime-env.jsonを正本にする。
+
+検査: Python unittestのtest_character_learning_worker.py/test_character_learning_runtime.py、tools/tests/character-learning-settings.mjs、Rust character_learning::tests。URL取り込みはyt-dlpを使う単一YouTube動画だけに限定し、一般音声URLの自動取り込みは実装していない。管理runtimeのfresh導入・長い実音声の学習完走・Windows WebView2操作は、単体/Chromium検査と別に確認する。
+
+学習workerと管理導入のPython回帰検査はtools/tests/character-learning-python.mjsから通常のcargo xtask verifyに含める。Python 3.10以上をPATHに置くか、LEARNING_TEST_PYTHONに実行ファイルを明示する。-Sで外部パッケージを無効にし、モデル取得なしで状態・入力保護・実OSロック・導入再開を検査する。管理学習ランタイムのPythonは3.12で固定する。
+
+管理学習環境は取得前にnvidia-smiのcompute_cap/driver_versionを照合し、CUDA12.8/Torch2.10の対応世代とWindowsドライバー570.65以上に限定する（基準: [CUDA12.8公式release notes](https://docs.nvidia.com/cuda/archive/12.8.0/cuda-toolkit-release-notes/index.html)・[PyTorch2.10 release](https://github.com/pytorch/pytorch/releases/tag/v2.10.0)）。混在GPU構成では対応GPUをCUDA_VISIBLE_DEVICESで選ぶ。明示選択した既存ランタイムへこの固定wheel制限を掛けない。文字起こしはCPU/int8で実行し、GPUメモリ競合を減らすが長尺素材では遅くなる。

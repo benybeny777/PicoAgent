@@ -2,7 +2,13 @@
   "bundle": {
     "resources": [
       "resources/bundled/engine/**/*",
-      "resources/component-manifest.json"
+      "resources/component-manifest.json",
+      "../scripts/character-learning-worker.py",
+      "../scripts/setup-character-learning-runtime.py",
+      "../scripts/train-voice-model.ps1",
+      "../scripts/select-voice-training-clips.py",
+      "../scripts/voice_training_common.py",
+      "../scripts/check-synthesized-voice.py"
     ],
     "windows": {
       "nsis": {

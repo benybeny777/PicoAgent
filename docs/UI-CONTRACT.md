@@ -103,6 +103,13 @@
 | `settings_character_maker_install` | `characterId` | 導入結果 |
 | `settings_character_maker_preview` | `characterId` | 確認画面を開く |
 | `settings_character_maker_preview_data` | `characterId` | 確認画面の描画データ |
+| `settings_character_learning_pick` | `folder` | 音声素材または既存学習環境の選択。取消はpathなし |
+| `settings_character_learning_list` | なし | Windows対応・管理環境の確認済み状態・学習一覧・実行中ID |
+| `settings_character_learning_start` | `input`, `resumeId` | 素材から候補を作成、または同一ジョブを再開。進捗は一覧に含める |
+| `settings_character_learning_cancel` | `id` | 実行中の学習の停止要求 |
+| `settings_character_learning_setup` | なし | Windows/NVIDIAの専用学習環境を明示導入・確認 |
+| `settings_character_learning_check_voice` | `id` | 候補をAivisへ登録し、30文の品質検査結果を保存 |
+| `settings_character_learning_sample` | `id`, `index` | 学習ジョブ内の試聴WAVのdata URL・文・件数 |
 | `settings_pick_stream_image` | `kind` | 取り込んだ画像のパス |
 | `settings_export_diagnostics` | なし | 書き出した診断ファイル |
 | `restart_app` | `restartEngine`, `restartAivis` | 再初期化の結果。メインへ `pet:reload` を送る |

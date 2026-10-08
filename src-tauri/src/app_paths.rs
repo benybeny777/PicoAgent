@@ -53,6 +53,20 @@ pub fn packaged_character_maker_dir(app: &AppHandle) -> Option<PathBuf> {
         .map(|root| packaged_character_maker_at(&root))
 }
 
+/// 製品のキャラ学習処理だけを明示同梱したスクリプトの保存先。
+pub fn character_learning_scripts_dir(app: &AppHandle) -> Result<PathBuf, String> {
+    if cfg!(debug_assertions) {
+        return Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .map(|root| root.join("scripts"))
+            .ok_or_else(|| "開発用の学習処理の保存先が不正です".into());
+    }
+    app.path()
+        .resource_dir()
+        .map(|root| root.join("_up_/scripts"))
+        .map_err(|error| format!("同梱の学習処理の保存先を取得できません: {error}"))
+}
+
 pub fn data_dir(app: &AppHandle) -> PathBuf {
     let identifier = app.config().identifier.as_str();
     if let Some(root) = dev_data_root() {
