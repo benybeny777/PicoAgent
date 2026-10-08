@@ -450,3 +450,5 @@ scripts/setup-character-learning-runtime.pyは共有Python3.12から専用venv�
 検査: Python unittestのtest_character_learning_worker.py/test_character_learning_runtime.py、tools/tests/character-learning-settings.mjs、Rust character_learning::tests。URL取り込みはyt-dlpを使う単一YouTube動画だけに限定し、一般音声URLの自動取り込みは実装していない。管理runtimeのfresh導入・長い実音声の学習完走・Windows WebView2操作は、単体/Chromium検査と別に確認する。
 
 学習workerと管理導入のPython回帰検査はtools/tests/character-learning-python.mjsから通常のcargo xtask verifyに含める。Python 3.10以上をPATHに置くか、LEARNING_TEST_PYTHONに実行ファイルを明示する。-Sで外部パッケージを無効にし、モデル取得なしで状態・入力保護・実OSロック・導入再開を検査する。管理学習ランタイムのPythonは3.12で固定する。
+
+管理学習環境は取得前にnvidia-smiのcompute_cap/driver_versionを照合し、CUDA12.8/Torch2.10の対応世代とWindowsドライバー570.65以上に限定する（基準: [CUDA12.8公式release notes](https://docs.nvidia.com/cuda/archive/12.8.0/cuda-toolkit-release-notes/index.html)・[PyTorch2.10 release](https://github.com/pytorch/pytorch/releases/tag/v2.10.0)）。混在GPU構成では対応GPUをCUDA_VISIBLE_DEVICESで選ぶ。明示選択した既存ランタイムへこの固定wheel制限を掛けない。文字起こしはCPU/int8で実行し、GPUメモリ競合を減らすが長尺素材では遅くなる。

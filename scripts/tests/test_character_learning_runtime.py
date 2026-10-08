@@ -19,6 +19,9 @@ class RuntimeTests(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory(dir=repo / "temp")
         self.addCleanup(self.temporary.cleanup)
         self.base = Path(self.temporary.name)
+        gpu_probe = patch.object(RUNTIME, "detect_cuda_gpu", return_value={"CUDA_VISIBLE_DEVICES": "0", "CUDA_DEVICE_ORDER": "PCI_BUS_ID"})
+        gpu_probe.start()
+        self.addCleanup(gpu_probe.stop)
         self.root = self.base / "bundled/voice-training"
         self.shared = self.base / "shared/python.exe"
         self.ffmpeg = self.base / "ffmpeg.exe"
@@ -225,6 +228,34 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual(json.loads(self.status.read_text(encoding="utf-8"))["error"], "CUDA確認失敗")
         self.assertEqual(before, {str(path.relative_to(self.root)): path.read_bytes()
                                   for path in self.root.rglob("*") if path.is_file()})
+
+    def test_既知minor互換とdriver境界を判定する(self):
+        for capability in ("7.0", "7.5", "8.0", "8.6", "8.7", "8.9", "9.0", "10.0", "10.3", "12.0", "12.1"):
+            with self.subTest(capability=capability):
+                self.assertEqual(RUNTIME.select_cuda_gpu(f"2, {capability}, 570.65")["CUDA_VISIBLE_DEVICES"], "2")
+        for output in ("0, 6.1, 590.00", "0, 12.0, 570.64", "0, 13.0, 590.00", "0, N/A, 590.00", "不正", ""):
+            with self.subTest(output=output), self.assertRaises(ValueError):
+                RUNTIME.select_cuda_gpu(output)
+
+    def test_複数GPUは対応先頭一枚に固定し後続不正行も拒否する(self):
+        self.assertEqual(RUNTIME.select_cuda_gpu("0, 6.1, 590.00\n1, 8.9, 590.00\n2, 12.0, 590.00"), {"CUDA_VISIBLE_DEVICES": "1", "CUDA_DEVICE_ORDER": "PCI_BUS_ID"})
+        with self.assertRaises(ValueError):
+            RUNTIME.select_cuda_gpu("0, 12.0, 590.00\n不正行")
+
+    def test_GPU能力不足ではstage作成も取得もしない(self):
+        with patch.object(RUNTIME, "detect_cuda_gpu", side_effect=ValueError("GPU能力不足")):
+            with self.assertRaisesRegex(ValueError, "GPU能力不足"):
+                self.invoke(lambda *args: self.fail("能力不足なのに取得へ進んだ"))
+        self.assertFalse(self.root.parent.exists())
+
+    def test_選択GPUをstageと最終probeと導入記録へ渡す(self):
+        gpu = {"CUDA_VISIBLE_DEVICES": "2", "CUDA_DEVICE_ORDER": "PCI_BUS_ID"}
+        with patch.object(RUNTIME, "detect_cuda_gpu", return_value=gpu), patch.object(RUNTIME.platform, "system", return_value="Windows"), patch.object(RUNTIME.platform, "machine", return_value="AMD64"), patch.object(RUNTIME.subprocess, "run"), patch.object(RUNTIME, "populate") as populate, patch.object(RUNTIME, "run") as run:
+            RUNTIME.install(self.root, self.shared, self.ffmpeg, self.uv, self.status, True)
+            self.assertEqual(populate.call_args.args[-1], gpu)
+            for call in run.call_args_list:
+                self.assertEqual(call.args[2]["CUDA_VISIBLE_DEVICES"], "2")
+        self.assertEqual(json.loads((self.root / "install.json").read_text(encoding="utf-8"))["environment"]["CUDA_VISIBLE_DEVICES"], "2")
 
 
 if __name__ == "__main__":

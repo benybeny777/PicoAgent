@@ -435,10 +435,42 @@ def apply_patch(text: str, patch: str) -> str:
     return "".join(output)
 
 
-def environment(root: Path) -> dict[str, str]:
+def select_cuda_gpu(output: str) -> dict[str, str]:
+    # PyTorch 2.10 cu128の公式wheel対象とCUDA 12.8 GAのWindows driverを取得前に判定する。
+    supported = {(7, 0), (7, 5), (8, 0), (8, 6), (8, 7), (8, 9), (9, 0), (10, 0), (10, 3), (12, 0), (12, 1)}
+    selected = None
+    for line in output.splitlines():
+        fields = [part.strip() for part in line.split(",")]
+        if len(fields) != 3 or not re.fullmatch(r"\d+", fields[0]):
+            raise ValueError("nvidia-smiのGPU能力応答が不正です。取得していません")
+        if not re.fullmatch(r"\d+\.\d+", fields[1]) or not re.fullmatch(r"\d+\.\d+(?:\.\d+)?", fields[2]):
+            raise ValueError("nvidia-smiのGPU能力応答が不正です。取得していません")
+        capability = tuple(map(int, fields[1].split(".")))
+        driver = tuple(map(int, fields[2].split(".")))
+        if selected is None and capability in supported and driver >= (570, 65):
+            selected = {"CUDA_VISIBLE_DEVICES": fields[0], "CUDA_DEVICE_ORDER": "PCI_BUS_ID"}
+    if selected is not None:
+        return selected
+    raise ValueError("PyTorch 2.10 cu128対応GPUとWindows NVIDIA driver 570.65以上が必要です。取得していません")
+
+
+def detect_cuda_gpu() -> dict[str, str]:
+    executable = shutil.which("nvidia-smi")
+    if not executable:
+        raise ValueError("nvidia-smiがなくGPU能力を確認できません。取得していません")
+    try:
+        result = subprocess.run([executable, "--query-gpu=index,compute_cap,driver_version", "--format=csv,noheader,nounits"],
+                                capture_output=True, text=True, check=True, timeout=15,
+                                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    except (OSError, subprocess.SubprocessError) as error:
+        raise ValueError("NVIDIA GPU能力の確認に失敗しました。取得していません") from error
+    return select_cuda_gpu(result.stdout)
+
+
+def environment(root: Path, gpu: dict[str, str] | None = None) -> dict[str, str]:
     return {"HF_HOME": str(root / "cache/huggingface"), "HF_HUB_CACHE": str(root / "cache/huggingface/hub"),
             "TORCH_HOME": str(root / "cache/torch"), "PYTHONPATH": str(root),
-            "HF_HUB_OFFLINE": "1", "TRANSFORMERS_OFFLINE": "1", "HF_DATASETS_OFFLINE": "1"}
+            "HF_HUB_OFFLINE": "1", "TRANSFORMERS_OFFLINE": "1", "HF_DATASETS_OFFLINE": "1"} | (gpu or {})
 
 
 def run(command: list[str], cwd: Path, env: dict, log: Path):
@@ -512,12 +544,12 @@ print(json.dumps({'cuda':True,'device':torch.cuda.get_device_name(0)}))
 '''
 
 
-def populate(stage: Path, shared: Path, uv: Path, ffmpeg: Path):
+def populate(stage: Path, shared: Path, uv: Path, ffmpeg: Path, gpu: dict[str, str]):
     fetch_source(FORK, COMMIT, TREE, stage, stage / "source.zip")
     for name, patch in PATCHES.items():
         path = stage / name
         path.write_text(apply_patch(path.read_text(encoding="utf-8"), patch), encoding="utf-8", newline="\n")
-    env = os.environ | environment(stage)
+    env = os.environ | environment(stage, gpu)
     log = stage / "setup.log"
     run([str(uv), "venv", str(stage / ".venv"), "--python", str(shared), "--relocatable"], stage, env, log)
     python = stage / ".venv/Scripts/python.exe"
@@ -551,7 +583,7 @@ def cleanup_failed_stages(root: Path):
             shutil.rmtree(candidate)
 
 
-def verify_existing(root: Path, ffmpeg: Path, status: Path):
+def verify_existing(root: Path, ffmpeg: Path, status: Path, gpu: dict[str, str]):
     record = json.loads((root / "install.json").read_text(encoding="utf-8"))
     expected_patches = {name: hashlib.sha256(patch.encode()).hexdigest() for name, patch in PATCHES.items()}
     if (record.get("state") != "installed"
@@ -562,11 +594,12 @@ def verify_existing(root: Path, ffmpeg: Path, status: Path):
             or record.get("patchSha256") != expected_patches
             or (root / "requirements-runtime.txt").read_text(encoding="utf-8") != FROZEN
             or json.loads((root / "runtime-env.json").read_text(encoding="utf-8")) != record
-            or record.get("environment") != environment(root)):
+            or {key: value for key, value in record.get("environment", {}).items()
+                if key not in ("CUDA_VISIBLE_DEVICES", "CUDA_DEVICE_ORDER")} != environment(root)):
         raise ValueError("既存学習環境の固定版記録が一致しません。環境は変更しません")
     # 確認ログはジョブ側へ置き、既存rootのファイルを上書きしない。
     status.parent.mkdir(parents=True, exist_ok=True)
-    env, log = os.environ | environment(root), status.parent / "runtime-check.log"
+    env, log = os.environ | environment(root, gpu), status.parent / "runtime-check.log"
     run([str(ffmpeg), "-version"], root, env, log)
     run([str(root / ".venv/Scripts/aivmlib.exe"), "--help"], root, env, log)
     run([str(root / ".venv/Scripts/python.exe"), "-m", "yt_dlp", "--version"], root, env, log)
@@ -604,16 +637,17 @@ def install(root: Path, shared: Path, ffmpeg: Path, uv: Path, status: Path, conf
     root, shared, ffmpeg, uv, status = [path.resolve() for path in (root, shared, ffmpeg, uv, status)]
     if platform.system() != "Windows" or platform.machine().lower() not in ("amd64", "x86_64") or not confirmed:
         raise ValueError("Windows x64とNVIDIA GPUの事前確認が必要です。何も取得していません")
+    gpu = detect_cuda_gpu()
     if root == root.parent or root in shared.parents or shared in root.parents or status == root or root in status.parents:
         raise ValueError("既存環境・共有Python・導入先内statusは変更できません")
     for file in (shared, ffmpeg, uv):
         if not file.is_file() or root in file.parents:
             raise ValueError(f"管理実体の実行ファイルがありません: {file}")
-    subprocess.run([str(shared), "-c", "import sys; assert sys.version_info[:2]==(3,12)"], check=True)
+    subprocess.run([str(shared), "-c", "import sys; assert sys.version_info[:2]==(3,12)"], env=os.environ | gpu, check=True)
     if root.exists():
         if (root / "install.json").exists():
             try:
-                verify_existing(root, ffmpeg, status)
+                verify_existing(root, ffmpeg, status, gpu)
             except BaseException as error:
                 atomic_json(status, {"state": "failed", "phase": "setup", "message": str(error)})
                 raise
@@ -625,10 +659,10 @@ def install(root: Path, shared: Path, ffmpeg: Path, uv: Path, status: Path, conf
     atomic_json(stage / "stage-owner.json", {"destination": str(root), "pid": os.getpid()})
     atomic_json(status, {"state": "running", "phase": "setup", "message": "専用音声学習環境を導入中"})
     try:
-        populate(stage, shared, uv, ffmpeg)
+        populate(stage, shared, uv, ffmpeg, gpu)
         # relocatablevenvでも実CLIとcacheの移動後解決を確認してからinstalledを記録する。
         stage.rename(root)
-        final_env = os.environ | environment(root)
+        final_env = os.environ | environment(root, gpu)
         try:
             run([str(root / ".venv/Scripts/aivmlib.exe"), "--help"], root, final_env, root / "setup.log")
             run([str(root / ".venv/Scripts/python.exe"), "-c", PROBE], root, final_env, root / "setup.log")
@@ -637,7 +671,7 @@ def install(root: Path, shared: Path, ffmpeg: Path, uv: Path, status: Path, conf
             raise
         record = {"schemaVersion": 1, "state": "installed", "source": {"repository": FORK, "commit": COMMIT, "tree": TREE, "officialRelease": OFFICIAL_RELEASE, "officialCommit": OFFICIAL_COMMIT, "reason": FORK_REASON},
                   "patchSha256": {name: hashlib.sha256(patch.encode()).hexdigest() for name, patch in PATCHES.items()},
-                  "requirementsSha256": hashlib.sha256(FROZEN.encode()).hexdigest(), "environment": environment(root), "ffmpeg": str(ffmpeg), "sharedPython": str(shared), "capabilities": {"windows": True, "nvidia": True, "cuda": True, "jpExtra": True, "transcribe": True, "export": True, "qa": True}, "models": [{"repository": row[0], "revision": row[1]} for row in MODEL_SPECS]}
+                  "requirementsSha256": hashlib.sha256(FROZEN.encode()).hexdigest(), "environment": environment(root, gpu), "ffmpeg": str(ffmpeg), "sharedPython": str(shared), "capabilities": {"windows": True, "nvidia": True, "cuda": True, "jpExtra": True, "transcribe": True, "export": True, "qa": True}, "models": [{"repository": row[0], "revision": row[1]} for row in MODEL_SPECS]}
         atomic_json(root / "runtime-env.json", record)
         atomic_json(root / "install.json", record)
         cleanup_failed_stages(root)

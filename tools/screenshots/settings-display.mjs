@@ -189,7 +189,10 @@ try {
       throw new Error(`可視確認ウィンドウが左画面内にありません: x=${windowBounds.x}, width=${windowBounds.width}`);
     }
   }
-  await page.waitForSelector(".layout-card-grid .layout-card");
+  await page.waitForSelector(".layout-card-grid .layout-card").catch(async error => {
+    console.error("設定画面の初期表示診断:", (await page.locator("body").innerText()).slice(0,2500));
+    throw error;
+  });
   const displayTab = page.getByRole("tab", { name: "画面・操作", exact: true });
   await displayTab.focus();
   for (const [key, expected] of [["Home", "基本設定"], ["End", "診断・修復"], ["ArrowRight", "基本設定"], ["ArrowLeft", "診断・修復"], ["Home", "基本設定"], ["ArrowDown", "画面・操作"]]) {

@@ -171,6 +171,34 @@ class WorkerTests(unittest.TestCase):
             self.assertTrue(quality['aivisPassed'])
             self.assertEqual(quality['defaultAssignable'],sbv2)
 
+    def test_起動PIDとQA情報の変更だけで再開を妨げない(self):
+        self.request['ownerProcessId']=100
+        worker=WORKER.Worker(self.request)
+        WORKER.atomic_json(worker.job/'prepare-owner.json',dict(self.request))
+        WORKER.atomic_json(worker.job/'prepared.json',{'dataset':worker.selected,'request':dict(self.request),'artifacts':{str(self.source):WORKER.digest(self.source)}})
+        changed=dict(self.request,ownerProcessId=200,endpoint='http://127.0.0.1:11436',speaker=123)
+        resumed=WORKER.Worker(changed,lambda *a,**k:self.fail('再処理禁止'))
+        resumed.prepare()
+        saved=json.loads((worker.job/'prepare-owner.json').read_text(encoding='utf-8'))
+        self.assertEqual(WORKER.provenance_request(saved),WORKER.provenance_request(changed))
+
+    def test_素材と固定学習条件の変更は再開を拒否する(self):
+        worker=WORKER.Worker(self.request)
+        WORKER.atomic_json(worker.job/'prepared.json',{'dataset':worker.selected,'request':dict(self.request),'artifacts':{str(self.source):WORKER.digest(self.source)}})
+        changes={'source':dict(kind='file',value=str(self.runtime/'.venv/Scripts/python.exe')),'mode':'persona','characterName':'別名','stopAtStep':2000,'scriptsRoot':str(self.runtime),'ffmpeg':'別のffmpeg.exe'}
+        for key,value in changes.items():
+            with self.subTest(key=key):
+                modified=WORKER.Worker(dict(self.request,**{key:value}))
+                with self.assertRaisesRegex(ValueError,'request'):
+                    modified.prepare()
+
+    def test_ライブと不明な容量を拒否する(self):
+        for status in ('is_live','is_upcoming','post_live'):
+            self.assertIsNotNone(WORKER.youtube_limit({'duration':1,'filesize':10,'live_status':status}))
+        self.assertIsNotNone(WORKER.youtube_limit({'duration':1,'filesize':10,'is_live':True},incomplete=True))
+        self.assertIsNotNone(WORKER.youtube_limit({'duration':1}))
+        self.assertIsNone(WORKER.youtube_limit({'duration':60,'filesize':1000,'live_status':'not_live'}))
+
 
 if __name__=='__main__':
     unittest.main()

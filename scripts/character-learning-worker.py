@@ -16,6 +16,23 @@ MAX_BYTES = 500_000_000
 MAX_SECONDS = 7200
 
 
+def provenance_request(request):
+    """再起動PID・QA接続情報だけを素材来歴から除外する。"""
+    stable={key:value for key,value in request.items() if key not in ('ownerProcessId','endpoint','speaker')}
+    stable.setdefault('stopAtStep',1000)
+    return stable
+
+
+def youtube_limit(info, *, incomplete=False):
+    if info.get('is_live') or info.get('live_status') in ('is_live','is_upcoming','post_live'):
+        return 'ライブ・予約配信・確定前のライブ音声には対応しません'
+    duration=info.get('duration')
+    size=info.get('filesize') or info.get('filesize_approx')
+    if not incomplete and (duration is None or duration>MAX_SECONDS or size is None or size>MAX_BYTES):
+        return '長さ・容量が不明、または2時間/500MB上限超過です'
+    return None
+
+
 class RuntimeLock:
     """OSがプロセス終了時にも解放する共有ランタイムの排他。"""
     def __init__(self, root):
@@ -152,7 +169,7 @@ class Worker:
         completed = self.job/'prepared.json'
         if completed.is_file():
             proof=json.loads(completed.read_text(encoding='utf-8'))
-            if proof.get('dataset') != self.selected or proof.get('request') != self.request:
+            if proof.get('dataset') != self.selected or provenance_request(proof.get('request',{})) != provenance_request(self.request):
                 raise ValueError('準備済みrequestが一致しません')
             for name, expected in proof['artifacts'].items():
                 if digest(Path(name)) != expected:
@@ -162,12 +179,12 @@ class Worker:
         target = self.job / 'source'
         owner=self.job/'prepare-owner.json'
         if owner.exists():
-            if json.loads(owner.read_text(encoding='utf-8')) != self.request:
+            if provenance_request(json.loads(owner.read_text(encoding='utf-8'))) != provenance_request(self.request):
                 raise ValueError('再開requestが一致しません')
         else:
             if target.exists() or (self.job/'transcript.txt').exists():
                 raise ValueError('所有証跡のない既存入力は上書きしません')
-            atomic_json(owner,self.request)
+            atomic_json(owner,provenance_request(self.request))
         import soundfile as sf
         ffmpeg = self.request.get('ffmpeg')
         if ffmpeg:
@@ -200,16 +217,13 @@ class Worker:
                 raise ValueError('コピー中に原音が変わりました')
         else:
             import yt_dlp
-            def limited(info, *, incomplete=False):
-                duration = info.get('duration')
-                size = info.get('filesize') or info.get('filesize_approx')
-                if not incomplete and (duration is None or duration > MAX_SECONDS or size is None or size > MAX_BYTES):
-                    return '長さ・容量が不明、または2時間/500MB上限超過です'
             self.stage('download')
-            with yt_dlp.YoutubeDL({'noplaylist': True, 'format': 'bestaudio', 'outtmpl': str(target/'original.%(ext)s'), 'max_filesize': MAX_BYTES, 'match_filter': limited, 'overwrites': False}) as downloader:
+            with yt_dlp.YoutubeDL({'noplaylist': True, 'format': 'bestaudio', 'outtmpl': str(target/'original.%(ext)s'), 'max_filesize': MAX_BYTES, 'match_filter': youtube_limit, 'overwrites': False}) as downloader:
                 info = downloader.extract_info(self.url, download=True)
                 if not info or info.get('entries'):
                     raise ValueError('単一音声の取得に失敗しました')
+                if youtube_limit(info):
+                    raise ValueError(youtube_limit(info))
                 snapshot = Path(downloader.prepare_filename(info))
             if not snapshot.is_file() or snapshot.stat().st_size > MAX_BYTES:
                 raise ValueError('取得音声がありません、または500MB超過です')
@@ -343,7 +357,7 @@ class Worker:
         if self.request['mode']!='persona':
             artifacts.extend((self.root/'Data'/self.selected).rglob('*.wav'))
             artifacts.extend([self.root/'Data'/self.selected/'esd.list',self.job/'selected-reference.jsonl'])
-        atomic_json(self.job/'prepared.json', {'dataset':self.selected,'mode':self.request['mode'],'source_sha256':digest(snapshot),'request':self.request,'artifacts':{str(p):digest(p) for p in artifacts}})
+        atomic_json(self.job/'prepared.json', {'dataset':self.selected,'mode':self.request['mode'],'source_sha256':digest(snapshot),'request':provenance_request(self.request),'artifacts':{str(p):digest(p) for p in artifacts}})
         atomic_json(self.job/'status.json', {'stage':'prepared','state':'completed'})
 
     def train(self):
@@ -352,6 +366,8 @@ class Worker:
         prepared=json.loads((self.job/'prepared.json').read_text(encoding='utf-8'))
         if prepared['dataset']!=self.selected:
             raise ValueError('準備済みデータセットが一致しません')
+        if 'request' in prepared and provenance_request(prepared['request'])!=provenance_request(self.request):
+            raise ValueError('準備済み素材・学習条件が一致しません')
         source = json.loads((self.job/'source.json').read_text(encoding='utf-8'))
         if digest(Path(source['snapshot'])) != prepared['source_sha256']:
             raise ValueError('準備後に原音snapshotが変更されています')
