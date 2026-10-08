@@ -61,7 +61,7 @@ fn fetch_office_inner() -> Result<()> {
     // 公式が慎重な利用者向けに案内する成熟ブランチを固定し、監査時に最新版へ更新する。
     // **バージョンは4桁**（`24.8.7.2`）。`old/` 配下は4桁のディレクトリしか無く、
     // 3桁（`24.8.4`）を指定すると 404 になる（実際にこれで取得できていなかった）。
-    let version = env_or("LIBREOFFICE_VERSION", "25.8.7.2");
+    let version = env_or("LIBREOFFICE_VERSION", "26.2.6.3");
     let base = format!("https://downloadarchive.documentfoundation.org/libreoffice/old/{version}");
 
     if cfg!(windows) {

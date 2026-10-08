@@ -50,7 +50,7 @@ def main():
     os.environ["UV_CACHE_DIR"] = str(root / "install-cache")
     venv = root / "venv"
     python = venv / ("Scripts/python.exe" if os.name == "nt" else "bin/python3")
-    expected = {"revision": REVISION, "backend": options.backend, "torch": "2.11.0", "transformers": "5.19.0", "sentence_transformers": "6.1.0", "torchvision": "0.26.0", "pillow": "12.3.0", "requirements_revision": "2026-10-07.1"}
+    expected = {"revision": REVISION, "backend": options.backend, "torch": "2.11.0" if sys.platform == "darwin" else "2.14.1", "transformers": "5.19.0", "sentence_transformers": "6.1.0", "torchvision": "0.26.0" if sys.platform == "darwin" else "0.29.1", "pillow": "12.3.0", "requirements_revision": "2026-10-08.1"}
     marker_path = root / "install.json"
     if marker_path.is_file():
         try:
@@ -68,7 +68,7 @@ def main():
         subprocess.run([str(options.uv), "venv", str(venv), "--python", sys.executable, "--relocatable", "--allow-existing"], check=True)
     # 推移依存も版・配布ハッシュで固定し、GPU版とCPU版を同時に取得しない。
     lock = Path(__file__).parent / ("requirements-cuda.lock" if options.backend == "cuda" else "requirements-cpu.lock")
-    command = [str(options.uv), "pip", "install", "--python", str(python), "--no-cache", "--require-hashes", "--only-binary", ":all:", "--torch-backend", "cu128" if options.backend == "cuda" else "cpu", "-r", str(lock)]
+    command = [str(options.uv), "pip", "install", "--python", str(python), "--no-cache", "--require-hashes", "--only-binary", ":all:", "--torch-backend", "cu130" if options.backend == "cuda" else "cpu", "-r", str(lock)]
     subprocess.run(command, check=True)
     model = root / "model"
     for name, (size, digest) in FILES.items():

@@ -30,7 +30,7 @@ pub async fn ensure(app: &AppHandle, requested: &str) -> Result<PathBuf> {
     let python = crate::components::python_executable(&root.join("venv"));
     let backend = if requested == "cpu" {
         "cpu"
-    } else if crate::components::nvidia_cuda_ready().await {
+    } else if crate::components::nvidia_cuda13_ready().await {
         "cuda"
     } else if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
         "mps"
@@ -51,12 +51,22 @@ pub async fn ensure(app: &AppHandle, requested: &str) -> Result<PathBuf> {
             && (marker["backend"] == backend
                 || (requested == "cpu"
                     && matches!(marker["backend"].as_str(), Some("cuda" | "mps"))))
-            && marker["torch"] == "2.11.0"
+            && marker["torch"]
+                == if cfg!(target_os = "macos") {
+                    "2.11.0"
+                } else {
+                    "2.14.1"
+                }
             && marker["transformers"] == "5.19.0"
             && marker["sentence_transformers"] == "6.1.0"
-            && marker["torchvision"] == "0.26.0"
+            && marker["torchvision"]
+                == if cfg!(target_os = "macos") {
+                    "0.26.0"
+                } else {
+                    "0.29.1"
+                }
             && marker["pillow"] == "12.3.0"
-            && marker["requirements_revision"] == "2026-10-07.1"
+            && marker["requirements_revision"] == "2026-10-08.1"
         {
             return Ok(python);
         }

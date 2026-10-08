@@ -12,9 +12,9 @@ import zipfile
 from model_catalog import LICENSE_REVISION, check_hardware
 from setup_models import digest, download, safe_path
 
-COMFY_COMMIT = "73c9bad4d21e7addbe1d13bc92eee0f1431b017d"
-COMFY_SHA = "a6bc4df3ffef9bbf734f96c2038381fe2415abe1b8b7b72e38ca3e3caf97b8ae"
-COMFY_SIZE = 13_201_561
+COMFY_COMMIT = "b0b743566f65daafc423b4fea8a2fbda94b3384a"
+COMFY_SHA = "c8997f6781e2b53861697fab23b77a7fdb556ec0640f21653a89689556816b54"
+COMFY_SIZE = 13_350_160
 
 
 def checked_path(path):

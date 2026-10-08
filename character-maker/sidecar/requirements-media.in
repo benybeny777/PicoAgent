@@ -1,16 +1,17 @@
-# ComfyUI v0.37.0のNVFP4専用環境。既存キャラ作成環境とは仮想環境を分ける。
+# ComfyUI v0.39.0のNVFP4専用環境。既存キャラ作成環境とは仮想環境を分ける。
 --extra-index-url https://download.pytorch.org/whl/cu130
-torch==2.11.0+cu130
-torchvision==0.26.0+cu130
+torch==2.14.1+cu130
+torchvision==0.29.1+cu130
 torchaudio==2.11.0+cu130
-comfyui-frontend-package==1.52.7
-comfyui-workflow-templates==0.11.66
-comfyui-embedded-docs==0.5.12
-comfy-kitchen==0.2.35
+comfyui-frontend-package==1.53.10
+comfyui-workflow-templates==0.11.76
+comfyui-embedded-docs==0.5.13
+comfy-kitchen==0.2.37
 comfy-aimdo==0.5.5
 torchsde
 numpy>=1.25.0
 einops
+# サイドカー既存のモデル読込契約を維持し、ComfyUI更新だけでtransformers 5へ移行しない。
 transformers>=4.50.3,<5
 tokenizers>=0.13.3
 sentencepiece
@@ -35,3 +36,6 @@ pydantic~=2.0
 pydantic-settings~=2.0
 pyopengl>=3.1.8
 comfy-angle
+
+# TorchAudioは公式最終版2.11を維持する。torch 2.11以降との互換性は上流が保証する。
+# https://github.com/pytorch/audio
