@@ -95,8 +95,10 @@ fn path(app: &AppHandle, character_id: &str) -> Result<PathBuf, String> {
     if !crate::character_pack::is_valid_id(character_id) {
         return Err("キャラクターIDが不正です。".to_string());
     }
-    let root = crate::log_paths::data_dir(app);
-    Ok(root.join(format!("relationship-{character_id}.json")))
+    Ok(crate::app_paths::data_path(
+        app,
+        crate::app_paths::DataPath::Relationship(character_id),
+    ))
 }
 
 fn read(

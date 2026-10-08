@@ -41,14 +41,20 @@ const GPU_CACHE_RESET_MARKER: &str = "gpu-cache-reset-requested";
 /// GPU描画のエラーから回復するため、次回起動時にGPU・シェーダのキャッシュを消すよう予約する。
 /// 起動中のWebViewが使用中のファイルは消せないため、その場では消さない。
 pub fn request_gpu_cache_reset(app: &AppHandle) -> std::io::Result<()> {
-    let root = crate::log_paths::data_dir(app);
+    let root = crate::app_paths::data_dir(app);
     crate::store::write_atomic(&root.join(GPU_CACHE_RESET_MARKER), b"requested\n")
         .map_err(std::io::Error::other)
 }
 
 fn profile_roots(data_root: &Path) -> Vec<PathBuf> {
-    let mut roots = vec![data_root.join("browser-profile")];
-    if let Ok(entries) = std::fs::read_dir(data_root.join("webview")) {
+    let mut roots = vec![crate::app_paths::path_at(
+        data_root,
+        crate::app_paths::DataPath::BrowserProfile,
+    )];
+    if let Ok(entries) = std::fs::read_dir(crate::app_paths::path_at(
+        data_root,
+        crate::app_paths::DataPath::WebviewRoot,
+    )) {
         for entry in entries.flatten() {
             if entry.path().is_dir() {
                 roots.push(entry.path().join("EBWebView"));
@@ -66,7 +72,7 @@ fn gpu_cache_targets(data_root: &Path) -> Vec<PathBuf> {
 }
 
 fn cache_targets(data_root: &Path) -> Vec<PathBuf> {
-    let cache_root = data_root.join("cache");
+    let cache_root = crate::app_paths::path_at(data_root, crate::app_paths::DataPath::Cache);
     let mut targets = vec![
         cache_root.join("character-maker-installer"),
         cache_root.join("media-model-installer"),
@@ -119,7 +125,7 @@ fn reset_gpu_cache(
 }
 
 pub fn run(app: &AppHandle) {
-    let root = crate::log_paths::data_dir(app);
+    let root = crate::app_paths::data_dir(app);
     let marker = root.join(GPU_CACHE_RESET_MARKER);
     for target in cache_targets(&root) {
         if let Err(error) = remove_target(&target) {
@@ -140,7 +146,7 @@ pub fn run(app: &AppHandle) {
             |message| crate::log_paths::append_app_log(app, message),
         );
     }
-    let generated = crate::log_paths::data_dir(app).join("generated-media");
+    let generated = crate::app_paths::data_path(app, crate::app_paths::DataPath::GeneratedMedia);
     if let Ok(entries) = std::fs::read_dir(&generated) {
         for entry in entries.flatten() {
             let name = entry.file_name().to_string_lossy().to_string();

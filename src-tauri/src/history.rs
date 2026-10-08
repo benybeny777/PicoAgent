@@ -27,7 +27,7 @@ const LEGACY_CHAT_GUIDANCE: &str = "\n\nこれは雑談や相談です。Web検�
 const LEGACY_GREETING_GUIDANCE: &str = "\n\nこれは短い挨拶です。表記の正誤や語法の説明に広げず、選択中キャラクター本人として短く挨拶を返してください。自分をアプリ、AI、デスクトップペットとして説明しないでください。";
 
 fn data_dir(app: &AppHandle) -> anyhow::Result<PathBuf> {
-    Ok(crate::log_paths::data_dir(app))
+    Ok(crate::app_paths::data_dir(app))
 }
 
 /// キャラクターIDをファイル名に使える形へ正規化する（想定外の文字は落とす）。
@@ -44,7 +44,10 @@ fn sanitize(character_id: &str) -> String {
 }
 
 pub fn path(app: &AppHandle, character_id: &str) -> anyhow::Result<PathBuf> {
-    Ok(data_dir(app)?.join(format!("history-{}.json", sanitize(character_id))))
+    Ok(crate::app_paths::data_path(
+        app,
+        crate::app_paths::DataPath::History(&sanitize(character_id)),
+    ))
 }
 
 /// 読み込みに失敗した履歴ファイル（＝中身が分からない原本）を持つキャラクターID。

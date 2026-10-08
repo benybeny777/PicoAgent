@@ -153,7 +153,7 @@ async fn launch(app: &AppHandle, requested: &str) -> Result<Worker> {
         requested,
     );
     let python = crate::memory_embedding_install::ensure(app, requested).await?;
-    let root = crate::log_paths::bundled_dir(app).join("embedding-memory");
+    let root = crate::app_paths::bundled_dir(app).join("embedding-memory");
     let script = root.join("worker.py");
     crate::store::write_atomic(
         &script,
@@ -171,7 +171,10 @@ async fn launch(app: &AppHandle, requested: &str) -> Result<Worker> {
         .arg(&script)
         .arg(&root)
         .arg(requested)
-        .arg(crate::log_paths::data_dir(app).join("memory-vectors.json"))
+        .arg(crate::app_paths::data_path(
+            app,
+            crate::app_paths::DataPath::MemoryVectors,
+        ))
         .env("PYTHONUTF8", "1")
         .env("PYTHONIOENCODING", "utf-8")
         .stdin(Stdio::piped())

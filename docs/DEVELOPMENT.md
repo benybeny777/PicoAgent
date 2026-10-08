@@ -297,7 +297,7 @@ cargo xtask license issue --customer "購入者名" --purchase-id "BOOTH注文�
   | キャラ作成の同梱資産 | インストール先の `character-maker/` | リポジトリの `character-maker/` |
 
   - 開発用の作業ツール（`tools/screenshots/review-board.mjs`、`scripts/open-character-preview.ps1`、`scripts/build-partner-installer.ps1` の素材取得）も `PicoAgent-Dev` だけを読む
-  - 正本は `log_paths::data_dir()`・`packaged_bundled_dir()`・`packaged_character_maker_dir()`、スキルからは `components::runtime_dirs()`。探す順は「追加導入した物（利用者データの `bundled/`）→ このビルドの同梱物」だけで、作業フォルダ・実行ファイルからの相対位置・ビルドしたリポジトリの絶対パス・旧保存先からは探さない。同じPCでビルドしたインストーラでも、製品がリポジトリの資産を使うことはない
+  - 正本は `app_paths::data_dir()`・`packaged_bundled_dir()`・`packaged_character_maker_dir()`、スキルからは `components::runtime_dirs()`。探す順は「追加導入した物（利用者データの `bundled/`）→ このビルドの同梱物」だけで、作業フォルダ・実行ファイルからの相対位置・ビルドしたリポジトリの絶対パス・旧保存先からは探さない。同じPCでビルドしたインストーラでも、製品がリポジトリの資産を使うことはない
   - 旧保存先のモデル（`models/`、旧識別子フォルダ）と旧Aivis配置の探索・移行、旧ログの移行はしない。利用者データ直下に残った旧配置（`aivis/`・`models/`）は、新しい配置の準備に成功した後で削除する（`log_paths::remove_legacy_layout_dir()`）。製品ビルドの更新時に旧識別子フォルダ（`com.picoagent.app` 等）から設定・履歴を移す処理だけは残し、開発ビルドでは行わない
   - 開発用の保存先はリポジトリの外にあり、worktree・cloneの作り直しでもモデルや音声を取り直さない。初回だけ空から始まる
 - 開発版と通常版の同時起動はしない。識別子は共通のため、片方の起動中にもう片方を起動すると既存の窓が前面に出る。`cargo xtask dev` は起動前に `cargo xtask stop` で残存プロセスを止めるため、起動中の通常版も終了する
@@ -357,7 +357,8 @@ NSIS アンインストーラは、インストール先またはPicoAgent管理
 | `src-tauri/src/memory.rs` / `emotion.rs` | 暗黙的な長期メモリ（`app_data_dir/memory.json`）／ルールベースの感情状態推定 |
 | `src-tauri/src/usage.rs` / `tracer.rs` | トークン使用量の永続集計／ツール実行レイテンシの計測（診断タブ） |
 | `src-tauri/src/aivis.rs` | 同梱 AivisSpeech Engine のライフサイクルと音声モデル導入（読み上げは同梱エンジンのみ） |
-| `src-tauri/src/log_paths.rs` / `migration.rs` | ログ置き場と保持期間の管理／旧識別子データの移行 |
+| `crates/picoagent-core/src/paths.rs` / `src-tauri/src/app_paths.rs` | 保存先・同梱物・管理ファイル名の共通定義／OS・Tauriへの接続。アプリとxtaskは同じ `DataPath` とルート定義を使う |
+| `src-tauri/src/log_paths.rs` / `migration.rs` | ログの書き込み・保持期間の管理／旧識別子データの移行。保存先は `app_paths` を参照 |
 | `src-tauri/src/boot_screen.rs` | フロントを読み込めなかったときの案内画面。読込開始（`pet_frontend_ready`）は12秒（`PICOAGENT_BOOT_TIMEOUT_MS` がそれより小さければその値）、開始後は進捗通知（`pet_boot_progress`。初期化中は1秒、設定取得後は `PICOAGENT_BOOT_TIMEOUT_MS` の1/4を1〜10秒へ収めた間隔）が `PICOAGENT_BOOT_TIMEOUT_MS` だけ途絶えたことを監視し、届かなければ webview 既定のエラーページの代わりにキャラクター付きの案内画面へ `navigate` する（起動完了 `pet_finish_boot` が来れば監視を終える。モデル取得などで準備が長引いても、進捗が続く限り案内画面へ落とさない）。**起動完了の記録はウィンドウ寸法の復元より先に行う**（寸法変更の失敗で、動いている画面を案内画面へ差し替えないため）。**配信元が死んでいるときにこそ出る画面なので、HTML（`src-tauri/assets/boot_screen/`）と画像はバイナリへ埋め込み、専用 URI スキーム `picoboot` から返す**。案内画面には状況・読み込み先・ログの置き場所に加えて**当日 `app.log` の末尾12行**を出す（読み取りは末尾8KBまで）。**この画面はそのまま撮って送られる前提なので、ログ本文は診断情報の書き出しと同じ `commands::redacted_log_tail()` を通し、APIキー等を伏せてから出す**（設定を読めないときは本文を出さない）。CSP の `script-src` にインライン許可（`'unsafe-inline'`）が無いため案内ページに JavaScript は置けない（再読み込みはリンク遷移で行う） |
 | `src-tauri/src/message.rs` | 正規形メッセージ・`Field`（設定項目） |
 | `src-tauri/src/providers/*.rs` | 叩く AI コネクタ（既定 local・trait + inventory 登録）。`mod` / `local` / `ollama` / `openai` / `anthropic` / `gemini` / `deepseek` / `xai` / `mistral` / `agent_cli` |

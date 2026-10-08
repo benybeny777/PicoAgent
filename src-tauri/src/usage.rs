@@ -81,7 +81,10 @@ impl UsageStore {
 }
 
 fn path(app: &AppHandle) -> anyhow::Result<PathBuf> {
-    Ok(crate::log_paths::data_dir(app).join("usage.json"))
+    Ok(crate::app_paths::data_path(
+        app,
+        crate::app_paths::DataPath::Usage,
+    ))
 }
 
 pub fn load(app: &AppHandle) -> anyhow::Result<UsageStore> {

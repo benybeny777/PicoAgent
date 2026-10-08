@@ -46,8 +46,11 @@ test('動画とキャラGPU工程がcharacters直下の共通ロックを使う'
   const app = source('src-tauri/src/character_maker.rs');
   const completion = source('character-maker/sidecar/completion/generate.py');
   const pipeline = source('character-maker/src/pipeline.rs');
-  assert.match(app, /characters_root: data\.join\("character-maker\/characters"\)/);
-  assert.match(tool, /character-maker\/characters\/temp\/completion-gpu\.lock/);
+  const layout = source('crates/picoagent-core/src/paths.rs');
+  assert.match(app, /characters_root: crate::app_paths::path_at\(\s*&data,\s*crate::app_paths::DataPath::MakerCharacters,?\s*\)/);
+  assert.match(layout, /DataPath::MakerCharacters => root\.join\("character-maker\/characters"\)/);
+  assert.match(tool, /crate::app_paths::DataPath::MakerGpuLock/);
+  assert.match(layout, /DataPath::MakerGpuLock =>[\s\S]*?path_at\(root, DataPath::MakerCharacters\)\.join\("temp\/completion-gpu\.lock"\)/);
   assert.match(completion, /workspace = character\.parent\/'temp'/);
   assert.match(completion, /workspace\/'completion-gpu\.lock'/);
   assert.match(pipeline, /matches!\(stage, "isolate" \| "decompose"\)[\s\S]*?startup_cleanup_guard\(\s*&self\.characters_root,?\s*\)/);

@@ -1379,8 +1379,7 @@ pub fn pet_open_external_url(url: String) -> Result<(), String> {
 /// PicoAgentが生成した画像・動画（`generated-media/`直下）だけを既定アプリで開く。
 #[tauri::command]
 pub fn pet_open_generated_media(app: tauri::AppHandle, path: String) -> Result<(), String> {
-    let root = crate::log_paths::data_dir(&app)
-        .join("generated-media")
+    let root = crate::app_paths::data_path(&app, crate::app_paths::DataPath::GeneratedMedia)
         .canonicalize()
         .map_err(|_| "生成ファイルの保存先が見つかりません。".to_string())?;
     let target = std::path::Path::new(&path)
@@ -4285,7 +4284,7 @@ pub async fn settings_install_update(app: AppHandle) -> Result<Value, String> {
         .filter(|sha| sha.len() == 64 && sha.chars().all(|c| c.is_ascii_hexdigit()))
         .ok_or_else(|| "更新インストーラのSHA-256がありません".to_string())?
         .to_ascii_lowercase();
-    let cache = crate::log_paths::cache_dir(&app).join("updates");
+    let cache = crate::app_paths::cache_dir(&app).join("updates");
     tokio::fs::create_dir_all(&cache)
         .await
         .map_err(|error| error.to_string())?;
@@ -5115,7 +5114,10 @@ fn open_settings_tab(app: &tauri::AppHandle, tab: Option<&str>) -> Result<(), St
         .find(|window| window.label == "main")
         .and_then(|window| window.additional_browser_args.as_deref());
     let mut builder = WebviewWindowBuilder::new(app, "settings", WebviewUrl::App(path.into()));
-    builder = builder.data_directory(crate::log_paths::data_dir(app).join("webview/settings"));
+    builder = builder.data_directory(crate::app_paths::data_path(
+        app,
+        crate::app_paths::DataPath::Webview("settings"),
+    ));
     // WebView2の起動条件はメイン画面と揃える。
     if let Some(args) = browser_args {
         builder = builder.additional_browser_args(args);

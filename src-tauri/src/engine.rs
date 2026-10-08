@@ -38,10 +38,10 @@ async fn vision_projector(app: &AppHandle) -> anyhow::Result<Option<PathBuf>> {
     local::validate_vision_model(&state.config)?;
     let name = local::vision_asset::FILE_NAME;
     // 追加導入した資産、このビルドの同梱物の順。別の置き場所は探さない。
-    let mut candidates = vec![crate::log_paths::bundled_dir(app)
+    let mut candidates = vec![crate::app_paths::bundled_dir(app)
         .join("local-vision")
         .join(name)];
-    if let Some(packaged) = crate::log_paths::packaged_bundled_dir(app) {
+    if let Some(packaged) = crate::app_paths::packaged_bundled_dir(app) {
         candidates.push(packaged.join("local-vision").join(name));
     }
     select_vision_projector(
@@ -119,8 +119,8 @@ fn server_path(app: &AppHandle) -> PathBuf {
     };
     // 差し替え用に取得したエンジン、このビルドの同梱物の順。作業フォルダや旧配置は探さない。
     let mut candidates: Vec<PathBuf> = Vec::new();
-    candidates.push(crate::log_paths::bundled_dir(app).join("engine").join(exe));
-    if let Some(packaged) = crate::log_paths::packaged_bundled_dir(app) {
+    candidates.push(crate::app_paths::bundled_dir(app).join("engine").join(exe));
+    if let Some(packaged) = crate::app_paths::packaged_bundled_dir(app) {
         candidates.push(packaged.join("engine").join(exe));
     }
     candidates
@@ -129,7 +129,7 @@ fn server_path(app: &AppHandle) -> PathBuf {
         // WindowsのCUDA/ROCm/SYCL管理版は、この共通版が未配置でも候補解決側で
         // 先に検査・準備できる。存在しない既定パスはフォールバック候補として渡し、
         // 実在候補が1件も無い場合だけ呼び出し側で未導入エラーにする。
-        .unwrap_or_else(|| crate::log_paths::bundled_dir(app).join("engine").join(exe))
+        .unwrap_or_else(|| crate::app_paths::bundled_dir(app).join("engine").join(exe))
 }
 
 fn existing_backend_candidates(
@@ -179,12 +179,12 @@ fn model_path(app: &AppHandle) -> PathBuf {
         },
         |preset| preset.file_name,
     );
-    crate::log_paths::bundled_dir(app).join("models").join(name)
+    crate::app_paths::data_path(app, crate::app_paths::DataPath::Models).join(name)
 }
 
 /// ダウンロード済みモデルの保存ディレクトリ（`app_data_dir/bundled/models`）。
 pub fn models_dir(app: &AppHandle) -> PathBuf {
-    crate::log_paths::bundled_dir(app).join("models")
+    crate::app_paths::data_path(app, crate::app_paths::DataPath::Models)
 }
 
 /// 現在の設定で使用するモデルの GGUF ファイル名（一覧で「使用中」を判定する用途）。

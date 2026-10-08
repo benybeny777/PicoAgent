@@ -8,7 +8,6 @@ use std::path::{Path, PathBuf};
 
 use crate::config::Config;
 
-pub const ROOT_NAME: &str = "user-skills";
 pub const CONTEXT_BEGIN: &str = "[利用者追加スキル]\n";
 pub const CONTEXT_END: &str = "\n[/利用者追加スキル]";
 const FILE_NAME: &str = "SKILL.md";
@@ -65,7 +64,10 @@ pub struct Catalog {
 }
 
 pub fn root(config: &Config) -> Result<PathBuf, String> {
-    Ok(config.config_dir()?.join(ROOT_NAME))
+    Ok(crate::app_paths::path_at(
+        &config.config_dir()?,
+        crate::app_paths::DataPath::UserSkills,
+    ))
 }
 
 pub fn is_valid_name(name: &str) -> bool {

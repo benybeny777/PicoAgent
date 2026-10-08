@@ -5,6 +5,7 @@ mod agent;
 mod aivis;
 mod alarm;
 mod api_server;
+mod app_paths;
 mod boot_screen;
 #[cfg(test)]
 mod bundle_scope;
@@ -207,7 +208,7 @@ pub fn run() {
             menu::handle_event(app, event.id().as_ref());
         })
         .setup(|app| {
-            let managed_data = log_paths::data_dir(app.handle());
+            let managed_data = app_paths::data_dir(app.handle());
             std::fs::create_dir_all(&managed_data)?;
             log_paths::allow_asset_scope(app.handle());
             if let Err(error) = migration::migrate_identity_dirs(app.handle(), &managed_data) {
@@ -228,7 +229,7 @@ pub fn run() {
                     .iter()
                     .find(|window| window.label == "main")
                     .ok_or("mainウィンドウ設定がありません")?;
-                let webview_data = managed_data.join("webview/main");
+                let webview_data = app_paths::path_at(&managed_data, app_paths::DataPath::Webview("main"));
                 std::fs::create_dir_all(&webview_data)?;
                 tauri::WebviewWindowBuilder::from_config(app.handle(), config)?
                     .data_directory(webview_data)
@@ -244,7 +245,7 @@ pub fn run() {
             let config_dir = managed_data;
             match std::fs::create_dir_all(&config_dir) {
                 Ok(()) => {
-                    let config_path = config_dir.join("config.json");
+                    let config_path = app_paths::path_at(&config_dir, app_paths::DataPath::Config);
                     match state.config.load(config_path) {
                         Ok(Some(warning)) => log_paths::append_app_log(app.handle(), &warning),
                         Ok(None) => {}
