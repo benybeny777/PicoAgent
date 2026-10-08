@@ -57,6 +57,8 @@
 | ダウンロード済みキャラ登録のWindows実機確認 | 実際に利用条件を確認して取得したMMD・Live2Dのzipまたはフォルダを使い、設定「キャラ登録」の候補表示、名前とIDの確認、追加後の表示をWebView2で確認する。検査用モデルが無い場合は取得せず、利用者が用意した後に実施する。複数モデル入りzip、欠損テクスチャ、不正ファイルの拒否も隔離した検査素材で確認する |
 | 別物理ボリュームへの配置 | 一時ディレクトリと配置先を別のローカル物理ボリュームにして、`cargo xtask setup engine`のEXDEVコピー経路を確認する |
 | 旧名ローカルモデルの照合表示 | 現行固定サイズ・SHA-256に合う旧保存名GGUFを隔離状態で用意し、起動画面の「ローカルモデルを確認中」表示を確認する |
+| llama.cpp b11429のWindows GPU実機確認 | NVIDIA（CUDA 13.4、Turing以降・ドライバー580以上）、ROCm 10.0公式対応のAMD GPU（例: RX 7900 XTX／RX 9070）、Intel Arc（SYCL）の各Windows機で、追加エンジンの取得、`--list-devices`の認識、実モデルの起動と応答を確認する。CUDA 13.4の新機能はR615／R616以降のドライバーを要するとの記載があり、580系ドライバーで起動できるかは未確認。失敗した場合はVulkanへ切り替わるが、580系で常に失敗するなら判定の下限を上げる。Linux上の起動試験（Vulkan版の自作小型GGUF）だけで代替しない |
+| Ryzen APUのROCm判定 | ROCm 10.0はRyzen AI Max／AI 300・400／200系をWindows対応としているが、Windowsが返すGPU名は「AMD Radeon(TM) 8060S Graphics」のような内蔵GPU名で、`WINDOWS_ROCM_RUNTIME_SKUS`のCPU名とは一致しないため現状はVulkanを使う。CPU名（またはPCI ID）と内蔵GPU名を突き合わせる判定を実機で確認してから対応させる |
 | Linuxの専用GPU経路 | 固定llama.cpp版に対応するLinux CUDA／ROCm資産を独自ビルド・配布し、対応実GPUで起動とGPU利用を確認する。現状のUbuntu版はVulkan→CPU |
 | Ubuntu実Wayland | Ubuntu 24.04 LTS x64の実Wayland環境で、画面共有許可、画面取得、入力拒否時の理由付きエラーを確認する |
 | macOSのスキル外部CLIのPATH解決不一致 | 追加機能の導入判定（`components.rs`）とAivisの分割書庫展開は共通の`tools::process::resolve_executable()`へ揃えたが、**スキルが実際に起動する経路は未対応**。`tools::resolve_cli_path()`は明示設定にも同梱にも無い場合`"pandoc"`のような素の名前を返し、`ms_office` / `pdf_tools` / `document_convert` / `whisper_transcribe` / `doc_search`はそれをそのままspawnするため、GUI起動のmacOSではHomebrew導入分を掴めない可能性がある。素の名前を絶対パスへ変えると`image_tools`の`if resolved != "magick"`（ImageMagick v6の`convert`へ落とす分岐）と`document_convert`の名前比較が意味を失うので、**解決結果の扱いを決めてから**着手する。macOS実機でLibreOffice連携またはOSSツール群を使う作業のときに確認・修正 |

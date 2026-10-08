@@ -586,8 +586,8 @@ flowchart LR
 
 | OS / GPU | 第一候補 | 対応境界 | 失敗時 |
 |---|---|---|---|
-| Windows / NVIDIA | CUDA 13.3 | Turing世代以降（目安: GeForce RTX 20シリーズ以降）かつドライバー580以上 | Vulkan → CPU |
-| Windows / AMD | ROCm 7.14 | 下記の AMD 公式 HIP Runtime 対応機種だけ | Vulkan → CPU |
+| Windows / NVIDIA | CUDA 13.4 | Turing世代以降（目安: GeForce RTX 20シリーズ以降）かつドライバー580以上 | Vulkan → CPU |
+| Windows / AMD | ROCm 10.0 | 下記の AMD 公式 ROCm 10.0 Windows 対応機種だけ | Vulkan → CPU |
 | Windows / Intel | SYCL | Intel Arc、Iris Xe、Core Ultra 系の `Intel Graphics`、Data Center GPU Flex／Max、Server GPU（旧UHD／HD Graphicsは対象外） | Vulkan → CPU |
 | Ubuntu 24.04 LTS x64 | Vulkan | Vulkan対応GPU | CPU |
 | macOS | Metal | Apple Silicon／Metal対応Mac | CPU |
@@ -595,15 +595,14 @@ flowchart LR
 CUDA／ROCm／SYCL の追加エンジンは対象GPUを確認したPCだけが取得し、サイズとSHA-256を照合したうえで、実行ファイルが対象GPUを認識できた場合だけ使います。Ubuntu の CUDA／ROCm 専用版は上流に配布資産がないため未対応です。画像・動画・キャラクター生成（ComfyUI／PyTorch）の対応GPUは別の表で判定します（[管理モデル](docs/models.md#gpuバックエンドとモデルの関係)）。
 
 <details>
-<summary>Windows ROCm の対象 AMD 機種（2026-08-24確認）</summary>
+<summary>Windows ROCm の対象 AMD 機種（2026-10-08確認）</summary>
 
-[AMD公式HIP SDK Windows対応表](https://rocm.docs.amd.com/projects/radeon-ryzen/en/latest/docs/shared/hipsdk/reference/system-requirements.html)で Runtime 対応になっている次の機種だけを対象にします（「この番号以降」ではありません）。
+[AMD公式 ROCm 10.0.0 互換表](https://rocm.docs.amd.com/en/docs-10.0.0/compatibility/compatibility-matrix.html)で Windows 11 対応になっている次の機種だけを対象にします（「この番号以降」ではありません）。
 
-- Radeon RX: 6600 / 6600 XT / 6650 XT / 6700 / 6700 XT / 6750 XT / 6800 / 6800 XT / 6900 XT / 6950 XT / 7600 / 7600 XT / 7650 GRE / 7700 XT / 7800 XT / 7900 XT / 7900 XTX / 9060 / 9060 XT / 9070 / 9070 XT / 9070 GRE
-- Radeon PRO: W6600 / W6800 / W7700 / W7800 / W7900 / W7900 Dual Slot、Radeon AI PRO R9700
-- Ryzen APU: Ryzen AI Max Pro 380、Max／Max Pro 385、Max／Max Pro 390、Max+／Max+ Pro 395
+- Radeon RX: 7600 / 7700 / 7700 XT / 7800 XT / 7900 GRE / 7900 XT / 7900 XTX / 9050 / 9060 / 9060 XT / 9060 XT LP / 9070 / 9070 XT / 9070 GRE
+- Radeon PRO: W7700 / W7800 / W7800 48GB / W7900 / W7900 Dual Slot、Radeon AI PRO R9600D / R9700 / R9700S
 
-一覧外の Radeon、型番を特定できない「AMD Radeon Graphics」、RX 6500系以前などは Vulkan を使います。この一覧は llama.cpp 固定版または配布版を更新するたびに公式表と照合します。
+ROCm 10.0 で RX 6000 系・Radeon PRO W6000 系（RDNA2）と RX 7600 XT／7650 GRE は Windows 対応表から外れたため、これらは Vulkan を使います。Ryzen AI 系 APU も公式表には載っていますが、Windows が返す GPU 名（例: 「AMD Radeon(TM) 8060S Graphics」）から機種を特定できないため、現状は Vulkan を使います。一覧外の Radeon、型番を特定できない「AMD Radeon Graphics」なども Vulkan を使います。この一覧は llama.cpp 固定版または配布版を更新するたびに公式表と照合します。
 
 </details>
 

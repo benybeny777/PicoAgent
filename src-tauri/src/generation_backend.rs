@@ -740,8 +740,8 @@ mod tests {
         assert!(!engine.contains(&pytorch_table));
         assert!(!engine.contains("generation_backend::"));
         // llama.cppのROCm対応SKUをPyTorch側が自動で対応扱いにしない。
-        assert!(engine.contains("\"radeon rx 6600\""));
-        assert!(!is_supported_amd_pytorch_name("AMD Radeon RX 6600"));
+        assert!(engine.contains("\"radeon rx 7800 xt\""));
+        assert!(!is_supported_amd_pytorch_name("AMD Radeon RX 7800 XT"));
     }
 
     #[test]
