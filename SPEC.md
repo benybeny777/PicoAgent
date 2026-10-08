@@ -377,7 +377,7 @@ LLMによる候補生成・隔離検証・版管理を加える未実装の設�
 
 ### キャラクターの追加（ユーザー導入）
 
-同梱キャラは `ui-dist/assets/characters/` としてビルド時に実行ファイルへ焼き込まれるため、実行時には増減できない。**追加したキャラは `PicoAgent/characters/<id>/` に置く**（`user_characters.rs`）。webview へは asset プロトコル（`convertFileSrc`）で読ませ、`tauri.conf.json` の `app.security.assetProtocol.scope` を `$DATA/PicoAgent/characters/**` に限る（`protocol-asset` フィーチャが必要）。保存先を取れない場合はカレントディレクトリへ逃げず、一覧・導入・削除をエラーにする。
+同梱キャラは `ui-dist/assets/characters/` としてビルド時に実行ファイルへ焼き込まれるため、実行時には増減できない。**追加したキャラは `PicoAgent/characters/<id>/` に置く**（`user_characters.rs`）。webview へは asset プロトコル（`convertFileSrc`）で読ませ、`tauri.conf.json` の `app.security.assetProtocol.scope` を `$DATA/PicoAgent/characters/**` に限る（`protocol-asset` フィーチャが必要）。開発ビルド（`PicoAgent-Dev`）と検査用の別識別子（`instances/<識別子>`）では、起動時に `log_paths::allow_asset_scope()` が実際の保存先の同じフォルダだけを許可へ足す。保存先を取れない場合はカレントディレクトリへ逃げず、一覧・導入・削除をエラーにする。
 
 **CSP** は `tauri.conf.json` の値が正本。
 

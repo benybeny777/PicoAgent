@@ -173,7 +173,7 @@ cargo xtask update-feed src-tauri\target\release\bundle\nsis\PicoAgent_<版>_x64
 
 許諾済み関係者へ非公開で渡す、MMDキャラと音声モデルを同梱した試用インストーラは、リポジトリ直下の `関係者版インストーラをビルド.bat` で生成します（本体は `scripts/build-partner-installer.ps1`。PowerShell 7が必要）。
 
-- 事前に `%APPDATA%\PicoAgent\characters\` の `miko-mmd`・`korone-mmd`、`%APPDATA%\PicoAgent\aivis-userdata\profile\AppData\Roaming\AivisSpeech-Engine\Models\` の2人分のAIVMX、`temp\settings-runtime\seed-voices.ps1` を用意します。足りなければビルド前に停止します。
+- 事前に開発版の保存先 `%APPDATA%\PicoAgent-Dev\characters\` の `miko-mmd`・`korone-mmd`、`%APPDATA%\PicoAgent-Dev\aivis-userdata\profile\AppData\Roaming\AivisSpeech-Engine\Models\` の2人分のAIVMX、`temp\settings-runtime\seed-voices.ps1` を用意します。足りなければビルド前に停止します。
 - チェックアウトが `origin/main` より古い場合や未コミットの変更がある場合は停止します（そのまま作る場合は引数に `-AllowStale`）。
 - ビルド中は `cargo xtask stop` で起動中のPicoAgentと同梱エンジンを終了します。
 - 生成物は `temp\partner-installer\PicoAgent_<版>_Partner-MMD-Voice_x64-setup.exe` です。公開LP・公開Release・`latest.json` へは載せません。
@@ -296,8 +296,9 @@ cargo xtask license issue --customer "購入者名" --purchase-id "BOOTH注文�
   | 同梱物 | インストール先の `resources/bundled/` | リポジトリの `src-tauri/resources/bundled/` |
   | キャラ作成の同梱資産 | インストール先の `character-maker/` | リポジトリの `character-maker/` |
 
+  - 開発用の作業ツール（`tools/screenshots/review-board.mjs`、`scripts/open-character-preview.ps1`、`scripts/build-partner-installer.ps1` の素材取得）も `PicoAgent-Dev` だけを読む
   - 正本は `log_paths::data_dir()`・`packaged_bundled_dir()`・`packaged_character_maker_dir()`、スキルからは `components::runtime_dirs()`。探す順は「追加導入した物（利用者データの `bundled/`）→ このビルドの同梱物」だけで、作業フォルダ・実行ファイルからの相対位置・ビルドしたリポジトリの絶対パス・旧保存先からは探さない。同じPCでビルドしたインストーラでも、製品がリポジトリの資産を使うことはない
-  - 旧保存先のモデル（`models/`、旧識別子フォルダ）と旧Aivis配置の探索・移行、旧ログの移行はしない。製品ビルドの更新時に旧識別子フォルダ（`com.picoagent.app` 等）から設定・履歴を移す処理だけは残し、開発ビルドでは行わない
+  - 旧保存先のモデル（`models/`、旧識別子フォルダ）と旧Aivis配置の探索・移行、旧ログの移行はしない。利用者データ直下に残った旧配置（`aivis/`・`models/`）は、新しい配置の準備に成功した後で削除する（`log_paths::remove_legacy_layout_dir()`）。製品ビルドの更新時に旧識別子フォルダ（`com.picoagent.app` 等）から設定・履歴を移す処理だけは残し、開発ビルドでは行わない
   - 開発用の保存先はリポジトリの外にあり、worktree・cloneの作り直しでもモデルや音声を取り直さない。初回だけ空から始まる
 - 開発版と通常版の同時起動はしない。識別子は共通のため、片方の起動中にもう片方を起動すると既存の窓が前面に出る。`cargo xtask dev` は起動前に `cargo xtask stop` で残存プロセスを止めるため、起動中の通常版も終了する
 - アイコンは `src-tauri/icons/`（`cargo tauri icon src-tauri/icon-source.png` で再生成）

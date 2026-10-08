@@ -360,24 +360,19 @@ fn validate_runtime_files(path: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn find_runtime(candidates: [PathBuf; 2]) -> anyhow::Result<Option<PathBuf>> {
-    for path in candidates {
-        if !path.exists() {
-            continue;
-        }
-        validate_runtime_files(&path)?;
-        return Ok(Some(path));
+/// 導入先に Aivis があれば完全性を確かめて返す。無ければ未導入で、別の場所は探さない。
+fn find_runtime(path: &Path) -> anyhow::Result<Option<PathBuf>> {
+    if !path.exists() {
+        return Ok(None);
     }
-    Ok(None)
+    validate_runtime_files(path)?;
+    Ok(Some(path.to_path_buf()))
 }
 
 fn runtime_engine_path(app: &tauri::AppHandle) -> Option<PathBuf> {
     let exe = if cfg!(windows) { "run.exe" } else { "run" };
-    let candidates = [
-        crate::log_paths::bundled_dir(app).join("aivis").join(exe),
-        crate::log_paths::data_dir(app).join("aivis").join(exe),
-    ];
-    match find_runtime(candidates) {
+    // 導入先は `bundled/aivis` だけ。旧配置（利用者データ直下の `aivis/`）は探さない。
+    match find_runtime(&crate::log_paths::bundled_dir(app).join("aivis").join(exe)) {
         Ok(path) => path,
         Err(error) => {
             append_log_best_effort(
@@ -936,6 +931,16 @@ async fn ensure_installed_inner(
     app: &tauri::AppHandle,
     force_repair: bool,
 ) -> anyhow::Result<PathBuf> {
+    let path = ensure_installed_ready(app, force_repair).await?;
+    // 新しい配置が使える状態になった後でだけ、旧配置を片付ける。
+    crate::log_paths::remove_legacy_layout_dir(app, "aivis");
+    Ok(path)
+}
+
+async fn ensure_installed_ready(
+    app: &tauri::AppHandle,
+    force_repair: bool,
+) -> anyhow::Result<PathBuf> {
     recover_interrupted_install(app);
     if !force_repair {
         if let Some(path) = runtime_engine_path(app) {
@@ -1467,35 +1472,23 @@ mod tests {
         interrupted_install_actions, replace_install_tree, validate_external_endpoint,
         InterruptedAction,
     };
-    // 実行ファイルと管理情報の判定、優先候補の順序は全OS共通。Python DLLだけWindows版の配置を検査する。
-    use super::{find_runtime, validate_runtime_files};
+    // 実行ファイルと管理情報の判定は全OS共通。Python DLLだけWindows版の配置を検査する。
+    use super::find_runtime;
+    #[cfg(windows)]
+    use super::validate_runtime_files;
 
     #[cfg(not(windows))]
     #[test]
-    fn 管理情報のないaivisは不完全と判定し優先候補で止める() {
+    fn 管理情報のないaivisは不完全と判定し未導入とも区別する() {
         let dir = tempfile::tempdir().unwrap();
-        let high = dir.path().join("high");
-        let fallback = dir.path().join("fallback");
-        for root in [&high, &fallback] {
-            std::fs::create_dir_all(root).unwrap();
-            std::fs::write(root.join("run"), []).unwrap();
-        }
-        let missing = validate_runtime_files(&high.join("run"))
-            .unwrap_err()
-            .to_string();
+        let run = dir.path().join("run");
+        // 導入先に無ければ未導入（別の場所は探さない）。
+        assert!(find_runtime(&run).unwrap().is_none());
+        std::fs::write(&run, []).unwrap();
+        let missing = find_runtime(&run).unwrap_err().to_string();
         assert!(missing.contains("管理情報"), "{missing}");
-        std::fs::write(fallback.join("engine_manifest.json"), b"{}").unwrap();
-        // 優先候補が壊れていれば、使える代替候補があっても黙って降格しない。
-        assert!(find_runtime([high.join("run"), fallback.join("run")]).is_err());
-        std::fs::write(high.join("engine_manifest.json"), b"{}").unwrap();
-        assert_eq!(
-            find_runtime([high.join("run"), fallback.join("run")]).unwrap(),
-            Some(high.join("run"))
-        );
-        assert_eq!(
-            find_runtime([dir.path().join("none/run"), fallback.join("run")]).unwrap(),
-            Some(fallback.join("run"))
-        );
+        std::fs::write(dir.path().join("engine_manifest.json"), b"{}").unwrap();
+        assert_eq!(find_runtime(&run).unwrap(), Some(run));
     }
 
     #[cfg(windows)]
@@ -1517,33 +1510,17 @@ mod tests {
 
     #[cfg(windows)]
     #[test]
-    fn aivis候補は優先順に確認し不完全な優先候補で止める() {
+    fn 導入先のaivisだけを確認し不完全なら使わない() {
         let dir = tempfile::tempdir().unwrap();
-        let high = dir.path().join("high");
-        let fallback = dir.path().join("fallback");
-        let high_run = high.join("run.exe");
-        let fallback_run = fallback.join("run.exe");
-        let create = |root: &std::path::Path| {
-            std::fs::create_dir_all(root.join("engine_internal")).unwrap();
-            std::fs::write(root.join("run.exe"), []).unwrap();
-            std::fs::write(root.join("engine_manifest.json"), b"{}").unwrap();
-            std::fs::write(root.join("engine_internal/python311.dll"), []).unwrap();
-        };
-        assert!(find_runtime([high_run.clone(), fallback_run.clone()])
-            .unwrap()
-            .is_none());
-        create(&fallback);
-        assert_eq!(
-            find_runtime([high_run.clone(), fallback_run.clone()]).unwrap(),
-            Some(fallback_run.clone())
-        );
-        create(&high);
-        assert_eq!(
-            find_runtime([high_run.clone(), fallback_run.clone()]).unwrap(),
-            Some(high_run.clone())
-        );
-        std::fs::remove_file(high.join("engine_internal/python311.dll")).unwrap();
-        assert!(find_runtime([high_run, fallback_run]).is_err());
+        let run = dir.path().join("run.exe");
+        assert!(find_runtime(&run).unwrap().is_none());
+        std::fs::create_dir_all(dir.path().join("engine_internal")).unwrap();
+        std::fs::write(&run, []).unwrap();
+        std::fs::write(dir.path().join("engine_manifest.json"), b"{}").unwrap();
+        std::fs::write(dir.path().join("engine_internal/python311.dll"), []).unwrap();
+        assert_eq!(find_runtime(&run).unwrap(), Some(run.clone()));
+        std::fs::remove_file(dir.path().join("engine_internal/python311.dll")).unwrap();
+        assert!(find_runtime(&run).is_err());
     }
 
     /// 前回の起動で入れ替え中に落ちた残りを、本体の有無に応じて戻すか消す。

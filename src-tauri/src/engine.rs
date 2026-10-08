@@ -928,6 +928,8 @@ async fn ensure_and_start_inner(app: AppHandle, start_generation: u64) {
             &format!("旧ローカルモデルの掃除に失敗しました: {error}"),
         ),
     }
+    // 現行モデルが揃った後でだけ、旧配置（利用者データ直下の `models/`）を片付ける。
+    crate::log_paths::remove_legacy_layout_dir(&app, "models");
     // 終了処理が始まっていたら spawn しない（ダウンロード完了後のレースコンディション対策）。
     if app
         .try_state::<EngineState>()

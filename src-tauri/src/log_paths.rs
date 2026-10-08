@@ -85,6 +85,41 @@ pub fn data_dir(app: &AppHandle) -> PathBuf {
     }
 }
 
+/// 旧版が利用者データ直下に置いていた配置（`aivis/`・`models/`）。現在は `bundled/` 配下だけを使い、
+/// 旧配置は探しも再利用もしない。置き去りにすると数GBが残り続けるため、新しい配置の準備に
+/// 成功した後で削除する（AGENTS「取得・更新の正常終了後は旧版を残さない」）。
+pub const LEGACY_LAYOUT_DIRS: [&str; 2] = ["aivis", "models"];
+
+/// 新しい配置の準備に成功した後、同じ保存先にある旧配置を削除する。
+/// 失敗しても新しい配置は使えるので処理は止めず、理由をログへ残して次回また試す。
+pub fn remove_legacy_layout_dir(app: &AppHandle, name: &str) {
+    let root = data_dir(app);
+    let path = root.join(name);
+    match remove_legacy_layout_dir_at(&root, name) {
+        Ok(true) => append_app_log(app, &format!("旧配置を削除しました: {}", path.display())),
+        Ok(false) => {}
+        // フォールバック許可: 旧配置の削除失敗だけで、準備済みの新しい配置の利用を止めない。
+        Err(error) => append_app_log(
+            app,
+            &format!("旧配置を削除できません: {} ({error})", path.display()),
+        ),
+    }
+}
+
+/// 保存先の根から旧配置のフォルダだけを削除する。無ければ `false`。
+fn remove_legacy_layout_dir_at(root: &Path, name: &str) -> std::io::Result<bool> {
+    if !LEGACY_LAYOUT_DIRS.contains(&name) {
+        return Err(std::io::Error::other(format!(
+            "旧配置ではありません: {name}"
+        )));
+    }
+    match std::fs::remove_dir_all(root.join(name)) {
+        Ok(()) => Ok(true),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(error),
+    }
+}
+
 /// webview へ asset プロトコルで読ませる保存先配下のフォルダ。
 /// `tauri.conf.json` の `assetProtocol.scope`（`$DATA/PicoAgent/<フォルダ>/**`）と同じ並びを保つ。
 pub const ASSET_SCOPE_DIRS: [&str; 4] = [
@@ -302,8 +337,13 @@ mod guard {
             }
             for line in source.body().lines() {
                 let trimmed = line.trim();
+                // 旧配置（利用者データ直下の `aivis/`・`models/`）は探さない。削除は remove_legacy_layout_dir だけ。
+                let legacy_layout = trimmed.contains("data_dir(")
+                    && super::LEGACY_LAYOUT_DIRS
+                        .iter()
+                        .any(|name| trimmed.contains(&format!(".join(\"{name}\")")));
                 if !trimmed.starts_with("//")
-                    && DIRECT.iter().any(|direct| trimmed.contains(direct))
+                    && (legacy_layout || DIRECT.iter().any(|direct| trimmed.contains(direct)))
                 {
                     violations.push(format!("{}: {trimmed}", source.path.display()));
                 }
@@ -407,6 +447,38 @@ mod tests {
             .map(|dir| format!("$DATA/PicoAgent/{dir}/**"))
             .collect();
         assert_eq!(scope, expected);
+    }
+
+    #[test]
+    fn 旧配置は指定したフォルダだけを削除し現在の配置に触れない() {
+        let root = std::env::temp_dir().join(format!(
+            "picoagent-legacy-layout-{}-{}",
+            std::process::id(),
+            chrono::Local::now()
+                .timestamp_nanos_opt()
+                .unwrap_or_default()
+        ));
+        for dir in [
+            "aivis",
+            "models",
+            "bundled/aivis",
+            "bundled/models",
+            "characters",
+        ] {
+            std::fs::create_dir_all(root.join(dir)).unwrap();
+            std::fs::write(root.join(dir).join("keep"), b"x").unwrap();
+        }
+        assert!(super::remove_legacy_layout_dir_at(&root, "aivis").unwrap());
+        assert!(super::remove_legacy_layout_dir_at(&root, "models").unwrap());
+        // 二度目は無いので何もしない。
+        assert!(!super::remove_legacy_layout_dir_at(&root, "models").unwrap());
+        // 旧配置として名指ししていないフォルダは消さない。
+        assert!(super::remove_legacy_layout_dir_at(&root, "characters").is_err());
+        for dir in ["bundled/aivis", "bundled/models", "characters"] {
+            assert!(root.join(dir).join("keep").is_file(), "{dir} が消えました");
+        }
+        assert!(!root.join("aivis").exists() && !root.join("models").exists());
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
