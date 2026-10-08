@@ -282,27 +282,16 @@ fn tauri(mode: &str, extra: &[String], build: Build) -> Result<()> {
 }
 
 fn dev_log_path() -> std::path::PathBuf {
-    let base = if cfg!(target_os = "windows") {
-        std::env::var_os("APPDATA").map(std::path::PathBuf::from)
-    } else if cfg!(target_os = "macos") {
-        std::env::var_os("HOME")
-            .map(std::path::PathBuf::from)
-            .map(|home| home.join("Library").join("Application Support"))
-    } else {
-        std::env::var_os("XDG_DATA_HOME")
-            .map(std::path::PathBuf::from)
-            .filter(|path| path.is_absolute())
-            .or_else(|| {
-                std::env::var_os("HOME")
-                    .map(std::path::PathBuf::from)
-                    .map(|home| home.join(".local").join("share"))
-            })
-    }
-    .unwrap_or_else(std::env::temp_dir);
-    base.join("PicoAgent").join("log").join(format!(
-        "dev.{}.log",
-        chrono::Local::now().format("%Y-%m-%d")
-    ))
+    // 開発ビルドの保存先（src-tauri/src/log_paths.rs の dev_data_root）と同じ場所へ置き、
+    // 利用者の通常版のログフォルダへ開発中の出力を混ぜない。
+    repo_root()
+        .join("dev-data")
+        .join("PicoAgent")
+        .join("log")
+        .join(format!(
+            "dev.{}.log",
+            chrono::Local::now().format("%Y-%m-%d")
+        ))
 }
 
 /// `tauri dev` はコンパイル失敗後も監視を続けるため、親プロセスの終了コードだけでは

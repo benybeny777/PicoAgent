@@ -73,12 +73,15 @@ if ($Mode -eq '2d') {
     exit 0
 }
 
+# 開発起動は通常版の利用者データではなく、リポジトリ配下の開発用保存先を使う。
+$devCharacterRoot = Join-Path $repositoryRoot 'dev-data\PicoAgent\characters'
+
 if ($Mode -eq 'live2d') {
     $live2dCharacters = [System.Collections.Generic.List[object]]::new()
     $seen = [System.Collections.Generic.HashSet[string]]::new()
     foreach ($root in @(
         (Join-Path $repositoryRoot 'characters'),
-        (Join-Path $env:APPDATA 'com.picoagent.desktop\characters')
+        $devCharacterRoot
     )) {
         if (-not (Test-Path -LiteralPath $root -PathType Container)) { continue }
         foreach ($directory in Get-ChildItem -LiteralPath $root -Directory) {
@@ -116,9 +119,9 @@ if ($Mode -eq 'live2d') {
 }
 
 if ($Mode -in @('miko-mmd', 'korone-mmd')) {
-    $characterPath = Join-Path $env:APPDATA "com.picoagent.desktop\characters\$Mode\character.json"
+    $characterPath = Join-Path $devCharacterRoot "$Mode\character.json"
     if (-not (Test-Path -LiteralPath $characterPath -PathType Leaf)) {
-        throw "登録済みMMDキャラクターが見つかりません: $characterPath"
+        throw "開発版に登録済みのMMDキャラクターが見つかりません: $characterPath（開発版は通常版と保存先が別のため、開発版の設定画面から追加してください）"
     }
 }
 if ($null -eq (Get-Command cargo -ErrorAction SilentlyContinue)) {

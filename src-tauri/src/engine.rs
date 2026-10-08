@@ -281,7 +281,7 @@ fn model_storage_roots(app: &AppHandle) -> Vec<PathBuf> {
         models_dir(app),
         crate::log_paths::data_dir(app).join("models"),
     ];
-    if let Ok(dir) = app.path().app_data_dir() {
+    if let Some(dir) = crate::log_paths::legacy_app_data_dir(app) {
         roots.push(dir.join("models"));
     }
     roots

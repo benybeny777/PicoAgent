@@ -209,6 +209,7 @@ pub fn run() {
         .setup(|app| {
             let managed_data = log_paths::data_dir(app.handle());
             std::fs::create_dir_all(&managed_data)?;
+            log_paths::allow_asset_scope(app.handle());
             if let Err(error) = migration::migrate_identity_dirs(app.handle(), &managed_data) {
                 log_paths::append_app_log(
                     app.handle(),
