@@ -24,7 +24,7 @@ PowerShell 7、Rust/Tauri、認証済みの`gh`、各版の許諾済み同梱素
 
 ローカル検査: `pwsh -NoProfile -File scripts/test-publish-windows.ps1`。これは実ビルド・GitHub書き込みを行わない。
 
-`cargo xtask verify`はNodeが使える環境でJavaScriptの構文だけでなく、追跡中の`tools/tests/*.mjs`の回帰テストも実行する。キャラクター修正時は追加で`python scripts/test-face-landmarks.py`（Pillowが必要）と`node tools/check-rig-feature-matrix.mjs temp/<新規検証名>`を実行し、全7体の実画像を確認する。後者のPlaywrightは`PICO_PLAYWRIGHT_MODULE`で作業用モジュールの絶対パスを指定する。生成成功やCPU検査だけで見た目合格にしない。
+`cargo xtask verify`はNodeが使える環境でJavaScriptの構文だけでなく、追跡中の`tools/tests/*.mjs`の回帰テストも実行する。会話パネルの角丸・内容包含はPlaywright/Chromiumで長いコード・表の横スクロールと入力欄の四辺まで検査する（`tools/screenshots/panel-overflow.mjs`）。開発用Playwrightはローカルまたはグローバル導入を再利用し、`PLAYWRIGHT_MODULE`でも指定できる。未導入時は明示エラーで止める。キャラクター修正時は追加で`python scripts/test-face-landmarks.py`（Pillowが必要）と`node tools/check-rig-feature-matrix.mjs temp/<新規検証名>`を実行し、全7体の実画像を確認する。後者のPlaywrightは`PICO_PLAYWRIGHT_MODULE`で作業用モジュールの絶対パスを指定する。生成成功やCPU検査だけで見た目合格にしない。
 
 この文書は、ソースを変更する開発者と配布物を作る担当者向けの正本です。製品の利用手順は [MANUAL.md](../MANUAL.md)、アーキテクチャと動作仕様は [SPEC.md](../SPEC.md)、全設定キーは [SETTINGS.md](SETTINGS.md) を参照してください。
 

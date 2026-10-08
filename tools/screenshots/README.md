@@ -183,3 +183,5 @@ Live2D撮影は、ひよりのCubism 5／4モデルを個別に読み込んだ�
 > **`ffmpeg` はアニメーション WebP を読めません**（書き出し専用。`-i` に渡すと
 > `image data not found` で失敗します）。中身を確認したいときはブラウザで開くか、
 > libwebp の `anim_dump` / `webpmux -get frame N` を使ってください。
+
+可愛いモードの控えめな角丸と、200/320px幅の会話パネルに長いコード・表を表示した際の包含は、同じPLAYWRIGHT_MODULEを指定して `node tools/screenshots/panel-overflow.mjs` で検査する。可愛い・かっこいいと明暗の全組合せを共通CSSで描き、スクロール可能な本文が親パネルからはみ出さないことを確かめる。
