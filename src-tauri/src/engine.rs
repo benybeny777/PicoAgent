@@ -443,6 +443,41 @@ fn model_download_path(dest: &Path) -> PathBuf {
     ))
 }
 
+/// 強制終了・停電で残った同じモデルの取得途中ファイルを回収する。
+/// 一時ファイル名は取得ごとに固有なので、次の取得が上書きせず、放置すると数GBずつ溜まる。
+/// 旧形式の `<名前>.part` と、他のプロセスが作った `<名前>.part-<PID>-<連番>` だけを対象にし、
+/// このプロセスの一時ファイルと別モデルのファイルには触れない。
+fn remove_stale_model_parts(dest: &Path, own_pid: u32) -> anyhow::Result<usize> {
+    use anyhow::Context as _;
+    let (Some(dir), Some(stem)) = (
+        dest.parent(),
+        dest.file_stem().and_then(|stem| stem.to_str()),
+    ) else {
+        return Ok(0);
+    };
+    let legacy = format!("{stem}.part");
+    let unique_prefix = format!("{stem}.part-");
+    let own_prefix = format!("{unique_prefix}{own_pid}-");
+    let mut removed = 0;
+    for entry in std::fs::read_dir(dir)? {
+        let entry = entry?;
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else { continue };
+        let stale =
+            name == legacy || (name.starts_with(&unique_prefix) && !name.starts_with(&own_prefix));
+        if stale && entry.file_type()?.is_file() {
+            std::fs::remove_file(entry.path()).with_context(|| {
+                format!(
+                    "取得途中のモデルを削除できません: {}",
+                    entry.path().display()
+                )
+            })?;
+            removed += 1;
+        }
+    }
+    Ok(removed)
+}
+
 // モデルをストリーミングダウンロード（進捗を emit）。
 async fn download_model(app: &AppHandle, dest: &PathBuf) -> anyhow::Result<()> {
     use sha2::{Digest, Sha256};
@@ -541,6 +576,11 @@ async fn download_model(app: &AppHandle, dest: &PathBuf) -> anyhow::Result<()> {
                 );
             }
         }
+    }
+    // 取得と検証は済んでいるので、回収に失敗しても起動は止めず理由を残す。
+    // フォールバック許可: 残った一時ファイルは次の取得成功時に再び回収を試みる。
+    if let Err(error) = remove_stale_model_parts(dest, std::process::id()) {
+        crate::log_paths::append_app_log(app, &format!("警告: {error:#}"));
     }
     Ok(())
 }
@@ -1162,6 +1202,46 @@ mod tests {
             .unwrap()
             .to_string_lossy()
             .starts_with("model.part-"));
+    }
+
+    #[test]
+    fn 取得成功後は他プロセスと旧形式の取得途中ファイルだけを回収する() {
+        let dir = std::env::temp_dir().join(format!(
+            "picoagent-stale-parts-{}-{}",
+            std::process::id(),
+            chrono::Local::now()
+                .timestamp_nanos_opt()
+                .unwrap_or_default()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let own = 4242;
+        for name in [
+            "model.gguf",
+            "model.part",
+            "model.part-111-0",
+            "model.part-4242-3",
+            "other.part-111-0",
+            "other.part",
+        ] {
+            std::fs::write(dir.join(name), b"x").unwrap();
+        }
+        let removed = super::remove_stale_model_parts(&dir.join("model.gguf"), own).unwrap();
+        assert_eq!(removed, 2);
+        let mut left: Vec<_> = std::fs::read_dir(&dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+            .collect();
+        left.sort();
+        assert_eq!(
+            left,
+            [
+                "model.gguf",
+                "model.part-4242-3",
+                "other.part",
+                "other.part-111-0"
+            ]
+        );
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[tokio::test]

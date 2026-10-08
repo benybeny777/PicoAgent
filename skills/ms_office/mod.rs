@@ -407,6 +407,10 @@ mod tests {
         assert!(result.contains("PDF を出力しました"), "結果: {result}");
         assert!(dir.join("hello.pdf").exists());
         let _ = std::fs::remove_dir_all(&dir);
+        // テスト専用のOfficeプロファイル（document_convert::office_profile_base）も残さない。
+        let _ = std::fs::remove_dir_all(
+            std::env::temp_dir().join(format!("picoagent-test-office-{}", std::process::id())),
+        );
     }
 
     #[test]

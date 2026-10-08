@@ -34,14 +34,33 @@ fn bundled_office_dirs() -> Vec<PathBuf> {
 
 /// LibreOfficeの設定・ロック・キャッシュをPicoAgent管理下へ固定する起動引数。
 pub(crate) fn isolated_office_profile_arg() -> Result<String, String> {
-    let bundled = crate::components::runtime_root()
-        .ok_or_else(|| "PicoAgent管理領域を取得できません".to_string())?;
-    let profile = bundled.parent().unwrap_or(bundled).join("office-profile");
+    let bundled = office_profile_base()?;
+    let profile = bundled.parent().unwrap_or(&bundled).join("office-profile");
     std::fs::create_dir_all(&profile)
         .map_err(|error| format!("Office専用プロファイルを作成できません: {error}"))?;
     let url = reqwest::Url::from_directory_path(&profile)
         .map_err(|_| "Office専用プロファイルのURLを作成できません".to_string())?;
     Ok(format!("-env:UserInstallation={url}"))
+}
+
+#[cfg(not(test))]
+fn office_profile_base() -> Result<std::path::PathBuf, String> {
+    crate::components::runtime_root()
+        .map(std::path::Path::to_path_buf)
+        .ok_or_else(|| "PicoAgent管理領域を取得できません".to_string())
+}
+
+// 管理領域はアプリ起動時にだけ決まる。単体テストではプロセス共有の値を書き換えず
+// （並列に走る他のテストの探索先を変えないため）、専用の一時フォルダへプロファイルを置く。
+#[cfg(test)]
+fn office_profile_base() -> Result<std::path::PathBuf, String> {
+    Ok(crate::components::runtime_root()
+        .map(std::path::Path::to_path_buf)
+        .unwrap_or_else(|| {
+            std::env::temp_dir()
+                .join(format!("picoagent-test-office-{}", std::process::id()))
+                .join("bundled")
+        }))
 }
 
 fn soffice_name() -> &'static str {
