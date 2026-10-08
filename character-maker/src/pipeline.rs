@@ -130,17 +130,16 @@ impl PipelineContext {
         let decoded = image::load_from_memory(&source_bytes)?;
         let mut png = Cursor::new(Vec::new());
         decoded.write_to(&mut png, ImageFormat::Png)?;
-        let source_sha256 = format!("{:x}", Sha256::digest(png.get_ref()));
+        let source_sha256 = hex::encode(Sha256::digest(png.get_ref()));
         let nonce = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_nanos();
         let id = format!(
             "c_{}",
-            &format!(
-                "{:x}",
-                Sha256::digest(format!("{source_sha256}:{nonce}").as_bytes())
-            )[..12]
+            &hex::encode(Sha256::digest(
+                format!("{source_sha256}:{nonce}").as_bytes()
+            ))[..12]
         );
         let directory = self.character_dir(&id)?;
         if directory.exists() {

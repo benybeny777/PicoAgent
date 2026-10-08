@@ -100,7 +100,7 @@ impl Reader {
             }
             digest.update(&buffer[..count]);
         }
-        if format!("{:x}", digest.finalize()) != selected.rig_sha256 {
+        if hex::encode(digest.finalize()) != selected.rig_sha256 {
             return Err(io::Error::other("公開リグが改変されています"));
         }
         let completion_path = directory.join("completion.json");
@@ -110,7 +110,7 @@ impl Reader {
             .take(metadata_limit.saturating_add(1))
             .read_to_end(&mut metadata)?;
         if metadata.len() as u64 > metadata_limit
-            || format!("{:x}", Sha256::digest(&metadata)) != selected.completion_sha256
+            || hex::encode(Sha256::digest(&metadata)) != selected.completion_sha256
         {
             return Err(io::Error::other(
                 "公開補完証跡が改変されているか容量超過です",
@@ -127,8 +127,10 @@ impl Reader {
         // tempfile は排他的に作成する。名前自体をプロトコルの固定形式へ変換する。
         let temporary = tempfile::NamedTempFile::new_in(&leases)?;
         let name = format!(
-            "l_{:x}.lease",
-            Sha256::digest(temporary.path().as_os_str().to_string_lossy().as_bytes())
+            "l_{}.lease",
+            hex::encode(Sha256::digest(
+                temporary.path().as_os_str().to_string_lossy().as_bytes()
+            ))
         );
         let name = format!("{}.lease", &name[..34]);
         let lease = leases.join(name);
@@ -276,7 +278,7 @@ mod tests {
             fs::create_dir_all(&dir).unwrap();
             fs::write(dir.join("rig.json"), b"{}").unwrap();
             fs::write(dir.join("completion.json"), b"{\"outputs\":{}}").unwrap();
-            fs::write(root.join("rig-current.json"), serde_json::to_vec(&serde_json::json!({"schema_version":1,"generation":generation,"previous":previous,"rig_sha256":format!("{:x}",Sha256::digest(b"{}")),"completion_sha256":format!("{:x}",Sha256::digest(b"{\"outputs\":{}}"))})).unwrap()).unwrap();
+            fs::write(root.join("rig-current.json"), serde_json::to_vec(&serde_json::json!({"schema_version":1,"generation":generation,"previous":previous,"rig_sha256":hex::encode(Sha256::digest(b"{}")),"completion_sha256":hex::encode(Sha256::digest(b"{\"outputs\":{}}"))})).unwrap()).unwrap();
             generation
         };
         let first = publish(1, None);
@@ -320,7 +322,7 @@ mod tests {
             fs::create_dir_all(&dir).unwrap();
             fs::write(dir.join("rig.json"), b"{}").unwrap();
             fs::write(dir.join("completion.json"), b"{\"outputs\":{}}").unwrap();
-            fs::write(root.join("rig-current.json"), serde_json::to_vec(&serde_json::json!({"schema_version":1,"generation":generation,"previous":previous,"rig_sha256":format!("{:x}",Sha256::digest(b"{}")),"completion_sha256":format!("{:x}",Sha256::digest(b"{\"outputs\":{}}"))})).unwrap()).unwrap();
+            fs::write(root.join("rig-current.json"), serde_json::to_vec(&serde_json::json!({"schema_version":1,"generation":generation,"previous":previous,"rig_sha256":hex::encode(Sha256::digest(b"{}")),"completion_sha256":hex::encode(Sha256::digest(b"{\"outputs\":{}}"))})).unwrap()).unwrap();
             generation
         };
         let first = publish(1, None);
