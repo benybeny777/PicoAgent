@@ -4,7 +4,8 @@
 //   1. 3形式（ペット・ミニ・配信）で起動が完了し、キャラが描かれる。
 //   2. キャラが切れない: キャラ矩形の上端・左右端に描画が接していない（全身構図は下端も含む）。
 //      最小・既定・大きく拡大した3つの大きさで確かめる。
-//   3. 最小サイズ（200×240）でも入力欄・送信・状態表示・ウィンドウ操作が窓の内側に完全に収まる。
+//   3. 最小サイズ（200×240）でも入力欄・送信・状態表示・ウィンドウ操作が窓の内側に完全に収まり、
+//      親の overflow で切れず、前面の別要素にも覆われない。
 //   4. 右クリックはどこでも pet_menu を呼び、文脈（選択・入力欄・リンク・キャラ）だけを渡す。
 //   5. 配置の保存は pet_save_scene だけを通り、倍率を持たない矩形で届く。
 //   6. タイトルバーは見えているシーンの真上へ同じ幅で付き、フロー表示と常に表示を切り替えられる。
@@ -167,16 +168,35 @@ async function fullyInside(page, selector) {
       if (["hidden", "clip", "auto", "scroll"].includes(style.overflowX)) inside &&= rect.left >= bounds.left - 0.5 && rect.right <= bounds.right + 0.5;
       if (["hidden", "clip", "auto", "scroll"].includes(style.overflowY)) inside &&= rect.top >= bounds.top - 0.5 && rect.bottom <= bounds.bottom + 0.5;
     }
+    // 窓内で切れていなくても、前面の別要素（タイトルバー・配置操作など）に覆われていれば押せない。
+    // 中央と内側4点で最前面の要素を調べる。pointer-events:none の要素はクリックを通すので対象外になる。
+    const occludedBy = [];
+    if (inside) {
+      for (const [fx, fy] of [[0.5, 0.5], [0.25, 0.25], [0.75, 0.25], [0.25, 0.75], [0.75, 0.75]]) {
+        const hit = document.elementFromPoint(rect.left + rect.width * fx, rect.top + rect.height * fy);
+        // 窓の縁のリサイズ領域（ui/components/window.css）は枠なし窓の意図した重なりで、隅に触れても中央は押せる。
+        if (hit && hit !== element && !element.contains(hit) && !hit.closest(".window-resize-handles")) {
+          const name = hit.id ? `#${hit.id}` : `${hit.tagName.toLowerCase()}${hit.classList.length ? `.${[...hit.classList].join(".")}` : ""}`;
+          if (!occludedBy.includes(name)) occludedBy.push(name);
+        }
+      }
+    }
     return {
       present: true,
-      inside,
+      inside: inside && !occludedBy.length,
+      occludedBy,
       rect: { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom },
     };
   }, selector);
 }
 
 const LAYOUTS = { pet: [900, 600], mascot: [360, 560], stream: [1280, 720] };
-const characters = (process.env.UI_CHECK_CHARACTERS || "mugi,rin,photoreal-prototype").split(",");
+// all は配信コピーに実在する全キャラ。見た目の不具合は1体で見つけても全員で確かめる（AGENTS）。
+const characters = process.env.UI_CHECK_CHARACTERS === "all"
+  ? JSON.parse(fs.readFileSync(path.join(uiDir, "assets/characters/index.json"), "utf8")).characters
+    .map(entry => entry.id)
+    .filter(id => fs.existsSync(path.join(uiDir, "assets/characters", id)))
+  : (process.env.UI_CHECK_CHARACTERS || "mugi,rin,photoreal-prototype").split(",");
 const layoutIds = (process.env.UI_CHECK_LAYOUTS || "pet,mascot,stream").split(",");
 
 for (const characterId of characters) {
@@ -414,7 +434,7 @@ for (const layout of Object.keys(LAYOUTS)) {
   for (const selector of ["#input", "#sendButton", "#micButton", "#topWindowMenu .window-close", "#topWindowMenu .window-caption-controls button"]) {
     const result = await fullyInside(page, selector);
     if (!result.present) fail(label, `${selector} が表示されていません`);
-    else if (!result.inside) fail(label, `${selector} が窓の外へ出ています ${JSON.stringify(result.rect)}`);
+    else if (!result.inside) fail(label, `${selector} が窓の外へ出ているか覆われています ${JSON.stringify(result)}`);
   }
   ok(`${label} 最小サイズの収まり`);
   await context.close();
@@ -426,7 +446,11 @@ for (const layout of Object.keys(LAYOUTS)) {
   for (const [width, height] of [[200, 240], [360, 560], [400, 600], [480, 600], [620, 600], [900, 240]]) {
     await page.setViewportSize({ width, height });
     await page.waitForTimeout(120);
-    await page.evaluate(() => document.querySelector("#petApp").classList.add("title-bar-shown"));
+    // クラスを直接付けるだけだと、起動直後の案内（INTRO_MS）が切れた時点でアプリが隠し、
+    // 隠れたボタンを検査してしまう。利用者と同じく上端へポインタを置いて表示を保つ。
+    const menuBox = await page.locator("#topWindowMenu").boundingBox();
+    await page.mouse.move(menuBox.x + menuBox.width / 2, 1);
+    await page.waitForFunction(() => document.querySelector("#petApp").classList.contains("title-bar-shown") && getComputedStyle(document.querySelector("#topWindowMenu")).opacity === "1");
     for (const selector of ["#topWindowMenu .top-window-menu-items button:last-child", "#topWindowMenu .window-pin", "#topWindowMenu .window-caption-controls button:nth-child(2)", "#topWindowMenu .window-caption-controls button:nth-child(3)", "#topWindowMenu .window-close"]) {
       const result = await fullyInside(page, selector);
       if (!result.present || !result.inside) fail(`${layout}/${width}x${height}`, `${selector} が隠れるか切れています ${JSON.stringify(result)}`);
@@ -582,18 +606,24 @@ for (const [layout, width, height] of [["stream", 1000, 760], ["stream", 1280, 7
 for (const [layout, width, height, key, initial, step] of [["pet", 900, 600, "PICOAGENT_BUBBLE_FONT_PX", 14, 1], ["stream", 1280, 720, "PICOAGENT_STREAM_CHAT_FONT_PX", 22, 2]]) {
   const label = `font/${layout}`;
   const { context, page, errors } = await openApp({ layout, width, height });
-  const size = () => page.locator("[data-source=chat]").evaluate(node => node.style.getPropertyValue(node.dataset.variant === "column" ? "--stream-chat-font-size" : "--chat-font-size"));
   await page.locator(".font-size-toggle").click();
   await page.locator(".font-size-panel").waitFor();
-  await page.getByRole("button", { name: "文字を大きく" }).click();
-  await page.getByRole("button", { name: "文字を大きく" }).click();
-  const afterPlus = await size();
   const chatBox = await page.locator("[data-source=chat]").boundingBox();
-  await page.mouse.move(chatBox.x + chatBox.width / 2, chatBox.y + chatBox.height / 2);
-  await page.keyboard.down("Control");
-  await page.mouse.wheel(0, 120);
-  await page.keyboard.up("Control");
-  const afterWheel = await size();
+  // 3回の操作は保存の待ち（600ms）より短い間隔で続けるのが前提。Playwrightの操作を
+  // 1つずつ送ると負荷の高い環境では間隔が600msを超え、正しく2回保存されて検査が揺れるため、
+  // 実際のボタンとホイールのハンドラへ1回の評価の中で続けて送る。
+  const { afterPlus, afterWheel } = await page.evaluate(({ x, y }) => {
+    const read = () => {
+      const node = document.querySelector("[data-source=chat]");
+      return node.style.getPropertyValue(node.dataset.variant === "column" ? "--stream-chat-font-size" : "--chat-font-size");
+    };
+    const larger = document.querySelector('[aria-label="文字を大きく"]');
+    larger.click();
+    larger.click();
+    const plus = read();
+    document.elementFromPoint(x, y).dispatchEvent(new WheelEvent("wheel", { deltaY: 120, ctrlKey: true, bubbles: true, cancelable: true, clientX: x, clientY: y }));
+    return { afterPlus: plus, afterWheel: read() };
+  }, { x: chatBox.x + chatBox.width / 2, y: chatBox.y + chatBox.height / 2 });
   await page.waitForTimeout(900);
   const saved = await page.evaluate(() => window.__calls.filter(call => call.name === "pet_save_ui_pref").map(call => call.args));
   const panelBox = await page.locator(".font-size-panel").boundingBox();
