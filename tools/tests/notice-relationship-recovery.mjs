@@ -16,6 +16,7 @@ function el(tag, props = {}, children = []) {
 }
 function load(file, factory, extra) {
   const context = vm.createContext({ el, logApp() {}, toast() {}, errorDetail: String, errorMessage: String,
+    notifyBackgroundFailure() {}, clearBackgroundFailure() {},
     setTimeout, clearTimeout, twoStepAction: window.PicoUI.twoStepAction, ...extra });
   vm.runInContext(uiFile(file).replace(/^import .*;\r?$/gm, "").replace("export function", "function")
     + `\nthis.factory = ${factory};`, context);
@@ -56,6 +57,30 @@ test("通知を消去した後に古い一覧応答で消した通知を復活�
   await loading;
   assert.deepEqual(env.entries(), []);
 });
+
+for (const [method, command, label] of [["loadScheduleRuns", "scheduleRuns", "スケジュール実行履歴"], ["loadDurableJobs", "durableJobs", "永続ジョブ一覧"]]) {
+  test(`${label}の取得失敗・不正応答は通知を保持して画面へ知らせ復旧を記録する`, async () => {
+    let mode = "失敗", stored = "[]";
+    const failures = [], recovered = [];
+    const factory = load("app/notice.js", "createNotices", {
+      bridge: { [command]: async () => { if (mode === "失敗") throw new Error("取得失敗の検査"); return mode === "不正" ? {} : []; } },
+      notifyBackgroundFailure: (key, message) => failures.push({ key, message }),
+      clearBackgroundFailure: key => recovered.push(key),
+      localStorage: { getItem: () => stored, setItem: (_key, value) => { stored = value; } },
+      window: { addEventListener() {}, PicoFrameScheduler: { create: callback => ({ schedule: callback }) } },
+    });
+    const notices = factory({ panel: el("div"), button: el("button"), status: { flash() {} } });
+    notices.push({ kind: "通知", title: "既存の通知" });
+    await notices[method]();
+    assert.match(failures[0]?.message || "", /取得失敗の検査/);
+    assert.equal(JSON.parse(stored)[0].title, "既存の通知");
+    mode = "不正"; await notices[method]();
+    assert.match(failures[1]?.message || "", /形式が不正/);
+    assert.equal(JSON.parse(stored)[0].title, "既存の通知");
+    mode = "成功"; await notices[method]();
+    assert.deepEqual(recovered, [failures[0].key]);
+  });
+}
 
 function relationshipHarness({ deleteMoment = async () => { throw new Error("保存失敗"); } } = {}) {
   const snapshot = deferred();

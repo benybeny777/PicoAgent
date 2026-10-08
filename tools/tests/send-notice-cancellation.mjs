@@ -10,7 +10,7 @@ function element(_tag, attributes = {}, children = []) {
     replaceChildren(...nodes) { this.children = nodes; }, append(...nodes) { this.children.push(...nodes); } };
 }
 function load(file, factory, values) {
-  const context = vm.createContext({ logApp() {}, errorDetail: String, errorMessage: String, ...values });
+  const context = vm.createContext({ logApp() {}, notifyBackgroundFailure() {}, clearBackgroundFailure() {}, errorDetail: String, errorMessage: String, ...values });
   vm.runInContext(uiFile(file).replace(/^import .*;\r?$/gm, "").replace("export function", "function") + `\nthis.factory = ${factory};`, context);
   return context.factory;
 }

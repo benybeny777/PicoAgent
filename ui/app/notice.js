@@ -229,7 +229,9 @@ export function createNotices({ panel, button, status, onRetryPrompt, onCancelJo
       const revision = clearRevision;
       try {
         const runs = await bridge.scheduleRuns();
-        if (!Array.isArray(runs) || revision !== clearRevision) return;
+        if (revision !== clearRevision) return;
+        if (!Array.isArray(runs)) throw new Error("スケジュール実行履歴の形式が不正です");
+        clearBackgroundFailure("schedule-history-load");
         const others = entries.filter(entry => entry.kind !== "schedule");
         const scheduled = runs.slice(0, 20).map(run => ({
           kind: "schedule", title: String(run.title || "スケジュール"), body: String(run.body || ""), ok: run.ok !== false,
@@ -246,7 +248,8 @@ export function createNotices({ panel, button, status, onRetryPrompt, onCancelJo
         entries.length = Math.min(entries.length, LIMIT);
         changed();
       } catch (error) {
-        logApp("warn", "スケジュール実行履歴の読み込みに失敗しました", errorDetail(error));
+        if (revision !== clearRevision) return;
+        notifyBackgroundFailure("schedule-history-load", `スケジュール実行履歴を読み込めません: ${errorMessage(error)}`, error);
       }
     },
     /** 前回から残っている永続ジョブを戻す（起動前に流れたイベントは受け取れないため）。 */
@@ -254,7 +257,9 @@ export function createNotices({ panel, button, status, onRetryPrompt, onCancelJo
       const revision = clearRevision;
       try {
         const jobs = await bridge.durableJobs();
-        if (!Array.isArray(jobs) || revision !== clearRevision) return;
+        if (revision !== clearRevision) return;
+        if (!Array.isArray(jobs)) throw new Error("永続ジョブ一覧の形式が不正です");
+        clearBackgroundFailure("durable-jobs-load");
         const others = entries.filter(entry => entry.kind !== "durable_job");
         const restored = jobs.slice(0, 20).map(job => {
           const entry = durableEntry({
@@ -271,7 +276,8 @@ export function createNotices({ panel, button, status, onRetryPrompt, onCancelJo
         entries.length = Math.min(entries.length, LIMIT);
         changed();
       } catch (error) {
-        logApp("warn", "永続ジョブ一覧を復元できませんでした", errorDetail(error));
+        if (revision !== clearRevision) return;
+        notifyBackgroundFailure("durable-jobs-load", `永続ジョブ一覧を復元できません: ${errorMessage(error)}`, error);
       }
     },
   };
