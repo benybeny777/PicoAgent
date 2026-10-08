@@ -196,12 +196,25 @@ export function createSender({ chat, voice, motion, notices, engine, relationshi
       const fullText = fileContext ? `${fileContext}${request.text || "このファイルについて教えて"}` : request.text;
       const images = [...request.images];
       if (isScreenshotQuery(request.text)) {
+        // 画面を見る依頼で撮影できなかったら、画像なしでAIへ送らない（見えていない画面を推測させない）。
+        // Waylandの拒否なども成功扱いにせず、理由を出して再送できる失敗にする。
+        let shot = null;
         try {
           status.set("画面を撮影中…", "send");
-          const shot = await Promise.race([bridge.captureScreen(), released]);
-          if (shot?.dataUrl) images.push(shot.dataUrl);
+          shot = await Promise.race([bridge.captureScreen(), released]);
         } catch (error) {
+          if (requestRevision !== revision || cancelled()) { job.state = "cancelled"; return; }
+          job.state = "failed";
           logApp("warn", "スクリーンショット取得に失敗しました。", errorDetail(error));
+          showFailure(`画面を撮影できませんでした: ${errorMessage(error)}`);
+          return;
+        }
+        if (shot?.dataUrl) images.push(shot.dataUrl);
+        else if (!shot?.releasedByCancel && requestRevision === revision && !cancelled()) {
+          job.state = "failed";
+          logApp("warn", "スクリーンショットの画像を受け取れませんでした。", JSON.stringify(shot));
+          showFailure("画面を撮影できませんでした: 画像を受け取れませんでした");
+          return;
         }
       }
       if (requestRevision !== revision || cancelled()) { job.state = "cancelled"; return; }
