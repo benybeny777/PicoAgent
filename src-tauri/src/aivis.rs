@@ -1529,9 +1529,36 @@ mod tests {
         interrupted_install_actions, replace_install_tree, validate_external_endpoint,
         InterruptedAction,
     };
-    // 実行時ファイルの判定はWindows版AivisSpeechの配置だけを検査する。
-    #[cfg(windows)]
+    // 実行ファイルと管理情報の判定、優先候補の順序は全OS共通。Python DLLだけWindows版の配置を検査する。
     use super::{find_runtime, validate_runtime_files};
+
+    #[cfg(not(windows))]
+    #[test]
+    fn 管理情報のないaivisは不完全と判定し優先候補で止める() {
+        let dir = tempfile::tempdir().unwrap();
+        let high = dir.path().join("high");
+        let fallback = dir.path().join("fallback");
+        for root in [&high, &fallback] {
+            std::fs::create_dir_all(root).unwrap();
+            std::fs::write(root.join("run"), []).unwrap();
+        }
+        let missing = validate_runtime_files(&high.join("run"))
+            .unwrap_err()
+            .to_string();
+        assert!(missing.contains("管理情報"), "{missing}");
+        std::fs::write(fallback.join("engine_manifest.json"), b"{}").unwrap();
+        // 優先候補が壊れていれば、使える代替候補があっても黙って降格しない。
+        assert!(find_runtime([high.join("run"), fallback.join("run")]).is_err());
+        std::fs::write(high.join("engine_manifest.json"), b"{}").unwrap();
+        assert_eq!(
+            find_runtime([high.join("run"), fallback.join("run")]).unwrap(),
+            Some(high.join("run"))
+        );
+        assert_eq!(
+            find_runtime([dir.path().join("none/run"), fallback.join("run")]).unwrap(),
+            Some(fallback.join("run"))
+        );
+    }
 
     #[cfg(windows)]
     #[test]
