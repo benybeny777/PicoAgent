@@ -1,9 +1,9 @@
-/* pastel - 既定の可愛いモード。ローズ色と丸いパネル。明暗は PICOAGENT_THEME に従い、`system` は OS の設定に追従する。 */
+/* pastel - 既定の可愛いモード。ローズ色と控えめな角丸。明暗は PICOAGENT_THEME に従い、`system` は OS の設定に追従する。 */
 :root[data-ui-theme="pastel"] {
-  --radius-xl: 24px;
-  --radius-lg: 20px;
-  --radius-md: 16px;
-  --radius-sm: 10px;
+  --radius-xl: 10px;
+  --radius-lg: 8px;
+  --radius-md: 6px;
+  --radius-sm: 4px;
   --radius-pill: 999px;
   --surface: rgba(255, 250, 252, 0.84);
   --surface-strong: rgba(255, 255, 255, 0.96);
