@@ -38,7 +38,7 @@ for (const name of packages) {
 // GitのLF正規化後も固定ハッシュが一致するよう、依存配布物のCRLFを揃える。
 await writeFile(path.join(stage, 'LICENSES.txt'), licenses.replaceAll('\r\n', '\n'));
 const digest = async file => createHash('sha256').update(await readFile(file)).digest('hex');
-const metadata = { schemaVersion: 1, packages: { 'babylon-mmd': '1.3.0', '@babylonjs/core': '9.26.0', esbuild: '0.28.2' },
+const metadata = { schemaVersion: 1, packages: { 'babylon-mmd': '1.3.0', '@babylonjs/core': '9.30.0', esbuild: '0.28.2' },
   lockSha256: await digest(path.join(here, 'package-lock.json')),
   files: { 'mmd-runtime.js': await digest(path.join(stage, 'mmd-runtime.js')), 'LICENSES.txt': await digest(path.join(stage, 'LICENSES.txt')) } };
 await writeFile(path.join(stage, 'runtime.json'), JSON.stringify(metadata, null, 2) + '\n');

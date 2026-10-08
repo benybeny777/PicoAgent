@@ -23,7 +23,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 
-=== @babylonjs/core 9.26.0 (Apache-2.0) ===
+=== @babylonjs/core 9.30.0 (Apache-2.0) ===
 # Apache License 2.0 (Apache)
 
 Apache License
