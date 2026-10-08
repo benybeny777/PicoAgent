@@ -14,7 +14,8 @@ const bundled = fs.readdirSync(path.join(root, "characters"), { withFileTypes: t
   .filter(entry => entry.isDirectory() && fs.existsSync(path.join(root, "characters", entry.name, "character.json")))
   .map(entry => JSON.parse(fs.readFileSync(path.join(root, "characters", entry.name, "character.json"), "utf8")))
   .map(({ id, name }) => ({ id, name, source: "bundled" }));
-const userDirectory = process.env.APPDATA ? path.join(process.env.APPDATA, "PicoAgent", "characters") : "";
+// 開発版の保存先（PicoAgent-Dev）の追加キャラだけを載せる。通常版（PicoAgent）のデータは読まない。
+const userDirectory = process.env.APPDATA ? path.join(process.env.APPDATA, "PicoAgent-Dev", "characters") : "";
 const userCharacters = userDirectory && fs.existsSync(userDirectory) ? fs.readdirSync(userDirectory, { withFileTypes: true })
   .filter(entry => entry.isDirectory() && fs.existsSync(path.join(userDirectory, entry.name, "character.json")))
   .map(entry => JSON.parse(fs.readFileSync(path.join(userDirectory, entry.name, "character.json"), "utf8")))

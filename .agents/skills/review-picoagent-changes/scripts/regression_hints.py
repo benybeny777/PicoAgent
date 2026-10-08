@@ -39,6 +39,7 @@ SECTIONS = {
     "D20": "見た目: 配色・テーマ・文字",
     "D21": "会話: 応答本文の欠落・壊れた出力・行動しない返答",
     "D22": "会話: 文脈・履歴・人格の混線",
+    "D23": "開発と製品の混在・旧配置の置き去り",
 }
 
 # パスの正規表現 → 節
@@ -53,6 +54,7 @@ PATH_RULES = [
     (r"src-tauri/src/tools/process\.rs|skills/(run_command|code_runner|command_job|browser_control|whisper_transcribe|meeting_recorder|document_convert)/", ["D4"]),
     (r"src-tauri/src/tools/http\.rs|src-tauri/src/(api_server|mcp)/?|src-tauri/src/api_server\.rs", ["D4", "D16"]),
     (r"(^|/)tests?/|tools/tests/|tools/screenshots/|mod guard|guard_scan\.rs", ["D6"]),
+    (r"src-tauri/src/(log_paths|migration|components|engine|aivis|character_maker)\.rs|skills/(document_convert|whisper_transcribe|meeting_recorder|browser_control)/|src-tauri/src/tools/mod\.rs|tauri(\.[a-z]+)?\.conf\.json|^scripts/|tools/screenshots/review-board", ["D23"]),
     (r"src-tauri/src/agent(\.rs|/)|src-tauri/src/(topic_guard|message|history)\.rs|skills/[^/]+/prompts/", ["D7", "D21", "D22"]),
     (r"src-tauri/src/providers/|src-tauri/src/(commands|memory|memory_embedding|relationship)\.rs|crates/picoagent-core/", ["D21", "D22"]),
     (r"src-tauri/src/tools/mod\.rs|skills/[^/]+/mod\.rs", ["D8", "D21"]),
@@ -82,6 +84,7 @@ LINE_RULES = [
     (r"spawn|Child|kill\(|wait\(", "D4", "孫プロセスと回収経路"),
     (r"\.chat(_stream)?\(|provider\.chat", "D7", "公開経路のガード"),
     (r"intent_(keywords|priority|invocation)", "D8", "当たる例と当たらない例"),
+    (r"resource_dir|current_dir|current_exe|CARGO_MANIFEST_DIR|APPDATA|data_dir\(|PicoAgent", "D23", "開発と製品の場所を混ぜないか・無いときに他を探さないか"),
     (r"schemas_for|MAX_SELECTED|compact|summar|圧縮|要約", "D21", "絞り込み・圧縮が道具選択や回答を減らさないか"),
     (r"role\s*==|\"assistant\"|\"system\"|history::|character_id", "D22", "メッセージ列と履歴の所有者"),
     (r"generation|revision|epoch|世代|AbortController|Notify", "D10", "古い結果・中断の取りこぼし"),
