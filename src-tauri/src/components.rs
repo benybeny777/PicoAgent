@@ -786,37 +786,37 @@ struct UvAsset {
 fn uv_asset() -> Option<UvAsset> {
     if cfg!(all(target_os = "windows", target_arch = "x86_64")) {
         return Some(UvAsset {
-            url: "https://github.com/astral-sh/uv/releases/download/0.12.11/uv-x86_64-pc-windows-msvc.zip",
+            url: "https://github.com/astral-sh/uv/releases/download/0.12.23/uv-x86_64-pc-windows-msvc.zip",
             cache_name: "uv.zip.part",
             executable: "uv.exe",
-            size: 16_996_332,
-            sha256: "e94225dea91e051472847bd6d146d7d66c4f54ffcd1f106678866a99580845f9",
+            size: 18_043_715,
+            sha256: "75d05de6762778c31ee183398de7dd15093fad0ed90b1f236d8205ea5ec00c90",
             archive: UvArchive::Zip,
         });
     }
     if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
         return Some(UvAsset {
-            url: "https://github.com/astral-sh/uv/releases/download/0.12.11/uv-aarch64-apple-darwin.tar.gz",
+            url: "https://github.com/astral-sh/uv/releases/download/0.12.23/uv-aarch64-apple-darwin.tar.gz",
             cache_name: "uv.tar.gz.part",
             executable: "uv",
-            size: 16_640_518,
-            sha256: "e01b69ee15e81918d5e8fc9cf39b3db7f59c5576e5e306cd9b7aeb2c7b7321c3",
+            size: 17_044_217,
+            sha256: "50487ae565ccd96e499056b4674d438f4c53170202617b4c759defe0c6a1b544",
             archive: UvArchive::TarGz,
         });
     }
     if cfg!(all(target_os = "linux", target_arch = "x86_64")) {
         return Some(UvAsset {
-            url: "https://github.com/astral-sh/uv/releases/download/0.12.11/uv-x86_64-unknown-linux-gnu.tar.gz",
-            cache_name: "uv.tar.gz.part", executable: "uv", size: 19_422_570,
-            sha256: "4ae93e0f148a18434cc094072547cec88912fc4a72b984183c7d0d0e9586cb5e",
+            url: "https://github.com/astral-sh/uv/releases/download/0.12.23/uv-x86_64-unknown-linux-gnu.tar.gz",
+            cache_name: "uv.tar.gz.part", executable: "uv", size: 19_906_150,
+            sha256: "9167d72b3319674b6303c4cbe071854bba13ebdf3d76b1a7cbdc175471fb66d6",
             archive: UvArchive::TarGz,
         });
     }
     if cfg!(all(target_os = "linux", target_arch = "aarch64")) {
         return Some(UvAsset {
-            url: "https://github.com/astral-sh/uv/releases/download/0.12.11/uv-aarch64-unknown-linux-gnu.tar.gz",
-            cache_name: "uv.tar.gz.part", executable: "uv", size: 18_589_830,
-            sha256: "e9933d907fb9cd27d606d819bbded419f2844c0e2efc98225ecfa409288eb28d",
+            url: "https://github.com/astral-sh/uv/releases/download/0.12.23/uv-aarch64-unknown-linux-gnu.tar.gz",
+            cache_name: "uv.tar.gz.part", executable: "uv", size: 18_965_616,
+            sha256: "6524bd338177ed50d035d39354e12545e993bbeba2ecbddf0480c5b3a81d313f",
             archive: UvArchive::TarGz,
         });
     }
@@ -979,8 +979,8 @@ async fn install_character_maker(app: &AppHandle) -> Result<()> {
         "キャラクター作成の導入には85GB以上の空き容量が必要です。何も取得していません"
     );
 
-    // uvは同じ0.12.11をOS別の公式アセットで取る。サイズとSHA-256は公式の
-    // `<資産名>.sha256`と照合済み（Windows: 2026-09-10、macOS: 2026-09-15）。
+    // uvは同じ0.12.23をOS別の公式アセットで取る。サイズとSHA-256は公式の
+    // `<資産名>.sha256`と照合済み（全4資産: 2026-10-08）。
     let uv_asset = uv_asset().context("この環境向けのPython管理ツール配布がありません")?;
     const COMFY_URL: &str =
         "https://github.com/Comfy-Org/ComfyUI/archive/12d5279438bfefc058a269eae805ceab6047777f.zip";
