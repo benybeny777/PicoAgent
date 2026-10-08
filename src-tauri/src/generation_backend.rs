@@ -384,13 +384,31 @@ pub fn is_nvfp4_component(component: &str) -> bool {
     matches!(component, "image-krea2" | "video-ltx25")
 }
 
-/// 名前から世代を推測せず、実GPUが報告する演算能力と専用メモリを確認する。
+/// CUDA 13の公式対応はTuring以降とR580以降。複数GPUも全て照合する。
+pub(crate) fn cuda13_report_supported(report: &str) -> bool {
+    !report.trim().is_empty()
+        && report.lines().all(|line| {
+            let fields: Vec<_> = line.split(',').map(str::trim).collect();
+            fields.len() == 2
+                && fields[0]
+                    .parse::<f32>()
+                    .is_ok_and(|capability| capability.is_finite() && capability >= 7.5)
+                && fields[1]
+                    .split('.')
+                    .next()
+                    .and_then(|part| part.parse::<u32>().ok())
+                    .is_some_and(|major| major >= 580)
+        })
+}
+
+/// 名前から世代を推測せず、実GPUが報告する演算能力・ドライバー・専用メモリを確認する。
 fn nvfp4_hardware_supported(report: &str, ram: Option<u64>) -> bool {
     ram.is_some_and(|bytes| bytes >= 32_000_000_000)
         && !report.trim().is_empty()
         && report.lines().all(|line| {
             let fields: Vec<_> = line.split(',').map(str::trim).collect();
-            fields.len() == 2
+            fields.len() == 3
+                && cuda13_report_supported(&format!("{}, {}", fields[0], fields[2]))
                 && fields[0]
                     .parse::<f32>()
                     .is_ok_and(|capability| capability >= 12.0)
@@ -403,7 +421,7 @@ fn nvfp4_hardware_supported(report: &str, ram: Option<u64>) -> bool {
 pub async fn validate_nvfp4_hardware() -> Result<(), String> {
     let mut command = crate::tools::process::command("nvidia-smi");
     command.args([
-        "--query-gpu=compute_cap,memory.total",
+        "--query-gpu=compute_cap,memory.total,driver_version",
         "--format=csv,noheader,nounits",
     ]);
     let output = crate::tools::process::output(command, 10, "NVFP4対応GPU確認")
@@ -419,7 +437,7 @@ pub async fn validate_nvfp4_hardware() -> Result<(), String> {
     {
         Ok(())
     } else {
-        Err("このNVFP4構成にはNVIDIA Blackwell以降（CUDA演算能力12以上）、専用VRAM 8GB以上、RAM 32GB以上が必要です。容量・演算能力不明の場合も取得・実行を停止します。".into())
+        Err("このNVFP4構成にはNVIDIA Blackwell以降（CUDA演算能力12以上）、R580以降のドライバー、専用VRAM 8GB以上、RAM 32GB以上が必要です。必要情報が不明の場合も取得・実行を停止します。".into())
     }
 }
 
@@ -630,14 +648,41 @@ mod tests {
     use super::*;
 
     #[test]
+    fn cuda13は旧gpuと旧ドライバーと不明値を取得前に拒否する() {
+        assert!(cuda13_report_supported("7.5, 580.88\n12.0, 616.56"));
+        for report in [
+            "7.0, 616.56",
+            "12.0, 579.99",
+            "NaN, 616.56",
+            "12.0, N/A",
+            "12.0",
+            "",
+            "12.0, 616.56\n7.0, 616.56",
+        ] {
+            assert!(!cuda13_report_supported(report), "{report}");
+        }
+    }
+
+    #[test]
     fn nvfp4は演算能力と専用容量とramの全条件を必須にする() {
-        assert!(nvfp4_hardware_supported("12.0, 8151", Some(34_000_000_000)));
-        for report in ["8.9, 24576", "12.0, 4096", "N/A, 8151", "12.0, N/A", ""] {
+        assert!(nvfp4_hardware_supported(
+            "12.0, 8151, 580.88",
+            Some(34_000_000_000)
+        ));
+        for report in [
+            "8.9, 24576, 580.88",
+            "12.0, 4096, 580.88",
+            "N/A, 8151, 580.88",
+            "12.0, N/A, 580.88",
+            "12.0, 8151, 579.99",
+            "12.0, 8151",
+            "",
+        ] {
             assert!(!nvfp4_hardware_supported(report, Some(34_000_000_000)));
         }
-        assert!(!nvfp4_hardware_supported("12.0, 8151", None));
+        assert!(!nvfp4_hardware_supported("12.0, 8151, 580.88", None));
         assert!(!nvfp4_hardware_supported(
-            "12.0, 8151",
+            "12.0, 8151, 580.88",
             Some(16_000_000_000)
         ));
     }

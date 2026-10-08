@@ -344,6 +344,25 @@ pub(crate) async fn nvidia_cuda_ready() -> bool {
     false
 }
 
+/// CUDA 13向け資産は、対応する演算能力とドライバーを取得前に確認する。
+pub(crate) async fn nvidia_cuda13_ready() -> bool {
+    if !cfg!(any(windows, target_os = "linux")) {
+        return false;
+    }
+    let mut command = crate::tools::process::command("nvidia-smi");
+    command.args([
+        "--query-gpu=compute_cap,driver_version",
+        "--format=csv,noheader,nounits",
+    ]);
+    crate::tools::process::output(command, 10, "CUDA 13対応確認")
+        .await
+        .is_ok_and(|output| {
+            output.status.success()
+                && String::from_utf8(output.stdout)
+                    .is_ok_and(|report| crate::generation_backend::cuda13_report_supported(&report))
+        })
+}
+
 /// 取得を始める前に、実GPUから生成バックエンドを判定する。
 pub(crate) async fn generation_selection() -> crate::generation_backend::BackendSelection {
     let devices = crate::gpu::devices();
@@ -461,7 +480,7 @@ fn modern_media_runtime_ready(root: &Path) -> bool {
         && marker
             .get("comfyCommit")
             .and_then(serde_json::Value::as_str)
-            == Some("73c9bad4d21e7addbe1d13bc92eee0f1431b017d")
+            == Some("b0b743566f65daafc423b4fea8a2fbda94b3384a")
         && marker.get("lockSha256").and_then(serde_json::Value::as_str) == Some(lock_hash.as_str())
 }
 
@@ -2340,7 +2359,7 @@ mod tests {
         std::fs::create_dir_all(root.join("ComfyUI")).unwrap();
         let marker = serde_json::json!({
             "version": "2026-09-21",
-            "comfyCommit": "73c9bad4d21e7addbe1d13bc92eee0f1431b017d",
+            "comfyCommit": "b0b743566f65daafc423b4fea8a2fbda94b3384a",
             "lockSha256": hex::encode(Sha256::digest(include_bytes!(
                 "../../character-maker/sidecar/requirements-media.lock"
             ))),
@@ -2352,6 +2371,15 @@ mod tests {
         assert!(!super::modern_media_runtime_ready(&root));
         std::fs::write(root.join("ComfyUI/main.py"), b"main").unwrap();
         assert!(super::modern_media_runtime_ready(&root));
+        std::fs::write(
+            root.join("install.json"),
+            marker.replace(
+                "b0b743566f65daafc423b4fea8a2fbda94b3384a",
+                "73c9bad4d21e7addbe1d13bc92eee0f1431b017d",
+            ),
+        )
+        .unwrap();
+        assert!(!super::modern_media_runtime_ready(&root));
         std::fs::write(root.join("install.json"), b"{}").unwrap();
         assert!(!super::modern_media_runtime_ready(&root));
         std::fs::write(root.join("install.json"), &marker).unwrap();

@@ -77,32 +77,30 @@
 | VTuber事務所への公式キャラクター許諾 | VTuber事務所については[docs/IP-PROPOSAL-VTUBER.md](IP-PROPOSAL-VTUBER.md)の照会文で該当性と窓口を確認する。判断材料は[docs/IP-LICENSING-STRATEGY.md](IP-LICENSING-STRATEGY.md) |
 | 収益化方式の決定後の実装検討 | [docs/SALES.md](SALES.md) §4のとおり、本体の有償・無償、課金対象、価格、販売方式は未定。方式の決定を着手条件とし、その結果に応じて課金判定、同梱構成、表示・利用文書の変更要否を判断する。Free／Pro境界撤去や同梱キャラ削減を先行しない |
 
-## 依存の最新化で取得元へ到達できず残った項目
+## 依存最新化の残る移行条件
 
-2026-10-08の一括最新化（PR #446〜#449）で、作業環境から取得元へ到達できず照合できなかった項目。着手条件は、各ホストへ到達できる環境であること。一次情報で版・サイズ・SHA-256を照合してから更新する。
+取得元の到達性は2026-10-08に再確認済み。残る作業は接続の復旧ではなく、次の互換性・導入条件の解消である。モデルの固定revisionをREADME等の更新だけで動かさず、対象ファイルのハッシュと利用条件を照合する。
 
-| 項目 | 現行 | 確認時点の上流 | 必要な取得元 |
+| 項目 | 現行 | 更新候補 | 着手条件・完了条件 |
 |---|---|---|---|
-| PyTorch系ロック（記憶検索のCPU／CUDA、キャラ作成のCUDA／MPS／ROCm、メディア） | torch 2.11.0系 | PyPI上は2.14.1 | download.pytorch.org、repo.radeon.com。全GPU種別のロックを同じtorch系列で再生成し、対応GPU表とCUDA／ROCm版も照合する |
-| 共通Python・ComfyUI（キャラ作成ランタイム `2026.09.10`） | Python 3.12.13、ComfyUI v0.34.0 | Python 3.12.15（uv 0.12.23で取得可能）、ComfyUI v0.39.2 | 上のPyTorchロック更新と同時に行う。導入済みランタイムの世代判定（`install.json`）も更新する |
-| 会話モデルのプリセット（GGUF） | `providers/local.rs`の固定リビジョン | 未確認 | huggingface.co |
-| 画像・動画モデル、記憶検索のembeddinggemma、Whisper smallモデル | 各固定リビジョン | 未確認 | huggingface.co |
-| Live2D Cubism Core | 05／06系の固定SHA-256 | 未確認 | cubism.live2d.com |
-| LibreOffice | 25.8.7.2 | 未確認 | downloadarchive.documentfoundation.org |
-| ImageMagick・popplerの変更内容 | 7.1.2-32、26.09.0-0へ更新済み | 改善点は未確認 | GitHub Releases。PicoAgentの画像変換・PDF抽出に効く修正があるかを確認する |
+| キャラ作成基盤のPyTorch・ComfyUI | CUDA/MPSはtorch 2.11.0、AMD Windowsは公式2.9.1、ComfyUI v0.34.0 | CUDAはcu130・torch 2.14.1、ComfyUI v0.39.0 | AMD公式wheelに公開SHA-256が無いため、約821MBのtorch本体を含む取得を明示選択してからAMDロックを再生成する。CUDA/MPS/AMDの全ロックと導入世代を同じ作業で同期する。全GPUを同じtorch系列に揃える条件は撤回し、AMDの公式2.9.1を例外として維持する。macOS 13維持の場合はMPSも2.11.0を維持する。新版で起動・最小GPU演算・既存workflowを確認する |
+| 共通Python本体 | 3.12.13 | 3.12.15（uv 0.12.23に公式取得定義あり） | 既存の共有Pythonに依存するキャラ作成・記憶検索・メディアの全venvを列挙し、既存venvが参照する旧本体を先に削除しない移行を設計する。全導入環境の再公開と実起動が成功してから旧本体・キャッシュを回収する。版文字列だけの更新で既存環境を最新と扱わない |
+| 更新した依存の実機受入 | 記憶検索torch 2.14.1（darwinは2.11）、NVFP4用ComfyUI 0.39.0、LibreOffice 26.2.6.3の取得定義 | 固定済み | 大容量取得を利用者が明示選択した環境で、記憶検索のCUDA/CPU/MPS実推論、NVFP4の最小生成・更新失敗復元・成功後の旧版回収、LibreOfficeのWindows/macOS実書庫展開とOffice変換を確認する。ロック再生成・静的検査を実インストールの成功へ読み替えない |
 
 方針（利用者判断、2026-10-08）:
-- Python本体は3.12系のまま据え置く。3.13以降はAMDのWindows向けROCm版PyTorchがPython 3.12専用で、上げても改善が小さいため。
-- 古いGPUのサポートは切り捨ててよい。古いGPUのために古いPyTorch／CUDAへ留めない。
+- Python本体は3.12系を維持する。
+- 古いGPUのために古いPyTorch／CUDAへ留めない。CUDA 13では取得前に演算能力7.5以上とR580以降のドライバーを確認する。
 - 毎月1日8:53（日本時間）にルーチン「月次依存最新化」が同じ範囲を確認し、PRを作る（マージはしない）。
 
-### PIXI 8とLive2D表示ライブラリの移行（メジャー更新）
+### PIXI 8とLive2D表示ライブラリの移行
 
-Cargo・npmの直接依存は最新に揃っており、残るメジャー更新はPIXI 6.5.10→8系だけである。現行の`pixi-live2d-display` 0.4.0（2022年で更新停止）はPIXI 8に非対応のため、表示ライブラリごと置き換える。
+候補はPIXI 8.22.0と`untitled-pixi-live2d-engine` 1.4.0。現行のPIXI 6.5.10・`pixi-live2d-display` 0.4.0とCore 05／06の使い分けを維持し、互換性を解消する前に入れ替えない。
 
-| 内容 | 着手条件・完了条件 |
-|---|---|
-| 候補は`untitled-pixi-live2d-engine` 1.4.0（MIT、PIXI 8／Cubism 2〜5対応、pixi-live2d-display系の作り直し、`Live2DModel.from`は同じ）。0.x版の`@laplace.live/pixijs-live2d`は不採用。PIXI 8で変わる箇所は、`Application`の非同期初期化（`await app.init()`）、`SimplePlane`→`MeshPlane`、`Texture.from`の読み込み方法。対象は`ui/character/live2d.js`・`ui/character/runtime.js`・`ui/mesh-rig.js`・`xtask/src/bundled.rs`（固定URLとSHA-256）・ライセンス表記 | 着手条件: cubism.live2d.comへ到達でき、Cubism Coreを固定SHA-256で取得できる環境。完了条件: 同梱Live2D（ひより・ハル・マオ等）と自前メッシュリグの通常2Dキャラを、現行と並べたスクリーンショットで比較し、ひよりの口ArtMesh欠け（現行はCore 05／06の使い分けで回避）が出ないこと、マスク・モーション・口パク・ドラッグ・キャラ位置が変わらないことをWindows WebView2実機で確認する。期待できる改善は、マスクのにじみ・欠けの自動補正、Cubism 5へのそのまま対応（Core使い分けの廃止候補）、テクスチャLODによるVRAM削減、複数モーションの同時再生 |
+- Core 05と候補ライブラリでは、ひより・ハル・マオの初期描画をChromiumで比較できた。これはWindows WebView2の受入ではない。
+- Core 06はdrawableに`drawOrders`を持つが、候補のCubism Frameworkは`renderOrders`を読み、3体とも初回描画でTypeErrorになる。Core 05への一律降格は新しいMOCの対応を失うため採らない。Core 06へ対応した上流の安定版または検証可能な修正を準備する。
+- 新ライブラリの`coreModel.setParameterValueById`には文字列ではなく`CubismFramework.getIdManager().getId()`で得たIDを渡す。旧呼び出しをそのまま流用すると口パクが反映されない。
+- 変更対象は`ui/character/runtime.js`・`ui/character/live2d.js`・`ui/mesh-rig.js`・`xtask/src/bundled.rs`とライセンス。非同期`Application.init()`、`MeshPlane`、テクスチャ取得・解放、描画プラグイン登録、Graphics APIを同期し、通常2D全員と全Live2Dで検証する。
+- 完了条件: Windows WebView2で現行と並べた画像を比較し、ひよりの口ArtMesh、マスク、モーション、口パク、ドラッグ、位置、透過、キャラ切替後の資源解放が維持されること。LODによるVRAM削減は画質・実測が揃うまで改善済みと主張しない。
 
 ## FreeTokenローカルエンジンの段階導入
 

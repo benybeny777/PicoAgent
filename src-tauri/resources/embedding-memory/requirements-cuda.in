@@ -1,0 +1,7 @@
+# 記憶検索の固定された直接依存。CUDA13.0向けの公式wheelを指定する。
+# 再生成は --torch-backend cu130 --universal --python-version 3.12 --generate-hashes を指定する。
+sentence-transformers==6.1.0
+transformers==5.19.0
+torch==2.14.1+cu130
+torchvision==0.29.1+cu130
+pillow==12.3.0
