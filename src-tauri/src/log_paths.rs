@@ -1,6 +1,6 @@
 // log_paths.rs - 実行時ログをまとめる共通パス。
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use chrono::{Duration, Local, NaiveDate};
 use tauri::{AppHandle, Manager};
@@ -9,19 +9,47 @@ use tauri::{AppHandle, Manager};
 // 履歴（history-<キャラID>.json）は対話データなのでローテーション対象に含めない。
 const LOG_RETAIN_DAYS: i64 = 7;
 
+/// 開発ビルドの保存先の根（`<リポジトリ>/dev-data/PicoAgent`）。製品ビルドでは `None`。
+///
+/// 開発中の設定・履歴・キャラ・記憶・モデル・同梱ランタイムを利用者の通常版の領域へ混ぜないため、
+/// 起動経路（起動バッチ・`cargo xtask dev`・`cargo tauri dev`）ではなくビルドの種類で決める。
+/// 末尾を通常版と同じ `PicoAgent` にし、フォルダ構成と停止処理の目印（`PicoAgent/browser-profile`
+/// など）を通常版と揃える。
+pub fn dev_data_root() -> Option<PathBuf> {
+    cfg!(debug_assertions).then(|| dev_data_root_for(Path::new(env!("CARGO_MANIFEST_DIR"))))
+}
+
+/// `src-tauri` の場所から開発用の保存先を決める。
+fn dev_data_root_for(manifest_dir: &Path) -> PathBuf {
+    manifest_dir
+        .parent()
+        .unwrap_or(manifest_dir)
+        .join("dev-data")
+        .join("PicoAgent")
+}
+
+/// 保存先の根と識別子から、このアプリが使う管理領域を決める。
+/// 製品の識別子は根をそのまま使い、検査用など別の識別子は `instances/<識別子>` へ分ける。
+fn managed_dir(root: PathBuf, identifier: &str) -> PathBuf {
+    if identifier == "com.picoagent.desktop" {
+        root
+    } else {
+        root.join("instances").join(identifier)
+    }
+}
+
 pub fn data_dir(app: &AppHandle) -> PathBuf {
+    let identifier = app.config().identifier.as_str();
+    if let Some(root) = dev_data_root() {
+        return managed_dir(root, identifier);
+    }
     match app.path().app_data_dir() {
         Ok(path) => {
             let root = path
                 .parent()
                 .map(|parent| parent.join("PicoAgent"))
                 .unwrap_or(path);
-            let identifier = app.config().identifier.as_str();
-            if identifier == "com.picoagent.desktop" {
-                root
-            } else {
-                root.join("instances").join(identifier)
-            }
+            managed_dir(root, identifier)
         }
         // フォールバック許可: 保存先取得自体の失敗を記録するため、ログだけは一時領域へ退避する。
         Err(error) => {
@@ -29,6 +57,45 @@ pub fn data_dir(app: &AppHandle) -> PathBuf {
             std::env::temp_dir().join("PicoAgent")
         }
     }
+}
+
+/// webview へ asset プロトコルで読ませる保存先配下のフォルダ。
+/// `tauri.conf.json` の `assetProtocol.scope`（`$DATA/PicoAgent/<フォルダ>/**`）と同じ並びを保つ。
+pub const ASSET_SCOPE_DIRS: [&str; 4] = [
+    "characters",
+    "display",
+    "character-maker/characters",
+    "generated-media",
+];
+
+/// 静的な許可範囲は通常版の保存先（`$DATA/PicoAgent`）だけを指す。開発ビルドの `dev-data` や
+/// 検査用の別識別子（`instances/<識別子>`）でも同じフォルダだけを表示できるよう、起動時に足す。
+/// 通常版では静的な範囲と同じ場所なので、許可は広がらない。
+pub fn allow_asset_scope(app: &AppHandle) {
+    let root = data_dir(app);
+    for dir in ASSET_SCOPE_DIRS {
+        if let Err(error) = app
+            .asset_protocol_scope()
+            .allow_directory(root.join(dir), true)
+        {
+            append_app_log(
+                app,
+                &format!(
+                    "画像の読込許可を追加できません: {} ({error})",
+                    root.join(dir).display()
+                ),
+            );
+        }
+    }
+}
+
+/// 旧版が使っていた識別子別の保存先（`app_data_dir`）。旧データの探索・移行にだけ使う。
+/// 開発ビルドでは通常版の旧データを読んだり移したりしないよう `None` を返す。
+pub fn legacy_app_data_dir(app: &AppHandle) -> Option<PathBuf> {
+    if dev_data_root().is_some() {
+        return None;
+    }
+    app.path().app_data_dir().ok()
 }
 
 pub fn cache_dir(app: &AppHandle) -> PathBuf {
@@ -182,14 +249,15 @@ pub fn log_detached(message: &str) {
 
 pub fn migrate_legacy_app_log(app: &AppHandle, name: &str) {
     let new_path = log_file(app, name);
-    if new_path.exists() {
+    // 開発ビルドは通常版の旧ログを移して消さない。
+    if new_path.exists() || dev_data_root().is_some() {
         return;
     }
     let mut old_paths = Vec::new();
     if let Ok(old_dir) = app.path().app_log_dir() {
         old_paths.push(old_dir.join(name));
     }
-    if let Ok(old_data_dir) = app.path().app_data_dir() {
+    if let Some(old_data_dir) = legacy_app_data_dir(app) {
         old_paths.push(old_data_dir.join("log").join(name));
     }
     let Some(old_path) = old_paths.into_iter().find(|path| path.exists()) else {
@@ -213,6 +281,47 @@ pub fn migrate_legacy_app_log(app: &AppHandle, name: &str) {
 #[cfg(test)]
 mod guard {
     use crate::guard_scan;
+
+    /// OSの保存先を直接取ると、開発ビルドでも通常版の利用者データ（`%APPDATA%` など）を
+    /// 読み書きしてしまう。保存先は `data_dir()` / `legacy_app_data_dir()` を通す。
+    #[test]
+    fn 保存先はlog_pathsを通して開発ビルドと通常版を分ける() {
+        const DIRECT: &[&str] = &[
+            ".app_data_dir()",
+            ".app_local_data_dir()",
+            ".app_config_dir()",
+            ".app_log_dir()",
+            "dirs::data_dir()",
+            "dirs::data_local_dir()",
+            "dirs::config_dir()",
+        ];
+        // 理由付きの例外。いずれも開発ビルドでは使わない分岐の中にある。
+        const ALLOWED: &[&str] = &[
+            "src/log_paths.rs",       // 保存先の正本（開発ビルドは dev_data_root を先に返す）
+            "src/migration.rs",       // 旧識別子フォルダの移行（開発ビルドは冒頭で抜ける）
+            "browser_control/cdp.rs", // ブラウザ専用プロファイル（開発ビルドは dev_data_root を先に返す）
+        ];
+        let mut violations = Vec::new();
+        for source in guard_scan::all_sources() {
+            let path = source.path.display().to_string().replace('\\', "/");
+            if ALLOWED.iter().any(|allowed| path.ends_with(allowed)) {
+                continue;
+            }
+            for line in source.body().lines() {
+                let trimmed = line.trim();
+                if !trimmed.starts_with("//")
+                    && DIRECT.iter().any(|direct| trimmed.contains(direct))
+                {
+                    violations.push(format!("{}: {trimmed}", source.path.display()));
+                }
+            }
+        }
+        assert!(
+            violations.is_empty(),
+            "保存先は log_paths::data_dir() か legacy_app_data_dir() を通してください:\n{}",
+            violations.join("\n")
+        );
+    }
 
     /// 画面操作・通知の失敗を捨てると、設定や内部状態だけ変わって表示が追従しない。
     #[test]
@@ -275,7 +384,57 @@ mod guard {
 
 #[cfg(test)]
 mod tests {
-    use super::{date_in_name, is_prunable_log, tail_lines};
+    use super::{
+        date_in_name, dev_data_root, dev_data_root_for, is_prunable_log, managed_dir, tail_lines,
+    };
+    use std::path::{Path, PathBuf};
+
+    #[test]
+    fn 開発用の保存先はリポジトリ配下で通常版と同じ構成にする() {
+        let repo = Path::new("/work/PicoAgent");
+        let root = dev_data_root_for(&repo.join("src-tauri"));
+        assert_eq!(root, repo.join("dev-data").join("PicoAgent"));
+        // 停止処理（cargo xtask stop）の目印 `PicoAgent/browser-profile` が開発版にも当たる。
+        assert!(root
+            .join("browser-profile")
+            .to_string_lossy()
+            .replace('\\', "/")
+            .contains("PicoAgent/browser-profile"));
+        // テストは開発ビルドなので、通常版の領域ではなくこのリポジトリの dev-data を指す。
+        let current = dev_data_root().unwrap();
+        assert!(current.ends_with(Path::new("dev-data").join("PicoAgent")));
+        assert_eq!(
+            current.parent().unwrap().parent().unwrap(),
+            Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap()
+        );
+    }
+
+    #[test]
+    fn 実行時に足す読込許可は静的な許可範囲と同じフォルダだけにする() {
+        let config: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        let scope: Vec<String> = config["app"]["security"]["assetProtocol"]["scope"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|value| value.as_str().unwrap().to_string())
+            .collect();
+        let expected: Vec<String> = super::ASSET_SCOPE_DIRS
+            .iter()
+            .map(|dir| format!("$DATA/PicoAgent/{dir}/**"))
+            .collect();
+        assert_eq!(scope, expected);
+    }
+
+    #[test]
+    fn 製品の識別子は根を使い別の識別子はinstancesへ分ける() {
+        let root = PathBuf::from("/data/PicoAgent");
+        assert_eq!(managed_dir(root.clone(), "com.picoagent.desktop"), root);
+        assert_eq!(
+            managed_dir(root.clone(), "com.picoagent.ui-check"),
+            root.join("instances").join("com.picoagent.ui-check")
+        );
+    }
 
     #[test]
     fn 診断情報の書き出しも保持期間の対象にする() {

@@ -61,6 +61,10 @@ fn devtools_client() -> Option<&'static reqwest::Client> {
 
 /// `--user-data-dir` に使う隔離プロファイルの置き場所。
 fn isolated_profile_dir() -> Result<PathBuf, String> {
+    // 開発ビルドは通常版のプロファイルを使わない（`cargo xtask stop` の目印も同じ構成で当たる）。
+    if let Some(root) = crate::log_paths::dev_data_root() {
+        return Ok(root.join("browser-profile"));
+    }
     Ok(dirs::data_dir()
         .ok_or_else(|| "エラー: ブラウザ用プロファイルの保存先を取得できません".to_string())?
         .join("PicoAgent")

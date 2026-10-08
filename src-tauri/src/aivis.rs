@@ -567,7 +567,7 @@ fn install_dir(app: &tauri::AppHandle) -> anyhow::Result<PathBuf> {
 
 fn legacy_install_dirs(app: &tauri::AppHandle) -> Vec<PathBuf> {
     let mut dirs = vec![crate::log_paths::data_dir(app).join("aivis")];
-    if let Ok(path) = app.path().app_data_dir() {
+    if let Some(path) = crate::log_paths::legacy_app_data_dir(app) {
         dirs.push(path.join("aivis"));
     }
     dirs

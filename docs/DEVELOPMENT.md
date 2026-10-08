@@ -275,19 +275,21 @@ cargo xtask license issue --customer "購入者名" --purchase-id "BOOTH注文�
 <details>
 <summary>ログ・データの保存場所・識別子</summary>
 
-**ログ** — `%APPDATA%\PicoAgent\log\` に保存します。**1 日ごとに日付付きファイルへローテートし、1 週間より古いログは起動時と 1 日ごとに自動削除**します（会話履歴はログではないため対象外）。
+**ログ** — `%APPDATA%\PicoAgent\log\` に保存します（開発ビルドは `dev-data\PicoAgent\log\`）。**1 日ごとに日付付きファイルへローテートし、1 週間より古いログは起動時と 1 日ごとに自動削除**します（会話履歴はログではないため対象外）。
 
 | ファイル | 内容 |
 |---|---|
 | `app.<日付>.log` | アプリ本体とフロントのエラー |
 | `aivis.<日付>.log` | Aivis の起動ログ |
 | `engine.<日付>.log` | 同梱 llama-server のログ |
-| `dev.<日付>.log` | `cargo xtask dev` の再ビルド警告・コンパイルエラー（監視継続中の失敗を含む） |
+| `dev.<日付>.log` | `cargo xtask dev` の再ビルド警告・コンパイルエラー（監視継続中の失敗を含む）。`dev-data\PicoAgent\log\` に置く |
 
 **識別子とデータ**
 
 - アプリ識別子は `com.picoagent.desktop`。保存先は識別子別フォルダを使わず、設定・履歴・追加キャラ・管理ランタイムを`PicoAgent`配下へ集約する。初回起動時に現行および旧識別子（`com.picoagent.app` / `com.coda.app`）配下の全データを移す
 - 設定・履歴・メモリ・追加キャラ・同梱系の実行時取得物・ログ・キャッシュは、OSの利用者データ領域にある`PicoAgent/`配下へ集約する
+- **開発ビルド（デバッグビルド）は、通常版と保存先を分ける。** `PicoAgentを起動.bat`・`cargo xtask dev`・`cargo tauri dev` のどれで起動しても、保存先はリポジトリ直下の `dev-data/PicoAgent/`（Git管理外）になる。中の構成は通常版と同じ。初回は空から始まり、モデルや音声などは開発版として取り直す。通常版のデータは読まず、旧識別子フォルダからの移行・旧ログの移行・旧保存先のモデル／Aivis探索も行わない。判定はビルドの種類（`cfg!(debug_assertions)`、`log_paths::dev_data_root()`）で、製品ビルドは従来どおり利用者データ領域を使う
+- 開発版と通常版の同時起動はしない。識別子は共通のため、片方の起動中にもう片方を起動すると既存の窓が前面に出る。`cargo xtask dev` は起動前に `cargo xtask stop` で残存プロセスを止めるため、起動中の通常版も終了する
 - アイコンは `src-tauri/icons/`（`cargo tauri icon src-tauri/icon-source.png` で再生成）
 
 **インストール（上書き導入）**
