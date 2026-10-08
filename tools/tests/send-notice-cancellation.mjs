@@ -125,3 +125,38 @@ test("起動で非表示になったキャラは有効なキャラの読込成�
   assert.equal(characterSource.element.style.visibility, "hidden");
   assert.equal(characterSource.element.dataset.characterId, "mugi");
 });
+
+for (const [label, capture] of [
+  ["撮影が失敗した", async () => { throw new Error("画面取得が拒否されました"); }],
+  ["画像が返らない", async () => ({})],
+]) {
+  test(`画面を見る依頼で${label}ときは画像なしでAIへ送らず理由を出す`, async () => {
+    let sends = 0;
+    const errors = [];
+    const factory = load("chat/send.js", "createSender", {
+      bridge: {
+        listen: () => Promise.resolve(() => {}), captureScreen: capture,
+        send: async () => { sends += 1; return { reply: "見えない画面の推測" }; },
+        sendImage: async () => { sends += 1; return { reply: "返答" }; }, cancel: async () => {},
+      },
+      window: { PicoTaskRun: { createController: () => ({ start() {}, finish() {} }) } },
+      setTimeout: () => 0, clearTimeout() {}, cancelAnimationFrame() {},
+    });
+    const composer = { hasContent: () => true, take: () => ({ text: "画面を見て", images: [], files: [] }),
+      close() {}, setBlocked() {}, onSubmit() {}, setChoices() {}, restore() {} };
+    const noop = () => {};
+    const sender = factory({
+      chat: { composer, element: element(), status: { clear: noop, set: noop, setBusy: noop, flash: noop },
+        buttons: { regenerateButton: element(), cancelSendButton: element() },
+        history: { add: noop }, setThinking: noop, clearThinking: noop, showError: message => errors.push(message) },
+      voice: { stop: noop, beginStream: noop, cancelStream: noop },
+      motion: { setBusy: noop, react: noop }, notices: { upsertJob: noop }, engine: { blockedReason: () => "" },
+      relationship: {}, ambient: { onUserActivity: noop, afterConversation: noop }, mic: { scheduleContinuous: noop },
+    });
+    await sender.submit();
+    assert.equal(sends, 0, "撮影できないまま画像なしでAIへ送りました");
+    assert.equal(errors.length, 1);
+    assert.match(errors[0], /画面を撮影できませんでした/);
+    assert.equal(sender.busy, false);
+  });
+}

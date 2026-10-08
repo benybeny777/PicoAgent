@@ -123,6 +123,7 @@ graph TD
 - Ollama は tool 結果を位置・名前で扱うため `tool_call_id` を無視する（正規形には残す）。
 - `images` はマルチモーダル入力（省略可）。OpenAI 互換では user の `content` を `[{type:"text",...}, {type:"image_url",...}]` へ変換する。`usage` は `#[serde(skip)]` の一時フィールドで、返ったトークン数を持つ。
 - **スクリーンショット**: `pet_capture_screen` が主モニタを `xcap` で直接キャプチャし、PNG base64 data URL で返す（外部コマンドは使わない）。Windows / macOS / Linux 対応で、Linux は X11 と Wayland／PipeWire を持ち、OSの許可やポータルが拒否・未提供なら理由付きエラーを返す。対象外OSはビルドを保つスタブ。取得と変換は `spawn_blocking` で行う。フロントは「画面を見て」などの発話を検出して `pet_capture_screen` → `pet_send_image` へ切り替える。
+  - 「画面を見て」などの依頼で撮影できなかった（拒否・失敗・画像なし）場合は、画像なしでAIへ送らず、理由を表示して再送できる失敗にする（`ui/chat/send.js`）。見えていない画面をモデルに推測させないため。
 - **インライン画像**: `appendLinkedText()` が `![alt](url)` をフキダシ内の `<img>` として表示する。
 
 ### 手元の CLI エージェント（`providers/agent_cli.rs`）
