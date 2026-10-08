@@ -143,7 +143,7 @@ pub fn serve(app: &AppHandle) -> tauri::http::Response<Vec<u8>> {
     let state = app.state::<BootScreenState>();
     let app_url = state.app_url.lock().unwrap().clone();
     let detail = state.detail.lock().unwrap().clone();
-    let log_dir = crate::log_paths::log_dir(app).display().to_string();
+    let log_dir = crate::app_paths::log_dir(app).display().to_string();
 
     let detail_html = format!(
         "<b>状況</b>  {}\n<b>読み込み先</b>  {}\n<b>ログ</b>  {}",

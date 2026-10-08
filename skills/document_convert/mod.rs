@@ -20,7 +20,10 @@ fn bundled_office_dirs() -> Vec<PathBuf> {
 /// LibreOfficeの設定・ロック・キャッシュをPicoAgent管理下へ固定する起動引数。
 pub(crate) fn isolated_office_profile_arg() -> Result<String, String> {
     let bundled = office_profile_base()?;
-    let profile = bundled.parent().unwrap_or(&bundled).join("office-profile");
+    let profile = crate::app_paths::path_at(
+        bundled.parent().unwrap_or(&bundled),
+        crate::app_paths::DataPath::OfficeProfile,
+    );
     std::fs::create_dir_all(&profile)
         .map_err(|error| format!("Office専用プロファイルを作成できません: {error}"))?;
     let url = reqwest::Url::from_directory_path(&profile)

@@ -26,7 +26,7 @@ pub async fn ensure(app: &AppHandle, requested: &str) -> Result<PathBuf> {
         "記憶検索の実行先が不正です"
     );
     let _operation = crate::components::COMPONENT_OPERATION_LOCK.lock().await;
-    let root = crate::log_paths::bundled_dir(app).join("embedding-memory");
+    let root = crate::app_paths::bundled_dir(app).join("embedding-memory");
     let python = crate::components::python_executable(&root.join("venv"));
     let backend = if requested == "cpu" {
         "cpu"
@@ -100,7 +100,7 @@ pub async fn ensure(app: &AppHandle, requested: &str) -> Result<PathBuf> {
         "記憶検索環境の導入完了を確認できません"
     );
     // 成功時だけ、本処理専用の展開物と取得キャッシュを回収する。
-    let tools = crate::log_paths::bundled_dir(app).join("embedding-install-tools");
+    let tools = crate::app_paths::bundled_dir(app).join("embedding-install-tools");
     if tools.exists() {
         std::fs::remove_dir_all(&tools)?;
     }

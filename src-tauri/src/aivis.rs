@@ -146,7 +146,7 @@ fn managed_user_profile_paths(data_dir: &Path) -> (PathBuf, PathBuf, PathBuf, Pa
     // APPDATA だけでは Known Folder の参照先が変わらず、手動導入した Aivis と
     // Models・辞書・キャッシュを共有していた。専用プロファイル4変数を同時に渡し、
     // すべての実データを PicoAgent 管理下へ閉じ込める。
-    let profile = data_dir.join("aivis-userdata").join("profile");
+    let profile = crate::app_paths::path_at(data_dir, crate::app_paths::DataPath::AivisProfile);
     let roaming = profile.join("AppData").join("Roaming");
     let local = profile.join("AppData").join("Local");
     let aivis_data = roaming.join("AivisSpeech-Engine");
@@ -372,7 +372,7 @@ fn find_runtime(path: &Path) -> anyhow::Result<Option<PathBuf>> {
 fn runtime_engine_path(app: &tauri::AppHandle) -> Option<PathBuf> {
     let exe = if cfg!(windows) { "run.exe" } else { "run" };
     // 導入先は `bundled/aivis` だけ。旧配置（利用者データ直下の `aivis/`）は探さない。
-    match find_runtime(&crate::log_paths::bundled_dir(app).join("aivis").join(exe)) {
+    match find_runtime(&crate::app_paths::bundled_dir(app).join("aivis").join(exe)) {
         Ok(path) => path,
         Err(error) => {
             append_log_best_effort(
@@ -387,7 +387,7 @@ fn runtime_engine_path(app: &tauri::AppHandle) -> Option<PathBuf> {
 /// このビルドに同梱した Aivis の唯一の置き場所。作業フォルダや旧配置は探さない。
 fn resource_candidates(app: &tauri::AppHandle) -> Vec<PathBuf> {
     let exe = if cfg!(windows) { "run.exe" } else { "run" };
-    crate::log_paths::packaged_bundled_dir(app)
+    crate::app_paths::packaged_bundled_dir(app)
         .map(|packaged| vec![packaged.join("aivis").join(exe)])
         .unwrap_or_default()
 }
@@ -546,7 +546,7 @@ fn log_tail(app: &tauri::AppHandle) -> String {
 }
 
 fn install_dir(app: &tauri::AppHandle) -> anyhow::Result<PathBuf> {
-    Ok(crate::log_paths::bundled_dir(app).join("aivis"))
+    Ok(crate::app_paths::bundled_dir(app).join("aivis"))
 }
 
 fn release_asset_pattern() -> &'static str {
@@ -1192,7 +1192,7 @@ fn spawn_engine(
     }
     #[cfg(windows)]
     let managed_user_data =
-        configure_managed_user_profile(&mut command, &crate::log_paths::data_dir(app))?;
+        configure_managed_user_profile(&mut command, &crate::app_paths::data_dir(app))?;
     let mut log = std::fs::OpenOptions::new()
         .create(true)
         .append(true)

@@ -10,7 +10,7 @@ const LEGACY_IDENTIFIERS: [&str; 2] = ["com.picoagent.app", "com.coda.app"];
 pub fn migrate_identity_dirs(app: &AppHandle, current_config_dir: &Path) -> anyhow::Result<()> {
     std::fs::create_dir_all(current_config_dir)?;
     // 開発ビルドは空の専用領域から始め、通常版の旧識別子フォルダやWebView領域を移さない。
-    if crate::log_paths::dev_data_root().is_some() {
+    if crate::app_paths::dev_data_root().is_some() {
         return Ok(());
     }
     let mut sources = BTreeSet::new();
@@ -28,7 +28,10 @@ pub fn migrate_identity_dirs(app: &AppHandle, current_config_dir: &Path) -> anyh
             remove_empty_directories(&source)?;
         }
     }
-    let webview_target = current_config_dir.join("webview/main");
+    let webview_target = crate::app_paths::path_at(
+        current_config_dir,
+        crate::app_paths::DataPath::Webview("main"),
+    );
     let current_local = app.path().app_local_data_dir()?;
     let mut local_sources = BTreeSet::from([current_local.clone()]);
     if app.config().identifier == "com.picoagent.desktop" {

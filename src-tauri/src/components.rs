@@ -99,12 +99,12 @@ struct Progress {
 pub fn init(app: &AppHandle) {
     // フォールバック許可: `OnceLock::set` は2回目以降 Err を返すだけで、
     // 先に入っている同じ値がそのまま残る（起動時に一度だけ呼ぶ初期化）。
-    let _ = RUNTIME_ROOT.set(crate::log_paths::bundled_dir(app));
-    if let Some(root) = crate::log_paths::packaged_bundled_dir(app) {
+    let _ = RUNTIME_ROOT.set(crate::app_paths::bundled_dir(app));
+    if let Some(root) = crate::app_paths::packaged_bundled_dir(app) {
         let _ = PACKAGED_ROOT.set(root);
     }
     // キャラ作成の資産はこのビルドの同梱場所だけを使う（無いときに別の場所を探さない）。
-    if let Some(root) = crate::log_paths::packaged_character_maker_dir(app)
+    if let Some(root) = crate::app_paths::packaged_character_maker_dir(app)
         .filter(|root| root.join("sidecar").is_dir())
     {
         let _ = CHARACTER_MAKER_ASSETS.set(root);
@@ -128,7 +128,7 @@ pub fn runtime_root() -> Option<&'static Path> {
     RUNTIME_ROOT.get().map(PathBuf::as_path)
 }
 
-/// このビルドの同梱物の置き場所（`log_paths::packaged_bundled_dir`）。`AppHandle` を持たない
+/// このビルドの同梱物の置き場所（`app_paths::packaged_bundled_dir`）。`AppHandle` を持たない
 /// スキルから参照するため、起動時に一度だけ記録する。
 pub fn packaged_root() -> Option<&'static Path> {
     PACKAGED_ROOT.get().map(PathBuf::as_path)
@@ -289,13 +289,13 @@ pub fn managed_target_version(app: &AppHandle, id: &str) -> Result<String> {
 
 /// このビルドに同梱した追加機能の置き場所。無ければ未同梱として扱い、別の場所は探さない。
 fn packaged_dir(app: &AppHandle, id: &str) -> Option<PathBuf> {
-    crate::log_paths::packaged_bundled_dir(app)
+    crate::app_paths::packaged_bundled_dir(app)
         .map(|root| root.join(id))
         .filter(|path| path.is_dir())
 }
 
 fn installed_dir(app: &AppHandle, id: &str) -> PathBuf {
-    crate::log_paths::bundled_dir(app).join(id)
+    crate::app_paths::data_path(app, crate::app_paths::DataPath::Runtime(id))
 }
 
 /// GPUを使うPython機能は、機能ごとにPythonと同一wheelを複製せず、この1環境を共有する。
@@ -303,7 +303,7 @@ fn installed_dir(app: &AppHandle, id: &str) -> PathBuf {
 /// 共有するのはPython 3.12本体と仮想環境までで、PyTorchは実GPUに合うバックエンド
 /// （CUDAまたはROCm）を1つだけ導入する。両方を予備として入れない。
 pub(crate) fn shared_python_dir(app: &AppHandle) -> PathBuf {
-    crate::log_paths::bundled_dir(app).join("python")
+    crate::app_paths::bundled_dir(app).join("python")
 }
 
 /// 仮想環境のPython実行ファイル。OSでレイアウトが違うのでここへ集約する。
@@ -826,7 +826,7 @@ fn uv_asset() -> Option<UvAsset> {
 /// 記憶検索の導入用uvを公式固定資産から取得し、サイズとSHA-256を検証する。
 pub(crate) async fn acquire_embedding_uv(app: &AppHandle) -> Result<PathBuf> {
     let asset = uv_asset().context("この環境向けのPython管理ツール配布がありません")?;
-    let root = crate::log_paths::bundled_dir(app).join("embedding-install-tools");
+    let root = crate::app_paths::bundled_dir(app).join("embedding-install-tools");
     std::fs::create_dir_all(&root)?;
     let archive = root.join(asset.cache_name);
     download_to(
@@ -889,7 +889,7 @@ pub(crate) async fn ensure_shared_python(app: &AppHandle, uv: &Path) -> Result<P
         0,
     )
     .context("共通Python 3.12.13が見つかりません")?;
-    let venv = crate::log_paths::bundled_dir(app).join("embedding-install-tools/python-venv");
+    let venv = crate::app_paths::bundled_dir(app).join("embedding-install-tools/python-venv");
     if venv.exists() {
         std::fs::remove_dir_all(&venv)?;
     }
@@ -972,7 +972,7 @@ async fn install_character_maker(app: &AppHandle) -> Result<()> {
         0,
         0,
     );
-    let bundled = crate::log_paths::bundled_dir(app);
+    let bundled = crate::app_paths::bundled_dir(app);
     std::fs::create_dir_all(&bundled)?;
     anyhow::ensure!(
         free_disk_bytes(&bundled)? >= 85_000_000_000,
@@ -990,12 +990,12 @@ async fn install_character_maker(app: &AppHandle) -> Result<()> {
         .read_timeout(std::time::Duration::from_secs(120))
         .user_agent("PicoAgent/1.0 character maker installer")
         .build()?;
-    let cache = crate::log_paths::cache_dir(app).join("character-maker-installer");
+    let cache = crate::app_paths::cache_dir(app).join("character-maker-installer");
     let stage = installed_dir(app, "character-maker").with_file_name(format!(
         ".installing-character-maker-{}",
         std::process::id()
     ));
-    let python_stage = crate::log_paths::bundled_dir(app)
+    let python_stage = crate::app_paths::bundled_dir(app)
         .join(format!(".installing-python-{}", std::process::id()));
     cleanup_dir(app, "古いキャラ作成導入途中フォルダ", &stage).await;
     cleanup_dir(app, "古い共通Python導入途中フォルダ", &python_stage).await;
@@ -1186,7 +1186,7 @@ async fn install_character_maker(app: &AppHandle) -> Result<()> {
     .await;
     if result.is_err()
         && !["python", "character-maker"].iter().any(|id| {
-            crate::log_paths::bundled_dir(app)
+            crate::app_paths::bundled_dir(app)
                 .join(format!(".backup-{id}-{}", std::process::id()))
                 .exists()
         })
@@ -1209,7 +1209,7 @@ async fn install_modern_media_runtime(app: &AppHandle, id: &str, model: &str) ->
     let python = python_executable(&shared_python_dir(app));
     anyhow::ensure!(python.is_file(), "共通Pythonが未導入です。画像モデルは取得していません。既存キャラクター作成環境または開発用の共通Python導入が必要です");
     let assets = character_maker_assets().context("生成資源がありません")?;
-    let cache = crate::log_paths::cache_dir(app).join("media-runtime-installer");
+    let cache = crate::app_paths::cache_dir(app).join("media-runtime-installer");
     tokio::fs::create_dir_all(&cache).await?;
     let model_root = installed_dir(app, id);
     tokio::fs::create_dir_all(&model_root).await?;
@@ -1289,7 +1289,7 @@ async fn install_media_model(
         "ローカル動画生成はWindows x64とApple Silicon Mac専用です（Intel Macは対象外）"
     );
     let nvfp4 = crate::generation_backend::is_nvfp4_component(id);
-    let bundled = crate::log_paths::bundled_dir(app);
+    let bundled = crate::app_paths::bundled_dir(app);
     std::fs::create_dir_all(&bundled)?;
     // 専用ランタイムも大容量なので、取得・更新する前に全工程の必要容量を確かめる。
     anyhow::ensure!(
@@ -1354,7 +1354,7 @@ async fn install_media_model(
     );
     let stage =
         installed_dir(app, id).with_file_name(format!(".installing-{id}-{}", std::process::id()));
-    let cache = crate::log_paths::cache_dir(app)
+    let cache = crate::app_paths::cache_dir(app)
         .join("media-model-installer")
         .join(id);
     cleanup_dir(app, "古い動画モデル導入途中フォルダ", &stage).await;
@@ -1420,7 +1420,7 @@ fn stale_install_pid(name: &str, current_pid: &str) -> Option<u32> {
 }
 
 async fn cleanup_stale_install_stages(app: &AppHandle) -> Result<()> {
-    let bundled = crate::log_paths::bundled_dir(app);
+    let bundled = crate::app_paths::bundled_dir(app);
     let mut entries = match tokio::fs::read_dir(&bundled).await {
         Ok(entries) => entries,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
@@ -1717,7 +1717,7 @@ async fn install_whisper(app: &AppHandle) -> Result<()> {
         .json::<serde_json::Value>()
         .await?;
     let (asset_url, asset_size, asset_sha256) = whisper_asset(&release)?;
-    let cache = crate::log_paths::cache_dir(app).join("component-installer");
+    let cache = crate::app_paths::cache_dir(app).join("component-installer");
     tokio::fs::create_dir_all(&cache).await?;
     let archive = cache.join("whisper.zip.part");
     let unpacked = cache.join(format!("whisper-unpacked-{}", std::process::id()));

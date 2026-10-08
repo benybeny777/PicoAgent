@@ -436,7 +436,7 @@ fn is_completed_engine_backup(name: &str, id: &str, current_pid: u32) -> bool {
 
 #[cfg(windows)]
 async fn ensure_gpu_engine(app: &AppHandle, backend: &GpuBackend) -> Result<PathBuf> {
-    let root = crate::log_paths::bundled_dir(app).join(format!("engine-{}", backend.id));
+    let root = crate::app_paths::bundled_dir(app).join(format!("engine-{}", backend.id));
     let server = root.join("llama-server.exe");
     let manifest_path = root.join("picoagent-engine-backend.json");
     if server.is_file()

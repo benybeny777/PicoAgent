@@ -1,5 +1,6 @@
 // log_paths.rs - 実行時ログをまとめる共通パス。
 
+use crate::app_paths::{data_dir, log_dir};
 use std::path::{Path, PathBuf};
 
 use chrono::{Duration, Local, NaiveDate};
@@ -8,82 +9,6 @@ use tauri::{AppHandle, Manager};
 // ログの保持期間（日）。1日ごとにファイルを分け、これより古い日付のログは消す。
 // 履歴（history-<キャラID>.json）は対話データなのでローテーション対象に含めない。
 const LOG_RETAIN_DAYS: i64 = 7;
-
-/// 開発ビルドの保存先の根（Windowsは `%APPDATA%\PicoAgent-Dev`）。製品ビルドでは `None`。
-///
-/// 開発中の設定・履歴・キャラ・記憶・モデル・同梱ランタイムを、インストーラで入れた通常版の
-/// `PicoAgent` と完全に分ける。起動経路（起動バッチ・`cargo xtask dev`・`cargo tauri dev`）ではなく
-/// ビルドの種類で決めるので、どの起動でも通常版の領域へは触れない。リポジトリの外に置き、
-/// worktree や clone を作り直しても取得済みのモデル・音声を共有する。
-pub fn dev_data_root() -> Option<PathBuf> {
-    // フォールバック許可: OSの保存先を取れない開発環境でも、通常版の領域へは降格させない。
-    cfg!(debug_assertions)
-        .then(|| dev_data_root_for(&dirs::data_dir().unwrap_or_else(std::env::temp_dir)))
-}
-
-/// OSの利用者データ領域から開発用の保存先を決める。
-fn dev_data_root_for(os_data_dir: &Path) -> PathBuf {
-    os_data_dir.join("PicoAgent-Dev")
-}
-
-/// このビルドの同梱物（`resources/bundled`）の唯一の置き場所。
-///
-/// 製品ビルドはインストール先の `resources/bundled/`、開発ビルドはリポジトリの
-/// `src-tauri/resources/bundled/`。作業フォルダや実行ファイルの位置から推測したり、
-/// 無いときに別の置き場所を探したりしない（開発中の資産を製品で使わないため）。
-pub fn packaged_bundled_dir(app: &AppHandle) -> Option<PathBuf> {
-    if cfg!(debug_assertions) {
-        return Some(Path::new(env!("CARGO_MANIFEST_DIR")).join("resources/bundled"));
-    }
-    app.path()
-        .resource_dir()
-        .ok()
-        .map(|root| root.join("resources/bundled"))
-}
-
-/// キャラ作成の同梱資産（`character-maker`）の唯一の置き場所。考え方は `packaged_bundled_dir` と同じ。
-pub fn packaged_character_maker_dir(app: &AppHandle) -> Option<PathBuf> {
-    if cfg!(debug_assertions) {
-        return Path::new(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .map(|root| root.join("character-maker"));
-    }
-    app.path()
-        .resource_dir()
-        .ok()
-        .map(|root| root.join("character-maker"))
-}
-
-/// 保存先の根と識別子から、このアプリが使う管理領域を決める。
-/// 製品の識別子は根をそのまま使い、検査用など別の識別子は `instances/<識別子>` へ分ける。
-fn managed_dir(root: PathBuf, identifier: &str) -> PathBuf {
-    if identifier == "com.picoagent.desktop" {
-        root
-    } else {
-        root.join("instances").join(identifier)
-    }
-}
-
-pub fn data_dir(app: &AppHandle) -> PathBuf {
-    let identifier = app.config().identifier.as_str();
-    if let Some(root) = dev_data_root() {
-        return managed_dir(root, identifier);
-    }
-    match app.path().app_data_dir() {
-        Ok(path) => {
-            let root = path
-                .parent()
-                .map(|parent| parent.join("PicoAgent"))
-                .unwrap_or(path);
-            managed_dir(root, identifier)
-        }
-        // フォールバック許可: 保存先取得自体の失敗を記録するため、ログだけは一時領域へ退避する。
-        Err(error) => {
-            eprintln!("ログ保存先を取得できないため一時領域を使います: {error}");
-            std::env::temp_dir().join("PicoAgent")
-        }
-    }
-}
 
 /// 旧版が利用者データ直下に置いていた配置（`aivis/`・`models/`）。現在は `bundled/` 配下だけを使い、
 /// 旧配置は探しも再利用もしない。置き去りにすると数GBが残り続けるため、新しい配置の準備に
@@ -122,12 +47,7 @@ fn remove_legacy_layout_dir_at(root: &Path, name: &str) -> std::io::Result<bool>
 
 /// webview へ asset プロトコルで読ませる保存先配下のフォルダ。
 /// `tauri.conf.json` の `assetProtocol.scope`（`$DATA/PicoAgent/<フォルダ>/**`）と同じ並びを保つ。
-pub const ASSET_SCOPE_DIRS: [&str; 4] = [
-    "characters",
-    "display",
-    "character-maker/characters",
-    "generated-media",
-];
+pub use picoagent_core::paths::ASSET_SCOPE_DIRS;
 
 /// 静的な許可範囲は通常版の保存先（`$DATA/PicoAgent`）だけを指す。開発ビルドの `PicoAgent-Dev` や
 /// 検査用の別識別子（`instances/<識別子>`）でも同じフォルダだけを表示できるよう、起動時に足す。
@@ -148,18 +68,6 @@ pub fn allow_asset_scope(app: &AppHandle) {
             );
         }
     }
-}
-
-pub fn cache_dir(app: &AppHandle) -> PathBuf {
-    data_dir(app).join("cache")
-}
-
-pub fn log_dir(app: &AppHandle) -> PathBuf {
-    data_dir(app).join("log")
-}
-
-pub fn bundled_dir(app: &AppHandle) -> PathBuf {
-    data_dir(app).join("bundled")
 }
 
 /// ベース名（例 `app.log`）に当日の日付を挟んだファイル名を返す（例 `app.2026-06-28.log`）。
@@ -307,7 +215,7 @@ mod guard {
     /// 触ったり、同じPCでビルドした製品が開発中の資産を使ったりする。保存先は `data_dir()`、
     /// 同梱物は `packaged_bundled_dir()` / `components::runtime_dirs()` を通す。
     #[test]
-    fn 保存先と同梱物はlog_pathsを通して開発ビルドと製品を分ける() {
+    fn 保存先と同梱物はapp_pathsを通して開発ビルドと製品を分ける() {
         const DIRECT: &[&str] = &[
             ".app_data_dir()",
             ".app_local_data_dir()",
@@ -323,11 +231,10 @@ mod guard {
         ];
         // 理由付きの例外。
         const ALLOWED: &[&str] = &[
-            "src/log_paths.rs",       // 保存先・同梱物の正本（開発ビルドの判定はここだけ）
-            "src/migration.rs",       // 旧識別子フォルダの移行（開発ビルドは冒頭で抜ける）
-            "browser_control/cdp.rs", // ブラウザ専用プロファイル（開発ビルドは dev_data_root を先に返す）
-            "src/doc_sync.rs",        // テスト専用モジュール（文書と実装の突き合わせ）
-            "src/guard_scan.rs",      // テスト専用モジュール（設計ガードの走査範囲）
+            "src/app_paths.rs",  // 保存先・同梱物の正本（開発ビルドの判定はここだけ）
+            "src/migration.rs",  // 旧識別子フォルダの移行（開発ビルドは冒頭で抜ける）
+            "src/doc_sync.rs",   // テスト専用モジュール（文書と実装の突き合わせ）
+            "src/guard_scan.rs", // テスト専用モジュール（設計ガードの走査範囲）
         ];
         let mut violations = Vec::new();
         for source in guard_scan::all_sources() {
@@ -351,7 +258,7 @@ mod guard {
         }
         assert!(
             violations.is_empty(),
-            "保存先は log_paths::data_dir()、同梱物は packaged_bundled_dir() を通してください:\n{}",
+            "保存先は app_paths::data_dir()、同梱物は packaged_bundled_dir() を通してください:\n{}",
             violations.join("\n")
         );
     }
@@ -391,6 +298,7 @@ mod guard {
         // 理由付きの例外。どちらも「ログへ書けないこと自体」を伝える最後の手段。
         const ALLOWED: &[&str] = &[
             "src/log_paths.rs", // ログ保存先の取得失敗と app.log への書き込み失敗
+            "src/app_paths.rs", // 保存先の取得自体に失敗した最初期の診断
             "src/lib.rs",       // ログ置き場を作れなかった起動最初期
         ];
         let mut violations = Vec::new();
@@ -417,20 +325,7 @@ mod guard {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        date_in_name, dev_data_root, dev_data_root_for, is_prunable_log, managed_dir, tail_lines,
-    };
-    use std::path::{Path, PathBuf};
-
-    #[test]
-    fn 開発用の保存先は通常版と別のフォルダにする() {
-        let os = Path::new("/home/me/.local/share");
-        let root = dev_data_root_for(os);
-        assert_eq!(root, os.join("PicoAgent-Dev"));
-        assert_ne!(root, os.join("PicoAgent"));
-        // テストは開発ビルドなので、通常版の `PicoAgent` ではなく `PicoAgent-Dev` を指す。
-        assert!(dev_data_root().unwrap().ends_with("PicoAgent-Dev"));
-    }
+    use super::{date_in_name, is_prunable_log, tail_lines};
 
     #[test]
     fn 実行時に足す読込許可は静的な許可範囲と同じフォルダだけにする() {
@@ -479,16 +374,6 @@ mod tests {
         }
         assert!(!root.join("aivis").exists() && !root.join("models").exists());
         std::fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn 製品の識別子は根を使い別の識別子はinstancesへ分ける() {
-        let root = PathBuf::from("/data/PicoAgent");
-        assert_eq!(managed_dir(root.clone(), "com.picoagent.desktop"), root);
-        assert_eq!(
-            managed_dir(root.clone(), "com.picoagent.ui-check"),
-            root.join("instances").join("com.picoagent.ui-check")
-        );
     }
 
     #[test]

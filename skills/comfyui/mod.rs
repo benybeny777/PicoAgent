@@ -125,10 +125,10 @@ impl SidecarRequest<'_> {
 }
 
 fn prepare_generation_environment(bundled: &std::path::Path) -> Result<PathBuf, String> {
-    let root = bundled
-        .parent()
-        .unwrap_or(bundled)
-        .join("generation-runtime-data");
+    let root = crate::app_paths::path_at(
+        bundled.parent().unwrap_or(bundled),
+        crate::app_paths::DataPath::GenerationProfile,
+    );
     for directory in [root.join("home"), root.join("cache"), root.join("temp")] {
         std::fs::create_dir_all(&directory)
             .map_err(|error| format!("生成ランタイムの管理領域を作成できません: {error}"))?;
@@ -179,7 +179,7 @@ fn generation_root() -> Result<PathBuf, String> {
     })?;
     bundled
         .parent()
-        .map(|parent| parent.join("generated-media"))
+        .map(|parent| crate::app_paths::path_at(parent, crate::app_paths::DataPath::GeneratedMedia))
         .ok_or_else(|| "エラー: 生成結果の保存先を取得できません。".to_string())
 }
 
@@ -466,10 +466,10 @@ impl Tool for ComfyuiTool {
             return "エラー: 追加機能の管理領域がまだ準備できていません。少し待ってから再試行してください。"
                 .into();
         };
-        let lock = bundled
-            .parent()
-            .unwrap_or(bundled)
-            .join("character-maker/characters/temp/completion-gpu.lock");
+        let lock = crate::app_paths::path_at(
+            bundled.parent().unwrap_or(bundled),
+            crate::app_paths::DataPath::MakerGpuLock,
+        );
         let script = assets.join("sidecar/media/generate.py");
         if !script.is_file() {
             return "エラー: 画像・動画生成サイドカーが壊れています。アプリを修復してください。"

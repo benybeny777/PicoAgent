@@ -36,7 +36,10 @@ pub struct UserCharacter {
 
 /// 追加キャラクターの置き場（`PicoAgent/characters`）。
 pub fn root(app: &AppHandle) -> Result<PathBuf> {
-    Ok(crate::log_paths::data_dir(app).join("characters"))
+    Ok(crate::app_paths::data_path(
+        app,
+        crate::app_paths::DataPath::Characters,
+    ))
 }
 
 /// 導入済みの追加キャラクター一覧。壊れているものは飛ばして続ける。

@@ -324,7 +324,7 @@ async fn step(cfg: &Config, operation: &mut Operation, sequence: usize) -> Resul
     let request = crate::agent::request_id().ok_or("依頼を識別できないため停止しました。")?;
     let history = reserve(&request, cancel, settings.limit, sequence)?;
     let target = platform::select(&settings.title)?;
-    let root = cfg.config_dir()?.join("gameplay");
+    let root = crate::app_paths::path_at(&cfg.config_dir()?, crate::app_paths::DataPath::Gameplay);
     let root_safe = SafePath::app_owned(root.clone());
     permissions::fs::create_dir_all(&root_safe)?;
     // 一意なアプリ所有ディレクトリを永続記録として残す。利用者由来パスは受け取らない。

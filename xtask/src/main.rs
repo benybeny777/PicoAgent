@@ -282,7 +282,7 @@ fn tauri(mode: &str, extra: &[String], build: Build) -> Result<()> {
 }
 
 fn dev_log_path() -> std::path::PathBuf {
-    // 開発ビルドの保存先（src-tauri/src/log_paths.rs の dev_data_root）と同じ `PicoAgent-Dev` へ置き、
+    // 開発ビルドの保存先（src-tauri/src/app_paths.rs の dev_data_root）と同じ `PicoAgent-Dev` へ置き、
     // インストーラで入れた通常版のログフォルダへ開発中の出力を混ぜない。
     let base = if cfg!(target_os = "windows") {
         std::env::var_os("APPDATA").map(std::path::PathBuf::from)
@@ -301,7 +301,11 @@ fn dev_log_path() -> std::path::PathBuf {
             })
     }
     .unwrap_or_else(std::env::temp_dir);
-    base.join("PicoAgent-Dev").join("log").join(format!(
+    picoagent_core::paths::path_at(
+        &picoagent_core::paths::development_root(&base),
+        picoagent_core::paths::DataPath::Log,
+    )
+    .join(format!(
         "dev.{}.log",
         chrono::Local::now().format("%Y-%m-%d")
     ))

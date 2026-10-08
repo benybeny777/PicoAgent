@@ -100,11 +100,10 @@ pub fn settings_character_maker_preview(
     let title = format!("{} - PicoAgent キャラ確認", manifest.display_name);
     let url = format!("character-preview.html?characterId={character_id}");
     let mut builder = WebviewWindowBuilder::new(&app, &label, WebviewUrl::App(url.into()));
-    builder = builder.data_directory(
-        crate::log_paths::data_dir(&app)
-            .join("webview")
-            .join(&label),
-    );
+    builder = builder.data_directory(crate::app_paths::data_path(
+        &app,
+        crate::app_paths::DataPath::Webview(&label),
+    ));
     // WebView2の起動条件はメイン画面と揃える。
     if let Some(args) = app
         .config()
@@ -178,11 +177,11 @@ pub fn settings_character_maker_preview_data(
 }
 
 fn paths(app: &AppHandle) -> Result<(PipelineContext, MakerConfig)> {
-    let data = crate::log_paths::data_dir(app);
-    let bundled = crate::log_paths::bundled_dir(app);
+    let data = crate::app_paths::data_dir(app);
+    let bundled = crate::app_paths::bundled_dir(app);
     let managed = bundled.join("character-maker");
     // このビルドの同梱場所だけを使う。製品で開発用リポジトリの資産へ降格しない。
-    let assets_root = crate::log_paths::packaged_character_maker_dir(app)
+    let assets_root = crate::app_paths::packaged_character_maker_dir(app)
         .context("キャラ作成リソース領域を取得できません")?;
     let mut config = MakerConfig::managed(managed, crate::components::shared_python_dir(app));
     // 専用VRAM16GB未満・共有メモリ・VRAM不明では、ComfyUIを省メモリ設定で起動する。
@@ -198,7 +197,10 @@ fn paths(app: &AppHandle) -> Result<(PipelineContext, MakerConfig)> {
         backend.is_none_or(crate::generation_backend::GenerationBackend::supports_lowvram);
     Ok((
         PipelineContext {
-            characters_root: data.join("character-maker/characters"),
+            characters_root: crate::app_paths::path_at(
+                &data,
+                crate::app_paths::DataPath::MakerCharacters,
+            ),
             assets_root,
         },
         config,
@@ -494,7 +496,7 @@ fn install_completed(app: &AppHandle, character_id: &str) -> Result<Value> {
     }
     let source = pipeline.character_dir(character_id)?;
     let reader = Reader::acquire(&source, config.snapshot_part_bytes)?;
-    let staging_parent = crate::log_paths::data_dir(app).join("character-maker/staging");
+    let staging_parent = crate::app_paths::data_path(app, crate::app_paths::DataPath::MakerStaging);
     fs::create_dir_all(&staging_parent)?;
     let staging = tempfile::Builder::new()
         .prefix("install-")

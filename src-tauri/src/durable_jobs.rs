@@ -9,7 +9,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter, Manager};
 
-const STORE_NAME: &str = "durable-jobs.json";
 const STORE_LOCK: &str = "durable-jobs";
 const MAX_JOBS: usize = 200;
 const MAX_RESULT_CHARS: usize = 12_000;
@@ -528,7 +527,7 @@ fn recover() -> Result<Vec<String>, String> {
 }
 
 pub fn start(app: AppHandle) {
-    let path = crate::log_paths::data_dir(&app).join(STORE_NAME);
+    let path = crate::app_paths::data_path(&app, crate::app_paths::DataPath::Jobs);
     let _ = APP.set(app.clone());
     let _ = STORE_PATH.set(path.clone());
     let token = format!(

@@ -29,7 +29,10 @@ pub struct MemoryStore {
 }
 
 pub fn path(app: &AppHandle) -> anyhow::Result<PathBuf> {
-    Ok(crate::log_paths::data_dir(app).join("memory.json"))
+    Ok(crate::app_paths::data_path(
+        app,
+        crate::app_paths::DataPath::Memory,
+    ))
 }
 
 pub fn load(app: &AppHandle) -> anyhow::Result<MemoryStore> {
@@ -124,7 +127,7 @@ pub fn clear(app: &AppHandle) -> anyhow::Result<()> {
 }
 
 pub fn invalidate_cache(app: &AppHandle) -> anyhow::Result<()> {
-    let vectors = crate::log_paths::data_dir(app).join("memory-vectors.json");
+    let vectors = crate::app_paths::data_path(app, crate::app_paths::DataPath::MemoryVectors);
     for target in [vectors.clone(), vectors.with_extension("corrupt")] {
         match std::fs::remove_file(target) {
             Ok(()) => {}

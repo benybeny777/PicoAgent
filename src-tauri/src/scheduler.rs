@@ -235,7 +235,10 @@ pub fn reconcile_settings_patch(
 }
 
 fn run_history_path(app: &AppHandle) -> anyhow::Result<PathBuf> {
-    Ok(crate::log_paths::data_dir(app).join("schedule-runs.json"))
+    Ok(crate::app_paths::data_path(
+        app,
+        crate::app_paths::DataPath::ScheduleRuns,
+    ))
 }
 
 pub fn load_run_history(app: &AppHandle) -> anyhow::Result<Vec<ScheduledRunRecord>> {
