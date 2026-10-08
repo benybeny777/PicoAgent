@@ -14,22 +14,7 @@ pub struct DocumentConvertTool;
 
 /// 同梱 OfficeCLI（LibreOffice）の探索先ディレクトリ候補。
 fn bundled_office_dirs() -> Vec<PathBuf> {
-    let mut dirs = Vec::new();
-    if let Some(root) = crate::components::runtime_root() {
-        dirs.push(root.join("office"));
-    }
-    if let Ok(cwd) = std::env::current_dir() {
-        dirs.push(cwd.join("src-tauri/resources/bundled/office"));
-        dirs.push(cwd.join("resources/bundled/office"));
-    }
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(parent) = exe.parent() {
-            dirs.push(parent.join("resources/bundled/office"));
-            dirs.push(parent.join("../Resources/resources/bundled/office"));
-            dirs.push(parent.join("../../resources/bundled/office"));
-        }
-    }
-    dirs
+    crate::components::runtime_dirs("office")
 }
 
 /// LibreOfficeの設定・ロック・キャッシュをPicoAgent管理下へ固定する起動引数。

@@ -174,25 +174,9 @@ inventory::collect!(ToolReg);
 include!(concat!(env!("OUT_DIR"), "/tool_mods.rs"));
 
 /// 同梱 CLI ツール（`cargo xtask setup tools` → resources/bundled/tools/<ツール名>/）の探索先候補。
-/// 開発時（cwd 基準）とパッケージ後（実行ファイル基準）の両レイアウトに対応する。
+/// 追加導入した物、このビルドの同梱物の順。作業フォルダや実行ファイルの位置からは探さない。
 fn bundled_tool_dirs(tool: &str) -> Vec<PathBuf> {
-    let rel = format!("resources/bundled/tools/{tool}");
-    let mut dirs = Vec::new();
-    if let Some(root) = crate::components::runtime_root() {
-        dirs.push(root.join("tools").join(tool));
-    }
-    if let Ok(cwd) = std::env::current_dir() {
-        dirs.push(cwd.join("src-tauri").join(&rel));
-        dirs.push(cwd.join(&rel));
-    }
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(parent) = exe.parent() {
-            dirs.push(parent.join(&rel));
-            dirs.push(parent.join("../Resources").join(&rel));
-            dirs.push(parent.join("../..").join(&rel));
-        }
-    }
-    dirs
+    crate::components::runtime_dirs(&format!("tools/{tool}"))
 }
 
 /// ディレクトリ配下から実行ファイルを再帰探索する（アーカイブの展開レイアウト差異に強くする）。

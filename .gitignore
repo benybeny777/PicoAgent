@@ -35,8 +35,6 @@ ui-dist/
 .tmp/
 /tmp-*
 /temp/
-# 開発ビルドの保存先（設定・履歴・モデル・同梱ランタイム）。利用者データと同じく追跡しない。
-/dev-data/
 
 # キャラの配信コピー（正本は characters/。cargo xtask sync-characters で生成）
 ui/assets/characters/

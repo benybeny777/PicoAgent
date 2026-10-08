@@ -14,7 +14,7 @@ use anyhow::{Context, Result};
 use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter};
 
 const MAX_DOWNLOAD_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 const MAX_EXTRACTED_BYTES: u64 = 4 * 1024 * 1024 * 1024;
@@ -37,6 +37,7 @@ const WHISPER_MODEL_URL: &str =
 const WHISPER_MODEL_SHA256: &str =
     "1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b";
 static RUNTIME_ROOT: OnceLock<PathBuf> = OnceLock::new();
+static PACKAGED_ROOT: OnceLock<PathBuf> = OnceLock::new();
 static CHARACTER_MAKER_ASSETS: OnceLock<PathBuf> = OnceLock::new();
 pub(crate) static COMPONENT_OPERATION_LOCK: tokio::sync::Mutex<()> =
     tokio::sync::Mutex::const_new(());
@@ -99,16 +100,13 @@ pub fn init(app: &AppHandle) {
     // フォールバック許可: `OnceLock::set` は2回目以降 Err を返すだけで、
     // 先に入っている同じ値がそのまま残る（起動時に一度だけ呼ぶ初期化）。
     let _ = RUNTIME_ROOT.set(crate::log_paths::bundled_dir(app));
-    let packaged = app
-        .path()
-        .resource_dir()
-        .ok()
-        .map(|root| root.join("character-maker"))
-        .filter(|root| root.join("sidecar").is_dir());
-    let development = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .map(|root| root.join("character-maker"));
-    if let Some(root) = packaged.or(development) {
+    if let Some(root) = crate::log_paths::packaged_bundled_dir(app) {
+        let _ = PACKAGED_ROOT.set(root);
+    }
+    // キャラ作成の資産はこのビルドの同梱場所だけを使う（無いときに別の場所を探さない）。
+    if let Some(root) = crate::log_paths::packaged_character_maker_dir(app)
+        .filter(|root| root.join("sidecar").is_dir())
+    {
         let _ = CHARACTER_MAKER_ASSETS.set(root);
     }
     // 前回の導入・入れ替えが途中で落ちた残りを起動時に片付ける。導入操作のときだけ
@@ -128,6 +126,22 @@ pub fn init(app: &AppHandle) {
 
 pub fn runtime_root() -> Option<&'static Path> {
     RUNTIME_ROOT.get().map(PathBuf::as_path)
+}
+
+/// このビルドの同梱物の置き場所（`log_paths::packaged_bundled_dir`）。`AppHandle` を持たない
+/// スキルから参照するため、起動時に一度だけ記録する。
+pub fn packaged_root() -> Option<&'static Path> {
+    PACKAGED_ROOT.get().map(PathBuf::as_path)
+}
+
+/// 追加導入した物（利用者データの `bundled/`）、このビルドの同梱物の順で、名前付きの置き場所を返す。
+/// 作業フォルダ・実行ファイルの位置・旧配置からは探さない。
+pub fn runtime_dirs(name: &str) -> Vec<PathBuf> {
+    [runtime_root(), packaged_root()]
+        .into_iter()
+        .flatten()
+        .map(|root| root.join(name))
+        .collect()
 }
 
 pub(crate) fn character_maker_assets() -> Option<PathBuf> {
@@ -207,20 +221,12 @@ fn definitions(id: &str) -> Option<(&'static str, &'static str, &'static str)> {
     }
 }
 
-fn manifest(app: &AppHandle) -> Result<Manifest> {
-    let resource = app
-        .path()
-        .resource_dir()
-        .context("アプリ資源フォルダを取得できません")?
-        .join("resources/component-manifest.json");
-    let text = if resource.is_file() {
-        std::fs::read_to_string(&resource)
-            .with_context(|| format!("{} を読めません", resource.display()))?
-    } else {
-        include_str!("../resources/component-manifest.json").to_string()
-    };
+fn manifest(_app: &AppHandle) -> Result<Manifest> {
+    // 取得元情報はビルド時に実行ファイルへ埋め込んだ1つだけを使う（インストール先のファイルと
+    // 埋め込みの2段にしない）。
     let parsed: Manifest =
-        serde_json::from_str(&text).context("追加機能の取得元情報が壊れています")?;
+        serde_json::from_str(include_str!("../resources/component-manifest.json"))
+            .context("追加機能の取得元情報が壊れています")?;
     anyhow::ensure!(parsed.version == 2, "未対応の追加機能取得元情報です");
     anyhow::ensure!(
         parsed.policy == "direct-upstream",
@@ -281,24 +287,11 @@ pub fn managed_target_version(app: &AppHandle, id: &str) -> Result<String> {
         .with_context(|| format!("{id} の配布対象版がありません"))
 }
 
+/// このビルドに同梱した追加機能の置き場所。無ければ未同梱として扱い、別の場所は探さない。
 fn packaged_dir(app: &AppHandle, id: &str) -> Option<PathBuf> {
-    let resources = app.path().resource_dir().ok()?;
-    [
-        resources.join("resources/bundled").join(id),
-        resources.join("bundled").join(id),
-    ]
-    .into_iter()
-    .find(|path| path.is_dir())
-}
-
-fn development_dir(id: &str) -> Option<PathBuf> {
-    let cwd = std::env::current_dir().ok()?;
-    [
-        cwd.join("src-tauri/resources/bundled").join(id),
-        cwd.join("resources/bundled").join(id),
-    ]
-    .into_iter()
-    .find(|path| path.is_dir())
+    crate::log_paths::packaged_bundled_dir(app)
+        .map(|root| root.join(id))
+        .filter(|path| path.is_dir())
 }
 
 fn installed_dir(app: &AppHandle, id: &str) -> PathBuf {
@@ -549,7 +542,7 @@ pub fn statuses(app: &AppHandle) -> Result<Vec<ComponentStatus>> {
             } else {
                 installed_root.is_dir()
             };
-            let packaged_root = packaged_dir(app, id).or_else(|| development_dir(id));
+            let packaged_root = packaged_dir(app, id);
             let packaged = packaged_root.is_some();
             let system = external_ready(id);
             let version_root = if installed {

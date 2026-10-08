@@ -181,20 +181,9 @@ fn paths(app: &AppHandle) -> Result<(PipelineContext, MakerConfig)> {
     let data = crate::log_paths::data_dir(app);
     let bundled = crate::log_paths::bundled_dir(app);
     let managed = bundled.join("character-maker");
-    let installed_assets = app
-        .path()
-        .resource_dir()
-        .context("キャラ作成リソース領域を取得できません")?
-        .join("character-maker");
-    let development_assets = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .context("PicoAgentリポジトリルートを取得できません")?
-        .join("character-maker");
-    let assets_root = if installed_assets.join("sidecar").is_dir() {
-        installed_assets
-    } else {
-        development_assets
-    };
+    // このビルドの同梱場所だけを使う。製品で開発用リポジトリの資産へ降格しない。
+    let assets_root = crate::log_paths::packaged_character_maker_dir(app)
+        .context("キャラ作成リソース領域を取得できません")?;
     let mut config = MakerConfig::managed(managed, crate::components::shared_python_dir(app));
     // 専用VRAM16GB未満・共有メモリ・VRAM不明では、ComfyUIを省メモリ設定で起動する。
     // MPS（Apple Silicon）は専用VRAM判定を流用せず、検証済みの起動設定だけを使う。

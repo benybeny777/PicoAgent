@@ -137,22 +137,7 @@ fn minutes_path_from_transcript(
 }
 
 fn bundled_whisper_dirs() -> Vec<PathBuf> {
-    let mut dirs = Vec::new();
-    if let Some(root) = crate::components::runtime_root() {
-        dirs.push(root.join("whisper"));
-    }
-    if let Ok(cwd) = std::env::current_dir() {
-        dirs.push(cwd.join("src-tauri/resources/bundled/whisper"));
-        dirs.push(cwd.join("resources/bundled/whisper"));
-    }
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(parent) = exe.parent() {
-            dirs.push(parent.join("resources/bundled/whisper"));
-            dirs.push(parent.join("../Resources/resources/bundled/whisper"));
-            dirs.push(parent.join("../../resources/bundled/whisper"));
-        }
-    }
-    dirs
+    crate::components::runtime_dirs("whisper")
 }
 
 fn bundled_whisper_dir() -> Option<PathBuf> {
