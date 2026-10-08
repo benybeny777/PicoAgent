@@ -89,6 +89,20 @@
 | 画像・動画モデル、記憶検索のembeddinggemma、Whisper smallモデル | 各固定リビジョン | 未確認 | huggingface.co |
 | Live2D Cubism Core | 05／06系の固定SHA-256 | 未確認 | cubism.live2d.com |
 | LibreOffice | 25.8.7.2 | 未確認 | downloadarchive.documentfoundation.org |
+| ImageMagick・popplerの変更内容 | 7.1.2-32、26.09.0-0へ更新済み | 改善点は未確認 | GitHub Releases。PicoAgentの画像変換・PDF抽出に効く修正があるかを確認する |
+
+方針（利用者判断、2026-10-08）:
+- Python本体は3.12系のまま据え置く。3.13以降はAMDのWindows向けROCm版PyTorchがPython 3.12専用で、上げても改善が小さいため。
+- 古いGPUのサポートは切り捨ててよい。古いGPUのために古いPyTorch／CUDAへ留めない。
+- 毎月1日8:53（日本時間）にルーチン「月次依存最新化」が同じ範囲を確認し、PRを作る（マージはしない）。
+
+### PIXI 8とLive2D表示ライブラリの移行（メジャー更新）
+
+Cargo・npmの直接依存は最新に揃っており、残るメジャー更新はPIXI 6.5.10→8系だけである。現行の`pixi-live2d-display` 0.4.0（2022年で更新停止）はPIXI 8に非対応のため、表示ライブラリごと置き換える。
+
+| 内容 | 着手条件・完了条件 |
+|---|---|
+| 候補は`untitled-pixi-live2d-engine` 1.4.0（MIT、PIXI 8／Cubism 2〜5対応、pixi-live2d-display系の作り直し、`Live2DModel.from`は同じ）。0.x版の`@laplace.live/pixijs-live2d`は不採用。PIXI 8で変わる箇所は、`Application`の非同期初期化（`await app.init()`）、`SimplePlane`→`MeshPlane`、`Texture.from`の読み込み方法。対象は`ui/character/live2d.js`・`ui/character/runtime.js`・`ui/mesh-rig.js`・`xtask/src/bundled.rs`（固定URLとSHA-256）・ライセンス表記 | 着手条件: cubism.live2d.comへ到達でき、Cubism Coreを固定SHA-256で取得できる環境。完了条件: 同梱Live2D（ひより・ハル・マオ等）と自前メッシュリグの通常2Dキャラを、現行と並べたスクリーンショットで比較し、ひよりの口ArtMesh欠け（現行はCore 05／06の使い分けで回避）が出ないこと、マスク・モーション・口パク・ドラッグ・キャラ位置が変わらないことをWindows WebView2実機で確認する。期待できる改善は、マスクのにじみ・欠けの自動補正、Cubism 5へのそのまま対応（Core使い分けの廃止候補）、テクスチャLODによるVRAM削減、複数モーションの同時再生 |
 
 ## FreeTokenローカルエンジンの段階導入
 
