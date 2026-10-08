@@ -34,11 +34,11 @@ struct Tool {
 }
 
 fn tools() -> Vec<Tool> {
-    let pandoc = env_or("PANDOC_VERSION", "3.10.2");
+    let pandoc = env_or("PANDOC_VERSION", "3.12.1");
     let ripgrep = env_or("RIPGREP_VERSION", "15.2.0");
-    let qpdf = env_or("QPDF_VERSION", "12.4.0");
-    let poppler = env_or("POPPLER_WIN_VERSION", "26.02.0-0");
-    let imagemagick = env_or("IMAGEMAGICK_VERSION", "7.1.2-29");
+    let qpdf = env_or("QPDF_VERSION", "12.4.2");
+    let poppler = env_or("POPPLER_WIN_VERSION", "26.09.0-0");
+    let imagemagick = env_or("IMAGEMAGICK_VERSION", "7.1.2-32");
 
     let arm = cfg!(target_arch = "aarch64");
     let win = cfg!(windows);
