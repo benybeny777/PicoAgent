@@ -709,7 +709,7 @@ try {
   // 未保存変更の検査にならないため、保存操作が有効になるまで待つ。
   await modePage.waitForFunction(() => !document.getElementById("save").disabled);
   if (await modeSelect.inputValue() !== "pastel") throw new Error("未設定のUIモードが可愛いではありません");
-  for (const [mode, radius] of [["glass", "12px"], ["pastel", "24px"]]) {
+  for (const [mode, radius] of [["glass", "12px"], ["pastel", "10px"]]) {
     await modeSelect.selectOption(mode);
     const actual = await modePage.locator(".settings-panel-head").first().evaluate(node => ({
       mode: document.documentElement.dataset.uiTheme, radius: getComputedStyle(node).borderTopLeftRadius,

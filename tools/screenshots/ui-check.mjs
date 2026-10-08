@@ -540,7 +540,7 @@ for (const [layout, [width, height]] of Object.entries(LAYOUTS)) {
       mode: document.documentElement.dataset.uiTheme,
       column: node.dataset.variant === "column",
     }));
-    const radius = mode === "pastel" ? (actual.column ? "20px" : "24px") : (actual.column ? "10px" : "12px");
+    const radius = mode === "pastel" ? (actual.column ? "8px" : "10px") : (actual.column ? "10px" : "12px");
     if (actual.mode !== mode || actual.radius !== radius) fail(`${layout}/${mode}`, `モード即反映が不一致 ${JSON.stringify(actual)}`);
     else ok(`${layout}/${mode} UIモードを即反映`);
     await page.waitForTimeout(300); // 色の切替アニメーション完了後の確定した見た目を撮る。

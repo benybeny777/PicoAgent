@@ -69,6 +69,11 @@ const CHECKS: &[Check] = &[
         program: "cargo",
         args: &["xtask", "character-quality"],
     },
+    Check {
+        label: "会話パネルの角丸・内容包含（Chromium）",
+        program: "node",
+        args: &["tools/screenshots/panel-overflow.mjs"],
+    },
 ];
 
 #[derive(Debug, PartialEq, Eq)]
