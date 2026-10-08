@@ -34,7 +34,12 @@
       "csp": "default-src 'self' asset: http://asset.localhost; connect-src 'self' ipc: http://ipc.localhost asset: http://asset.localhost; script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval'; img-src 'self' blob: data: asset: http://asset.localhost; media-src 'self' blob: data: asset: http://asset.localhost; style-src 'self' 'unsafe-inline'",
       "assetProtocol": {
         "enable": true,
-          "scope": ["$DATA/PicoAgent/characters/**", "$DATA/PicoAgent/display/**", "$DATA/PicoAgent/character-maker/characters/**", "$DATA/PicoAgent/generated-media/**"]
+        "scope": [
+          "$DATA/PicoAgent/characters/**",
+          "$DATA/PicoAgent/display/**",
+          "$DATA/PicoAgent/character-maker/characters/**",
+          "$DATA/PicoAgent/generated-media/**"
+        ]
       }
     }
   },
@@ -46,12 +51,20 @@
       "resources/component-manifest.json": "resources/component-manifest.json",
       "../character-maker/sidecar/**/*": "character-maker/sidecar/",
       "../character-maker/installer/setup-runtime-models.py": "character-maker/installer/setup-runtime-models.py",
-      "../character-maker/workflows/**/*": "character-maker/workflows/"
+      "../character-maker/workflows/**/*": "character-maker/workflows/",
+      "../scripts/character-learning-worker.py": "_up_/scripts/character-learning-worker.py",
+      "../scripts/setup-character-learning-runtime.py": "_up_/scripts/setup-character-learning-runtime.py",
+      "../scripts/train-voice-model.ps1": "_up_/scripts/train-voice-model.ps1",
+      "../scripts/select-voice-training-clips.py": "_up_/scripts/select-voice-training-clips.py",
+      "../scripts/voice_training_common.py": "_up_/scripts/voice_training_common.py",
+      "../scripts/check-synthesized-voice.py": "_up_/scripts/check-synthesized-voice.py"
     },
     "windows": {
       "nsis": {
         "compression": "zlib",
-        "languages": ["Japanese"],
+        "languages": [
+          "Japanese"
+        ],
         "installerIcon": "icons/icon.ico",
         "uninstallerIcon": "icons/icon.ico",
         "installerHooks": "installer-hooks.nsh"

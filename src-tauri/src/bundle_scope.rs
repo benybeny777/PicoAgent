@@ -2,7 +2,7 @@
 //
 // リリースビルドに入るのは (1) `ui/` を写した `ui-dist/`、(2) `tauri.conf.json` の
 // `bundle.resources` が指すもの、の2経路だけ。開発用のツール・ドキュメント・撮影用の
-// 画像（`tools/` `docs/` `scripts/` `xtask/`）は入らない。
+// 画像（`tools/` `docs/` `xtask/`）は入らない。`scripts/` は製品の学習処理6本だけを明示許可する。
 //
 // ただし `ui/` は**中身を丸ごと**配信ビルドへコピーするため、ここへ作業用のファイルを
 // 置くと黙って製品に同梱される。設定を1行足すだけでも同じことが起きる。目視では気づけ
@@ -12,7 +12,7 @@
 // 追加すること。
 
 /// `bundle.resources` に書いてよいもの。追加するときは、なぜ製品へ同梱するのかを書き添える。
-const ALLOWED_RESOURCES: [(&str, &str, &str); 5] = [
+const ALLOWED_RESOURCES: [(&str, &str, &str); 11] = [
     (
         "resources/bundled/**/*",
         "resources/bundled/",
@@ -38,6 +38,36 @@ const ALLOWED_RESOURCES: [(&str, &str, &str); 5] = [
         "character-maker/workflows/",
         "標準ノードだけで動かす固定ComfyUIワークフロー",
     ),
+    (
+        "../scripts/character-learning-worker.py",
+        "_up_/scripts/character-learning-worker.py",
+        "音声・人格学習をアプリから実行する製品用処理",
+    ),
+    (
+        "../scripts/setup-character-learning-runtime.py",
+        "_up_/scripts/setup-character-learning-runtime.py",
+        "音声・人格学習をアプリから実行する製品用処理",
+    ),
+    (
+        "../scripts/train-voice-model.ps1",
+        "_up_/scripts/train-voice-model.ps1",
+        "音声・人格学習をアプリから実行する製品用処理",
+    ),
+    (
+        "../scripts/select-voice-training-clips.py",
+        "_up_/scripts/select-voice-training-clips.py",
+        "音声・人格学習をアプリから実行する製品用処理",
+    ),
+    (
+        "../scripts/voice_training_common.py",
+        "_up_/scripts/voice_training_common.py",
+        "音声・人格学習をアプリから実行する製品用処理",
+    ),
+    (
+        "../scripts/check-synthesized-voice.py",
+        "_up_/scripts/check-synthesized-voice.py",
+        "音声・人格学習をアプリから実行する製品用処理",
+    ),
 ];
 
 /// 販売版（`tauri.distribution.conf.json`）の `bundle.resources` に書いてよいもの。
@@ -46,7 +76,7 @@ const ALLOWED_RESOURCES: [(&str, &str, &str); 5] = [
 /// LibreOffice・AivisSpeech・Whisper のような取得物がそのまま販売物へ入る。
 /// 通常ビルド側（`ALLOWED_RESOURCES`）は `resources/bundled/**/*` を許しているため、
 /// 販売用の上書き設定を見ていないと、この違いが誰にも検出されないまま消える。
-const ALLOWED_DISTRIBUTION_RESOURCES: [(&str, &str); 2] = [
+const ALLOWED_DISTRIBUTION_RESOURCES: [(&str, &str); 8] = [
     (
         "resources/bundled/engine/**/*",
         "販売版に入れるのはローカルAIエンジンだけ（自前配布が許される同梱物）",
@@ -54,6 +84,30 @@ const ALLOWED_DISTRIBUTION_RESOURCES: [(&str, &str); 2] = [
     (
         "resources/component-manifest.json",
         "第三者追加機能の公式取得元と導入方式を表示・検証するためのマニフェスト",
+    ),
+    (
+        "../scripts/character-learning-worker.py",
+        "音声・人格学習の製品用処理",
+    ),
+    (
+        "../scripts/setup-character-learning-runtime.py",
+        "音声・人格学習の製品用処理",
+    ),
+    (
+        "../scripts/train-voice-model.ps1",
+        "音声・人格学習の製品用処理",
+    ),
+    (
+        "../scripts/select-voice-training-clips.py",
+        "音声・人格学習の製品用処理",
+    ),
+    (
+        "../scripts/voice_training_common.py",
+        "音声・人格学習の製品用処理",
+    ),
+    (
+        "../scripts/check-synthesized-voice.py",
+        "音声・人格学習の製品用処理",
     ),
 ];
 
@@ -231,6 +285,25 @@ mod guard {
             ("tauri.conf.json", tauri_conf()),
             ("tauri.distribution.conf.json", distribution_conf()),
         ] {
+            let mut conf = conf;
+            // 明示許可した製品処理だけを除き、その他の開発scriptsは引き続き拒否する。
+            if let Some(resources) = conf["bundle"]["resources"].as_object_mut() {
+                for (source, destination, _) in ALLOWED_RESOURCES {
+                    if source.starts_with("../scripts/")
+                        && resources.get(source).and_then(serde_json::Value::as_str)
+                            == Some(destination)
+                    {
+                        resources.remove(source);
+                    }
+                }
+            }
+            if let Some(resources) = conf["bundle"]["resources"].as_array_mut() {
+                resources.retain(|value| {
+                    !ALLOWED_RESOURCES.iter().any(|(source, _, _)| {
+                        source.starts_with("../scripts/") && value.as_str() == Some(*source)
+                    })
+                });
+            }
             let serialized = conf.to_string();
             for dir in DEV_ONLY_DIRS {
                 // アイコンやリソースの指定に開発用フォルダが紛れ込んでいないか。

@@ -159,6 +159,8 @@ window.__TAURI__ = {
     }
     if (name === "settings_check_update") return { status: "available", downloadReady: true, message: "1.1.0を利用できます。" };
     if (name === "engine_status") return { phase: "ready" };
+    // 学習セクションは全タブ構築時に一覧を読む。空オブジェクトではなくAPIの正規形を返す。
+    if (name === "settings_character_learning_list") return { supported: true, runtimeInstalled: true, activeId: null, jobs: [] };
     if (name === "aivis_status") return { enabled: true, up: true };
     if (name === "pet_usage") return {};
     if (name === "pet_traces") return { traces: [], tools: [] };

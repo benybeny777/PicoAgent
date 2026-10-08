@@ -1,0 +1,231 @@
+"""取得・学習を行わず、専用runtime導入の保護と原子確定を検査する。"""
+import importlib.util
+import json
+import tempfile
+import unittest
+import zipfile
+from pathlib import Path
+from unittest.mock import patch
+
+SPEC = importlib.util.spec_from_file_location("learning_runtime", Path(__file__).parents[1] / "setup-character-learning-runtime.py")
+RUNTIME = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(RUNTIME)
+
+
+class RuntimeTests(unittest.TestCase):
+    def setUp(self):
+        repo = Path(__file__).resolve().parents[2]
+        (repo / "temp").mkdir(exist_ok=True)
+        self.temporary = tempfile.TemporaryDirectory(dir=repo / "temp")
+        self.addCleanup(self.temporary.cleanup)
+        self.base = Path(self.temporary.name)
+        self.root = self.base / "bundled/voice-training"
+        self.shared = self.base / "shared/python.exe"
+        self.ffmpeg = self.base / "ffmpeg.exe"
+        self.uv = self.base / "uv.exe"
+        self.status = self.base / "job/status.json"
+        for path in (self.shared, self.ffmpeg, self.uv):
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b"existing")
+
+    def invoke(self, populate, confirmed=True):
+        with patch.object(RUNTIME.platform, "system", return_value="Windows"), patch.object(RUNTIME.platform, "machine", return_value="AMD64"), patch.object(RUNTIME.subprocess, "run") as command, patch.object(RUNTIME, "run"), patch.object(RUNTIME, "populate", side_effect=populate):
+            RUNTIME.install(self.root, self.shared, self.ffmpeg, self.uv, self.status, confirmed)
+            return command
+
+    def test_GPU未確認なら取得もstage作成もしない(self):
+        with self.assertRaises(ValueError):
+            self.invoke(lambda *args: self.fail("取得へ進んだ"), confirmed=False)
+        self.assertFalse(self.root.parent.exists())
+
+    def test_既存環境を上書きしない(self):
+        self.root.mkdir(parents=True)
+        original = self.root / "original.aivmx"
+        original.write_bytes(b"user-model")
+        with self.assertRaises(ValueError):
+            self.invoke(lambda *args: self.fail("取得へ進んだ"))
+        self.assertEqual(original.read_bytes(), b"user-model")
+
+    def test_probe失敗ではinstalledを確定せず診断stageだけ残す(self):
+        def failure(*args):
+            raise RuntimeError("CUDAカーネルが利用できません")
+        with self.assertRaises(RuntimeError):
+            self.invoke(failure)
+        self.assertFalse(self.root.exists())
+        stages = list(self.root.parent.glob(".installing-*"))
+        self.assertEqual(len(stages), 1)
+        self.assertFalse((stages[0] / "install.json").exists())
+        self.assertEqual(json.loads(self.status.read_text(encoding="utf-8"))["state"], "failed")
+        self.assertEqual(self.shared.read_bytes(), b"existing")
+
+    def test_移動後CLI検証失敗では導入済みにしない(self):
+        with patch.object(RUNTIME.platform, "system", return_value="Windows"), patch.object(RUNTIME.platform, "machine", return_value="AMD64"), patch.object(RUNTIME.subprocess, "run"), patch.object(RUNTIME, "populate"), patch.object(RUNTIME, "run", side_effect=RuntimeError("移動後CLIが起動できません")):
+            with self.assertRaises(RuntimeError):
+                RUNTIME.install(self.root, self.shared, self.ffmpeg, self.uv, self.status, True)
+        self.assertFalse(self.root.exists())
+        stage = next(self.root.parent.glob(".installing-*"))
+        self.assertFalse((stage / "install.json").exists())
+
+    def test_成功時だけrenameして環境変数は確定rootを参照する(self):
+        def success(stage, *args):
+            self.assertFalse(self.root.exists())
+            (stage / ".venv/Scripts").mkdir(parents=True)
+            (stage / ".venv/Scripts/python.exe").write_bytes(b"verified")
+        self.invoke(success)
+        record = json.loads((self.root / "runtime-env.json").read_text(encoding="utf-8"))
+        self.assertEqual(record["state"], "installed")
+        self.assertTrue(record["capabilities"]["cuda"])
+        self.assertEqual(record["environment"]["HF_HOME"], str(self.root.resolve() / "cache/huggingface"))
+        self.assertEqual(json.loads(self.status.read_text(encoding="utf-8"))["state"], "completed")
+        self.assertFalse(list(self.root.parent.glob(".installing-*")))
+
+    def test_並行導入先ができた場合はその資産を上書きしない(self):
+        def conflicting(stage, *args):
+            self.root.mkdir()
+            (self.root / "owned-by-other").write_bytes(b"other")
+        with self.assertRaises(OSError):
+            self.invoke(conflicting)
+        self.assertEqual((self.root / "owned-by-other").read_bytes(), b"other")
+
+    def test_書庫の範囲外パスとハッシュ不一致を拒否する(self):
+        archive = self.base / "source.zip"
+        with zipfile.ZipFile(archive, "w") as zipped:
+            zipped.writestr("archive/../outside", b"bad")
+        with self.assertRaises(ValueError):
+            RUNTIME.unpack_verified(archive, self.base / "source", {})
+        with zipfile.ZipFile(archive, "w") as zipped:
+            zipped.writestr("archive/slice.py", b"modified")
+        with self.assertRaises(ValueError):
+            RUNTIME.unpack_verified(archive, self.base / "source", {"slice.py": RUNTIME.git_blob(b"original")})
+
+    def test_固定patchは文脈不一致で止まる(self):
+        diff = "@@ -1,2 +1,2 @@\n before\n-old\n+new\n"
+        self.assertEqual(RUNTIME.apply_patch("before\nold\n", diff), "before\nnew\n")
+        with self.assertRaises(ValueError):
+            RUNTIME.apply_patch("before\nother\n", diff)
+
+    def test_依存は固定しORTの複数distributionを混在させない(self):
+        frozen = RUNTIME.FROZEN.splitlines()
+        self.assertGreater(len(frozen), 30)
+        self.assertTrue(all("==" in line for line in frozen))
+        self.assertIn("torch==2.10.0+cu128", frozen)
+        self.assertIn("torchaudio==2.10.0+cu128", frozen)
+        self.assertIn("faster-whisper==1.2.1", frozen)
+        self.assertEqual([line for line in frozen if line.startswith("onnxruntime")], ["onnxruntime-gpu==1.24.4"])
+
+    def test_成功後は所有確認済みの失敗stageだけを回収する(self):
+        self.root.parent.mkdir(parents=True)
+        own = self.root.with_name(".installing-voice-training-failed")
+        other = self.root.with_name(".installing-voice-training-other")
+        for folder, destination in ((own, self.root.resolve()), (other, self.base / "other")):
+            folder.mkdir()
+            (folder / "stage-owner.json").write_text(json.dumps({"destination": str(destination)}))
+            (folder / "failure.json").write_text('{}')
+        self.invoke(lambda *args: None)
+        self.assertFalse(own.exists())
+        self.assertTrue(other.exists())
+
+    def test_共有Pythonを含む導入先は取得前に拒否する(self):
+        self.root = self.shared.parent
+        with self.assertRaises(ValueError):
+            self.invoke(lambda *args: self.fail("取得へ進んだ"))
+        self.assertEqual(self.shared.read_bytes(), b"existing")
+
+    def installed_fixture(self):
+        self.invoke(lambda *args: None)
+        (self.root / "requirements-runtime.txt").write_text(RUNTIME.FROZEN, encoding="utf-8")
+        return {str(path.relative_to(self.root)): path.read_bytes()
+                for path in self.root.rglob("*") if path.is_file()}
+
+    def test_既導入確認成功は取得せずrootを変更しない(self):
+        before = self.installed_fixture()
+        self.invoke(lambda *args: self.fail("既導入確認が再取得へ進んだ"))
+        after = {str(path.relative_to(self.root)): path.read_bytes()
+                 for path in self.root.rglob("*") if path.is_file()}
+        self.assertEqual(before, after)
+        self.assertEqual(json.loads(self.status.read_text(encoding="utf-8"))["state"], "completed")
+        self.assertEqual(RUNTIME.environment(self.root.resolve())["PYTHONPATH"], str(self.root.resolve()))
+
+    def test_既導入確認probe失敗もrootを変更しない(self):
+        before = self.installed_fixture()
+        with patch.object(RUNTIME.platform, "system", return_value="Windows"), patch.object(RUNTIME.platform, "machine", return_value="AMD64"), patch.object(RUNTIME.subprocess, "run"), patch.object(RUNTIME, "populate") as populate, patch.object(RUNTIME, "run", side_effect=RuntimeError("CUDA確認失敗")):
+            with self.assertRaises(RuntimeError):
+                RUNTIME.install(self.root, self.shared, self.ffmpeg, self.uv, self.status, True)
+            populate.assert_not_called()
+        self.assertEqual(before, {str(path.relative_to(self.root)): path.read_bytes()
+                                  for path in self.root.rglob("*") if path.is_file()})
+        self.assertEqual(json.loads(self.status.read_text(encoding="utf-8"))["state"], "failed")
+
+    def test_既導入固定版不一致では検証も取得もしない(self):
+        self.installed_fixture()
+        record_path = self.root / "install.json"
+        record = json.loads(record_path.read_text(encoding="utf-8"))
+        record["source"]["commit"] = "不一致"
+        record_path.write_text(json.dumps(record), encoding="utf-8")
+        before = record_path.read_bytes()
+        with self.assertRaises(ValueError):
+            self.invoke(lambda *args: self.fail("不一致環境が取得へ進んだ"))
+        self.assertEqual(record_path.read_bytes(), before)
+
+    def test_所有済み未確定rootは診断退避して新規stageで再試行する(self):
+        self.root.mkdir(parents=True)
+        (self.root / "stage-owner.json").write_text(json.dumps({"destination": str(self.root.resolve()), "pid": 123}), encoding="utf-8")
+        (self.root / "partial-source").write_bytes(b"interrupted")
+        def failure(stage, *args):
+            self.assertFalse(self.root.exists())
+            diagnostics = [path for path in self.root.parent.glob(".installing-*") if (path / "partial-source").exists()]
+            self.assertEqual(len(diagnostics), 1)
+            raise RuntimeError("新規probe失敗")
+        with self.assertRaises(RuntimeError):
+            self.invoke(failure)
+        self.assertFalse(self.root.exists())
+        self.assertEqual(len(list(self.root.parent.glob(".installing-*"))), 2)
+
+    def test_所有済みでも利用者データがある未確定rootは移動しない(self):
+        self.root.mkdir(parents=True)
+        (self.root / "stage-owner.json").write_text(json.dumps({"destination": str(self.root.resolve()), "pid": 123}), encoding="utf-8")
+        data = self.root / "Data/user/audio.wav"
+        data.parent.mkdir(parents=True)
+        data.write_bytes(b"user-audio")
+        with self.assertRaises(ValueError):
+            self.invoke(lambda *args: self.fail("利用者データがあるのに取得へ進んだ"))
+        self.assertEqual(data.read_bytes(), b"user-audio")
+        self.assertFalse(list(self.root.parent.glob(".installing-*")))
+
+    def test_所有記録の導入先不一致では未確定rootを移動しない(self):
+        self.root.mkdir(parents=True)
+        owner = self.root / "stage-owner.json"
+        owner.write_text(json.dumps({"destination": str(self.base / "別領域"), "pid": 123}), encoding="utf-8")
+        before = owner.read_bytes()
+        with self.assertRaises(ValueError):
+            self.invoke(lambda *args: self.fail("所有不一致なのに取得へ進んだ"))
+        self.assertEqual(owner.read_bytes(), before)
+        self.assertFalse(list(self.root.parent.glob(".installing-*")))
+
+    def cli_args(self):
+        return ["setup-character-learning-runtime.py", "--root", str(self.root),
+                "--shared-python", str(self.shared), "--status", str(self.status),
+                "--ffmpeg-path", str(self.ffmpeg), "--uv", str(self.uv), "--nvidia-confirmed"]
+
+    def test_CLI事前検証失敗は前回完了状態を失敗理由で置き換える(self):
+        RUNTIME.atomic_json(self.status, {"state": "completed"})
+        self.ffmpeg.unlink()
+        with patch.object(RUNTIME.sys, "argv", self.cli_args()), patch.object(RUNTIME.platform, "system", return_value="Windows"), patch.object(RUNTIME.platform, "machine", return_value="AMD64"), patch.object(RUNTIME.sys, "stderr"):
+            self.assertEqual(RUNTIME.main(), 1)
+        status = json.loads(self.status.read_text(encoding="utf-8"))
+        self.assertEqual(status["state"], "failed")
+        self.assertEqual(status["phase"], "setup")
+        self.assertIn("管理実体の実行ファイルがありません", status["error"])
+        self.assertFalse(self.root.exists())
+
+    def test_CLI既導入probe失敗はrootを変更せず具体的理由を保存する(self):
+        before = self.installed_fixture()
+        with patch.object(RUNTIME.sys, "argv", self.cli_args()), patch.object(RUNTIME.platform, "system", return_value="Windows"), patch.object(RUNTIME.platform, "machine", return_value="AMD64"), patch.object(RUNTIME.subprocess, "run"), patch.object(RUNTIME, "run", side_effect=RuntimeError("CUDA確認失敗")), patch.object(RUNTIME.sys, "stderr"):
+            self.assertEqual(RUNTIME.main(), 1)
+        self.assertEqual(json.loads(self.status.read_text(encoding="utf-8"))["error"], "CUDA確認失敗")
+        self.assertEqual(before, {str(path.relative_to(self.root)): path.read_bytes()
+                                  for path in self.root.rglob("*") if path.is_file()})
+
+
+if __name__ == "__main__":
+    unittest.main()

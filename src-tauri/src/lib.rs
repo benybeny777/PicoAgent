@@ -9,6 +9,7 @@ mod app_paths;
 mod boot_screen;
 #[cfg(test)]
 mod bundle_scope;
+mod character_learning;
 mod character_maker;
 mod character_pack;
 mod commands;
@@ -106,6 +107,7 @@ pub fn run() {
         .manage(AivisState::new())
         .manage(BootScreenState::new())
         .manage(character_maker::CharacterMakerState::new())
+        .manage(character_learning::LearningState::new())
         .manage(WindowLayoutCache::default())
         .manage(tracer::Tracer::new(200))
         // フロントを読み込めなかったときの案内画面（配信経路に依存しないよう埋め込みを返す）。
@@ -162,6 +164,13 @@ pub fn run() {
             character_maker::settings_character_maker_install,
             character_maker::settings_character_maker_preview,
             character_maker::settings_character_maker_preview_data,
+            character_learning::settings_character_learning_pick,
+            character_learning::settings_character_learning_list,
+            character_learning::settings_character_learning_start,
+            character_learning::settings_character_learning_cancel,
+            character_learning::settings_character_learning_setup,
+            character_learning::settings_character_learning_check_voice,
+            character_learning::settings_character_learning_sample,
             commands::settings_pick_stream_image,
             commands::settings_export_diagnostics,
             commands::pet_request_gpu_cache_reset,
@@ -466,6 +475,15 @@ pub fn run() {
     app.run(|app_handle, event| {
         if let RunEvent::Exit = event {
             save_window_layout_on_exit(app_handle);
+            if let Err(error) = app_handle
+                .state::<character_learning::LearningState>()
+                .stop()
+            {
+                log_paths::append_app_log(
+                    app_handle,
+                    &format!("キャラクター学習を終了できません: {error}"),
+                );
+            }
             // OS へ確保したグローバルホットキーを明示的に返す。
             hotkey::release(app_handle);
             aivis::stop(app_handle);

@@ -2309,6 +2309,7 @@ function saveCurrentCharacterVoice(id) {
   const current = characterVoiceOverrides[id] || {};
   const defaultVoice = characterDefaultVoices[id] || {};
   const speaker = characterSpeaker.value.trim();
+  if (speaker && String(current.speaker || "") === speaker) return;
   // 空欄またはパック既定値は上書きではない。初期表示しただけでメタデータを生成して
   // 「未保存」にしない。既存のメタデータだけの指定は、そのまま維持する。
   if (!speaker || speaker === String(defaultVoice.styleId || "")) {
@@ -3077,6 +3078,12 @@ async function render() {
   ]);
   panels.components.append(buildAppUpdateSection(v), buildComponentManager());
   panels["character-maker"].append(buildCharacterMaker(registerInstalledCharacter));
+  panels["character-maker"].append(window.PicoCharacterLearning.build({
+    el, section,
+    getTarget: () => ({ id: characterSelect?.value, name: characterSelect?.selectedOptions[0]?.textContent || "キャラクター" }),
+    applyPersona: (id, profile) => { characterOverrides[id] = profile; if (characterSelect.value === id) characterPersona.value = profile; updateDirtyState(); },
+    applyVoice: (id, voice) => { characterVoiceOverrides[id] = { ...voice }; if (characterSelect.value === id) loadCharacterVoice(id); updateDirtyState(); },
+  }));
 
   // --- 会話と記憶（基本設定タブ） ---
   const global = section("会話と記憶");

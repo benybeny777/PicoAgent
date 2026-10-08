@@ -1302,3 +1302,12 @@ button.tab:active {
   --chip-bg: var(--surface-hover);
 }
 header { backdrop-filter: var(--blur); }
+
+/* 学習候補は設定の草稿へ明示適用するまで独立したカードで表示する。 */
+.learning-job-list { display:grid; gap:12px; min-width:0; margin-top:16px; }
+.learning-job { min-width:0; padding:14px; border:1px solid var(--line); border-radius:var(--radius-md,6px); background:var(--surface-soft); overflow-wrap:anywhere; }
+.learning-job input[type=text], .learning-job textarea, .learning-job audio { width:100%; max-width:100%; min-width:0; box-sizing:border-box; }
+.learning-job button, .learning-actions button { margin:4px 6px 4px 0; max-width:100%; white-space:normal; }
+.learning-actions { display:flex; flex-wrap:wrap; gap:6px; margin-top:14px; }
+.learning-listened { display:flex; align-items:flex-start; gap:8px; margin:10px 0; }
+.learning-listened input { flex:none; }

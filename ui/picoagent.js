@@ -259,6 +259,13 @@ window.picoagent = {
     characterMakerInstall: (characterId) => call("settings_character_maker_install", { characterId }),
     characterMakerPreview: (characterId) => call("settings_character_maker_preview", { characterId }),
     characterMakerPreviewData: (characterId) => call("settings_character_maker_preview_data", { characterId }),
+    characterLearningPick: (folder) => call("settings_character_learning_pick", { folder }),
+    characterLearningList: () => call("settings_character_learning_list"),
+    characterLearningStart: (input, resumeId) => call("settings_character_learning_start", { input, resumeId }),
+    characterLearningCancel: (id) => call("settings_character_learning_cancel", { id }),
+    characterLearningSetup: () => call("settings_character_learning_setup"),
+    characterLearningCheckVoice: (id) => call("settings_character_learning_check_voice", { id }),
+    characterLearningSample: (id, index) => call("settings_character_learning_sample", { id, index }),
     // 不具合の連絡へ添える診断情報を1ファイルへ書き出す（秘密値は含めない）。
     exportDiagnostics: () => call("settings_export_diagnostics"),
     componentStatus: () => call("settings_components_status"),
