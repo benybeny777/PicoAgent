@@ -21,65 +21,63 @@ use tauri::AppHandle;
 // クロスプラットフォームのテスト（tests モジュール、OS問わず実行）からも参照するため
 // `#[cfg(windows)]` では隠さず `allow(dead_code)` で非Windowsビルドの警告だけを抑止する。
 #[cfg_attr(not(windows), allow(dead_code))]
-const RELEASE_TAG: &str = "b10566";
+const RELEASE_TAG: &str = "b11429";
 #[cfg_attr(not(windows), allow(dead_code))]
-const CUDA_CORE_NAME: &str = "llama-b10566-bin-win-cuda-13.3-x64.zip";
+const CUDA_CORE_NAME: &str = "llama-b11429-bin-win-cuda-13.4-x64.zip";
 #[cfg_attr(not(windows), allow(dead_code))]
-const CUDA_CORE_SIZE: u64 = 146_890_631;
+const CUDA_CORE_SIZE: u64 = 153_089_864;
 #[cfg_attr(not(windows), allow(dead_code))]
-const CUDA_CORE_SHA256: &str = "c3e2336c1427e8bd7b5beb3c8618d2f7a268bc5fb6ec3f28c1e06cdb78d2e80a";
+const CUDA_CORE_SHA256: &str = "76ddc6eff2389570789ed608881efc6977751a722015d8e8c94f302224ff1a3a";
 #[cfg_attr(not(windows), allow(dead_code))]
-const CUDA_RUNTIME_NAME: &str = "cudart-llama-bin-win-cuda-13.3-x64.zip";
+const CUDA_RUNTIME_NAME: &str = "cudart-llama-bin-win-cuda-13.4-x64.zip";
 #[cfg_attr(not(windows), allow(dead_code))]
-const CUDA_RUNTIME_SIZE: u64 = 390_970_417;
+const CUDA_RUNTIME_SIZE: u64 = 423_535_356;
 #[cfg_attr(not(windows), allow(dead_code))]
 const CUDA_RUNTIME_SHA256: &str =
-    "1462a050eb4c684921ba51dcc4cc488a036674c3e73e9945ee705b854808d03e";
+    "738f8c251ac22b70c3ae6f83a10cf222725df0395246a2cf58f32bdb85fbe668";
 #[cfg_attr(not(windows), allow(dead_code))]
-const ROCM_NAME: &str = "llama-b10566-bin-win-rocm-7.14-x64.zip";
+const ROCM_NAME: &str = "llama-b11429-bin-win-rocm-10.0-x64.zip";
 #[cfg_attr(not(windows), allow(dead_code))]
-const ROCM_SIZE: u64 = 196_945_718;
+const ROCM_SIZE: u64 = 256_958_369;
 #[cfg_attr(not(windows), allow(dead_code))]
-const ROCM_SHA256: &str = "699027a1017a0d1309abe3d6528639611de18ec24e006ece7d6400a4630e8ba6";
+const ROCM_SHA256: &str = "289a8453bb222f0648f91eff3d55133c934119c841eb369b704aafae1d4719d2";
 #[cfg_attr(not(windows), allow(dead_code))]
-const SYCL_NAME: &str = "llama-b10566-bin-win-sycl-x64.zip";
+const SYCL_NAME: &str = "llama-b11429-bin-win-sycl-x64.zip";
 #[cfg_attr(not(windows), allow(dead_code))]
-const SYCL_SIZE: u64 = 119_838_336;
+const SYCL_SIZE: u64 = 147_963_744;
 #[cfg_attr(not(windows), allow(dead_code))]
-const SYCL_SHA256: &str = "118ae5d788ef29c2cb79a0ed0230e2f26adc725d82f7c188960ef62bd36f58a5";
-// 正本: https://rocm.docs.amd.com/projects/radeon-ryzen/en/latest/docs/shared/hipsdk/reference/system-requirements.html
-// 2026-08-24確認。llama.cpp固定版またはPicoAgent配布版の更新時に再確認する。
+const SYCL_SHA256: &str = "4968340c18e7b34f67b7805b7198e71b24ed043728b4864931be926675af9542";
+// 正本: https://rocm.docs.amd.com/en/docs-10.0.0/compatibility/compatibility-matrix.html
+// （元データ: https://github.com/ROCm/ROCm/blob/docs/10.0.0/docs/data/os-support.yaml の
+// Windows 対応行）。2026-10-08確認。llama.cpp固定版またはPicoAgent配布版の更新時に再確認する。
+// ROCm 10.0 では RDNA2（RX 6000 / PRO W6000）と RX 7600 XT・RX 7650 GRE が Windows 対応から外れた。
+// 一覧外の AMD GPU は大容量の ROCm 版を取らず Vulkan で動かす。
+// Ryzen APU は表示アダプタ名が「AMD Radeon(TM) 8060S Graphics」のように CPU 名と異なるため、
+// 下の CPU 名は現状一致しない（TASKS.md 参照）。
 #[cfg_attr(not(windows), allow(dead_code))]
 const WINDOWS_ROCM_RUNTIME_SKUS: &[&str] = &[
+    "radeon ai pro r9700s",
     "radeon ai pro r9700",
-    "radeon pro w7900 dual slot",
-    "radeon pro w7900",
-    "radeon pro w7800",
-    "radeon pro w7700",
-    "radeon pro w6800",
-    "radeon pro w6600",
+    "radeon ai pro r9600d",
     "radeon rx 9070 xt",
+    "radeon rx 9070 gre",
     "radeon rx 9070",
-    "rx 9070 gre",
+    "radeon rx 9060 xt lp",
     "radeon rx 9060 xt",
     "radeon rx 9060",
+    "radeon rx 9050",
+    "radeon pro w7900 dual slot",
+    "radeon pro w7900",
+    "radeon pro w7800 48gb",
+    "radeon pro w7800",
+    "radeon pro w7700",
     "radeon rx 7900 xtx",
     "radeon rx 7900 xt",
+    "radeon rx 7900 gre",
     "radeon rx 7800 xt",
     "radeon rx 7700 xt",
-    "radeon rx 7650 gre",
-    "radeon rx 7600 xt",
+    "radeon rx 7700",
     "radeon rx 7600",
-    "radeon rx 6950 xt",
-    "radeon rx 6900 xt",
-    "radeon rx 6800 xt",
-    "radeon rx 6800",
-    "radeon rx 6750 xt",
-    "radeon rx 6700 xt",
-    "radeon rx 6700",
-    "radeon rx 6650 xt",
-    "radeon rx 6600 xt",
-    "radeon rx 6600",
     "ryzen ai max+ pro 395",
     "ryzen ai max+ 395",
     "ryzen ai max pro 390",
@@ -118,7 +116,7 @@ impl InstalledManifest {
     fn cuda() -> Self {
         Self {
             release_tag: RELEASE_TAG.to_string(),
-            backend: "cuda-13.3".to_string(),
+            backend: "cuda-13.4".to_string(),
             core_name: CUDA_CORE_NAME.to_string(),
             core_sha256: CUDA_CORE_SHA256.to_string(),
             runtime_name: CUDA_RUNTIME_NAME.to_string(),
@@ -129,13 +127,13 @@ impl InstalledManifest {
     fn is_current(&self) -> bool {
         self.release_tag == RELEASE_TAG
             && match self.backend.as_str() {
-                "cuda-13.3" => {
+                "cuda-13.4" => {
                     self.core_name == CUDA_CORE_NAME
                         && self.core_sha256 == CUDA_CORE_SHA256
                         && self.runtime_name == CUDA_RUNTIME_NAME
                         && self.runtime_sha256 == CUDA_RUNTIME_SHA256
                 }
-                "rocm-7.14" => {
+                "rocm-10.0" => {
                     self.core_name == ROCM_NAME
                         && self.core_sha256 == ROCM_SHA256
                         && self.runtime_name.is_empty()
@@ -154,7 +152,7 @@ impl InstalledManifest {
     fn rocm() -> Self {
         Self {
             release_tag: RELEASE_TAG.to_string(),
-            backend: "rocm-7.14".to_string(),
+            backend: "rocm-10.0".to_string(),
             core_name: ROCM_NAME.to_string(),
             core_sha256: ROCM_SHA256.to_string(),
             runtime_name: String::new(),
@@ -693,7 +691,12 @@ mod tests {
     fn amd公式対応skuだけをrocm候補にする() {
         assert!(is_supported_amd_rocm_name("AMD Radeon RX 7900 XTX"));
         assert!(is_supported_amd_rocm_name("AMD Ryzen AI Max+ 395"));
+        assert!(is_supported_amd_rocm_name("AMD Radeon RX 9060 XT"));
         assert!(!is_supported_amd_rocm_name("AMD Radeon RX 6800S"));
+        // ROCm 10.0 で Windows 対応から外れた RDNA2 と RX 7600 XT は Vulkan へ回す。
+        assert!(!is_supported_amd_rocm_name("AMD Radeon RX 6800 XT"));
+        assert!(!is_supported_amd_rocm_name("AMD Radeon PRO W6800"));
+        assert!(!is_supported_amd_rocm_name("AMD Radeon RX 7600 XT"));
         assert!(!is_supported_amd_rocm_name("AMD Radeon Graphics"));
     }
 

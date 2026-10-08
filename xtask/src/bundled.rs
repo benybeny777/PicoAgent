@@ -232,24 +232,24 @@ fn work_dir(label: &str) -> PathBuf {
 
 // ── 推論エンジン（llama-server） ────────────────────────────────────────
 
-// llama.cpp v0.2.0 が配布用に案内する対応nightly。stableタグ自体には実行資産がなく、
+// llama.cpp v0.6.0 が配布用に案内する対応nightly。stableタグ自体には実行資産がなく、
 // `nightly-tag.txt` が指すこのタグへ固定する。同じPicoAgent版を別の日に作っても中身を変えない。
-const LLAMACPP_RELEASE_TAG: &str = "b10566";
+const LLAMACPP_RELEASE_TAG: &str = "b11429";
 const LLAMACPP_WIN_VULKAN_ASSET: (&str, &str) = (
-    "llama-b10566-bin-win-vulkan-x64.zip",
-    "68e15a0a0d07df55a695ec4d81465cf57400431d54ae19fadcb51dc919724042",
+    "llama-b11429-bin-win-vulkan-x64.zip",
+    "1bfe78ad9168b79fa02bf67f6af9f5e17a966d824d77238517f7bef12ac73b36",
 );
 const LLAMACPP_MAC_ARM64_ASSET: (&str, &str) = (
-    "llama-b10566-bin-macos-arm64.tar.gz",
-    "533f546dab2ce2f8e29ce3070f26acc55acc59528e177f2cd0d52b7f69b44f50",
+    "llama-b11429-bin-macos-arm64.tar.gz",
+    "740288ec6887be94280a5dfa25b5e23a78285cab104519e6c7e218904ee82459",
 );
 const LLAMACPP_MAC_X64_ASSET: (&str, &str) = (
-    "llama-b10566-bin-macos-x64.tar.gz",
-    "968669b2ec00acf9804e325b51180014d09939894202d44206b4a190d9ef0369",
+    "llama-b11429-bin-macos-x64.tar.gz",
+    "29ac3ea02be6bd143e824973f2cc5fa74bc4094393a9eaab0ff6814f19dd8522",
 );
 const LLAMACPP_LINUX_X64_ASSET: (&str, &str) = (
-    "llama-b10566-bin-ubuntu-vulkan-x64.tar.gz",
-    "773b3445348b5527dfe1601a7a37d9cf0e144a1023eee115351334bdb851b164",
+    "llama-b11429-bin-ubuntu-vulkan-x64.tar.gz",
+    "632c4e98feba2b94407a2130e3133e0c3aefb0ea1ab41337e926d8bfafdd0b74",
 );
 const ENGINE_BUNDLE_MANIFEST: &str = "picoagent-engine.json";
 
