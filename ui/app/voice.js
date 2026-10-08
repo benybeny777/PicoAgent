@@ -140,21 +140,25 @@ export function createVoice({ motion, lipSync, pager, status, onCancelVisible, o
         audio.removeAttribute("src");
         audio.load();
         URL.revokeObjectURL(url);
-        if (current === audio) current = null;
+        if (current === audio) {
+          current = null;
+          endSpeaking();
+        }
         resolve();
       };
       cancelPlayback = done;
       audio.addEventListener("ended", done, { once: true });
       audio.addEventListener("pause", done, { once: true });
-      audio.addEventListener("error", () => {
-        logApp("error", "音声データの読み込みに失敗しました", audio.error?.message || "");
+      const failed = error => {
+        if (!settled && voiceSession === session && current === audio) {
+          logApp("error", "音声再生に失敗しました", errorDetail(error));
+          status.flash(`音声を再生できません: ${errorMessage(error)}`, 12000);
+        }
         done();
-      }, { once: true });
+      };
+      audio.addEventListener("error", () => failed(audio.error?.message || "音声データを読み込めませんでした"), { once: true });
       onPlaying(audio, () => voiceSession === session && current === audio);
-      audio.play().catch(error => {
-        logApp("error", "音声再生に失敗しました", errorDetail(error));
-        done();
-      });
+      audio.play().catch(failed);
       status.set("音声再生準備中…", "voice");
     });
   }
@@ -193,6 +197,7 @@ export function createVoice({ motion, lipSync, pager, status, onCancelVisible, o
   async function speak(text) {
     // 読み上げが無効・音量0なら合成しない（準備中表示や中止ボタンを出さない）。字幕の送りだけ行う。
     if (enabled === false || volume <= 0.001) {
+      stop();
       pager.timed(text);
       return;
     }

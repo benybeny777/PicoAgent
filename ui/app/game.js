@@ -3,7 +3,7 @@
 // ゲーム中のキャラは stage のゲーム用の一時矩形で描く（保存済みの配置は使わず、閉じると元へ戻る）。
 
 import * as bridge from "./bridge.js";
-import { logApp } from "./util.js";
+import { isImeComposing, logApp } from "./util.js";
 
 export function createGame({ voice, stage }) {
 
@@ -820,7 +820,10 @@ export function createGame({ voice, stage }) {
     playTone("tap");
   });
   document.addEventListener("keydown", event => {
-    if (event.key === "Escape" && !overlay.hidden) close();
+    if (event.key !== "Escape" || overlay.hidden || isImeComposing(event)) return;
+    // ダイアログ側で消費し、変換中の入力や背後のチャットを巻き込まない。
+    event.preventDefault();
+    close();
   });
   syncSoundButton();
   return { open, close };

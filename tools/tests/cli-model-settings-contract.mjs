@@ -9,6 +9,7 @@ const loadModels = settings.slice(settings.indexOf("async function loadModels(")
 function harness(listModels, value = "codex") {
   const context = {
     modelLoadGeneration: 0,
+    providerModelDraftValues: {},
     modelOptions: { append() {} },
     modelInput: { value },
     cliModelSelect: { replaceChildren(...options) { this.options = options; } },
@@ -121,6 +122,59 @@ test("遅い古い取得結果で最新の選択肢を上書きしない", async
   await first;
   assert.ok(ctx.cliModelSelect.options.some(option => option.value === "codex:new"));
   assert.ok(!ctx.cliModelSelect.options.some(option => option.value === "codex:old"));
+});
+
+test("OllamaとCLIのモデル草稿を別AIへの往復で既定へ戻さない", async () => {
+  for (const [provider, model] of [["ollama", "未取得の編集モデル"], ["agent_cli", "codex:編集モデル"]]) {
+    const ctx = harness(async () => ["候補の先頭"], model);
+    ctx.providerDraftValues = {};
+    ctx.inputs = new Map([["OLLAMA_MODEL", { value: "古いモデル" }]]);
+    ctx.data.providers = [{ id: provider, defaultModel: "既定モデル" }];
+    vm.runInContext(settings.slice(settings.indexOf("function rememberProviderModelDraft("), settings.indexOf("async function loadModels(")), ctx);
+    ctx.rememberProviderModelDraft(provider);
+    ctx.modelInput.value = "別AIのモデル";
+    await ctx.loadModels(provider, true);
+    assert.equal(ctx.modelInput.value, model);
+    if (provider === "ollama") {
+      assert.equal(ctx.inputs.get("OLLAMA_MODEL").value, model);
+      assert.equal(ctx.providerDraftValues.OLLAMA_MODEL, model);
+    }
+  }
+});
+
+test("モデル一覧待ちの保存中に旧一覧が完了しても保存値と表示モデルを一致させる", async () => {
+  let resolveModels;
+  let resolveSave;
+  let saveHandler;
+  let submitted;
+  const ctx = harness(() => new Promise(resolve => { resolveModels = resolve; }), "前のAIのモデル");
+  ctx.providerDefaultModel = () => "切替先の確定モデル";
+  ctx.savedSnapshot = {};
+  ctx.settingsMutationBusy = false;
+  ctx.validateSettingsNumberFields = () => true;
+  ctx.setSettingsMutationBusy = busy => { ctx.settingsMutationBusy = busy; };
+  ctx.collect = () => ({ PICOAGENT_MODEL: ctx.modelInput.value });
+  ctx.settingsChangeRequest = current => ({ patch: current, baseRevisions: {} });
+  ctx.cloneSettings = value => structuredClone(value);
+  ctx.saveBtn = { addEventListener(type, handler) { saveHandler = handler; } };
+  ctx.window.picoagent.settings.save = patch => {
+    submitted = patch;
+    return new Promise(resolve => { resolveSave = resolve; });
+  };
+  const start = settings.indexOf('saveBtn.addEventListener("click", async () => {');
+  vm.runInContext(settings.slice(start, settings.indexOf('resetChangesBtn?.addEventListener(', start)), ctx);
+  const loading = ctx.loadModels("ollama", true);
+  const saving = saveHandler();
+  assert.equal(ctx.settingsMutationBusy, true);
+  resolveModels(["遅れて返る別モデル"]);
+  await loading;
+  assert.equal(ctx.modelInput.value, submitted.PICOAGENT_MODEL);
+  assert.equal(ctx.statusEl.textContent, "保存中…");
+  resolveSave({ up: true });
+  await saving;
+  assert.equal(ctx.settingsMutationBusy, false);
+  assert.equal(ctx.savedSnapshot.PICOAGENT_MODEL, ctx.modelInput.value);
+  assert.match(ctx.statusEl.textContent, /保存しました/);
 });
 
 test("狭い設定画面では見出しごとスクロールし、タブと保存の帯だけを固定する", async () => {

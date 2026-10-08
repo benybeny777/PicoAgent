@@ -207,7 +207,7 @@ export function createSender({ chat, voice, motion, notices, engine, relationshi
       if (requestRevision !== revision || cancelled()) { job.state = "cancelled"; return; }
       // 停止要求のあと応答が返らない場合に備え、打ち切りの合図と競走させる。
       const result = await Promise.race([images.length ? bridge.sendImage(fullText, images) : bridge.send(fullText), released]);
-      if (result?.stale || requestRevision !== revision) {
+      if (result?.stale || requestRevision !== revision || cancelled()) {
         job.state = "cancelled";
         chat.clearThinking();
         voice.cancelStream();
@@ -245,6 +245,7 @@ export function createSender({ chat, voice, motion, notices, engine, relationshi
       if (result.quitApp) setTimeout(() => bridge.quit().catch(error => logApp("error", "アプリ終了に失敗しました", errorDetail(error))), 900);
     } catch (error) {
       if (requestRevision !== revision) { job.state = "cancelled"; return; }
+      if (cancelled()) { job.state = "cancelled"; return; }
       job.state = "failed";
       logApp("error", "AI応答の取得に失敗しました", errorDetail(error));
       showFailure(`応答に失敗しました: ${errorMessage(error)}`);
@@ -294,21 +295,25 @@ export function createSender({ chat, voice, motion, notices, engine, relationshi
     /** 停止を要求する。応答が返らないまま待ち続けないよう、一定時間で画面側の待機を解除する。 */
     async cancel(button) {
       if (!busy) return;
-      if (activeRequest) activeRequest.cancelled = true;
+      const cancellation = activeRequest;
+      const release = releasePending;
+      if (cancellation) cancellation.cancelled = true;
+      voice.cancelStream();
+      voice.stop();
       if (button) button.disabled = true;
       status.set("停止を要求しています…", "send");
       if (cancelTimer) clearTimeout(cancelTimer);
       cancelTimer = setTimeout(() => {
         cancelTimer = null;
-        if (!busy || !releasePending) return;
+        if (!busy || activeRequest !== cancellation || !release) return;
         logApp("warn", "停止要求のあと応答が返らないため、画面の待機を解除しました");
-        releasePending({ stale: true, releasedByCancel: true });
+        release({ stale: true, releasedByCancel: true });
       }, CANCEL_RELEASE_MS);
       try {
         await bridge.cancel();
       } catch (error) {
-        clearTimeout(cancelTimer);
-        cancelTimer = null;
+        // 旧送信の停止応答が遅れても、次の送信の状態と待機解除を巻き戻さない。
+        if (!busy || activeRequest !== cancellation) return;
         logApp("warn", "中断要求の送信に失敗しました", errorDetail(error));
         status.set(`停止を要求できませんでした: ${errorMessage(error)}`, "send");
         if (button) button.disabled = false;
@@ -330,6 +335,8 @@ export function createSender({ chat, voice, motion, notices, engine, relationshi
     /** 「新しい話」: 表示中の会話・控え・選択肢を捨てる（打ちかけの文面は残す）。 */
     reset() {
       revision += 1;
+      // 旧通信が戻らなくても、リセット後の入力を待機状態へ閉じ込めない。
+      if (busy) void sender.cancel();
       last = { text: "", images: [], files: [] };
       voice.cancelStream();
       voice.stop();

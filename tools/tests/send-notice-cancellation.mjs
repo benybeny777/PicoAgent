@@ -10,7 +10,7 @@ function element(_tag, attributes = {}, children = []) {
     replaceChildren(...nodes) { this.children = nodes; }, append(...nodes) { this.children.push(...nodes); } };
 }
 function load(file, factory, values) {
-  const context = vm.createContext({ logApp() {}, errorDetail: String, errorMessage: String, ...values });
+  const context = vm.createContext({ logApp() {}, notifyBackgroundFailure() {}, clearBackgroundFailure() {}, errorDetail: String, errorMessage: String, ...values });
   vm.runInContext(uiFile(file).replace(/^import .*;\r?$/gm, "").replace("export function", "function") + `\nthis.factory = ${factory};`, context);
   return context.factory;
 }
@@ -109,7 +109,8 @@ test("起動で非表示になったキャラは有効なキャラの読込成�
   const characterSource = { element: { dataset: {}, style: { visibility: "hidden" } } };
   const context = vm.createContext({
     loadedSignature: "", signatureOf: id => id, characterOverrides: {}, sdkOverrides: {}, characterName: "",
-    voice: { stop() {} }, host: { load: async () => ({ pack: { id: "mugi", name: "むぎ", manifest: {} }, greeting: "" }) },
+    characterLoadGeneration: 0, characterLoads: 0, status: { set() {}, clear() {} }, errorMessage: String,
+    voice: { stop() {} }, host: { setDisplayReady() {}, load: async () => ({ pack: { id: "mugi", name: "むぎ", manifest: {} }, greeting: "" }) },
     stage: { setCharacter() {} }, chrome: { setCharacterName() {} }, characterSource,
     renderCharacterOptions() {}, motion: { rest() {} }, personaText: () => "人格",
     bridge: { setCharacterProfile: async () => ({}) }, applyStreamAppearance() {},

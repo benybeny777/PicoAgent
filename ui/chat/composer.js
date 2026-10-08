@@ -27,6 +27,7 @@ export function createComposer({ form, input, preview: previewBox, suggestions, 
   let draftTimer = 0;
   let images = [];
   let files = [];
+  let pendingReads = 0;
   let blocked = { busy: false, reason: "" };
   let quickItems = null; // 利用者定義（null なら既定）
   let defaultItems = quick.visibleQuickActions(quick.DEFAULT_QUICK_ACTIONS, {});
@@ -55,13 +56,15 @@ export function createComposer({ form, input, preview: previewBox, suggestions, 
   }
 
   function hasContent() {
+    if (pendingReads > 0) return false;
     return Boolean(input.value.trim()) || images.length > 0 || files.length > 0;
   }
 
   function updateState() {
     sendButton.disabled = blocked.busy || Boolean(blocked.reason) || !hasContent();
-    sendButton.title = blocked.reason || "Enter または Ctrl+Enter で送信 / Shift+Enterで改行 / ↑↓で入力履歴";
-    for (const node of quickActions.querySelectorAll("button")) node.disabled = blocked.busy || Boolean(blocked.reason);
+    sendButton.title = blocked.reason || (pendingReads > 0 ? "添付ファイルを読み込み中です"
+      : "Enter または Ctrl+Enter で送信 / Shift+Enterで改行 / ↑↓で入力履歴");
+    for (const node of quickActions.querySelectorAll("button")) node.disabled = blocked.busy || Boolean(blocked.reason) || pendingReads > 0;
   }
 
   function setValue(value) {
@@ -162,11 +165,25 @@ export function createComposer({ form, input, preview: previewBox, suggestions, 
     });
   }
 
+  /** 添付が確定するまで送信を止める。返す解除処理は失敗時も呼び、二重解除は無視する。 */
+  function beginAttachmentLoad() {
+    pendingReads += 1;
+    updateState();
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      pendingReads -= 1;
+      updateState();
+    };
+  }
+
   async function addFile(file) {
     if (!file) return;
     const isImage = file.type.startsWith("image/");
     if (isImage && images.length >= MAX_IMAGES) { toast(`画像は最大 ${MAX_IMAGES} 枚まで`, "warn"); return; }
     if (!isImage && files.length >= MAX_FILES) { toast(`ファイルは最大 ${MAX_FILES} 件まで`, "warn"); return; }
+    const release = beginAttachmentLoad();
     try {
       const dataUrl = await readFile(file);
       // 同時に貼り付けたファイルやネイティブドロップも、読込完了時の残り枠で判定する。
@@ -176,6 +193,8 @@ export function createComposer({ form, input, preview: previewBox, suggestions, 
     } catch (error) {
       logApp("error", "添付の読み込みに失敗しました", `${file.name}: ${errorDetail(error)}`);
       toast(isImage ? "画像を読み込めませんでした" : "ファイルを読み込めませんでした", "error");
+    } finally {
+      release();
     }
   }
 
@@ -232,6 +251,7 @@ export function createComposer({ form, input, preview: previewBox, suggestions, 
   });
   form.addEventListener("submit", event => {
     event.preventDefault();
+    if (pendingReads > 0) return;
     onSubmit();
   });
 
@@ -318,6 +338,7 @@ export function createComposer({ form, input, preview: previewBox, suggestions, 
     },
     resetNavigation,
     addFile,
+    beginAttachmentLoad,
     /** ネイティブのドロップで読み込んだ添付を足す。上限を超えた分は理由を返す。 */
     addLoaded(info) {
       if (info.kind === "image") {

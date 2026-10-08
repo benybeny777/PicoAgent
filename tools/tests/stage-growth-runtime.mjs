@@ -8,13 +8,14 @@ import * as model from "../../ui/app/scene-model.js";
 const source = readFileSync(new URL("../../ui/app/stage.js", import.meta.url), "utf8")
   .replace(/^import[\s\S]*?;\r?\n/gm, "").replace("export function createStage", "function createStage");
 
-function setup({ barHeight = 0, fixed = false, fail = false, ratio = 1 } = {}) {
+function setup({ barHeight = 0, fixed = false, fail = false, ratio = 1, saveGate = null, resizeGate = null } = {}) {
   const win = { innerWidth: 900, innerHeight: 700, devicePixelRatio: ratio,
     screen: { availWidth: 1920, availHeight: 1080 } };
   const stageElement = { clientWidth: 900, clientHeight: 700 - barHeight,
     closest: () => null, classList: { toggle() {} } };
   const element = () => ({ style: {} });
   const calls = [];
+  const saveCalls = [];
   const position = { x: 200, y: 200 };
   let saved;
   function resize(width, height) {
@@ -27,10 +28,19 @@ function setup({ barHeight = 0, fixed = false, fail = false, ratio = 1 } = {}) {
     createEmitter: () => ({ emit() {} }), logApp() {}, errorDetail: String, errorMessage: String,
     requestAnimationFrame: () => 1, ResizeObserver: class { observe() {} }, window: win,
     bridge: {
-      saveScene: async value => { saved = value; },
-      setWindowSize: async (width, height) => { calls.push({ width, height }); resize(width, height); },
+      saveScene: async value => {
+        saveCalls.push(value);
+        if (saveGate) await saveGate;
+        saved = value;
+      },
+      setWindowSize: async (width, height) => {
+        calls.push({ width, height });
+        if (resizeGate) await resizeGate;
+        resize(width, height);
+      },
       moveAndResizeWindow: async (leftDelta, topDelta, width, height) => {
         calls.push({ leftDelta, topDelta, width, height });
+        if (resizeGate) await resizeGate;
         resize(width, height); position.x -= leftDelta; position.y -= topDelta;
       },
     },
@@ -44,7 +54,7 @@ function setup({ barHeight = 0, fixed = false, fail = false, ratio = 1 } = {}) {
   stage.load({ pet: def }, { version: 1, pet: { sources: { chat },
     characters: { other: { anchor: "center", x: 0, y: 0, w: 100, h: 200, framing: "bust" } } } });
   stage.setCharacter("rice");
-  return { stage, win, calls, position, def, get saved() { return saved; } };
+  return { stage, win, calls, saveCalls, position, def, get saved() { return saved; } };
 }
 
 function close(actual, expected) {
@@ -119,4 +129,61 @@ test("窓の拡張に失敗した場合は未実行の拡張を保存座標へ�
   assert.equal(state.win.innerWidth, 900);
   assert.equal(state.saved.pet.characters.rice.x, 138);
   assert.equal(state.stage.rectOf("character").left, rect.left);
+});
+
+test("配置の保存待ちにバックエンドでリセットしたら未送信の古い保存を捨てる", async () => {
+  let release;
+  const state = setup({ saveGate: new Promise(resolve => { release = resolve; }) });
+  const first = state.stage.setVisible("character", false);
+  await new Promise(setImmediate);
+  const second = state.stage.setVisible("character", true);
+  state.stage.replaceScenes({ version: 1 });
+  release(); await first; await second;
+  assert.equal(state.saveCalls.length, 1);
+  assert.deepEqual(state.stage.scenes, { version: 1 });
+});
+
+test("保存待ちに既定へ戻すと未送信の途中配置を省略しリセットだけ保存する", async () => {
+  let release;
+  const state = setup({ saveGate: new Promise(resolve => { release = resolve; }) });
+  const first = state.stage.setVisible("character", false);
+  await new Promise(setImmediate);
+  const second = state.stage.setVisible("character", true);
+  const reset = state.stage.resetLayout();
+  release(); await first; await second; await reset;
+  assert.equal(state.saveCalls.length, 2);
+  assert.deepEqual(state.saveCalls.at(-1), { version: 1 });
+});
+
+test("窓拡張待ち中の次の配置も元の画面位置に残り古い拡張を追いかけない", async () => {
+  let release;
+  const state = setup({ resizeGate: new Promise(resolve => { release = resolve; }) });
+  const first = state.stage.commit("character", { left: 665, top: 50, width: 373, height: 600 });
+  await new Promise(setImmediate);
+  const second = state.stage.commit("character", { left: 600, top: 50, width: 200, height: 600 });
+  assert.equal(state.calls.length, 1);
+  release(); await first; await second;
+  assert.equal(state.stage.rectOf("character").left, 600);
+  assert.equal(state.saved.pet.characters.rice.w, 200);
+  assert.equal(state.calls.length, 1);
+});
+
+test("左上移動の完了待ちに再配置しても次のキャラの画面座標を維持する", async () => {
+  let release;
+  const state = setup({ resizeGate: new Promise(resolve => { release = resolve; }) });
+  const first = state.stage.commit("character", { left: -100, top: -80, width: 400, height: 500 });
+  await new Promise(setImmediate);
+  const second = state.stage.commit("character", { left: 600, top: 300, width: 200, height: 300 });
+  release(); await first; await second;
+  const rect = state.stage.rectOf("character");
+  close(state.position.x + rect.left, 800);
+  close(state.position.y + rect.top, 500);
+  assert.equal(state.calls.length, 1);
+});
+
+test("窓拡張が不要な自動配置リセットは既定矩形を保存値へ複製しない", async () => {
+  const state = setup();
+  await state.stage.resetCharacter();
+  assert.equal(state.saved.pet.characters.rice, undefined);
+  assert.equal(state.calls.length, 0);
 });

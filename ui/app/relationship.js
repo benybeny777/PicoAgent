@@ -20,6 +20,8 @@ export function createRelationship({ card, onResume }) {
   let lastTouchAt = 0;
   let pendingZone = "";
   let pendingTimer = null;
+  let visibilityRevision = 0;
+  let renderRevision = 0;
 
   const clearConfirmation = twoStepAction(clear, {
     initialLabel: "記録をすべて消す",
@@ -29,6 +31,7 @@ export function createRelationship({ card, onResume }) {
 
   function render(data) {
     if (!data) return;
+    renderRevision += 1;
     const state = data.relationship || data;
     label.textContent = data.bondLabel || state.bondLabel || "いっしょの相棒";
     stats.textContent = `会話 ${Number(state.conversations || 0)}回 ・ 完了 ${Number(state.completedTasks || 0)}件 ・ ふれあい ${Number(state.interactions || 0)}回`;
@@ -51,10 +54,11 @@ export function createRelationship({ card, onResume }) {
           confirmLabel: "もう一度押す",
           onArm: () => toast("この記録だけを消します。もう一度押すと実行します", "info"),
         });
-        remove.addEventListener("click", () => {
+        remove.addEventListener("click", async () => {
           if (!confirmation.request()) return;
           remove.textContent = "削除中…";
-          update(() => bridge.deleteRelationshipMoment(moment.id));
+          await update(() => bridge.deleteRelationshipMoment(moment.id));
+          remove.textContent = "削除";
         });
         buttons.push(pin, remove);
         return el("div", { className: "relationship-moment", dataset: { pinned: String(moment.pinned === true) } }, [
@@ -68,7 +72,7 @@ export function createRelationship({ card, onResume }) {
 
   function setBusy(busy) {
     card.setAttribute("aria-busy", String(busy));
-    for (const node of card.querySelectorAll("button")) node.disabled = busy;
+    for (const node of card.querySelectorAll("button")) if (node !== close) node.disabled = busy;
   }
 
   async function update(operation) {
@@ -83,7 +87,9 @@ export function createRelationship({ card, onResume }) {
   }
 
   function hide() {
+    visibilityRevision += 1;
     card.hidden = true;
+    if (opener) opener.disabled = false;
     opener?.setAttribute("aria-expanded", "false");
     opener?.focus({ preventScroll: true });
   }
@@ -128,18 +134,24 @@ export function createRelationship({ card, onResume }) {
     async toggle(button) {
       opener = button;
       if (!card.hidden) { hide(); return; }
+      const visibility = ++visibilityRevision;
+      const revision = renderRevision;
       card.hidden = false;
       button.setAttribute("aria-expanded", "true");
       button.disabled = true;
       moments.textContent = "記録を読み込んでいます…";
-      try { render(await bridge.relationshipState()); }
+      try {
+        const data = await bridge.relationshipState();
+        if (visibility === visibilityRevision && revision === renderRevision) render(data);
+      }
       catch (error) {
+        if (visibility !== visibilityRevision || revision !== renderRevision) return;
         logApp("warn", "いっしょの記録を読めませんでした", errorDetail(error));
         moments.textContent = `記録を読み込めませんでした: ${errorMessage(error)}`;
       } finally {
-        button.disabled = false;
+        if (visibility === visibilityRevision || card.hidden) button.disabled = false;
       }
-      close.focus({ preventScroll: true });
+      if (visibility === visibilityRevision && !card.hidden) close.focus({ preventScroll: true });
     },
     hide,
     get open() { return !card.hidden; },

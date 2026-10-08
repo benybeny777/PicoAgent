@@ -30,6 +30,7 @@ export function createCharacterHost({ container }) {
   let motion = "idle";
   let speaking = false;
   let active = true;
+  let displayReady = true;
   let layoutId = "pet";
   let framing = "bust";
   let size = null;
@@ -56,6 +57,8 @@ export function createCharacterHost({ container }) {
 
   async function createRenderer(Renderer, loadedPack) {
     const instance = new Renderer({ reducedMotion });
+    // 寸法計算はできるまま、読込途中の描画だけを隠して確定後に公開する。
+    instance.element.style.visibility = "hidden";
     container.prepend(instance.element);
     try {
       await instance.load(loadedPack);
@@ -72,7 +75,7 @@ export function createCharacterHost({ container }) {
     renderer.setFraming(framing);
     renderer.setMotion(motion);
     renderer.setSpeaking(speaking);
-    renderer.setActive(active && !sleeping && !document.hidden);
+    renderer.setActive(active && displayReady && !sleeping && !document.hidden);
     if (size) renderer.resize(size.width, size.height, size.pixelRatio);
   }
 
@@ -122,6 +125,7 @@ export function createCharacterHost({ container }) {
       container.dataset.renderKind = renderer.constructor.kind;
       events.emit("loaded", pack);
       applyState();
+      renderer.element.style.visibility = "";
       return {
         pack,
         profile: personaText(loaded.manifest, overrides[loaded.id]),
@@ -183,7 +187,12 @@ export function createCharacterHost({ container }) {
     },
     setActive(value) {
       active = Boolean(value);
-      renderer?.setActive(active && !sleeping && !document.hidden);
+      renderer?.setActive(active && displayReady && !sleeping && !document.hidden);
+    },
+    /** 配置の可視状態とは別に、人格と描画が確定するまで描画ループを止める。 */
+    setDisplayReady(value) {
+      displayReady = Boolean(value);
+      renderer?.setActive(active && displayReady && !sleeping && !document.hidden);
     },
     /** 居眠り。寝姿の画像（boot.sleeping）があるキャラだけ眠る。 */
     setSleeping(value) {
@@ -199,7 +208,7 @@ export function createCharacterHost({ container }) {
         sleepImage.hidden = true;
         renderer?.element.removeAttribute("hidden");
       }
-      renderer?.setActive(active && !sleeping && !document.hidden);
+      renderer?.setActive(active && displayReady && !sleeping && !document.hidden);
       return sleeping;
     },
     get sleeping() { return sleeping; },
@@ -234,7 +243,7 @@ export function createCharacterHost({ container }) {
     events.emit("reduced-motion", reducedMotion);
   });
   document.addEventListener("visibilitychange", () => {
-    renderer?.setActive(active && !sleeping && !document.hidden);
+    renderer?.setActive(active && displayReady && !sleeping && !document.hidden);
   });
   return host;
 }
