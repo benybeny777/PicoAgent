@@ -25,7 +25,7 @@ SECTIONS = {
     "D6": "検査の形骸化",
     "D7": "人格プロンプト・内部資料の混入",
     "D8": "意図ルーティング・先回り実行の誤爆",
-    "D9": "ウィンドウ配置・構図・レイアウト",
+    "D9": "ウィンドウ位置・寸法の保存と復元",
     "D10": "非同期の競合・世代・取りこぼし",
     "D11": "設定反映・再初期化",
     "D12": "配布・ビルド種別の混入",
@@ -33,6 +33,10 @@ SECTIONS = {
     "D14": "レビュー修正そのものによる退行",
     "D15": "日本語・文字列",
     "D16": "外部入力の上限・境界",
+    "D17": "見た目: 操作部品の切れ・遮蔽・はみ出し",
+    "D18": "見た目: キャラの構図・切れ・位置",
+    "D19": "見た目: キャラ素材・顔パーツ・描画品質",
+    "D20": "見た目: 配色・テーマ・文字",
 }
 
 # パスの正規表現 → 節
@@ -48,7 +52,11 @@ PATH_RULES = [
     (r"src-tauri/src/tools/http\.rs|src-tauri/src/(api_server|mcp)/?|src-tauri/src/api_server\.rs", ["D4", "D16"]),
     (r"(^|/)tests?/|tools/tests/|tools/screenshots/|mod guard|guard_scan\.rs", ["D6"]),
     (r"src-tauri/src/agent(\.rs|/)|src-tauri/src/(topic_guard|message|history)\.rs|skills/[^/]+/prompts/", ["D7"]),
-    (r"src-tauri/src/(layout|scene|stream_profile|hotkey)\.rs|ui/character/|ui/app/(stage|window-chrome|edit|motion)\.js|ui/[^/]*\.css|ui/themes/", ["D9"]),
+    (r"src-tauri/src/(layout|scene|stream_profile|hotkey)\.rs|ui/app/(stage|window-chrome|edit)\.js", ["D9", "D17", "D18"]),
+    (r"ui/[^/]*\.(css|html)$|ui/chat/|ui/app/(context-menu|onboarding|notice|quick-actions)\.js|ui/components/|ui/settings", ["D17", "D20"]),
+    (r"ui/themes/|ui/[^/]*\.css$", ["D20"]),
+    (r"ui/character/|ui/app/motion\.js|ui/mesh-rig\.js|ui/mmd-renderer\.js|character-preview|character_framing|characters/[^/]+/character\.json", ["D18", "D19"]),
+    (r"^characters/|^character-sources/|scripts/build-character", ["D19"]),
     (r"src-tauri/src/(commands|settings_memory|secret)\.rs|ui/settings[^/]*", ["D11"]),
     (r"^xtask/|^distribution/|Cargo\.(toml|lock)$|tauri\.conf\.json|\.bat$|^scripts/", ["D12"]),
     (r"\.md$", ["D13"]),

@@ -31,7 +31,7 @@ description: PicoAgentの画面崩れ、ドラッグ、最大化、キャラ位�
 
 ## 検証する
 
-- まず`tools/screenshots/ui-check.mjs`で3形式の画素・操作部品の完全包含・右クリック文脈・矩形保存を検査する。必要なら`SHOOT_CHARACTER_MATRIX=1`などの旧撮影ツールで実機の追加確認を行う。
+- まず`tools/screenshots/ui-check.mjs`で3形式の画素・操作部品の完全包含（窓内・親のoverflow・前面要素の遮蔽）・右クリック文脈・矩形保存を検査する。見た目の修正では`UI_CHECK_CHARACTERS=all`で全キャラを対象にする。必要なら`SHOOT_CHARACTER_MATRIX=1`などの旧撮影ツールで実機の追加確認を行う。
 - 代表レイアウトだけで済ませず、変更に関係する現行3形式を確認する。
 - スクリーンショットを実際に開き、キャラの鮮明さ、切れ、左右位置、前後関係、操作部品を目視する。
 - 一時画像・結果は`temp/`だけへ置き、成果物のREADME WebPだけを`docs/images/`へ出す。

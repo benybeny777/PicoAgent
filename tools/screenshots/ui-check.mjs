@@ -4,7 +4,8 @@
 //   1. 3形式（ペット・ミニ・配信）で起動が完了し、キャラが描かれる。
 //   2. キャラが切れない: キャラ矩形の上端・左右端に描画が接していない（全身構図は下端も含む）。
 //      最小・既定・大きく拡大した3つの大きさで確かめる。
-//   3. 最小サイズ（200×240）でも入力欄・送信・状態表示・ウィンドウ操作が窓の内側に完全に収まる。
+//   3. 最小サイズ（200×240）でも入力欄・送信・状態表示・ウィンドウ操作が窓の内側に完全に収まり、
+//      親の overflow で切れず、前面の別要素にも覆われない。
 //   4. 右クリックはどこでも pet_menu を呼び、文脈（選択・入力欄・リンク・キャラ）だけを渡す。
 //   5. 配置の保存は pet_save_scene だけを通り、倍率を持たない矩形で届く。
 //   6. タイトルバーは見えているシーンの真上へ同じ幅で付き、フロー表示と常に表示を切り替えられる。
@@ -167,16 +168,34 @@ async function fullyInside(page, selector) {
       if (["hidden", "clip", "auto", "scroll"].includes(style.overflowX)) inside &&= rect.left >= bounds.left - 0.5 && rect.right <= bounds.right + 0.5;
       if (["hidden", "clip", "auto", "scroll"].includes(style.overflowY)) inside &&= rect.top >= bounds.top - 0.5 && rect.bottom <= bounds.bottom + 0.5;
     }
+    // 窓内で切れていなくても、前面の別要素（タイトルバー・配置操作など）に覆われていれば押せない。
+    // 中央と内側4点で最前面の要素を調べる。pointer-events:none の要素はクリックを通すので対象外になる。
+    const occludedBy = [];
+    if (inside) {
+      for (const [fx, fy] of [[0.5, 0.5], [0.25, 0.25], [0.75, 0.25], [0.25, 0.75], [0.75, 0.75]]) {
+        const hit = document.elementFromPoint(rect.left + rect.width * fx, rect.top + rect.height * fy);
+        if (hit && hit !== element && !element.contains(hit)) {
+          const name = hit.id ? `#${hit.id}` : `${hit.tagName.toLowerCase()}${hit.classList.length ? `.${[...hit.classList].join(".")}` : ""}`;
+          if (!occludedBy.includes(name)) occludedBy.push(name);
+        }
+      }
+    }
     return {
       present: true,
-      inside,
+      inside: inside && !occludedBy.length,
+      occludedBy,
       rect: { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom },
     };
   }, selector);
 }
 
 const LAYOUTS = { pet: [900, 600], mascot: [360, 560], stream: [1280, 720] };
-const characters = (process.env.UI_CHECK_CHARACTERS || "mugi,rin,photoreal-prototype").split(",");
+// all は配信コピーに実在する全キャラ。見た目の不具合は1体で見つけても全員で確かめる（AGENTS）。
+const characters = process.env.UI_CHECK_CHARACTERS === "all"
+  ? JSON.parse(fs.readFileSync(path.join(uiDir, "assets/characters/index.json"), "utf8")).characters
+    .map(entry => entry.id)
+    .filter(id => fs.existsSync(path.join(uiDir, "assets/characters", id)))
+  : (process.env.UI_CHECK_CHARACTERS || "mugi,rin,photoreal-prototype").split(",");
 const layoutIds = (process.env.UI_CHECK_LAYOUTS || "pet,mascot,stream").split(",");
 
 for (const characterId of characters) {
@@ -414,7 +433,7 @@ for (const layout of Object.keys(LAYOUTS)) {
   for (const selector of ["#input", "#sendButton", "#micButton", "#topWindowMenu .window-close", "#topWindowMenu .window-caption-controls button"]) {
     const result = await fullyInside(page, selector);
     if (!result.present) fail(label, `${selector} が表示されていません`);
-    else if (!result.inside) fail(label, `${selector} が窓の外へ出ています ${JSON.stringify(result.rect)}`);
+    else if (!result.inside) fail(label, `${selector} が窓の外へ出ているか覆われています ${JSON.stringify(result)}`);
   }
   ok(`${label} 最小サイズの収まり`);
   await context.close();
