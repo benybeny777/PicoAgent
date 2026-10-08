@@ -107,7 +107,7 @@
   - 子プロセスは終了時に `kill` し、`wait` でハンドルまで回収する（ゾンビ・ハンドルリークを残さない）。
   - `reqwest` の `is_up` などプローブ系には `timeout` を付ける。長時間ストリーミング（モデルDL・生成）は全体timeoutを付けない代わりに接続自体の滞留に注意する。
   - フロントの `URL.createObjectURL` は再生終了・失敗・中断で必ず `revokeObjectURL` する。`setInterval` 等のタイマーは全経路で `clearInterval` する。
-- **開発ビルドは通常版の利用者データに触れない。** デバッグビルドの保存先はリポジトリ直下の `dev-data/PicoAgent/`（`log_paths::dev_data_root()`）で、起動経路によらずビルドの種類で決まる。保存先は必ず `log_paths::data_dir()`、旧データの探索・移行は `log_paths::legacy_app_data_dir()` を通し、OSの保存先（`app_data_dir()`・`dirs::data_dir()` など）を直接使わない。`log_paths::guard` が直接使用を検出する。
+- **開発ビルドと製品ビルドを完全に分ける。** インストーラで入れた製品の人力テストが、開発中のデータや資産で動いてしまわないようにするため。保存先は開発ビルドが `PicoAgent-Dev`、製品ビルドが `PicoAgent`（`log_paths::data_dir()`）、同梱物は開発ビルドがリポジトリの `src-tauri/resources/bundled/`、製品ビルドがインストール先の `resources/bundled/`（`log_paths::packaged_bundled_dir()`）だけにする。判定はビルドの種類（`cfg!(debug_assertions)`）で、起動経路によらない。**無いときに別の場所（作業フォルダ・実行ファイルからの相対位置・ビルドしたリポジトリ・旧保存先）を探して代わりに使うことは禁止する。** OSの保存先や同梱物の場所（`app_data_dir()`・`resource_dir()`・`current_dir()`・`current_exe()`・`CARGO_MANIFEST_DIR`・`dirs::data_dir()` など）を直接使わない。`log_paths::guard` が直接使用を検出する。
 - **PicoAgent は同時に1つしか動かさない**（`tauri-plugin-single-instance`）。`store::lock_state` はプロセス内 Mutex でプロセスをまたぐと効かず、設定・記憶・使用量・実行履歴・会話履歴はどれも「全体を読んで全体を書き戻す」ため、2つ目のインスタンスがあると片方の保存が古いスナップショットで丸ごと上書きされる（＝利用者のデータが黙って消える）。2つ目の起動は既存ウィンドウを前面へ出して終了する。**この前提を外す変更（複数ウィンドウ・複数プロセス）をするなら、状態ファイルのプロセス間排他を先に用意すること。**
 
 ## 設定値・シークレット

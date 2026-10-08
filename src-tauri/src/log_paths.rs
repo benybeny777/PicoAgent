@@ -9,23 +9,49 @@ use tauri::{AppHandle, Manager};
 // 履歴（history-<キャラID>.json）は対話データなのでローテーション対象に含めない。
 const LOG_RETAIN_DAYS: i64 = 7;
 
-/// 開発ビルドの保存先の根（`<リポジトリ>/dev-data/PicoAgent`）。製品ビルドでは `None`。
+/// 開発ビルドの保存先の根（Windowsは `%APPDATA%\PicoAgent-Dev`）。製品ビルドでは `None`。
 ///
-/// 開発中の設定・履歴・キャラ・記憶・モデル・同梱ランタイムを利用者の通常版の領域へ混ぜないため、
-/// 起動経路（起動バッチ・`cargo xtask dev`・`cargo tauri dev`）ではなくビルドの種類で決める。
-/// 末尾を通常版と同じ `PicoAgent` にし、フォルダ構成と停止処理の目印（`PicoAgent/browser-profile`
-/// など）を通常版と揃える。
+/// 開発中の設定・履歴・キャラ・記憶・モデル・同梱ランタイムを、インストーラで入れた通常版の
+/// `PicoAgent` と完全に分ける。起動経路（起動バッチ・`cargo xtask dev`・`cargo tauri dev`）ではなく
+/// ビルドの種類で決めるので、どの起動でも通常版の領域へは触れない。リポジトリの外に置き、
+/// worktree や clone を作り直しても取得済みのモデル・音声を共有する。
 pub fn dev_data_root() -> Option<PathBuf> {
-    cfg!(debug_assertions).then(|| dev_data_root_for(Path::new(env!("CARGO_MANIFEST_DIR"))))
+    // フォールバック許可: OSの保存先を取れない開発環境でも、通常版の領域へは降格させない。
+    cfg!(debug_assertions)
+        .then(|| dev_data_root_for(&dirs::data_dir().unwrap_or_else(std::env::temp_dir)))
 }
 
-/// `src-tauri` の場所から開発用の保存先を決める。
-fn dev_data_root_for(manifest_dir: &Path) -> PathBuf {
-    manifest_dir
-        .parent()
-        .unwrap_or(manifest_dir)
-        .join("dev-data")
-        .join("PicoAgent")
+/// OSの利用者データ領域から開発用の保存先を決める。
+fn dev_data_root_for(os_data_dir: &Path) -> PathBuf {
+    os_data_dir.join("PicoAgent-Dev")
+}
+
+/// このビルドの同梱物（`resources/bundled`）の唯一の置き場所。
+///
+/// 製品ビルドはインストール先の `resources/bundled/`、開発ビルドはリポジトリの
+/// `src-tauri/resources/bundled/`。作業フォルダや実行ファイルの位置から推測したり、
+/// 無いときに別の置き場所を探したりしない（開発中の資産を製品で使わないため）。
+pub fn packaged_bundled_dir(app: &AppHandle) -> Option<PathBuf> {
+    if cfg!(debug_assertions) {
+        return Some(Path::new(env!("CARGO_MANIFEST_DIR")).join("resources/bundled"));
+    }
+    app.path()
+        .resource_dir()
+        .ok()
+        .map(|root| root.join("resources/bundled"))
+}
+
+/// キャラ作成の同梱資産（`character-maker`）の唯一の置き場所。考え方は `packaged_bundled_dir` と同じ。
+pub fn packaged_character_maker_dir(app: &AppHandle) -> Option<PathBuf> {
+    if cfg!(debug_assertions) {
+        return Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .map(|root| root.join("character-maker"));
+    }
+    app.path()
+        .resource_dir()
+        .ok()
+        .map(|root| root.join("character-maker"))
 }
 
 /// 保存先の根と識別子から、このアプリが使う管理領域を決める。
@@ -68,7 +94,7 @@ pub const ASSET_SCOPE_DIRS: [&str; 4] = [
     "generated-media",
 ];
 
-/// 静的な許可範囲は通常版の保存先（`$DATA/PicoAgent`）だけを指す。開発ビルドの `dev-data` や
+/// 静的な許可範囲は通常版の保存先（`$DATA/PicoAgent`）だけを指す。開発ビルドの `PicoAgent-Dev` や
 /// 検査用の別識別子（`instances/<識別子>`）でも同じフォルダだけを表示できるよう、起動時に足す。
 /// 通常版では静的な範囲と同じ場所なので、許可は広がらない。
 pub fn allow_asset_scope(app: &AppHandle) {
@@ -87,15 +113,6 @@ pub fn allow_asset_scope(app: &AppHandle) {
             );
         }
     }
-}
-
-/// 旧版が使っていた識別子別の保存先（`app_data_dir`）。旧データの探索・移行にだけ使う。
-/// 開発ビルドでは通常版の旧データを読んだり移したりしないよう `None` を返す。
-pub fn legacy_app_data_dir(app: &AppHandle) -> Option<PathBuf> {
-    if dev_data_root().is_some() {
-        return None;
-    }
-    app.path().app_data_dir().ok()
 }
 
 pub fn cache_dir(app: &AppHandle) -> PathBuf {
@@ -247,45 +264,15 @@ pub fn log_detached(message: &str) {
     }
 }
 
-pub fn migrate_legacy_app_log(app: &AppHandle, name: &str) {
-    let new_path = log_file(app, name);
-    // 開発ビルドは通常版の旧ログを移して消さない。
-    if new_path.exists() || dev_data_root().is_some() {
-        return;
-    }
-    let mut old_paths = Vec::new();
-    if let Ok(old_dir) = app.path().app_log_dir() {
-        old_paths.push(old_dir.join(name));
-    }
-    if let Some(old_data_dir) = legacy_app_data_dir(app) {
-        old_paths.push(old_data_dir.join("log").join(name));
-    }
-    let Some(old_path) = old_paths.into_iter().find(|path| path.exists()) else {
-        return;
-    };
-    let result = (|| -> anyhow::Result<()> {
-        if let Some(parent) = new_path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        std::fs::copy(&old_path, &new_path)?;
-        // 旧ファイルは移行後に消す。残すと日付別ファイルへ毎日コピーし直してしまう。
-        std::fs::remove_file(&old_path)?;
-        Ok(())
-    })();
-    // フォールバック許可: 旧ログ移行に失敗しても起動とログ出力は継続する。
-    if let Err(error) = result {
-        append_app_log(app, &format!("旧ログの移行に失敗しました: {error}"));
-    }
-}
-
 #[cfg(test)]
 mod guard {
     use crate::guard_scan;
 
-    /// OSの保存先を直接取ると、開発ビルドでも通常版の利用者データ（`%APPDATA%` など）を
-    /// 読み書きしてしまう。保存先は `data_dir()` / `legacy_app_data_dir()` を通す。
+    /// OSの保存先や同梱物の場所を直接取ると、開発ビルドが通常版の利用者データ（`%APPDATA%` など）を
+    /// 触ったり、同じPCでビルドした製品が開発中の資産を使ったりする。保存先は `data_dir()`、
+    /// 同梱物は `packaged_bundled_dir()` / `components::runtime_dirs()` を通す。
     #[test]
-    fn 保存先はlog_pathsを通して開発ビルドと通常版を分ける() {
+    fn 保存先と同梱物はlog_pathsを通して開発ビルドと製品を分ける() {
         const DIRECT: &[&str] = &[
             ".app_data_dir()",
             ".app_local_data_dir()",
@@ -294,12 +281,18 @@ mod guard {
             "dirs::data_dir()",
             "dirs::data_local_dir()",
             "dirs::config_dir()",
+            ".resource_dir()",
+            "current_dir()",
+            "current_exe()",
+            "CARGO_MANIFEST_DIR",
         ];
-        // 理由付きの例外。いずれも開発ビルドでは使わない分岐の中にある。
+        // 理由付きの例外。
         const ALLOWED: &[&str] = &[
-            "src/log_paths.rs",       // 保存先の正本（開発ビルドは dev_data_root を先に返す）
+            "src/log_paths.rs",       // 保存先・同梱物の正本（開発ビルドの判定はここだけ）
             "src/migration.rs",       // 旧識別子フォルダの移行（開発ビルドは冒頭で抜ける）
             "browser_control/cdp.rs", // ブラウザ専用プロファイル（開発ビルドは dev_data_root を先に返す）
+            "src/doc_sync.rs",        // テスト専用モジュール（文書と実装の突き合わせ）
+            "src/guard_scan.rs",      // テスト専用モジュール（設計ガードの走査範囲）
         ];
         let mut violations = Vec::new();
         for source in guard_scan::all_sources() {
@@ -318,7 +311,7 @@ mod guard {
         }
         assert!(
             violations.is_empty(),
-            "保存先は log_paths::data_dir() か legacy_app_data_dir() を通してください:\n{}",
+            "保存先は log_paths::data_dir()、同梱物は packaged_bundled_dir() を通してください:\n{}",
             violations.join("\n")
         );
     }
@@ -390,23 +383,13 @@ mod tests {
     use std::path::{Path, PathBuf};
 
     #[test]
-    fn 開発用の保存先はリポジトリ配下で通常版と同じ構成にする() {
-        let repo = Path::new("/work/PicoAgent");
-        let root = dev_data_root_for(&repo.join("src-tauri"));
-        assert_eq!(root, repo.join("dev-data").join("PicoAgent"));
-        // 停止処理（cargo xtask stop）の目印 `PicoAgent/browser-profile` が開発版にも当たる。
-        assert!(root
-            .join("browser-profile")
-            .to_string_lossy()
-            .replace('\\', "/")
-            .contains("PicoAgent/browser-profile"));
-        // テストは開発ビルドなので、通常版の領域ではなくこのリポジトリの dev-data を指す。
-        let current = dev_data_root().unwrap();
-        assert!(current.ends_with(Path::new("dev-data").join("PicoAgent")));
-        assert_eq!(
-            current.parent().unwrap().parent().unwrap(),
-            Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap()
-        );
+    fn 開発用の保存先は通常版と別のフォルダにする() {
+        let os = Path::new("/home/me/.local/share");
+        let root = dev_data_root_for(os);
+        assert_eq!(root, os.join("PicoAgent-Dev"));
+        assert_ne!(root, os.join("PicoAgent"));
+        // テストは開発ビルドなので、通常版の `PicoAgent` ではなく `PicoAgent-Dev` を指す。
+        assert!(dev_data_root().unwrap().ends_with("PicoAgent-Dev"));
     }
 
     #[test]

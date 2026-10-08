@@ -240,7 +240,7 @@ cargo xtask license issue --customer "購入者名" --purchase-id "BOOTH注文�
 
 - llama.cppは安定版v0.2.0が配布用に対応付けた`b10566`へ固定し、Windows Vulkan x64・macOS arm64／x64・Ubuntu Linux Vulkan x64の資産名とSHA-256をコードで照合します。WindowsのNVIDIA CUDA 13.3版、AMD ROCm 7.14版、Intel SYCL版は対応GPUを検出した場合だけ公式Releaseから追加取得し、固定サイズ・SHA-256・`--list-devices`の実認識をすべて確認した後に使います。取得済み配置もマニフェストのタグ・方式・資産名・SHA-256が一致する場合だけ再利用します。3方式の取得・検証・入れ替えは`engine_backend.rs`の`GPU_BACKENDS`表と`ensure_gpu_engine()`に1本化してあり、方式を足すときは表へ1行足します
 - 実行ファイルは配布物へ同梱しますが、モデル GGUF（数 GB）は含めず、初回起動時に `%APPDATA%\PicoAgent\bundled\models\` へ取得します
-- 実行時に差し替える場合は `%APPDATA%\PicoAgent\bundled\engine\` を優先して探します
+- 実行時に差し替える場合は `%APPDATA%\PicoAgent\bundled\engine\`（開発ビルドは `%APPDATA%\PicoAgent-Dev\bundled\engine\`）を優先し、無ければこのビルドの同梱物だけを使います
 
 **同梱 Aivis（読み上げ）**
 
@@ -275,20 +275,30 @@ cargo xtask license issue --customer "購入者名" --purchase-id "BOOTH注文�
 <details>
 <summary>ログ・データの保存場所・識別子</summary>
 
-**ログ** — `%APPDATA%\PicoAgent\log\` に保存します（開発ビルドは `dev-data\PicoAgent\log\`）。**1 日ごとに日付付きファイルへローテートし、1 週間より古いログは起動時と 1 日ごとに自動削除**します（会話履歴はログではないため対象外）。
+**ログ** — `%APPDATA%\PicoAgent\log\` に保存します（開発ビルドは `%APPDATA%\PicoAgent-Dev\log\`）。**1 日ごとに日付付きファイルへローテートし、1 週間より古いログは起動時と 1 日ごとに自動削除**します（会話履歴はログではないため対象外）。
 
 | ファイル | 内容 |
 |---|---|
 | `app.<日付>.log` | アプリ本体とフロントのエラー |
 | `aivis.<日付>.log` | Aivis の起動ログ |
 | `engine.<日付>.log` | 同梱 llama-server のログ |
-| `dev.<日付>.log` | `cargo xtask dev` の再ビルド警告・コンパイルエラー（監視継続中の失敗を含む）。`dev-data\PicoAgent\log\` に置く |
+| `dev.<日付>.log` | `cargo xtask dev` の再ビルド警告・コンパイルエラー（監視継続中の失敗を含む）。`%APPDATA%\PicoAgent-Dev\log\` に置く |
 
 **識別子とデータ**
 
 - アプリ識別子は `com.picoagent.desktop`。保存先は識別子別フォルダを使わず、設定・履歴・追加キャラ・管理ランタイムを`PicoAgent`配下へ集約する。初回起動時に現行および旧識別子（`com.picoagent.app` / `com.coda.app`）配下の全データを移す
 - 設定・履歴・メモリ・追加キャラ・同梱系の実行時取得物・ログ・キャッシュは、OSの利用者データ領域にある`PicoAgent/`配下へ集約する
-- **開発ビルド（デバッグビルド）は、通常版と保存先を分ける。** `PicoAgentを起動.bat`・`cargo xtask dev`・`cargo tauri dev` のどれで起動しても、保存先はリポジトリ直下の `dev-data/PicoAgent/`（Git管理外）になる。中の構成は通常版と同じ。初回は空から始まり、モデルや音声などは開発版として取り直す。通常版のデータは読まず、旧識別子フォルダからの移行・旧ログの移行・旧保存先のモデル／Aivis探索も行わない。判定はビルドの種類（`cfg!(debug_assertions)`、`log_paths::dev_data_root()`）で、製品ビルドは従来どおり利用者データ領域を使う
+- **開発ビルドと製品ビルドは完全に分ける。** 判定はビルドの種類（`cfg!(debug_assertions)`）で、`PicoAgentを起動.bat`・`cargo xtask dev`・`cargo tauri dev` のどれで起動しても同じになる。
+
+  | | 製品ビルド（インストーラ） | 開発ビルド |
+  |---|---|---|
+  | 利用者データ（設定・履歴・記憶・追加キャラ・モデル・追加導入物・ログ） | `%APPDATA%\PicoAgent\` | `%APPDATA%\PicoAgent-Dev\` |
+  | 同梱物 | インストール先の `resources/bundled/` | リポジトリの `src-tauri/resources/bundled/` |
+  | キャラ作成の同梱資産 | インストール先の `character-maker/` | リポジトリの `character-maker/` |
+
+  - 正本は `log_paths::data_dir()`・`packaged_bundled_dir()`・`packaged_character_maker_dir()`、スキルからは `components::runtime_dirs()`。探す順は「追加導入した物（利用者データの `bundled/`）→ このビルドの同梱物」だけで、作業フォルダ・実行ファイルからの相対位置・ビルドしたリポジトリの絶対パス・旧保存先からは探さない。同じPCでビルドしたインストーラでも、製品がリポジトリの資産を使うことはない
+  - 旧保存先のモデル（`models/`、旧識別子フォルダ）と旧Aivis配置の探索・移行、旧ログの移行はしない。製品ビルドの更新時に旧識別子フォルダ（`com.picoagent.app` 等）から設定・履歴を移す処理だけは残し、開発ビルドでは行わない
+  - 開発用の保存先はリポジトリの外にあり、worktree・cloneの作り直しでもモデルや音声を取り直さない。初回だけ空から始まる
 - 開発版と通常版の同時起動はしない。識別子は共通のため、片方の起動中にもう片方を起動すると既存の窓が前面に出る。`cargo xtask dev` は起動前に `cargo xtask stop` で残存プロセスを止めるため、起動中の通常版も終了する
 - アイコンは `src-tauri/icons/`（`cargo tauri icon src-tauri/icon-source.png` で再生成）
 

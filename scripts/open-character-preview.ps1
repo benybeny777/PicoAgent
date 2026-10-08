@@ -73,8 +73,8 @@ if ($Mode -eq '2d') {
     exit 0
 }
 
-# 開発起動は通常版の利用者データではなく、リポジトリ配下の開発用保存先を使う。
-$devCharacterRoot = Join-Path $repositoryRoot 'dev-data\PicoAgent\characters'
+# 開発起動は通常版（%APPDATA%\PicoAgent）ではなく、開発用の保存先を使う。
+$devCharacterRoot = Join-Path $env:APPDATA 'PicoAgent-Dev\characters'
 
 if ($Mode -eq 'live2d') {
     $live2dCharacters = [System.Collections.Generic.List[object]]::new()

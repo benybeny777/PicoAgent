@@ -263,7 +263,7 @@ inventory::submit! { ProviderReg { make: || Box::new(MyProvider) } }
 
 ### ログ
 
-- 実行時ログは利用者データの `PicoAgent/log/` にまとめる（Windows 例: `%APPDATA%\PicoAgent\log\`。開発ビルドはリポジトリ直下の `dev-data/PicoAgent/log/`）。アプリ本体とフロントのエラーは `app`、Aivis の stdout/stderr は `aivis`、llama-server は `engine` へ追記する（`app.<日付>.log` / `engine.<日付>.log` / `aivis.<日付>.log`）。
+- 実行時ログは利用者データの `PicoAgent/log/` にまとめる（Windows 例: `%APPDATA%\PicoAgent\log\`。開発ビルドは `%APPDATA%\PicoAgent-Dev\log\`）。アプリ本体とフロントのエラーは `app`、Aivis の stdout/stderr は `aivis`、llama-server は `engine` へ追記する（`app.<日付>.log` / `engine.<日付>.log` / `aivis.<日付>.log`）。
 - バックエンドのパニックは `std::panic::set_hook`、フロントは大域 `error`/`unhandledrejection`、`window.picoagent` の `invoke` ラッパ、Tauriイベントの購読・コールバック・解除、WebAudio 等の非同期解放失敗で捕捉し、文脈付きで `app` へ記録する。
 - 起動時の更新確認はオフライン・タイムアウトだけを正常な見送りとし、通信異常・フィード解析失敗は `app` へ残す。ログ保存先そのものを取れない場合に限り、一時領域へ退避して stderr にも理由を出す。
 - 1日ごとに日付付きファイル（`app.<YYYY-MM-DD>.log` など。`log_paths::dated_name`）へ分け、1週間（`LOG_RETAIN_DAYS=7`）保持する。起動時と1日ごとのタイマーで `prune_old_logs` が古い `.log` を消す。**会話履歴（`history-<キャラID>.json`）はログではないので対象外。**

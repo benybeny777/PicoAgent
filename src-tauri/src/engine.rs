@@ -37,18 +37,13 @@ async fn vision_projector(app: &AppHandle) -> anyhow::Result<Option<PathBuf>> {
     }
     local::validate_vision_model(&state.config)?;
     let name = local::vision_asset::FILE_NAME;
+    // 追加導入した資産、このビルドの同梱物の順。別の置き場所は探さない。
     let mut candidates = vec![crate::log_paths::bundled_dir(app)
         .join("local-vision")
         .join(name)];
-    if let Ok(resources) = app.path().resource_dir() {
-        candidates.push(resources.join("resources/bundled/local-vision").join(name));
-        candidates.push(resources.join("bundled/local-vision").join(name));
+    if let Some(packaged) = crate::log_paths::packaged_bundled_dir(app) {
+        candidates.push(packaged.join("local-vision").join(name));
     }
-    candidates.push(
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("resources/bundled/local-vision")
-            .join(name),
-    );
     select_vision_projector(
         &candidates,
         local::vision_asset::SIZE,
@@ -122,20 +117,11 @@ fn server_path(app: &AppHandle) -> PathBuf {
     } else {
         "llama-server"
     };
+    // 差し替え用に取得したエンジン、このビルドの同梱物の順。作業フォルダや旧配置は探さない。
     let mut candidates: Vec<PathBuf> = Vec::new();
     candidates.push(crate::log_paths::bundled_dir(app).join("engine").join(exe));
-    if let Ok(res) = app.path().resource_dir() {
-        candidates.push(res.join("resources/bundled/engine").join(exe));
-        candidates.push(res.join("bundled/engine").join(exe));
-        candidates.push(res.join("resources/engine").join(exe));
-        candidates.push(res.join("engine").join(exe));
-    }
-    // dev（tauri dev / cargo run）のフォールバック: 作業ディレクトリ直下。
-    if let Ok(cwd) = std::env::current_dir() {
-        candidates.push(cwd.join("resources/bundled/engine").join(exe));
-        candidates.push(cwd.join("src-tauri/resources/bundled/engine").join(exe));
-        candidates.push(cwd.join("resources/engine").join(exe));
-        candidates.push(cwd.join("src-tauri/resources/engine").join(exe));
+    if let Some(packaged) = crate::log_paths::packaged_bundled_dir(app) {
+        candidates.push(packaged.join("engine").join(exe));
     }
     candidates
         .into_iter()
@@ -276,15 +262,9 @@ fn legacy_model_paths(app: &AppHandle) -> Vec<PathBuf> {
         .collect()
 }
 
+/// モデルの置き場所は `bundled/models` だけ。旧配置（`models/` や旧識別子フォルダ）は探さない。
 fn model_storage_roots(app: &AppHandle) -> Vec<PathBuf> {
-    let mut roots = vec![
-        models_dir(app),
-        crate::log_paths::data_dir(app).join("models"),
-    ];
-    if let Some(dir) = crate::log_paths::legacy_app_data_dir(app) {
-        roots.push(dir.join("models"));
-    }
-    roots
+    vec![models_dir(app)]
 }
 
 async fn preset_model_matches(

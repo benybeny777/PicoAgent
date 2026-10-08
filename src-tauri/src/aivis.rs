@@ -389,22 +389,12 @@ fn runtime_engine_path(app: &tauri::AppHandle) -> Option<PathBuf> {
     }
 }
 
+/// このビルドに同梱した Aivis の唯一の置き場所。作業フォルダや旧配置は探さない。
 fn resource_candidates(app: &tauri::AppHandle) -> Vec<PathBuf> {
     let exe = if cfg!(windows) { "run.exe" } else { "run" };
-    let mut candidates = Vec::new();
-    if let Ok(res) = app.path().resource_dir() {
-        candidates.push(res.join("resources/bundled/aivis").join(exe));
-        candidates.push(res.join("bundled/aivis").join(exe));
-        candidates.push(res.join("resources/aivis").join(exe));
-        candidates.push(res.join("aivis").join(exe));
-    }
-    if let Ok(cwd) = std::env::current_dir() {
-        candidates.push(cwd.join("resources/bundled/aivis").join(exe));
-        candidates.push(cwd.join("src-tauri/resources/bundled/aivis").join(exe));
-        candidates.push(cwd.join("resources/aivis").join(exe));
-        candidates.push(cwd.join("src-tauri/resources/aivis").join(exe));
-    }
-    candidates
+    crate::log_paths::packaged_bundled_dir(app)
+        .map(|packaged| vec![packaged.join("aivis").join(exe)])
+        .unwrap_or_default()
 }
 
 fn resource_engine_path(app: &tauri::AppHandle) -> Option<PathBuf> {
@@ -510,7 +500,6 @@ fn device_mode(state: &AppState) -> DeviceMode {
 }
 
 fn log_path(app: &tauri::AppHandle) -> PathBuf {
-    crate::log_paths::migrate_legacy_app_log(app, "aivis.log");
     crate::log_paths::log_file(app, "aivis.log")
 }
 
@@ -563,14 +552,6 @@ fn log_tail(app: &tauri::AppHandle) -> String {
 
 fn install_dir(app: &tauri::AppHandle) -> anyhow::Result<PathBuf> {
     Ok(crate::log_paths::bundled_dir(app).join("aivis"))
-}
-
-fn legacy_install_dirs(app: &tauri::AppHandle) -> Vec<PathBuf> {
-    let mut dirs = vec![crate::log_paths::data_dir(app).join("aivis")];
-    if let Some(path) = crate::log_paths::legacy_app_data_dir(app) {
-        dirs.push(path.join("aivis"));
-    }
-    dirs
 }
 
 fn release_asset_pattern() -> &'static str {
@@ -956,7 +937,6 @@ async fn ensure_installed_inner(
     force_repair: bool,
 ) -> anyhow::Result<PathBuf> {
     recover_interrupted_install(app);
-    migrate_legacy_install(app)?;
     if !force_repair {
         if let Some(path) = runtime_engine_path(app) {
             if let Some(resource) = resource_engine_path(app) {
@@ -1060,47 +1040,6 @@ pub async fn install_component(app: &tauri::AppHandle) -> anyhow::Result<PathBuf
         }
     }
     result
-}
-
-fn migrate_legacy_install(app: &tauri::AppHandle) -> anyhow::Result<()> {
-    let new_dir = install_dir(app)?;
-    let exe = if cfg!(windows) { "run.exe" } else { "run" };
-    if new_dir.join(exe).exists() {
-        return Ok(());
-    }
-    let Some(old_dir) = legacy_install_dirs(app)
-        .into_iter()
-        .find(|path| path.join(exe).exists())
-    else {
-        return Ok(());
-    };
-    append_log(
-        app,
-        &format!(
-            "旧 Aivis 配置を PicoAgent bundled ディレクトリへ移行します: {} -> {}",
-            old_dir.display(),
-            new_dir.display()
-        ),
-    )?;
-    if let Some(parent) = new_dir.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    match std::fs::rename(&old_dir, &new_dir) {
-        Ok(()) => Ok(()),
-        Err(_) => {
-            copy_dir_all(&old_dir, &new_dir)?;
-            if let Err(error) = std::fs::remove_dir_all(&old_dir) {
-                crate::log_paths::append_app_log(
-                    app,
-                    &format!(
-                        "移行済みの旧Aivisフォルダを削除できません: {} ({error})",
-                        old_dir.display()
-                    ),
-                );
-            }
-            Ok(())
-        }
-    }
 }
 
 fn child_exit_status(app: &tauri::AppHandle) -> Result<Option<ExitStatus>, String> {
@@ -1303,7 +1242,6 @@ pub fn start_background(app: &tauri::AppHandle) -> anyhow::Result<()> {
     if has_running_child(app) {
         return Ok(());
     }
-    migrate_legacy_install(app)?;
     let path = match runtime_engine_path(app) {
         Some(path) => {
             if let Some(resource) = resource_engine_path(app) {
