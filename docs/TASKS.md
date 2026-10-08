@@ -77,6 +77,19 @@
 | VTuber事務所への公式キャラクター許諾 | VTuber事務所については[docs/IP-PROPOSAL-VTUBER.md](IP-PROPOSAL-VTUBER.md)の照会文で該当性と窓口を確認する。判断材料は[docs/IP-LICENSING-STRATEGY.md](IP-LICENSING-STRATEGY.md) |
 | 収益化方式の決定後の実装検討 | [docs/SALES.md](SALES.md) §4のとおり、本体の有償・無償、課金対象、価格、販売方式は未定。方式の決定を着手条件とし、その結果に応じて課金判定、同梱構成、表示・利用文書の変更要否を判断する。Free／Pro境界撤去や同梱キャラ削減を先行しない |
 
+## 依存の最新化で取得元へ到達できず残った項目
+
+2026-10-08の一括最新化（PR #446〜#449）で、作業環境から取得元へ到達できず照合できなかった項目。着手条件は、各ホストへ到達できる環境であること。一次情報で版・サイズ・SHA-256を照合してから更新する。
+
+| 項目 | 現行 | 確認時点の上流 | 必要な取得元 |
+|---|---|---|---|
+| PyTorch系ロック（記憶検索のCPU／CUDA、キャラ作成のCUDA／MPS／ROCm、メディア） | torch 2.11.0系 | PyPI上は2.14.1 | download.pytorch.org、repo.radeon.com。全GPU種別のロックを同じtorch系列で再生成し、対応GPU表とCUDA／ROCm版も照合する |
+| 共通Python・ComfyUI（キャラ作成ランタイム `2026.09.10`） | Python 3.12.13、ComfyUI v0.34.0 | Python 3.12.15（uv 0.12.23で取得可能）、ComfyUI v0.39.2 | 上のPyTorchロック更新と同時に行う。導入済みランタイムの世代判定（`install.json`）も更新する |
+| 会話モデルのプリセット（GGUF） | `providers/local.rs`の固定リビジョン | 未確認 | huggingface.co |
+| 画像・動画モデル、記憶検索のembeddinggemma、Whisper smallモデル | 各固定リビジョン | 未確認 | huggingface.co |
+| Live2D Cubism Core | 05／06系の固定SHA-256 | 未確認 | cubism.live2d.com |
+| LibreOffice | 25.8.7.2 | 未確認 | downloadarchive.documentfoundation.org |
+
 ## FreeTokenローカルエンジンの段階導入
 
 2026-08-26時点では、[FreeToken](https://github.com/FlashML-org/FreeToken)を全環境の`llama-server`と一律に置き換えない。FreeTokenはOpenAI互換APIを提供し、公式のWindows向けPython 3.12 wheelを使ってネイティブ動作できるが、NVIDIA GPU、対応するPyTorch／CUDA／Tritonの組合せが必要である。対応モデルもHugging Face safetensors／FTWとGemma 4の一部GGUFに限られ、既存のPicoAgent用GGUFをすべてそのまま使えるわけではない。
