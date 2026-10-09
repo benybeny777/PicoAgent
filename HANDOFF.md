@@ -4,7 +4,7 @@
 
 ## 現在の状態
 
-- 最終確認日: 2026-10-07
+- 最終確認日: 2026-10-09
 - PR #389〜#394 は利用者のマージ指示を受けて順に `main` へ取り込んだ。配信の既定構図・チャット・タイトルバー、全キャラ確認画面、配置編集の境界、ダウンロード済みMMD・Live2Dモデルの登録候補表示を含む。統合後の `cargo xtask verify` は128件成功、`cargo audit` は脆弱性0件（既存警告7件）。Windows WebView2の残る目視項目は `docs/TASKS.md` を参照する。
 - 配信MMDの構図は描画器で修正し、#387 の描画方式別の初期配置補正は撤去した。利用者の `PICOAGENT_SCENES` に保存済みのさくらみこ711px配置は移行・上書き・削除していない。新しい胸上構図で位置が合わない場合は、右クリック「キャラを自動配置へ戻す」でそのキャラ・形式だけ既定配置へ戻せる。
 - 利用者の許可を受けGemma 4 E2B画像資産（約0.99GB）を導入済み。共通の `local-vision` へ配置し、通常チャットのローカル画像認識を実機確認した。画像入力設定は有効。再取得は不要。
@@ -14,9 +14,6 @@
 
 ## 保護している未統合作業
 
-- `codex/dev-data-isolation`: 閉じたDraft PR #411の旧設計と枝は保持しているが、保存先分離の実装はPR #442・#443・#444でmainへ取り込み済み。旧設計の「実装未着手」は現在には当てはまらない。開発版は利用者データ領域の`PicoAgent-Dev`、通常版は`PicoAgent`を使う。worktreeは`C:/Users/benyb/.codex/worktrees/dev-data-isolation/20_PicoAgent`。この枝を再マージせず、必要な未統合差分だけ現行mainと照合する。
-- `codex/isolate-managed-runtime-data`と`codex/krea-ltx25-lowvram`: 対応PRのマージ後にも枝の先端が異なり、未統合の差分がある。worktreeはそれぞれ`temp/news-summary-reliability`と`temp/krea-ltx25-lowvram`。古い枝全体を再マージせず、必要な差分だけ現行mainへ移植する。
-- `codex/pr-322-plan`: 元worktreeのパスがなく、未統合の差分があるため枝を保護している。再開前に内容を確認する。
 - ホロ関連の正本は別リポジトリ`C:/00_PG/PicoAgent-holo`。旧`temp/holo-explanation-video`はdetached HEADで、未コミットの文書・スライド・生成スクリプトが残る。ファイルは削除していないため、必要なら移行先との差分を確認して再開する。企画改訂案は移行先のPR #1と`codex/holo-proposal-preserved`に保存済み。
 
 ## 再開時の順序
