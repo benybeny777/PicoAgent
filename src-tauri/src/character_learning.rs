@@ -56,6 +56,11 @@ pub struct LearningInput {
     pub mode: String,
     #[serde(default)]
     pub runtime_root: String,
+    #[serde(default = "legacy_asr_device")]
+    pub asr_device: String,
+}
+fn legacy_asr_device() -> String {
+    "cpu".into()
 }
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -172,6 +177,9 @@ fn validate_input(input: &LearningInput) -> Result<(), String> {
     if !matches!(input.mode.as_str(), "persona" | "voice" | "both") {
         return Err("学習する対象が不正です".into());
     }
+    if !matches!(input.asr_device.as_str(), "cuda" | "cpu") {
+        return Err("文字起こしの処理はGPUまたはCPUを指定してください".into());
+    }
     if !matches!(input.source_kind.as_str(), "file" | "url") || input.source_value.trim().is_empty()
     {
         return Err("音声ファイルかYouTube URLを指定してください".into());
@@ -286,6 +294,7 @@ fn apply_runtime_env(command: &mut std::process::Command, path: &Path) -> Result
                     | "HUGGINGFACE_HUB_CACHE"
                     | "TRANSFORMERS_CACHE"
                     | "TORCH_HOME"
+                    | "DENO_DIR"
                     | "HF_DATASETS_CACHE"
                     | "PYTHONPATH"
                     | "HF_HUB_OFFLINE"
@@ -415,7 +424,7 @@ async fn run_worker(
         crate::tools::resolve_cli_path(&state.config, "PICOAGENT_FFMPEG_PATH", "ffmpeg", "ffmpeg");
     let ffmpeg = crate::tools::process::resolve_executable(&ffmpeg_name)
         .ok_or("音声変換のffmpeg実体がありません。追加機能の作業ツールを導入してください")?;
-    let mut request = json!({"jobDir":dir,"runtimeRoot":runtime,"source":{"kind":job.input.source_kind,"value":job.input.source_value},"mode":job.input.mode,"characterName":job.input.character_name,"stopAtStep":1000,"scriptsRoot":scripts(app)?,"ffmpeg":ffmpeg,"ownerProcessId":std::process::id()});
+    let mut request = json!({"jobDir":dir,"runtimeRoot":runtime,"source":{"kind":job.input.source_kind,"value":job.input.source_value},"mode":job.input.mode,"characterName":job.input.character_name,"asrDevice":job.input.asr_device,"stopAtStep":1000,"scriptsRoot":scripts(app)?,"ffmpeg":ffmpeg,"ownerProcessId":std::process::id()});
     if let Some(Value::Object(extra)) = extra {
         for (key, value) in extra {
             request[key] = value;
@@ -434,7 +443,9 @@ async fn run_worker(
     ]);
     command.env("PYTHONUTF8", "1");
     apply_runtime_env(&mut command, &runtime)?;
-    if job.input.runtime_root.trim().is_empty() && job.input.mode != "persona" {
+    if job.input.runtime_root.trim().is_empty()
+        && (job.input.mode != "persona" || job.input.asr_device == "cuda")
+    {
         command.env("CUDA_DEVICE_ORDER", "PCI_BUS_ID");
         command.env(
             "CUDA_VISIBLE_DEVICES",
@@ -804,6 +815,7 @@ pub async fn settings_character_learning_setup(
         source_value: String::new(),
         mode: "setup".into(),
         runtime_root: String::new(),
+        asr_device: "cpu".into(),
     };
     let job = create_job(&app, input)?;
     let flag = set_active(&state, &job.id)?;
@@ -856,6 +868,20 @@ pub async fn settings_character_learning_setup(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn 旧学習入力は従来の処理方式を保ち新規指定と不正指定を区別する() {
+        let mut value = json!({"characterId":"mugi","characterName":"むぎ","sourceKind":"url","sourceValue":"https://youtu.be/eCaOrzfsvSs","mode":"both"});
+        let legacy: LearningInput = serde_json::from_value(value.clone()).unwrap();
+        assert_eq!(legacy.asr_device, "cpu");
+        assert!(validate_input(&legacy).is_ok());
+        value["asrDevice"] = json!("cuda");
+        let gpu: LearningInput = serde_json::from_value(value.clone()).unwrap();
+        assert_eq!(gpu.asr_device, "cuda");
+        assert!(validate_input(&gpu).is_ok());
+        value["asrDevice"] = json!("auto");
+        let unsupported: LearningInput = serde_json::from_value(value).unwrap();
+        assert!(validate_input(&unsupported).is_err());
+    }
     #[test]
     fn 管理学習環境は未対応世代と古いドライバーを取得前に除外する() {
         assert_eq!(

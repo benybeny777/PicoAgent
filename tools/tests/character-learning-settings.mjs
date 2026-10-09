@@ -42,6 +42,37 @@ test("開始中の古い空一覧はロックを解除せず対象と素材を�
   await h.button("結果を再読み込み").fire("click");assert.equal(h.button("候補を作る").disabled,true);
   await h.button("候補を作る").fire("click");assert.equal(h.calls.length,1);assert.equal(h.calls[0].characterId,"mugi");wait.resolve();await settle();
 });
+test("YouTube URLを選び入力して開始するとURLとGPU既定または明示CPUを送る",async()=>{
+  for(const device of ["cuda","cpu"]){
+    const h=harness();h.build();await settle();
+    const selects=h.section.querySelectorAll("select");
+    const kind=selects.find(e=>e.children.some(option=>option.value==="url"));
+    const asr=selects.find(e=>e.ariaLabel==="文字起こしの処理");
+    assert.equal(asr.value,"cuda");
+    kind.value="url";await kind.fire("change");assert.equal(h.button("素材を選ぶ").disabled,true);
+    h.section.querySelectorAll("input")[0].value="  https://www.youtube.com/watch?v=example1234  ";
+    if(device==="cpu"){asr.value="cpu";await asr.fire("change");}
+    await h.button("候補を作る").fire("click");
+    const input=h.calls.find(call=>call[0]==="start")[1];
+    assert.equal(input.sourceKind,"url");assert.equal(input.sourceValue,"https://www.youtube.com/watch?v=example1234");assert.equal(input.asrDevice,device);
+  }
+});
+test("GPUの開始失敗後も処理方式をCPUへ自動変更しない",async()=>{
+  const h=harness();h.api.characterLearningStart=async()=>{throw new Error("GPUを利用できません");};h.build();await settle();
+  h.section.querySelectorAll("input")[0].value="C:/音声.wav";await h.button("候補を作る").fire("click");await settle();
+  assert.equal(h.section.querySelectorAll("select").find(e=>e.ariaLabel==="文字起こしの処理").value,"cuda");
+  assert.ok(h.section.querySelectorAll("p").some(e=>e.textContent==="Error: GPUを利用できません"));
+});
+test("ジョブは省略された旧CPUと新GPUを区別し実処理の方式と理由を優先表示する",async()=>{
+  for(const [input,progress,expected] of [[undefined,undefined,"CPU"],["cuda",undefined,"GPU"],["cuda",{asr:{device:"cpu",reason:"このジョブはCPUを明示指定して実行しました"}},"CPU"]]){
+    const h=harness();h.job.input.asrDevice=input;h.job.progress=progress;h.state.jobs=[h.job];h.build();await settle();
+    const texts=h.section.querySelectorAll("p").map(e=>e.textContent);
+    assert.ok(texts.includes(`文字起こし: ${expected}`));
+    if(progress)assert.ok(texts.includes(progress.asr.reason));
+  }
+  const setup=harness();setup.job.input.mode="setup";setup.state.jobs=[setup.job];setup.build();await settle();
+  assert.equal(setup.section.querySelectorAll("p").some(e=>e.textContent?.startsWith("文字起こし:")),false);
+});
 test("進捗再取得は編集と試聴を維持し画面再構築後も草稿を保持する",async()=>{
   const h=harness();h.state.jobs=[h.job];h.build();await settle();let draft=h.section.querySelectorAll("textarea")[0];draft.value="編集した人格";await draft.fire("input");
   assert.ok(h.section.querySelectorAll("p").some(e=>e.textContent==="文字起こしの根拠"));

@@ -10,6 +10,7 @@
     sec.append(el("p",{className:"hint",textContent:"音声ファイルやYouTube URLから、選択中キャラの声と話し方の候補を作ります。一人の声が明瞭に入った素材を使ってください。現在はWindows向けです。"}));
     const mode = el("select",{},[el("option",{value:"both",textContent:"声と人格"}),el("option",{value:"persona",textContent:"人格だけ"}),el("option",{value:"voice",textContent:"声だけ"})]);
     const sourceKind = el("select",{},[el("option",{value:"file",textContent:"音声・動画ファイル"}),el("option",{value:"url",textContent:"YouTube URL"})]);
+    const asrDevice = el("select",{ariaLabel:"文字起こしの処理"},[el("option",{value:"cuda",textContent:"GPU（NVIDIA・既定）"}),el("option",{value:"cpu",textContent:"CPU"})]);
     const source = el("input",{type:"text",placeholder:"音声ファイルを選ぶか、YouTube URLを入力"});
     const pick = el("button",{type:"button",textContent:"素材を選ぶ"});
     const runtime = el("input",{type:"text",placeholder:"空欄ならPicoAgent管理の学習環境"});
@@ -22,7 +23,8 @@
     const list = el("div",{className:"learning-job-list"});
     const line = (label,input) => el("div",{className:"field"},[el("label",{textContent:label}),input]);
     const advanced = el("details",{},[el("summary",{textContent:"既存の学習環境を使う"}),line("Style-Bert-VITS2のフォルダー",runtime),pickRuntime]);
-    sec.append(line("作成するもの",mode),line("素材の種類",sourceKind),line("素材",source),pick,
+    sec.append(line("作成するもの",mode),line("素材の種類",sourceKind),line("素材",source),pick,line("文字起こしの処理",asrDevice),
+      el("p",{className:"hint",textContent:"GPUはNVIDIA GPUを使います。GPUを利用できない場合はCPUを選んでください。GPUで失敗しても自動でCPUへ切り替えません。GPU文字起こしは空きメモリ6.0GBを事前の目安にします。"}),
       el("p",{className:"hint",textContent:"音声学習にはNVIDIA GPUと十分な量の音声が必要です。学習環境の初回準備は数GB以上を取得します。通常起動では取得しません。人格の作成には選択中AIを使い、クラウドAIの場合は文字起こしの抜粋を送ります。"}),setup,advanced,
       el("div",{className:"learning-actions"},[start,refresh]),status,list);
     let timer = null;
@@ -52,7 +54,7 @@
       const target=getTarget();
       if (!target?.id) {status.textContent="先に適用先のキャラを選択してください。";return;}
       if (!source.value.trim()) {status.textContent="音声ファイルかYouTube URLを指定してください。";return;}
-      const input={characterId:target.id,characterName:target.name,sourceKind:sourceKind.value,sourceValue:source.value.trim(),mode:mode.value,runtimeRoot:runtime.value.trim()};
+      const input={characterId:target.id,characterName:target.name,sourceKind:sourceKind.value,sourceValue:source.value.trim(),mode:mode.value,runtimeRoot:runtime.value.trim(),asrDevice:asrDevice.value};
       run(()=>window.picoagent.settings.characterLearningStart(input,null));
     });
     setup.addEventListener("click",()=>run(()=>window.picoagent.settings.characterLearningSetup()));
@@ -66,6 +68,11 @@
       const title=el("strong",{textContent:job.input.characterName});
       const detail=el("p",{className:"hint",textContent:job.error || job.progress?.error || job.progress?.message || (job.input.mode === "setup" && job.state === "ready" ? "学習環境を確認しました" : "") || stageNames[job.progress?.stage] || ({ready:"候補の確認待ち",running:"処理中",interrupted:"前回の処理が中断されました",cancelled:"停止しました",failed:"処理に失敗しました"}[job.state] || job.state)});
       box.append(title,detail);
+      if(job.input.mode!=="setup") {
+        const device=job.progress?.asr?.device || job.input.asrDevice || "cpu";
+        box.append(el("p",{className:"hint",textContent:`文字起こし: ${device==="cuda"?"GPU":"CPU"}`}));
+        if(job.progress?.asr?.reason) box.append(el("p",{className:"hint",textContent:job.progress.asr.reason}));
+      }
       if (job.id===active) {
         const cancel=el("button",{type:"button",textContent:"停止する"});
         cancel.addEventListener("click",async()=>{cancel.disabled=true;try {await window.picoagent.settings.characterLearningCancel(job.id);status.textContent="停止を要求しました。処理の回収を待っています…";}catch(error){fail(error);cancel.disabled=false;}});
