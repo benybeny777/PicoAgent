@@ -491,8 +491,6 @@ pub fn settings_character_learning_list(
     app: AppHandle,
     state: State<'_, LearningState>,
 ) -> Result<Value, String> {
-    // 実行排他を取れたときだけ中断へ遷移させ、開始・完了との書き戻し競合を防ぐ。
-    let idle = state.execution.try_lock().ok();
     let active = state
         .active
         .lock()
@@ -508,10 +506,18 @@ pub fn settings_character_learning_list(
             }
             let id = entry.file_name().to_string_lossy().to_string();
             let mut job = load_job(&app, &id)?;
-            if idle.is_some() && job.state == "running" && active.as_deref() != Some(&job.id) {
-                job.state = "interrupted".into();
-                job.error = "前回の学習が中断されています。再開できます。".into();
-                save_job(&app, &job)?;
+            if job.state == "running" && active.as_deref() != Some(&job.id) {
+                // 実行排他は中断への書き換えの間だけ取る。一覧の走査中ずっと握ると、
+                // その間の開始・品質検査が「別の学習が実行中です」で弾かれる。
+                // 排他を取れたら読み直し、開始・完了と競合した書き戻しをしない。
+                if let Ok(_idle) = state.execution.try_lock() {
+                    job = load_job(&app, &id)?;
+                    if job.state == "running" {
+                        job.state = "interrupted".into();
+                        job.error = "前回の学習が中断されています。再開できます。".into();
+                        save_job(&app, &job)?;
+                    }
+                }
             }
             jobs.push(view_job(&app, &job)?);
         }
@@ -559,9 +565,7 @@ pub async fn settings_character_learning_start(
             return Err("学習環境の準備は準備ボタンから再実行してください".into());
         }
         configured_runtime(&app, &job.input)?;
-        if job.input.mode != "persona" && !crate::components::nvidia_cuda_ready().await {
-            return Err("音声学習にはCUDA対応NVIDIA GPUが必要です".into());
-        }
+        ensure_voice_prerequisites(&job.input.mode).await?;
         job.error.clear();
         job.state = "running".into();
         job
@@ -569,9 +573,7 @@ pub async fn settings_character_learning_start(
         let input = input.ok_or("学習の入力がありません")?;
         validate_input(&input)?;
         configured_runtime(&app, &input)?;
-        if input.mode != "persona" && !crate::components::nvidia_cuda_ready().await {
-            return Err("音声学習にはCUDA対応NVIDIA GPUが必要です".into());
-        }
+        ensure_voice_prerequisites(&input.mode).await?;
         create_job(&app, input)?
     };
     validate_input(&job.input)?;
@@ -591,6 +593,29 @@ pub async fn settings_character_learning_start(
     .await;
     finish(&app, &state, job, result)
 }
+/// 品質検査を通った学習音声を、キャラの声設定へ渡す形にする。
+fn learned_voice(style_id: u64, speaker_uuid: &str, style_name: &Value) -> Value {
+    json!({"speaker": style_id.to_string(), "speakerUuid": speaker_uuid, "styleName": style_name})
+}
+
+/// 声の学習を含む依頼は、取得・文字起こしの長い工程を始める前に学習段の前提を確かめる。
+/// 学習段の `train-voice-model.ps1` は PowerShell 7（`pwsh`）専用で、Windows 標準の 5.1 では動かない。
+/// 確かめずに始めると、取得と文字起こしを終えた最後の工程で失敗し、再開しても同じ所で止まる。
+async fn ensure_voice_prerequisites(mode: &str) -> Result<(), String> {
+    if mode == "persona" {
+        return Ok(());
+    }
+    if !crate::components::nvidia_cuda_ready().await {
+        return Err("音声学習にはCUDA対応NVIDIA GPUが必要です".into());
+    }
+    if !crate::tools::process::has_executable("pwsh") {
+        return Err(
+            "音声学習にはPowerShell 7（pwsh）が必要です。Microsoftの配布元から導入して再度お試しください".into(),
+        );
+    }
+    Ok(())
+}
+
 async fn create_persona(
     app: &AppHandle,
     ai: &AppState,
@@ -768,30 +793,117 @@ pub async fn settings_character_learning_check_voice(
     job.error.clear();
     save_job(&app, &job)?;
     let flag = set_active(&state, &id)?;
-    let result=async {
-        cancellable(crate::aivis::ensure_started(&app),&flag).await?;
-        let endpoint=crate::aivis::endpoint(&app,&ai);
-        let client=reqwest::Client::builder().timeout(Duration::from_secs(300)).build().map_err(|e|e.to_string())?;
-        let speakers:Value=cancellable(async {client.get(format!("{endpoint}/speakers")).send().await?.error_for_status()?.json().await},&flag).await?;
-        let has_speaker=speakers.as_array().is_some_and(|rows|rows.iter().any(|row|row["speaker_uuid"].as_str()==Some(&speaker_uuid)));
+    let result = async {
+        cancellable(crate::aivis::ensure_started(&app), &flag).await?;
+        let endpoint = crate::aivis::endpoint(&app, &ai);
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(300))
+            .build()
+            .map_err(|e| e.to_string())?;
+        let speakers: Value = cancellable(
+            async {
+                client
+                    .get(format!("{endpoint}/speakers"))
+                    .send()
+                    .await?
+                    .error_for_status()?
+                    .json()
+                    .await
+            },
+            &flag,
+        )
+        .await?;
+        let has_speaker = speakers.as_array().is_some_and(|rows| {
+            rows.iter()
+                .any(|row| row["speaker_uuid"].as_str() == Some(&speaker_uuid))
+        });
         if !has_speaker {
             use tokio::io::AsyncReadExt;
-            let length=fs::metadata(&file).map_err(|e|e.to_string())?.len();
-            let stream=futures::stream::try_unfold(tokio::fs::File::open(&file).await.map_err(|e|e.to_string())?,|mut handle|async move{let mut buffer=vec![0u8;64*1024];let n=handle.read(&mut buffer).await?;if n==0{Ok::<_,std::io::Error>(None)}else{buffer.truncate(n);Ok(Some((buffer,handle)))}});
-            let part=reqwest::multipart::Part::stream_with_length(reqwest::Body::wrap_stream(stream),length).file_name("learning-candidate.aivmx");
-            cancellable(async {client.post(format!("{endpoint}/aivm_models/install")).multipart(reqwest::multipart::Form::new().part("file",part)).send().await?.error_for_status()},&flag).await?;
+            let length = fs::metadata(&file).map_err(|e| e.to_string())?.len();
+            let stream = futures::stream::try_unfold(
+                tokio::fs::File::open(&file)
+                    .await
+                    .map_err(|e| e.to_string())?,
+                |mut handle| async move {
+                    let mut buffer = vec![0u8; 64 * 1024];
+                    let n = handle.read(&mut buffer).await?;
+                    if n == 0 {
+                        Ok::<_, std::io::Error>(None)
+                    } else {
+                        buffer.truncate(n);
+                        Ok(Some((buffer, handle)))
+                    }
+                },
+            );
+            let part = reqwest::multipart::Part::stream_with_length(
+                reqwest::Body::wrap_stream(stream),
+                length,
+            )
+            .file_name("learning-candidate.aivmx");
+            cancellable(
+                async {
+                    client
+                        .post(format!("{endpoint}/aivm_models/install"))
+                        .multipart(reqwest::multipart::Form::new().part("file", part))
+                        .send()
+                        .await?
+                        .error_for_status()
+                },
+                &flag,
+            )
+            .await?;
         }
-        if flag.load(Ordering::SeqCst){return Err("音声検査を停止しました".into());}
-        let speakers:Value=cancellable(async {client.get(format!("{endpoint}/speakers")).send().await?.error_for_status()?.json().await},&flag).await?;
-        let speaker=speakers.as_array().and_then(|rows|rows.iter().find(|row|row["speaker_uuid"].as_str()==Some(&speaker_uuid))).ok_or("登録した音声の話者が読み上げエンジンにありません")?;
-        let style=speaker["styles"].as_array().and_then(|styles|styles.iter().find(|v|matches!(v["name"].as_str(),Some("ノーマル" | "Normal")))).ok_or("登録した音声のスタイルがありません")?;
-        let style_id=style["id"].as_u64().ok_or("音声スタイルIDが不正です")?;
-        run_worker(&app,&ai,&job,"aivis-qa",flag.clone(),Some(json!({"endpoint":endpoint,"speaker":style_id}))).await?;
-        let mut result=read_json(&dir.join("result.json"))?;
-        result["voice"]=json!({"speaker":style_id.to_string(),"modelUuid":candidate["modelUUID"],"speakerUuid":speaker_uuid,"styleName":style["name"]});
-        crate::store::write_json_atomic(&dir.join("result.json"),&result).map_err(|e|e.to_string())?;
+        if flag.load(Ordering::SeqCst) {
+            return Err("音声検査を停止しました".into());
+        }
+        let speakers: Value = cancellable(
+            async {
+                client
+                    .get(format!("{endpoint}/speakers"))
+                    .send()
+                    .await?
+                    .error_for_status()?
+                    .json()
+                    .await
+            },
+            &flag,
+        )
+        .await?;
+        let speaker = speakers
+            .as_array()
+            .and_then(|rows| {
+                rows.iter()
+                    .find(|row| row["speaker_uuid"].as_str() == Some(&speaker_uuid))
+            })
+            .ok_or("登録した音声の話者が読み上げエンジンにありません")?;
+        let style = speaker["styles"]
+            .as_array()
+            .and_then(|styles| {
+                styles
+                    .iter()
+                    .find(|v| matches!(v["name"].as_str(), Some("ノーマル" | "Normal")))
+            })
+            .ok_or("登録した音声のスタイルがありません")?;
+        let style_id = style["id"].as_u64().ok_or("音声スタイルIDが不正です")?;
+        run_worker(
+            &app,
+            &ai,
+            &job,
+            "aivis-qa",
+            flag.clone(),
+            Some(json!({"endpoint":endpoint,"speaker":style_id})),
+        )
+        .await?;
+        let mut result = read_json(&dir.join("result.json"))?;
+        // 学習した声は手元で作ったモデルでAivisHubに無い。`modelUuid`を残すと、エンジンからモデルが
+        // 消えたとき読み上げのたびにHubからの取得を試みて失敗し、手元のUUIDも外部へ送る。
+        // 話者UUIDだけで解決し、未導入なら導入済みでない旨の合成エラーにする。
+        result["voice"] = learned_voice(style_id, &speaker_uuid, &style["name"]);
+        crate::store::write_json_atomic(&dir.join("result.json"), &result)
+            .map_err(|e| e.to_string())?;
         Ok(())
-    }.await;
+    }
+    .await;
     finish(&app, &state, job, result)
 }
 
@@ -868,6 +980,14 @@ pub async fn settings_character_learning_setup(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn 学習した声はaivis_hubから取得しないようモデルuuidを持たない() {
+        let voice = learned_voice(42, "local-speaker", &json!("ノーマル"));
+        assert_eq!(voice["speaker"], "42");
+        assert_eq!(voice["speakerUuid"], "local-speaker");
+        // modelUuid と speakerUuid が揃うと prepare_tts_voice_model が AivisHub から導入を試みる。
+        assert!(voice.get("modelUuid").is_none());
+    }
     #[test]
     fn 旧学習入力は従来の処理方式を保ち新規指定と不正指定を区別する() {
         let mut value = json!({"characterId":"mugi","characterName":"むぎ","sourceKind":"url","sourceValue":"https://youtu.be/eCaOrzfsvSs","mode":"both"});

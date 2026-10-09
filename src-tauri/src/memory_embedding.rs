@@ -113,6 +113,16 @@ pub fn status() -> Value {
         .unwrap_or_else(|| json!({"phase":"idle"}))
 }
 
+/// GPU優先を選んだのにCPUで動く場合は、取得前の判定で外れた理由を状態へ出す。
+/// 理由を出さないと、R580未満のドライバーや旧世代GPUを含む構成の利用者には黙ってCPUになったように見える。
+fn ready_message(requested: &str, actual: &str) -> &'static str {
+    if requested == "gpu" && actual == "cpu" {
+        "長期メモリ検索を利用できます（GPUの条件（NVIDIAは全GPUが演算能力7.5以上かつR580以降のドライバー、またはApple Silicon）を満たさないためCPUで実行中）"
+    } else {
+        "長期メモリ検索を利用できます"
+    }
+}
+
 fn set_status(phase: &str, message: &str, device: &str) {
     *STATUS.lock().unwrap() = Some(json!({"phase":phase,"message":message,"device":device}));
 }
@@ -201,7 +211,7 @@ async fn launch(app: &AppHandle, requested: &str) -> Result<Worker> {
         .get("device")
         .and_then(Value::as_str)
         .context("記憶検索の実行先が応答にありません")?;
-    set_status("ready", "長期メモリ検索を利用できます", actual);
+    set_status("ready", ready_message(requested, actual), actual);
     Ok(worker)
 }
 
@@ -468,6 +478,13 @@ pub fn stop(app: &AppHandle) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn gpu優先なのにcpuで動くときは理由を状態へ出す() {
+        assert!(ready_message("gpu", "cpu").contains("R580"));
+        assert_eq!(ready_message("gpu", "cuda"), "長期メモリ検索を利用できます");
+        assert_eq!(ready_message("cpu", "cpu"), "長期メモリ検索を利用できます");
+    }
 
     #[test]
     fn 記憶原本と一致する順位だけを受け付ける() {

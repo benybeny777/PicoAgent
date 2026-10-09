@@ -298,6 +298,7 @@ cargo xtask license issue --customer "購入者名" --purchase-id "BOOTH注文�
   | 同梱物 | インストール先の `resources/bundled/` | リポジトリの `src-tauri/resources/bundled/` |
   | キャラ作成の同梱資産 | インストール先の `character-maker/` | リポジトリの `character-maker/` |
 
+  - 製品の識別子（`com.picoagent.desktop`）以外で起動する検証版（画面検査用の `com.picoagent.ui-check` など）は、上の根の下の `instances/<識別子>\` を保存先にする（`picoagent_core::paths`）。製品・開発版の設定や履歴は読まず、`cargo xtask stop` はこの配下のブラウザも止める
   - 開発用の作業ツール（`tools/screenshots/review-board.mjs`、`scripts/open-character-preview.ps1`、`scripts/build-partner-installer.ps1` の素材取得）も `PicoAgent-Dev` だけを読む
   - 正本は `app_paths::data_dir()`・`packaged_bundled_dir()`・`packaged_character_maker_dir()`、スキルからは `components::runtime_dirs()`。探す順は「追加導入した物（利用者データの `bundled/`）→ このビルドの同梱物」だけで、作業フォルダ・実行ファイルからの相対位置・ビルドしたリポジトリの絶対パス・旧保存先からは探さない。同じPCでビルドしたインストーラでも、製品がリポジトリの資産を使うことはない
   - 旧保存先のモデル（`models/`、旧識別子フォルダ）と旧Aivis配置の探索・移行、旧ログの移行はしない。利用者データ直下に残った旧配置（`aivis/`・`models/`）は、新しい配置の準備に成功した後で削除する（`log_paths::remove_legacy_layout_dir()`）。製品ビルドの更新時に旧識別子フォルダ（`com.picoagent.app` 等）から設定・履歴を移す処理だけは残し、開発ビルドでは行わない

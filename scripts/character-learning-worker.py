@@ -103,10 +103,16 @@ class RuntimeLock:
                 self.handle=None
 
 
-def atomic_json(path, value):
+def atomic_text(path, text):
+    # 停止（taskkill /F）やクラッシュが書き込み中に当たっても、途中までの内容を正本として残さない。
+    # 再開時は既存ファイルとの一致で完了工程を再利用するため、欠けたファイルは永久に再開を止める。
     temporary = path.with_suffix(path.suffix + '.incoming')
-    temporary.write_text(json.dumps(value, ensure_ascii=False, indent=2), encoding='utf-8')
+    temporary.write_text(text, encoding='utf-8')
     temporary.replace(path)
+
+
+def atomic_json(path, value):
+    atomic_text(path, json.dumps(value, ensure_ascii=False, indent=2))
 
 
 def digest(path):
@@ -358,7 +364,7 @@ class Worker:
             if (self.job/'transcript.txt').read_text(encoding='utf-8')!=transcript:
                 raise ValueError('既存文字起こしが区間と一致しません')
         else:
-            (self.job/'transcript.txt').write_text(transcript, encoding='utf-8')
+            atomic_text(self.job/'transcript.txt', transcript)
         if self.request['mode'] != 'persona':
             chunks=[]
             for row in rows:
@@ -416,7 +422,7 @@ class Worker:
                 if (dataset/'esd.list').read_text(encoding='utf-8')!=text:
                     raise ValueError('既存esd.listが一致しません')
             else:
-                (dataset/'esd.list').write_text(text, encoding='utf-8')
+                atomic_text(dataset/'esd.list', text)
             report=self.job/'clip-metrics.jsonl'
             self.script('select-voice-training-clips.py', ['measure','--sbv2-root',self.root,'--dataset',self.dataset,'--report',report,'--device','cuda'], 'measure')
             selected=self.root/'Data'/self.selected
@@ -437,7 +443,7 @@ class Worker:
             reference = [line for line in report.read_text(encoding='utf-8').splitlines() if json.loads(line)['file'] in accepted]
             if len(reference) != len(accepted):
                 raise ValueError('選別済み話者基準の件数が一致しません')
-            (self.job/'selected-reference.jsonl').write_text('\n'.join(reference)+'\n', encoding='utf-8')
+            atomic_text(self.job/'selected-reference.jsonl', '\n'.join(reference)+'\n')
         artifacts=[snapshot,self.job/'source.json',self.job/'transcript.txt',self.job/'segments.json']
         if (self.job/'asr.json').exists():
             artifacts.append(self.job/'asr.json')

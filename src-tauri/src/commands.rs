@@ -1255,7 +1255,6 @@ pub async fn settings_pick_stream_image(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<Value, String> {
-    use tauri::path::BaseDirectory;
     use tauri_plugin_dialog::DialogExt;
     if kind != "background" && kind != "display" {
         return Err("画像の用途が不正です。".to_string());
@@ -1284,11 +1283,10 @@ pub async fn settings_pick_stream_image(
         return Err("画像は20MB以内にしてください。".to_string());
     }
     let bytes = crate::permissions::fs::read(&source)?;
-    let base = app
-        .path()
-        .resolve("display", BaseDirectory::AppData)
-        .map_err(|error| format!("配信画像の保存先を作れません: {error}"))?;
-    let destination = base.join(format!("{kind}.{extension}"));
+    // assetプロトコルの許可範囲（`ASSET_SCOPE_DIRS` の display）と同じ管理領域へ保存する。
+    // Tauri の `BaseDirectory::AppData` は識別子別フォルダで、許可範囲外かつ開発版と通常版で共有される。
+    let destination = crate::app_paths::data_path(&app, crate::app_paths::DataPath::Display)
+        .join(format!("{kind}.{extension}"));
     crate::store::write_atomic(&destination, &bytes)
         .map_err(|error| format!("配信画像を保存できません: {error}"))?;
     Ok(json!({ "path": destination.to_string_lossy() }))

@@ -40,6 +40,7 @@ pub enum DataPath<'a> {
     ScheduleRuns,
     Jobs,
     Characters,
+    Display,
     GeneratedMedia,
     MakerCharacters,
     MakerGpuLock,
@@ -71,6 +72,7 @@ pub fn path_at(root: &Path, entry: DataPath<'_>) -> PathBuf {
         DataPath::ScheduleRuns => root.join("schedule-runs.json"),
         DataPath::Jobs => root.join("durable-jobs.json"),
         DataPath::Characters => root.join("characters"),
+        DataPath::Display => root.join("display"),
         DataPath::GeneratedMedia => root.join("generated-media"),
         DataPath::MakerCharacters => root.join("character-maker/characters"),
         DataPath::MakerGpuLock => {
@@ -100,3 +102,23 @@ pub const ASSET_SCOPE_DIRS: [&str; 4] = [
     "character-maker/characters",
     "generated-media",
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// assetプロトコルで読む領域は、保存側も同じ配置定義（`DataPath`）を通す。
+    /// 定義が無いと保存側が別の場所（Tauriの識別子別フォルダなど）へ書き、表示が黙って消える。
+    #[test]
+    fn asset許可の各領域は保存側の配置定義と一致する() {
+        let root = Path::new("root");
+        let saved = [
+            path_at(root, DataPath::Characters),
+            path_at(root, DataPath::Display),
+            path_at(root, DataPath::MakerCharacters),
+            path_at(root, DataPath::GeneratedMedia),
+        ];
+        let allowed: Vec<PathBuf> = ASSET_SCOPE_DIRS.iter().map(|dir| root.join(dir)).collect();
+        assert_eq!(allowed, saved);
+    }
+}

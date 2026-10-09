@@ -15,7 +15,9 @@ if (!modulePath) {
     if (!fs.existsSync(modulePath)) throw new Error("Chromium検査には開発用Playwrightが必要です。tools/screenshots/README.mdの導入手順を確認してください。");
   }
 }
-const { chromium } = await import(pathToFileURL(modulePath).href);
+// require.resolve は CommonJS の index.js を返し、動的importでは default にしか載らない。
+const playwright = await import(pathToFileURL(modulePath).href);
+const { chromium } = playwright.chromium ? playwright : playwright.default;
 const browser = await chromium.launch({ headless: true });
 try {
   const page = await browser.newPage();
