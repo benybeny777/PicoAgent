@@ -221,6 +221,7 @@ mod guard {
             ".app_local_data_dir()",
             ".app_config_dir()",
             ".app_log_dir()",
+            "BaseDirectory::",
             "dirs::data_dir()",
             "dirs::data_local_dir()",
             "dirs::config_dir()",

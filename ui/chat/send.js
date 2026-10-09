@@ -195,7 +195,9 @@ export function createSender({ chat, voice, motion, notices, engine, relationshi
       }
       const fullText = fileContext ? `${fileContext}${request.text || "このファイルについて教えて"}` : request.text;
       const images = [...request.images];
-      if (isScreenshotQuery(request.text)) {
+      // 利用者が画像を添付・貼り付けしているときは、その画像についての質問として送る。
+      // 「このスクリーンショットのエラーを説明して」で自動撮影を重ね、撮影できない環境で送信ごと止めない。
+      if (!request.images.length && isScreenshotQuery(request.text)) {
         // 画面を見る依頼で撮影できなかったら、画像なしでAIへ送らない（見えていない画面を推測させない）。
         // Waylandの拒否なども成功扱いにせず、理由を出して再送できる失敗にする。
         let shot = null;

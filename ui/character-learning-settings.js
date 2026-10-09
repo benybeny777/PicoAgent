@@ -41,13 +41,13 @@
     sourceKind.addEventListener("change",()=>{pick.disabled=sourceKind.value!=="file";});
     pick.addEventListener("click",async()=>{try {const result=await window.picoagent.settings.characterLearningPick(false);if (!disposed && result.path) {sourceKind.value="file";source.value=result.path;pick.disabled=false;}}catch(error){fail(error);}});
     pickRuntime.addEventListener("click",async()=>{try {const result=await window.picoagent.settings.characterLearningPick(true);if (!disposed && result.path) runtime.value=result.path;}catch(error){fail(error);}});
-    async function run(action) {
+    async function run(action, done="候補を作成しました。結果を確認してください。") {
       if (pending || active || !supported || disposed) return;
       pending=true;
       lock(true);status.textContent="処理を開始しています…";
       const poll = () => {clearTimeout(timer);timer=setTimeout(async()=>{await reload();if (!disposed && start.disabled) poll();},1200);};
       poll();
-      try {await action();if (!disposed) status.textContent="候補を作成しました。結果を確認してください。";}catch(error){fail(error);}
+      try {await action();if (!disposed) status.textContent=done;}catch(error){fail(error);}
       finally {pending=false;if (!disposed) {clearTimeout(timer);await reload();lock(!!active || !supported);}}
     }
     start.addEventListener("click",()=>{
@@ -57,7 +57,7 @@
       const input={characterId:target.id,characterName:target.name,sourceKind:sourceKind.value,sourceValue:source.value.trim(),mode:mode.value,runtimeRoot:runtime.value.trim(),asrDevice:asrDevice.value};
       run(()=>window.picoagent.settings.characterLearningStart(input,null));
     });
-    setup.addEventListener("click",()=>run(()=>window.picoagent.settings.characterLearningSetup()));
+    setup.addEventListener("click",()=>run(()=>window.picoagent.settings.characterLearningSetup(),"学習環境を準備しました。"));
     refresh.addEventListener("click",reload);
     function sameTarget(job) {
       if (getTarget()?.id!==job.input.characterId) {status.textContent=`適用先の「${job.input.characterName}」をキャラ選択で選んでください。`;return false;}
@@ -91,7 +91,7 @@
         box.append(el("p",{className:"hint",textContent:job.result.quality?.defaultAssignable?"合成検査に合格しました。複数文を試聴して確認してください。":"学習候補・品質確認中。学習時と読み上げエンジンの両方の合成検査に合格するまでキャラへ割り当てません。"}));
         const check=el("button",{type:"button",textContent:"読み上げエンジンで品質を検査"});
         check.disabled=!!active || pending;
-        check.addEventListener("click",()=>run(()=>window.picoagent.settings.characterLearningCheckVoice(job.id)));
+        check.addEventListener("click",()=>run(()=>window.picoagent.settings.characterLearningCheckVoice(job.id),"読み上げエンジンでの品質検査が終わりました。結果を確認してください。"));
         const audio=el("audio",{controls:true});audios.add(audio);
         const played=new Set();let loadedSample=null;
         const samples=el("select");
@@ -106,7 +106,11 @@
         accept.addEventListener("click",()=>{if (!sameTarget(job) || accept.disabled) return;applyVoice(job.input.characterId,job.result.voice);status.textContent="声を設定の草稿へ反映しました。設定を保存すると適用されます。";});
         box.append(check,samples,listen,audio,el("label",{className:"learning-listened"},[heard,document.createTextNode("複数文を聴き、声・ノイズ・発音を確認しました")]),accept);
       }
-      if (["failed","cancelled","interrupted"].includes(job.state) && job.input.mode!=="setup") {
+      // GPU文字起こしを開始できず失敗した学習は、処理方式が来歴に含まれるため再開しても同じ所で止まる。
+      // 再開ボタンを出さず、CPUを選んで新しく始める手順を示す。
+      const gpuAsrUnavailable=job.state==="failed" && job.input.asrDevice==="cuda" && String(job.error || job.progress?.error || "").includes("CUDA文字起こしを開始できません");
+      if (gpuAsrUnavailable) box.append(el("p",{className:"hint",textContent:"このPCではGPU文字起こしを使えません。「文字起こしの処理」をCPUにして、新しく学習を始めてください。"}));
+      else if (["failed","cancelled","interrupted"].includes(job.state) && job.input.mode!=="setup") {
         const resume=el("button",{type:"button",textContent:"この学習を再開",disabled:!!active || pending});
         resume.addEventListener("click",()=>run(()=>window.picoagent.settings.characterLearningStart(null,job.id)));
         box.append(resume);

@@ -112,3 +112,12 @@ test("学習した同一speakerの保存はmodelUuidを保持し手動変更だ�
   context.characterSpeaker.value="54321";vm.runInContext('saveCurrentCharacterVoice("mugi")',context);
   assert.equal(context.characterVoiceOverrides.mugi.speaker,"54321");assert.equal(context.characterVoiceOverrides.mugi.modelUuid,undefined);
 });
+test("GPU文字起こしを開始できず失敗した学習は同じ所で止まる再開を出さずCPUでの新規開始を案内する",async()=>{
+  const failed=harness();Object.assign(failed.job,{state:"failed",error:"CUDA文字起こしを開始できません。空きGPUメモリ2.00GBが保守的な必要容量6.0GBを下回っています",result:{}});
+  failed.job.input.asrDevice="cuda";failed.state.jobs=[failed.job];failed.build();await settle();
+  assert.equal(failed.button("この学習を再開"),undefined);
+  assert.ok(failed.section.querySelectorAll("p").some(e=>e.textContent?.includes("CPUにして、新しく学習を始めてください")));
+  const other=harness();Object.assign(other.job,{state:"failed",error:"音声の取得に失敗しました",result:{}});
+  other.job.input.asrDevice="cuda";other.state.jobs=[other.job];other.build();await settle();
+  assert.ok(other.button("この学習を再開"));
+});

@@ -38,7 +38,7 @@ def verify_runtime(path):
     python = checked_path(path / "venv/Scripts/python.exe")
     if not python.is_file() or not checked_path(path / "ComfyUI/main.py").is_file():
         raise RuntimeError("専用ランタイムの実行ファイルが欠損しています")
-    run([str(python), "-c", "import torch,comfy_kitchen,comfy_aimdo; assert torch.cuda.is_available(); assert torch.cuda.get_device_capability()[0] >= 12; assert tuple(map(int, torch.version.cuda.split('.')[:2])) >= (13, 0)"])
+    run([str(python), "-c", "import torch,torchaudio,comfy_kitchen,comfy_aimdo; assert torch.cuda.is_available(); assert torch.cuda.get_device_capability()[0] >= 12; assert tuple(map(int, torch.version.cuda.split('.')[:2])) >= (13, 0)"])
 
 
 def run(arguments):

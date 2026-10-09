@@ -63,6 +63,17 @@ class WorkerTests(unittest.TestCase):
         self.assertEqual(calls[0]['env']['HF_HUB_OFFLINE'],'1')
         self.assertFalse((worker.job/'status.json.incoming').exists())
 
+    def test_再開照合に使う本文は書き込み途中で中断しても旧内容を壊さない(self):
+        target=Path(self.directory.name)/'transcript.txt'
+        target.write_text('完成した文字起こし', encoding='utf-8')
+        with patch.object(Path, 'replace', side_effect=OSError('停止')):
+            with self.assertRaises(OSError):
+                WORKER.atomic_text(target, '途中')
+        self.assertEqual(target.read_text(encoding='utf-8'), '完成した文字起こし')
+        source=(ROOT/'scripts/character-learning-worker.py').read_text(encoding='utf-8')
+        for name in ('transcript.txt', 'esd.list', 'selected-reference.jsonl'):
+            self.assertNotIn(f"'{name}').write_text", source)
+
     def test_失敗後の工程を停止する(self):
         """失敗後に後続コマンドを実行しない。"""
         calls=[]

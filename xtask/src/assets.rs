@@ -1846,8 +1846,28 @@ fn stop_managed_screenshot_node(stopped: &mut Vec<&'static str>) {
 /// 無関係なタブごと巻き込む。逆に止めないと、デバッグポートを握った実体が残り、
 /// 次回の起動が「PicoAgent が管理していないブラウザに使われています」で必ず失敗する。
 /// 通常版（`PicoAgent`）と開発版（`PicoAgent-Dev`）の保存先にある専用プロファイル。
-const BROWSER_PROFILE_NEEDLES: [&str; 2] =
-    ["PicoAgent/browser-profile", "PicoAgent-Dev/browser-profile"];
+/// 検証版は識別子ごとに `<根>/instances/<識別子>/browser-profile` を使うため、それも対象にする。
+/// `pkill -f`（ERE）と PowerShell の `-match` に同じ式を渡し、判定は `is_managed_browser_command` と揃える。
+const BROWSER_PROFILE_PATTERN: &str = "PicoAgent(-Dev)?/(instances/[^/]+/)?browser-profile";
+
+/// `BROWSER_PROFILE_PATTERN` と同じ判定。円記号はスラッシュへ揃えてから見る。
+#[cfg_attr(not(test), allow(dead_code))]
+fn is_managed_browser_command(command: &str) -> bool {
+    let line = command.replace('\\', "/");
+    ["PicoAgent/", "PicoAgent-Dev/"].iter().any(|root| {
+        line.match_indices(root).any(|(index, _)| {
+            let rest = &line[index + root.len()..];
+            if rest.starts_with("browser-profile") {
+                return true;
+            }
+            rest.strip_prefix("instances/")
+                .and_then(|rest| rest.split_once('/'))
+                .is_some_and(|(identifier, tail)| {
+                    !identifier.is_empty() && tail.starts_with("browser-profile")
+                })
+        })
+    })
+}
 
 /// プロファイル経路で絞り込んだうえで、対象にする実行ファイル名。
 /// 判定に使う PowerShell 自身のコマンドラインにも目印が載るため、名前でも絞って自滅を防ぐ。
@@ -1858,16 +1878,13 @@ const BROWSER_PROCESS_NAMES: [&str; 4] = ["chrome.exe", "msedge.exe", "chromium.
 
 #[cfg(unix)]
 fn stop_managed_browser(stopped: &mut Vec<&'static str>) {
-    let mut ok = false;
-    for needle in BROWSER_PROFILE_NEEDLES {
-        ok |= Command::new("pkill")
-            .args(["-f", needle])
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status()
-            .map(|status| status.success())
-            .unwrap_or(false);
-    }
+    let ok = Command::new("pkill")
+        .args(["-f", BROWSER_PROFILE_PATTERN])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false);
     if ok {
         stopped.push("browser-control");
     }
@@ -1882,9 +1899,7 @@ fn stop_managed_browser(stopped: &mut Vec<&'static str>) {
         .collect::<Vec<_>>()
         .join(" OR ");
     let script = format!(
-        "$needles = @('{}', '{}');          Get-CimInstance Win32_Process -Filter \"{names}\" |          Where-Object {{ $line = $_.CommandLine; $line -and ($needles | Where-Object {{ $line.Replace('\\', '/').Contains($_) }}) }} |          ForEach-Object {{ taskkill /PID $_.ProcessId /T /F > $null 2>&1; 'stopped' }}",
-        BROWSER_PROFILE_NEEDLES[0],
-        BROWSER_PROFILE_NEEDLES[1],
+        "$pattern = '{BROWSER_PROFILE_PATTERN}';          Get-CimInstance Win32_Process -Filter \"{names}\" |          Where-Object {{ $line = $_.CommandLine; $line -and ($line.Replace('\\', '/') -match $pattern) }} |          ForEach-Object {{ taskkill /PID $_.ProcessId /T /F > $null 2>&1; 'stopped' }}",
     );
     let stopped_any = Command::new("powershell")
         .args(["-NoProfile", "-Command", &script])
@@ -2629,17 +2644,15 @@ mod tests {
 
     #[test]
     fn ブラウザ判定は専用プロファイル経路と実行ファイル名の両方で絞る() {
-        let needles = super::BROWSER_PROFILE_NEEDLES;
-        let matches = |command: &str| {
-            needles
-                .iter()
-                .any(|needle| command.replace('\\', "/").contains(needle))
-        };
-        // 通常版と開発版の専用プロファイルを、相対・スラッシュ、絶対・円記号のどちらの起動でも拾う。
+        let matches = super::is_managed_browser_command;
+        // 通常版・開発版・検証版（instances配下）の専用プロファイルを、
+        // 相対・スラッシュ、絶対・円記号のどちらの起動でも拾う。
         for command in [
             "chrome --user-data-dir=C:\\Users\\me\\AppData\\Roaming\\PicoAgent\\browser-profile",
             "chrome --user-data-dir=/home/me/.local/share/PicoAgent/browser-profile",
             "chrome --user-data-dir=C:\\Users\\me\\AppData\\Roaming\\PicoAgent-Dev\\browser-profile",
+            "chrome --user-data-dir=C:\\Users\\me\\AppData\\Roaming\\PicoAgent\\instances\\com.picoagent.ui-check\\browser-profile",
+            "chrome --user-data-dir=/home/me/.local/share/PicoAgent-Dev/instances/com.picoagent.ui-check/browser-profile",
         ] {
             assert!(matches(command), "拾えません: {command}");
         }
@@ -2647,6 +2660,8 @@ mod tests {
         for command in [
             "chrome --user-data-dir=C:\\Users\\me\\AppData\\Local\\Google\\Chrome\\User Data",
             "msedge about:blank",
+            "chrome --user-data-dir=C:\\Users\\me\\PicoAgent\\instances\\browser-profile",
+            "chrome --user-data-dir=C:\\Users\\me\\PicoAgent\\instances\\x\\other\\browser-profile",
         ] {
             assert!(!matches(command), "誤検出: {command}");
         }

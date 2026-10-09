@@ -160,3 +160,33 @@ for (const [label, capture] of [
     assert.equal(sender.busy, false);
   });
 }
+
+test("画像を貼り付けた送信は撮影語を含んでも自動撮影せず、その画像を送る", async () => {
+  let captures = 0;
+  const sent = [];
+  const factory = load("chat/send.js", "createSender", {
+    bridge: {
+      listen: () => Promise.resolve(() => {}),
+      captureScreen: async () => { captures += 1; throw new Error("画面取得が拒否されました"); },
+      send: async () => ({ reply: "返答" }),
+      sendImage: async (text, images) => { sent.push(images); return { reply: "返答" }; }, cancel: async () => {},
+    },
+    window: { PicoTaskRun: { createController: () => ({ start() {}, finish() {} }) } },
+    setTimeout: () => 0, clearTimeout() {}, cancelAnimationFrame() {},
+  });
+  const composer = { hasContent: () => true,
+    take: () => ({ text: "このスクリーンショットのエラーを説明して", images: ["data:image/png;base64,AA=="], files: [] }),
+    close() {}, setBlocked() {}, onSubmit() {}, setChoices() {}, restore() {} };
+  const noop = () => {};
+  const sender = factory({
+    chat: { composer, element: element(), status: { clear: noop, set: noop, setBusy: noop, flash: noop },
+      buttons: { regenerateButton: element(), cancelSendButton: element() },
+      history: { add: noop }, setThinking: noop, clearThinking: noop, showError: noop, addReply: noop, finishReply: noop },
+    voice: { stop: noop, beginStream: noop, cancelStream: noop, speak: noop, finishStream: noop },
+    motion: { setBusy: noop, react: noop }, notices: { upsertJob: noop }, engine: { blockedReason: () => "" },
+    relationship: {}, ambient: { onUserActivity: noop, afterConversation: noop }, mic: { scheduleContinuous: noop },
+  });
+  await sender.submit();
+  assert.equal(captures, 0, "貼り付け画像があるのに自動撮影しました");
+  assert.equal(JSON.stringify(sent), JSON.stringify([["data:image/png;base64,AA=="]]));
+});
