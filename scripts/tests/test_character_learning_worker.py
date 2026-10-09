@@ -235,6 +235,25 @@ class WorkerTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             WORKER.choose_asr_device('auto',probe)
 
+    def test_GPU容量不足の後も同じ来歴で再開し回復したGPUを利用する(self):
+        self.request['asrDevice']='cuda'
+        calls=[]
+        row=SimpleNamespace(start=0,end=2,text=' 試験 ',words=[])
+        def factory(*args,**kwargs):
+            calls.append(kwargs)
+            return SimpleNamespace(transcribe=lambda *a,**k:(iter([row]),None))
+        worker=WORKER.Worker(self.request)
+        with self.assertRaisesRegex(RuntimeError,'CUDA文字起こしを開始できません'):
+            worker.transcribe('fake.wav',factory,lambda:dict(available=True,freeBytes=1_000_000_000))
+        self.assertEqual(calls,[])
+        resumed=WORKER.Worker(dict(self.request))
+        result=resumed.transcribe('fake.wav',factory,lambda:dict(available=True,freeBytes=8_000_000_000))
+        self.assertEqual(result[0]['text'],'試験')
+        self.assertEqual(calls[0]['device'],'cuda')
+        proof=json.loads((resumed.job/'asr.json').read_text(encoding='utf-8'))
+        self.assertEqual(proof['state'],'completed')
+        self.assertEqual(proof['device'],'cuda')
+
     def test_GPU推論失敗でCPUへ切り替えない(self):
         self.request['asrDevice']='cuda'
         worker=WORKER.Worker(self.request)

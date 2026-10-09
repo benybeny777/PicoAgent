@@ -106,11 +106,11 @@
         accept.addEventListener("click",()=>{if (!sameTarget(job) || accept.disabled) return;applyVoice(job.input.characterId,job.result.voice);status.textContent="声を設定の草稿へ反映しました。設定を保存すると適用されます。";});
         box.append(check,samples,listen,audio,el("label",{className:"learning-listened"},[heard,document.createTextNode("複数文を聴き、声・ノイズ・発音を確認しました")]),accept);
       }
-      // GPU文字起こしを開始できず失敗した学習は、処理方式が来歴に含まれるため再開しても同じ所で止まる。
-      // 再開ボタンを出さず、CPUを選んで新しく始める手順を示す。
+      // GPUの空きメモリ不足などは一時的な失敗なので、環境を整えて同じ方式で再開できる。
+      // 処理方式は来歴に含まれるため、CPUへ変更する場合だけ新規開始が必要になる。
       const gpuAsrUnavailable=job.state==="failed" && job.input.asrDevice==="cuda" && String(job.error || job.progress?.error || "").includes("CUDA文字起こしを開始できません");
-      if (gpuAsrUnavailable) box.append(el("p",{className:"hint",textContent:"このPCではGPU文字起こしを使えません。「文字起こしの処理」をCPUにして、新しく学習を始めてください。"}));
-      else if (["failed","cancelled","interrupted"].includes(job.state) && job.input.mode!=="setup") {
+      if (gpuAsrUnavailable) box.append(el("p",{className:"hint",textContent:"GPUの空きメモリや実行環境を整えて、この学習を再開できます。CPUへ変更する場合は「文字起こしの処理」をCPUにして、新しく学習を始めてください。"}));
+      if (["failed","cancelled","interrupted"].includes(job.state) && job.input.mode!=="setup") {
         const resume=el("button",{type:"button",textContent:"この学習を再開",disabled:!!active || pending});
         resume.addEventListener("click",()=>run(()=>window.picoagent.settings.characterLearningStart(null,job.id)));
         box.append(resume);
