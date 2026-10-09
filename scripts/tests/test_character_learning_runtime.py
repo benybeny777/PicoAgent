@@ -22,6 +22,10 @@ class RuntimeTests(unittest.TestCase):
         gpu_probe = patch.object(RUNTIME, "detect_cuda_gpu", return_value={"CUDA_VISIBLE_DEVICES": "0", "CUDA_DEVICE_ORDER": "PCI_BUS_ID"})
         gpu_probe.start()
         self.addCleanup(gpu_probe.stop)
+        self.real_deno_probe = RUNTIME.probe_deno
+        deno_probe = patch.object(RUNTIME, "probe_deno")
+        deno_probe.start()
+        self.addCleanup(deno_probe.stop)
         self.root = self.base / "bundled/voice-training"
         self.shared = self.base / "shared/python.exe"
         self.ffmpeg = self.base / "ffmpeg.exe"
@@ -256,6 +260,42 @@ class RuntimeTests(unittest.TestCase):
             for call in run.call_args_list:
                 self.assertEqual(call.args[2]["CUDA_VISIBLE_DEVICES"], "2")
         self.assertEqual(json.loads((self.root / "install.json").read_text(encoding="utf-8"))["environment"]["CUDA_VISIBLE_DEVICES"], "2")
+
+    def test_Deno書庫は固定ハッシュと安全な単一実体だけ許可する(self):
+        archive = self.base / "deno.zip"
+        for name, succeeds in (("deno.exe", True), ("../deno.exe", False)):
+            with zipfile.ZipFile(archive, "w") as zipped:
+                zipped.writestr(name, b"official-fixture")
+            destination = self.base / ("valid-deno" if succeeds else "invalid-deno")
+            with patch.object(RUNTIME, "DENO_SIZE", archive.stat().st_size), patch.object(RUNTIME, "DENO_SHA256", RUNTIME.file_digest(archive, True)):
+                if succeeds:
+                    RUNTIME.unpack_deno(archive, destination)
+                    self.assertEqual((destination / "deno.exe").read_bytes(), b"official-fixture")
+                else:
+                    with self.assertRaises(ValueError):
+                        RUNTIME.unpack_deno(archive, destination)
+                    self.assertFalse(destination.exists())
+        with self.assertRaises(ValueError):
+            RUNTIME.unpack_deno(archive, self.base / "checksum-failed")
+
+    def test_Deno実行検証は管理実体に限定しglobalPATHを使わない(self):
+        executable = self.root / "tools/deno/deno.exe"
+        executable.parent.mkdir(parents=True)
+        executable.write_bytes(b"managed-deno")
+        with patch.object(RUNTIME, "run") as run:
+            self.real_deno_probe(self.root, {}, self.status.parent / "check.log")
+            self.assertTrue(all(call.args[0][0] == str(executable) for call in run.call_args_list))
+            self.assertIn("--no-remote", run.call_args_list[1].args[0])
+        executable.unlink()
+        with self.assertRaises(ValueError):
+            self.real_deno_probe(self.root, {}, self.status.parent / "check.log")
+
+    def test_YouTube依存とDeno資産は公式固定値を記録する(self):
+        self.assertIn("yt-dlp-ejs==0.8.0", RUNTIME.FROZEN.splitlines())
+        self.installed_fixture()
+        record = json.loads((self.root / "install.json").read_text(encoding="utf-8"))
+        self.assertEqual(record["tools"]["deno"]["archiveSha256"], RUNTIME.DENO_SHA256)
+        self.assertEqual(record["environment"]["DENO_DIR"], str(self.root.resolve() / "cache/deno"))
 
 
 if __name__ == "__main__":

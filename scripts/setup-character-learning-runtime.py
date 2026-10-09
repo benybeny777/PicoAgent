@@ -34,6 +34,10 @@ MODEL_SPECS = (
 )
 SILERO_COMMIT = "0467799ff2f3df0f866bfa3867e9d97c6e5cce50"
 SILERO_TREE = "87601798fc80deb0d25162372c5e43d7869322e6"
+DENO_VERSION = "2.9.7"
+DENO_URL = "https://github.com/denoland/deno/releases/download/v2.9.7/deno-x86_64-pc-windows-msvc.zip"
+DENO_SIZE = 42630221
+DENO_SHA256 = "a0c3101b4158d1dfb7d6a78a7bf0f3de80c96bb423c152beec8beb22786f2238"
 
 # 実績環境の学習・取得・QA依存closureを固定。ORTは共有module衝突を避けCUDA版だけにする。
 FROZEN = """absl-py==2.5.0
@@ -192,6 +196,7 @@ werkzeug==3.1.8
 wheel==0.46.3
 win32-setctime==1.2.0
 yt-dlp==2026.8.19
+yt-dlp-ejs==0.8.0
 zipp==4.1.0
 """
 PATCHES = {
@@ -469,7 +474,7 @@ def detect_cuda_gpu() -> dict[str, str]:
 
 def environment(root: Path, gpu: dict[str, str] | None = None) -> dict[str, str]:
     return {"HF_HOME": str(root / "cache/huggingface"), "HF_HUB_CACHE": str(root / "cache/huggingface/hub"),
-            "TORCH_HOME": str(root / "cache/torch"), "PYTHONPATH": str(root),
+            "TORCH_HOME": str(root / "cache/torch"), "PYTHONPATH": str(root), "DENO_DIR": str(root / "cache/deno"),
             "HF_HUB_OFFLINE": "1", "TRANSFORMERS_OFFLINE": "1", "HF_DATASETS_OFFLINE": "1"} | (gpu or {})
 
 
@@ -518,6 +523,7 @@ def acquire_models(root: Path, python: Path, env: dict, log: Path):
 
 PROBE = r'''
 import json,sys,importlib
+from importlib.metadata import version
 from pathlib import Path
 import torch,torchaudio
 assert sys.version_info[:2]==(3,12), 'Python3.12が必要'
@@ -527,6 +533,11 @@ assert torch.cuda.is_available(), 'CUDAを利用できません'
 assert (torch.ones(16,device='cuda')*2).sum().item()==32
 for module in ('aivmlib','onnx','onnxsim','faster_whisper','pyannote.audio','soundfile','yt_dlp','transformers','style_bert_vits2'):
     importlib.import_module(module)
+assert version('yt-dlp')=='2026.8.19' and version('yt-dlp-ejs')=='0.8.0'
+from yt_dlp.dependencies import yt_dlp_ejs
+assert yt_dlp_ejs, 'YouTube EJSの互換版を利用できません'
+from yt_dlp_ejs.yt import solver
+assert solver.core() and solver.lib(), 'YouTube EJS資産がありません'
 import pyopenjtalk
 assert pyopenjtalk.extract_fullcontext('こんにちは'), '日本語辞書を利用できません'
 root=Path.cwd()
@@ -544,6 +555,39 @@ print(json.dumps({'cuda':True,'device':torch.cuda.get_device_name(0)}))
 '''
 
 
+def unpack_deno(archive: Path, destination: Path):
+    if archive.stat().st_size != DENO_SIZE or file_digest(archive, True) != DENO_SHA256:
+        raise ValueError("Deno公式ZIPのサイズまたはSHA256が一致しません")
+    with zipfile.ZipFile(archive) as zipped:
+        entries = zipped.infolist()
+        if len(entries) != 1 or entries[0].filename != "deno.exe" or entries[0].file_size > 200_000_000:
+            raise ValueError("Deno公式ZIPの構成が不正です")
+        destination.mkdir(parents=True, exist_ok=False)
+        with zipped.open(entries[0]) as source, (destination / "deno.exe").open("xb") as target:
+            shutil.copyfileobj(source, target, 1024 * 1024)
+
+
+def acquire_deno(root: Path):
+    archive = root / "deno.zip"
+    size = 0
+    with urlopen(Request(DENO_URL, headers={"User-Agent": "PicoAgent-character-learning"}), timeout=120) as response, archive.open("xb") as target:
+        while chunk := response.read(1024 * 1024):
+            size += len(chunk)
+            if size > DENO_SIZE:
+                raise ValueError("Deno取得サイズが公式固定値を超えました")
+            target.write(chunk)
+    unpack_deno(archive, root / "tools/deno")
+    archive.unlink()
+
+
+def probe_deno(root: Path, env: dict, log: Path):
+    executable = root / "tools/deno/deno.exe"
+    if not executable.is_file():
+        raise ValueError("管理Deno実体がありません")
+    run([str(executable), "--version"], root, env, log)
+    run([str(executable), "eval", "--no-config", "--no-remote", f"if (Deno.version.deno !== '{DENO_VERSION}' || 1+2 !== 3) throw Error('管理Denoの版または実行検証が不一致');"], root, env, log)
+
+
 def populate(stage: Path, shared: Path, uv: Path, ffmpeg: Path, gpu: dict[str, str]):
     fetch_source(FORK, COMMIT, TREE, stage, stage / "source.zip")
     for name, patch in PATCHES.items():
@@ -551,6 +595,8 @@ def populate(stage: Path, shared: Path, uv: Path, ffmpeg: Path, gpu: dict[str, s
         path.write_text(apply_patch(path.read_text(encoding="utf-8"), patch), encoding="utf-8", newline="\n")
     env = os.environ | environment(stage, gpu)
     log = stage / "setup.log"
+    acquire_deno(stage)
+    probe_deno(stage, env, log)
     run([str(uv), "venv", str(stage / ".venv"), "--python", str(shared), "--relocatable"], stage, env, log)
     python = stage / ".venv/Scripts/python.exe"
     frozen = stage / "requirements-runtime.txt"
@@ -586,12 +632,14 @@ def cleanup_failed_stages(root: Path):
 def verify_existing(root: Path, ffmpeg: Path, status: Path, gpu: dict[str, str]):
     record = json.loads((root / "install.json").read_text(encoding="utf-8"))
     expected_patches = {name: hashlib.sha256(patch.encode()).hexdigest() for name, patch in PATCHES.items()}
+    expected_deno = {"version": DENO_VERSION, "path": str(root / "tools/deno/deno.exe"), "archiveSha256": DENO_SHA256, "archiveSize": DENO_SIZE}
     if (record.get("state") != "installed"
             or record.get("source", {}).get("repository") != FORK
             or record.get("source", {}).get("commit") != COMMIT
             or record.get("source", {}).get("tree") != TREE
             or record.get("requirementsSha256") != hashlib.sha256(FROZEN.encode()).hexdigest()
             or record.get("patchSha256") != expected_patches
+            or record.get("tools", {}).get("deno") != expected_deno
             or (root / "requirements-runtime.txt").read_text(encoding="utf-8") != FROZEN
             or json.loads((root / "runtime-env.json").read_text(encoding="utf-8")) != record
             or {key: value for key, value in record.get("environment", {}).items()
@@ -603,6 +651,7 @@ def verify_existing(root: Path, ffmpeg: Path, status: Path, gpu: dict[str, str])
     run([str(ffmpeg), "-version"], root, env, log)
     run([str(root / ".venv/Scripts/aivmlib.exe"), "--help"], root, env, log)
     run([str(root / ".venv/Scripts/python.exe"), "-m", "yt_dlp", "--version"], root, env, log)
+    probe_deno(root, env, log)
     run([str(root / ".venv/Scripts/python.exe"), "-c", PROBE], root, env, log)
     atomic_json(status, {"state": "completed", "phase": "setup", "message": "既存音声学習環境の検証が完了しました", "runtimeRoot": str(root)})
 
@@ -664,12 +713,14 @@ def install(root: Path, shared: Path, ffmpeg: Path, uv: Path, status: Path, conf
         stage.rename(root)
         final_env = os.environ | environment(root, gpu)
         try:
+            probe_deno(root, final_env, root / "setup.log")
             run([str(root / ".venv/Scripts/aivmlib.exe"), "--help"], root, final_env, root / "setup.log")
             run([str(root / ".venv/Scripts/python.exe"), "-c", PROBE], root, final_env, root / "setup.log")
         except BaseException:
             root.rename(stage)
             raise
         record = {"schemaVersion": 1, "state": "installed", "source": {"repository": FORK, "commit": COMMIT, "tree": TREE, "officialRelease": OFFICIAL_RELEASE, "officialCommit": OFFICIAL_COMMIT, "reason": FORK_REASON},
+                  "tools": {"deno": {"version": DENO_VERSION, "path": str(root / "tools/deno/deno.exe"), "archiveSha256": DENO_SHA256, "archiveSize": DENO_SIZE}},
                   "patchSha256": {name: hashlib.sha256(patch.encode()).hexdigest() for name, patch in PATCHES.items()},
                   "requirementsSha256": hashlib.sha256(FROZEN.encode()).hexdigest(), "environment": environment(root, gpu), "ffmpeg": str(ffmpeg), "sharedPython": str(shared), "capabilities": {"windows": True, "nvidia": True, "cuda": True, "jpExtra": True, "transcribe": True, "export": True, "qa": True}, "models": [{"repository": row[0], "revision": row[1]} for row in MODEL_SPECS]}
         atomic_json(root / "runtime-env.json", record)

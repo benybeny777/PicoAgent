@@ -144,3 +144,5 @@
 | `settings:navigate` | タブID | 設定画面のタブ移動 |
 | `character-maker:state` / `character-maker:progress` | 作成状態 | 設定画面のキャラ作成 |
 | `tauri://drag-enter` / `tauri://drag-leave` / `tauri://drag-drop` | `{ paths }` | ファイルのドロップ添付 |
+
+学習input.asrDeviceはcuda/cpu。新規画面はcudaを既定に送信し、旧保存ジョブの省略だけcpuとして解釈する。URL・音声ファイルは同じ選択を使い、GPU失敗時の自動CPU切替は行わない。

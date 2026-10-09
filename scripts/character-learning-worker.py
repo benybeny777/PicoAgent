@@ -14,12 +14,41 @@ from urllib.parse import parse_qs, urlparse
 
 MAX_BYTES = 500_000_000
 MAX_SECONDS = 7200
+ASR_MIN_FREE_BYTES = 6_000_000_000
+
+
+def probe_asr_cuda():
+    import torch
+    import ctranslate2
+    if not torch.cuda.is_available() or ctranslate2.get_cuda_device_count()<1:
+        return {'available':False,'reason':'CUDA対応GPUまたは必要なCUDAランタイムを利用できません'}
+    if 'float16' not in ctranslate2.get_supported_compute_types('cuda',device_index=0):
+        return {'available':False,'reason':'このGPUのCTranslate2はfloat16に対応していません'}
+    free,total=torch.cuda.mem_get_info(0)
+    return {'available':True,'freeBytes':int(free),'totalBytes':int(total)}
+
+
+def choose_asr_device(requested, probe=probe_asr_cuda):
+    if requested not in ('cuda','cpu'):
+        raise ValueError('文字起こし実行先はcuda/cpuを指定してください')
+    if requested=='cpu':
+        return {'requested':requested,'device':'cpu','computeType':'int8','reason':'CPUが指定されています（旧request省略時もCPU）'}
+    try:
+        capability=probe()
+    except Exception as error:
+        capability={'available':False,'reason':f'CUDA能力を確認できません: {error}'}
+    ready=capability.get('available') is True and capability.get('freeBytes',0)>=ASR_MIN_FREE_BYTES
+    if ready:
+        return {'requested':requested,'device':'cuda','computeType':'float16','deviceIndex':0,'reason':'CUDA float16対応を確認し、空きGPUメモリが6.0GB以上あります','capability':capability}
+    reason=capability.get('reason') or f'空きGPUメモリ{capability.get("freeBytes",0)/1_000_000_000:.2f}GBが保守的な必要容量6.0GBを下回っています'
+    raise RuntimeError('CUDA文字起こしを開始できません。'+reason)
 
 
 def provenance_request(request):
     """再起動PID・QA接続情報だけを素材来歴から除外する。"""
     stable={key:value for key,value in request.items() if key not in ('ownerProcessId','endpoint','speaker')}
     stable.setdefault('stopAtStep',1000)
+    stable.setdefault('asrDevice','cpu')
     return stable
 
 
@@ -98,12 +127,19 @@ def validate_url(value):
         video = parse_qs(parsed.query).get('v', [])
         if len(video) == 1 and re.fullmatch(r'[A-Za-z0-9_-]{11}', video[0]):
             return 'https://www.youtube.com/watch?v=' + video[0]
+    if parsed.hostname in ('youtube.com','www.youtube.com','m.youtube.com'):
+        match=re.fullmatch(r'/(?:shorts|live)/([A-Za-z0-9_-]{11})',parsed.path)
+        if match:
+            return 'https://www.youtube.com/watch?v=' + match.group(1)
     raise ValueError('単一YouTube動画だけに対応します。一般URL・playlistは利用できません')
 
 
 class Worker:
     def __init__(self, request, runner=subprocess.run):
         self.request = request
+        if request.get('asrDevice','cpu') not in ('cuda','cpu'):
+            raise ValueError('文字起こし実行先が不正です')
+        self.dll_handles=[]
         if request.get('mode') not in ('persona', 'voice', 'both'):
             raise ValueError('modeが不正です')
         if not isinstance(request.get('characterName'), str) or not request['characterName'].strip():
@@ -142,14 +178,62 @@ class Worker:
         if runtime_env.is_file():
             environment=json.loads(runtime_env.read_text(encoding='utf-8')).get('environment',{})
             for key,value in environment.items():
-                if key in ('HF_HOME','HF_HUB_CACHE','TORCH_HOME','PYTHONPATH','HF_DATASETS_CACHE') and isinstance(value,str):
+                if key in ('HF_HOME','HF_HUB_CACHE','TORCH_HOME','PYTHONPATH','HF_DATASETS_CACHE','DENO_DIR') and isinstance(value,str):
                     self.env[key]=value
                     os.environ[key]=value
         for key in ('HF_HUB_OFFLINE', 'TRANSFORMERS_OFFLINE', 'HF_DATASETS_OFFLINE'):
             os.environ[key] = '1'
 
     def stage(self, name):
-        atomic_json(self.job / 'status.json', {'stage': name, 'state': 'running', 'dataset': self.dataset})
+        path=self.job/'status.json'
+        status=json.loads(path.read_text(encoding='utf-8')) if path.exists() else {}
+        status.update(stage=name,state='running',dataset=self.dataset)
+        atomic_json(path,status)
+
+    def transcribe(self, audio, factory=None, probe=probe_asr_cuda):
+        # Windows DLL探索ハンドルは推論・generator消費が終わるまで所有する。
+        try:
+            if os.name=='nt' and hasattr(os,'add_dll_directory'):
+                directory=self.root/'.venv/Lib/site-packages/torch/lib'
+                if directory.is_dir():
+                    self.dll_handles.append(os.add_dll_directory(str(directory)))
+            return self._transcribe(audio,factory,probe)
+        finally:
+            for handle in self.dll_handles:
+                handle.close()
+            self.dll_handles.clear()
+
+    def _transcribe(self, audio, factory, probe):
+        self.stage('transcribe')
+        try:
+            selection=choose_asr_device(self.request.get('asrDevice','cpu'),probe)
+        except Exception as error:
+            selection={'requested':self.request.get('asrDevice','cpu'),'device':self.request.get('asrDevice','cpu'),'reason':str(error),'state':'failed'}
+            atomic_json(self.job/'asr.json',selection)
+            status=json.loads((self.job/'status.json').read_text(encoding='utf-8'))
+            status['asr']=selection
+            atomic_json(self.job/'status.json',status)
+            raise
+        atomic_json(self.job/'asr.json',dict(selection,state='running'))
+        status=json.loads((self.job/'status.json').read_text(encoding='utf-8'))
+        status['asr']=selection
+        atomic_json(self.job/'status.json',status)
+        model=None
+        try:
+            if factory is None:
+                from faster_whisper import WhisperModel
+                factory=WhisperModel
+            model=factory('large-v3',device=selection['device'],compute_type=selection['computeType'],local_files_only=True)
+            segments,_=model.transcribe(str(audio),language='ja',condition_on_previous_text=False,vad_filter=False,word_timestamps=True)
+            rows=[{'start':float(s.start),'end':float(s.end),'text':s.text.strip(),'words':[{'start':float(w.start),'end':float(w.end),'text':w.word} for w in (s.words or [])]} for s in segments]
+            atomic_json(self.job/'asr.json',dict(selection,state='completed'))
+            return rows
+        except Exception as error:
+            atomic_json(self.job/'asr.json',dict(selection,state='failed',error=str(error)))
+            # GPU推論失敗はCPUへ降格せず、原因を保持する。
+            raise RuntimeError(f'{selection["device"]}文字起こしに失敗しました: {error}') from error
+        finally:
+            del model
 
     def run(self, args, stage, allow_failure=False):
         self.stage(stage)
@@ -174,7 +258,10 @@ class Worker:
             for name, expected in proof['artifacts'].items():
                 if digest(Path(name)) != expected:
                     raise ValueError('準備済み成果物SHAが一致しません')
-            atomic_json(self.job/'status.json',{'stage':'prepared','state':'completed'})
+            status={'stage':'prepared','state':'completed'}
+            if (self.job/'asr.json').exists():
+                status['asr']=json.loads((self.job/'asr.json').read_text(encoding='utf-8'))
+            atomic_json(self.job/'status.json',status)
             return
         target = self.job / 'source'
         owner=self.job/'prepare-owner.json'
@@ -216,9 +303,12 @@ class Worker:
             if digest(snapshot) != before or digest(self.original) != before:
                 raise ValueError('コピー中に原音が変わりました')
         else:
+            deno=self.root/'tools/deno/deno.exe'
+            if not deno.is_file():
+                raise ValueError('YouTube取得用の専用Denoがありません。専用Denoを含む現行のキャラ学習環境を導入・選択してください。旧環境の自動更新は未対応です')
             import yt_dlp
             self.stage('download')
-            with yt_dlp.YoutubeDL({'noplaylist': True, 'format': 'bestaudio', 'outtmpl': str(target/'original.%(ext)s'), 'max_filesize': MAX_BYTES, 'match_filter': youtube_limit, 'overwrites': False}) as downloader:
+            with yt_dlp.YoutubeDL({'noplaylist': True, 'format': 'bestaudio', 'outtmpl': str(target/'original.%(ext)s'), 'max_filesize': MAX_BYTES, 'match_filter': youtube_limit, 'overwrites': False,'js_runtimes':{'deno':{'path':str(deno)}},'remote_components':[]}) as downloader:
                 info = downloader.extract_info(self.url, download=True)
                 if not info or info.get('entries'):
                     raise ValueError('単一音声の取得に失敗しました')
@@ -254,12 +344,7 @@ class Worker:
         if (self.job/'segments.json').exists():
             rows=json.loads((self.job/'segments.json').read_text(encoding='utf-8'))
         else:
-            from faster_whisper import WhisperModel
-            self.stage('transcribe')
-            model = WhisperModel('large-v3', device='cpu', compute_type='int8', local_files_only=True)
-            segments, _ = model.transcribe(str(target/'audio-16000.wav'), language='ja', condition_on_previous_text=False, vad_filter=False, word_timestamps=True)
-            rows = [{'start': float(s.start), 'end': float(s.end), 'text': s.text.strip(), 'words':[{'start':float(w.start),'end':float(w.end),'text':w.word} for w in (s.words or [])]} for s in segments]
-            del model
+            rows=self.transcribe(target/'audio-16000.wav')
         if not rows or not any(r['text'] for r in rows):
             raise ValueError('文字起こし結果が空です')
         if any(not math.isfinite(r['start']) or not math.isfinite(r['end']) or not 0<=r['start']<r['end']<=info.duration for r in rows):
@@ -354,11 +439,15 @@ class Worker:
                 raise ValueError('選別済み話者基準の件数が一致しません')
             (self.job/'selected-reference.jsonl').write_text('\n'.join(reference)+'\n', encoding='utf-8')
         artifacts=[snapshot,self.job/'source.json',self.job/'transcript.txt',self.job/'segments.json']
+        if (self.job/'asr.json').exists():
+            artifacts.append(self.job/'asr.json')
         if self.request['mode']!='persona':
             artifacts.extend((self.root/'Data'/self.selected).rglob('*.wav'))
             artifacts.extend([self.root/'Data'/self.selected/'esd.list',self.job/'selected-reference.jsonl'])
         atomic_json(self.job/'prepared.json', {'dataset':self.selected,'mode':self.request['mode'],'source_sha256':digest(snapshot),'request':provenance_request(self.request),'artifacts':{str(p):digest(p) for p in artifacts}})
-        atomic_json(self.job/'status.json', {'stage':'prepared','state':'completed'})
+        status=json.loads((self.job/'status.json').read_text(encoding='utf-8'))
+        status.update(stage='prepared',state='completed')
+        atomic_json(self.job/'status.json',status)
 
     def train(self):
         if self.request['mode']=='persona' or not (self.job/'prepared.json').is_file():
