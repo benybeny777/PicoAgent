@@ -1254,7 +1254,8 @@ pub async fn settings_generation_environment(app: AppHandle) -> Result<Value, St
             "画像・動画・キャラクター生成はWindows x64とApple Silicon Mac専用です（Intel Macは対象外）。何も取得していません。".into(),
         )
     };
-    let installed = crate::components::installed_generation_runtime(&app);
+    let installed = crate::components::installed_generation_runtime(&app)
+        .map_err(|error| format!("{error:#}"))?;
     let device = match &selection {
         BackendSelection::Supported(selected) => Some(selected.device.clone()),
         BackendSelection::Unsupported(_) => {

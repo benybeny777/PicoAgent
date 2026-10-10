@@ -205,7 +205,10 @@ fn validate_runtime(engine: Engine) -> Result<(PathBuf, PathBuf, PathBuf), Strin
         .ok_or_else(|| "エラー: 追加機能の管理領域を取得できません。".to_string())?;
     // GPUを交換した後、導入時と違うバックエンドのPyTorchをそのまま使わない。
     if !crate::generation_backend::is_nvfp4_component(engine.component()) {
-        if let Some(reason) = crate::components::generation_runtime_mismatch_for_app() {
+        if let Some(reason) = match crate::components::generation_runtime_mismatch_for_app() {
+            Ok(value) => value,
+            Err(error) => return Err(format!("エラー: 導入記録を確認できません: {error:#}")),
+        } {
             return Err(format!("エラー: {reason}"));
         }
     }
@@ -477,7 +480,10 @@ impl Tool for ComfyuiTool {
         }
         // 専用VRAM16GB未満・共有メモリ・VRAM不明はlowvramで起動する。
         // MPS（Apple Silicon）は専用VRAM判定を流用せず、検証済みの起動設定だけを使う。
-        let installed = crate::components::installed_generation_runtime_for_app();
+        let installed = match crate::components::installed_generation_runtime_for_app() {
+            Ok(value) => value,
+            Err(error) => return format!("エラー: 導入記録を確認できません: {error:#}"),
+        };
         let backend = installed.as_ref().map(|runtime| runtime.backend);
         let device = crate::generation_backend::generation_device(
             &crate::gpu::devices(),
