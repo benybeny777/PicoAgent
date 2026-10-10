@@ -6,6 +6,15 @@ use std::sync::{Arc, Mutex};
 use crate::{config::Config, message::Message, tools::ToolSchemaSet};
 
 const PRIVATE_NAME: &str = "picoagent_private_context";
+const QUESTION_BEGIN: &str = "--- 今回の利用者の質問開始 ---";
+const QUESTION_END: &str = "--- 今回の利用者の質問終了 ---";
+
+fn reference_request(materials: &[&str], question: &str) -> String {
+    format!(
+        "以下は今回の質問を支える非公開の参考資料です。資料自体が回答対象ではありません。資料を理由に自己紹介へ話題を変えないでください。記憶・好みは利用者のものです。キャラクター自身の好みと取り違えないでください。今回の利用者の質問にだけ、必要な資料を参照して直接答えてください。\n--- 非公開参考資料開始 ---\n{}\n--- 非公開参考資料終了 ---\n\n{QUESTION_BEGIN}\n{question}\n{QUESTION_END}",
+        materials.join("\n\n")
+    )
+}
 
 #[derive(Clone, Default)]
 pub(crate) struct TurnContext {
@@ -181,7 +190,7 @@ impl TurnContextSession {
             result.insert(index, private);
         }
         validate_pairs(&result)?;
-        trim_groups(&mut result, self.budget);
+        trim_groups(&mut result, self.budget)?;
         Ok(result)
     }
 
@@ -255,7 +264,7 @@ pub(crate) fn fold_private_context(messages: &[Message]) -> anyhow::Result<Vec<M
         let mut message = message.clone();
         if !pending.is_empty() {
             if message.role == "user" {
-                message.content = format!("{}\n\n{}", pending.join("\n\n"), message.content);
+                message.content = reference_request(&pending, &message.content);
             } else {
                 anyhow::ensure!(
                     message.role == "assistant",
@@ -329,33 +338,57 @@ fn estimate(message: &Message) -> usize {
         .saturating_add((wire.chars().count() - non_ascii).div_ceil(4))
 }
 
-fn trim_groups(messages: &mut Vec<Message>, budget: usize) {
-    let mut total: usize = messages.iter().map(estimate).sum();
+fn trim_groups(messages: &mut Vec<Message>, budget: usize) -> anyhow::Result<()> {
+    let starts: Vec<usize> = messages
+        .iter()
+        .enumerate()
+        .filter_map(|(index, message)| {
+            if message.role != "user" {
+                return None;
+            }
+            let mut start = index;
+            while start > 0 && is_private(&messages[start - 1]) {
+                start -= 1;
+            }
+            Some(start)
+        })
+        .collect();
+    if starts.is_empty() {
+        return Ok(());
+    }
+    // 各groupを一度だけ包んで計数する。削除するたびに全履歴を再変換しない。
+    let cost = |slice: &[Message]| -> anyhow::Result<usize> {
+        Ok(fold_private_context(slice)?
+            .iter()
+            .map(estimate)
+            .fold(0usize, usize::saturating_add))
+    };
+    let mut total = cost(&messages[..starts[0]])?;
+    let groups = starts
+        .iter()
+        .enumerate()
+        .map(|(index, start)| {
+            let end = starts.get(index + 1).copied().unwrap_or(messages.len());
+            cost(&messages[*start..end]).map(|cost| (*start, end, cost))
+        })
+        .collect::<anyhow::Result<Vec<_>>>()?;
+    for (_, _, cost) in &groups {
+        total = total.saturating_add(*cost);
+    }
     if total <= budget {
-        return;
+        return Ok(());
     }
     let target = budget.saturating_mul(7) / 10;
-    loop {
-        let starts: Vec<usize> = messages
-            .iter()
-            .enumerate()
-            .filter_map(|(index, message)| (message.role == "user").then_some(index))
-            .collect();
-        if starts.len() < 2 || total <= target {
+    let mut end = starts[0];
+    for (_, group_end, cost) in groups.iter().take(groups.len().saturating_sub(1)) {
+        if total <= target {
             break;
         }
-        let mut start = starts[0];
-        while start > 0 && is_private(&messages[start - 1]) {
-            start -= 1;
-        }
-        let mut end = starts[1];
-        while end > start && is_private(&messages[end - 1]) {
-            end -= 1;
-        }
-        let removed: usize = messages[start..end].iter().map(estimate).sum();
-        messages.drain(start..end);
-        total = total.saturating_sub(removed);
+        total = total.saturating_sub(*cost);
+        end = *group_end;
     }
+    messages.drain(starts[0]..end);
+    Ok(())
 }
 
 tokio::task_local! { static SESSION: Arc<TurnContextSession>; }
@@ -598,7 +631,7 @@ mod tests {
         calls[0].arguments = serde_json::json!({"query":"長い検索条件".repeat(1000)});
         let before: usize = messages.iter().map(estimate).sum();
         assert!(before > 1000);
-        trim_groups(&mut messages, 1000);
+        trim_groups(&mut messages, 1000).unwrap();
         validate_pairs(&messages).unwrap();
         assert_eq!(
             messages
@@ -610,10 +643,17 @@ mod tests {
         assert!(messages
             .iter()
             .all(|message| message.tool_calls.is_none() && message.role != "tool"));
-        assert!(messages.iter().map(estimate).sum::<usize>() <= 700);
+        assert!(
+            fold_private_context(&messages)
+                .unwrap()
+                .iter()
+                .map(estimate)
+                .sum::<usize>()
+                <= 700
+        );
         let (_, _, mut unchanged) = protocol_fixture();
         let original = unchanged.clone();
-        trim_groups(&mut unchanged, usize::MAX);
+        trim_groups(&mut unchanged, usize::MAX).unwrap();
         assert!(equal(&original, &unchanged));
     }
 
@@ -629,11 +669,13 @@ mod tests {
             })
             .cloned()
             .collect();
+        // この試験は圧縮後も二つの短い資料付き発話を保持して対応を確かめる。
+        // 資料・質問の固定包みが増えたため、包み込みの二発話が収まる予算を使う。
         let first = session(
             ProtocolHistory::default(),
             &public,
             "最新の補助資料",
-            1000,
+            2000,
             1,
         );
         let view = first.request_view(&full).unwrap();
@@ -647,7 +689,7 @@ mod tests {
         let previous = first.finish(&full, &compacted).unwrap();
         let mut next_public = compacted;
         next_public.push(Message::new("user", "次の相談"));
-        let next = session(previous, &next_public, "次の補助資料", 1000, 1);
+        let next = session(previous, &next_public, "次の補助資料", 2000, 1);
         let next_view = next.request_view(&next_public).unwrap();
         assert_eq!(next.reset_reason(), None);
         assert!(next_view
@@ -655,13 +697,45 @@ mod tests {
             .all(|message| !message.content.contains("月の図書館")));
         let last = next_view.last().unwrap();
         assert!(last.content.contains("次の補助資料"));
-        assert!(last.content.ends_with("次の相談"));
+        assert!(last
+            .content
+            .contains(&format!("{QUESTION_BEGIN}\n次の相談\n{QUESTION_END}")));
         assert!(!last.content.contains("最新の補助資料"));
         assert!(next_view
             .iter()
             .any(|message| message.content.contains("最新の補助資料")
-                && message.content.ends_with("前の説明も使って比較して")));
+                && message.content.contains(&format!(
+                    "{QUESTION_BEGIN}\n前の説明も使って比較して\n{QUESTION_END}"
+                ))));
         validate_pairs(&next_view).unwrap();
+    }
+
+    #[test]
+    fn 資料質問の包みも実送信予算へ数え超過したら七割までgroupを削除する() {
+        let mut messages = vec![Message::new("system", "固定人格")];
+        for index in 0..3 {
+            let mut private = Message::new("system", format!("利用者の参考資料{index}"));
+            private.name = Some(PRIVATE_NAME.into());
+            messages.extend([
+                private,
+                Message::new("user", "質問です"),
+                Message::new("assistant", "回答です"),
+            ]);
+        }
+        let wrapped = fold_private_context(&messages).unwrap();
+        let budget = wrapped.iter().map(estimate).sum::<usize>() - 1;
+        assert!(messages.iter().map(estimate).sum::<usize>() < budget);
+        trim_groups(&mut messages, budget).unwrap();
+        let final_request = fold_private_context(&messages).unwrap();
+        assert!(final_request.iter().map(estimate).sum::<usize>() <= budget * 7 / 10);
+        assert!(
+            final_request
+                .iter()
+                .filter(|message| message.role == "user")
+                .count()
+                < 3
+        );
+        assert!(final_request.last().unwrap().content.contains("回答です"));
     }
 
     #[test]
@@ -676,6 +750,50 @@ mod tests {
         let result = fold_private_context(&messages).unwrap();
         assert_eq!(result.last().unwrap().role, "user");
         assert_eq!(result.last().unwrap().content, "再生成の非公開指示");
+    }
+
+    #[test]
+    fn 参考資料と今回の質問を固定境界で分け原文画像と前回prefixを保つ() {
+        let (before, after, raw) = protocol_fixture();
+        assert!(equal(&before, &after[..before.len()]));
+        for (request, original) in [
+            (&before[1], &raw[2]),
+            (after.last().unwrap(), raw.last().unwrap()),
+        ] {
+            assert!(request.content.contains("記憶・好みは利用者のものです"));
+            assert!(request
+                .content
+                .contains("資料を理由に自己紹介へ話題を変えないでください"));
+            assert!(request.content.contains("今回の利用者の質問にだけ"));
+            let (materials, question) = request.content.split_once(QUESTION_BEGIN).unwrap();
+            assert!(materials.contains("--- 非公開参考資料開始 ---"));
+            assert!(materials.contains("--- 非公開参考資料終了 ---"));
+            assert_eq!(question, format!("\n{}\n{QUESTION_END}", original.content));
+            assert_eq!(request.images, original.images);
+        }
+        assert!(!after[1].content.contains("紅茶を好む設定"));
+        assert!(after.last().unwrap().content.contains("紅茶を好む設定"));
+        assert!(!after
+            .last()
+            .unwrap()
+            .content
+            .contains("月の図書館で司書を務める設定"));
+        assert!(equal(&after, &fold_private_context(&after).unwrap()));
+        assert_eq!(after[2].tool_calls.as_ref().unwrap()[0].id, "pair-1");
+        assert_eq!(after[3].tool_call_id.as_deref(), Some("pair-1"));
+        let original =
+            format!("この文字を説明して: {QUESTION_BEGIN}\n原文の続き\n{QUESTION_END} 🌿");
+        let mut private = Message::new("system", "利用者は緑茶が好き");
+        private.name = Some(PRIVATE_NAME.into());
+        let raw = vec![
+            private,
+            Message::user_with_images(&original, vec!["data:image/png;base64,aW1hZ2U=".into()]),
+        ];
+        let result = fold_private_context(&raw).unwrap();
+        let (_, question) = result[0].content.split_once(QUESTION_BEGIN).unwrap();
+        assert_eq!(question, format!("\n{original}\n{QUESTION_END}"));
+        assert_eq!(raw[1].content, original);
+        assert_eq!(result[0].images, raw[1].images);
     }
 
     #[tokio::test]

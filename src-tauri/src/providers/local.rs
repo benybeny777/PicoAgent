@@ -763,12 +763,15 @@ mod tests {
         assert_eq!(normalized[1].images, before[1].images);
         assert_eq!(normalized[2].tool_calls.as_ref().unwrap()[0].id, "pair-1");
         assert_eq!(normalized[3].tool_call_id, before[3].tool_call_id);
-        assert!(normalized[1].content.ends_with("画像の資料を説明して"));
-        assert!(normalized
-            .last()
-            .unwrap()
-            .content
-            .ends_with("前の説明も使って比較して"));
+        for (request, original) in [
+            (&normalized[1], &raw[2]),
+            (normalized.last().unwrap(), raw.last().unwrap()),
+        ] {
+            assert!(request.content.ends_with(&format!(
+                "\n{}\n--- 今回の利用者の質問終了 ---",
+                original.content
+            )));
+        }
     }
 
     type TimingReports = std::sync::Arc<std::sync::Mutex<Vec<super::TimingReport>>>;
