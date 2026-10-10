@@ -50,12 +50,7 @@ impl Tool for DiscordTool {
                 "password",
                 "https://discord.com/api/webhooks/...",
             ),
-            Field::new(
-                "PICOAGENT_DISCORD_TIMEOUT_SECS",
-                "Discord API 待ち時間（秒、3〜60）",
-                "text",
-                "15",
-            ),
+            Field::int(&crate::config::ints::DISCORD_TIMEOUT_SECS),
         ]
     }
 
@@ -78,12 +73,8 @@ impl Tool for DiscordTool {
                 MAX_CONTENT_CHARS
             );
         }
-        let timeout_secs = cfg
-            .get("PICOAGENT_DISCORD_TIMEOUT_SECS", "15")
-            .parse::<u64>()
-            .ok()
-            .filter(|value| (3..=60).contains(value))
-            .unwrap_or(15);
+        let timeout_secs =
+            crate::tool_try!(cfg.int(&crate::config::ints::DISCORD_TIMEOUT_SECS)) as u64;
         let mut payload = json!({ "content": content });
         if let Some(username) = args
             .get("username")

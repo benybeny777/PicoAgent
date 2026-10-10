@@ -18,15 +18,6 @@ const MAX_TEXT_CHARS: usize = 4000;
 
 pub struct SlackTool;
 
-fn parse_timeout(cfg: &Config) -> u64 {
-    // フォールバック許可: Slack の補助 timeout 設定が壊れていても既定値で続行する。
-    cfg.get("PICOAGENT_SLACK_TIMEOUT_SECS", "15")
-        .parse::<u64>()
-        .ok()
-        .filter(|value| (3..=60).contains(value))
-        .unwrap_or(15)
-}
-
 fn text_arg(args: &Value) -> Result<&str, String> {
     let text = args
         .get("text")
@@ -106,12 +97,7 @@ impl Tool for SlackTool {
                 "password",
                 "https://hooks.slack.com/services/...",
             ),
-            Field::new(
-                "PICOAGENT_SLACK_TIMEOUT_SECS",
-                "Slack API 待ち時間（秒、3〜60）",
-                "text",
-                "15",
-            ),
+            Field::int(&crate::config::ints::SLACK_TIMEOUT_SECS),
         ]
     }
 
@@ -121,7 +107,8 @@ impl Tool for SlackTool {
             .and_then(Value::as_str)
             .unwrap_or("send")
             .trim();
-        let timeout_secs = parse_timeout(cfg);
+        let timeout_secs =
+            crate::tool_try!(cfg.int(&crate::config::ints::SLACK_TIMEOUT_SECS)) as u64;
         let client = match reqwest::Client::builder()
             .timeout(Duration::from_secs(timeout_secs))
             .user_agent("PicoAgent/1.0 (Slack tool)")

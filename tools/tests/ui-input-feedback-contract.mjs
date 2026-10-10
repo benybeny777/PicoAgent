@@ -5,6 +5,7 @@ import vm from "node:vm";
 import test from "node:test";
 
 const settings = readFileSync(new URL("../../ui/settings.js", import.meta.url), "utf8");
+const integerInput = readFileSync(new URL("../../ui/settings-number.js", import.meta.url), "utf8");
 const bridge = readFileSync(new URL("../../ui/picoagent.js", import.meta.url), "utf8");
 
 test("設定のJSONが不正でも保存失敗後に入力と復元を操作できる", async () => {
@@ -113,10 +114,12 @@ test("設定保存は変更差分だけを送り内部状態を競合対象に�
 
 test("競合の再表示で非表示AIの草稿と最新値を両方保持する", () => {
   const context = vm.createContext({
-    inputs: new Map([["PICOAGENT_PROVIDER", { type: "select", value: "local" }]]),
+    inputs: new Map([["PICOAGENT_PROVIDER", { type: "select", dataset: {}, value: "local" }]]),
     cloneSettings: value => JSON.parse(JSON.stringify(value)),
-    data: { values: { PICOAGENT_PROVIDER: "local", OPENAI_MODEL: "草稿モデル", OTHER_PROVIDER_MODEL: "最新モデル" } },
+    data: { numberSettings: {}, values: { PICOAGENT_PROVIDER: "local", OPENAI_MODEL: "草稿モデル", OTHER_PROVIDER_MODEL: "最新モデル" } },
+    window: {},
   });
+  vm.runInContext(integerInput, context);
   vm.runInContext(`const providerDraftValues = {};
     const savedSnapshot = { PICOAGENT_PROVIDER: "local", OPENAI_MODEL: "旧モデル", OTHER_PROVIDER_MODEL: "旧モデル" };
     const characterOverrides = {}, characterVoiceOverrides = {}, characterLive2dSdkOverrides = {}, characterRendererOverrides = {}, characterStreamProfiles = {};

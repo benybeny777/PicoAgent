@@ -74,22 +74,12 @@ impl Tool for PdfToolsTool {
                 "text",
                 "pdftotext",
             ),
-            Field::new(
-                "PICOAGENT_PDF_TIMEOUT_SECS",
-                "PDF操作タイムアウト秒（5〜300）",
-                "text",
-                "120",
-            ),
+            Field::int(&crate::config::ints::PDF_TIMEOUT_SECS),
         ]
     }
 
     async fn run(&self, cfg: &Config, args: Value) -> String {
-        let timeout = cfg
-            .get("PICOAGENT_PDF_TIMEOUT_SECS", "120")
-            .parse::<u64>()
-            .ok()
-            .filter(|value| (5..=300).contains(value))
-            .unwrap_or(120);
+        let timeout = crate::tool_try!(cfg.int(&crate::config::ints::PDF_TIMEOUT_SECS)) as u64;
         // extract_text だけは qpdf ではなく Poppler pdftotext を使う。
         if args.get("action").and_then(Value::as_str) == Some("extract_text") {
             return extract_text(cfg, &args, timeout).await;

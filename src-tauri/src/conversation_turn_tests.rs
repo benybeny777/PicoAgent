@@ -28,8 +28,8 @@ impl Provider for DelayedProvider {
     async fn list_models(&self, _: &Config) -> anyhow::Result<Vec<String>> {
         Ok(vec![])
     }
-    async fn is_up(&self, _: &Config) -> bool {
-        true
+    async fn is_up(&self, _: &Config) -> Result<bool, String> {
+        Ok(true)
     }
     async fn chat(
         &self,
@@ -132,7 +132,9 @@ async fn 要約前に取得した停止旗が要約待機と子工程にも効�
             for _ in 0..5 {
                 messages.push(Message::new("assistant", "以前の返事"));
             }
-            maybe_summarize_context(messages, slow.as_ref(), &owner.config, "").await
+            maybe_summarize_context(messages, slow.as_ref(), &owner.config, "")
+                .await
+                .unwrap()
         })
         .await
     });

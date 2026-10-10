@@ -214,12 +214,7 @@ impl Tool for RunCommandTool {
                 "textarea",
                 DEFAULT_ALLOWLIST,
             ),
-            Field::new(
-                "PICOAGENT_COMMAND_TIMEOUT_SECS",
-                "run_command の既定タイムアウト秒（1〜120）",
-                "text",
-                "30",
-            ),
+            Field::int(&crate::config::ints::COMMAND_TIMEOUT_SECS),
         ]
     }
 
@@ -248,12 +243,8 @@ impl Tool for RunCommandTool {
                 cwd.display()
             );
         }
-        let default_timeout = cfg
-            .get("PICOAGENT_COMMAND_TIMEOUT_SECS", "30")
-            .parse::<u64>()
-            .ok()
-            .filter(|value| (1..=120).contains(value))
-            .unwrap_or(30);
+        let default_timeout =
+            crate::tool_try!(cfg.int(&crate::config::ints::COMMAND_TIMEOUT_SECS)) as u64;
         let timeout_secs = args
             .get("timeout_secs")
             .and_then(Value::as_u64)

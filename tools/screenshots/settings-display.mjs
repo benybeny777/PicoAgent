@@ -49,6 +49,10 @@ const settingsData = {
     PICOAGENT_MULTI_AI_JUDGE_MODEL: "gemma",
     PICOAGENT_MULTI_AGENT_MAX_CONCURRENCY: "3",
   },
+  numberSettings: {
+    PICOAGENT_STREAM_CHAT_FONT_PX: { range: [18, 48], unit: "px", default: "22", label: "配信チャットの文字サイズ", allow_auto: false },
+    PICOAGENT_TTS_VOLUME: { range: [0, 100], unit: "%", default: "35", label: "音量", allow_auto: false },
+  },
   active: { providerId: "local", model: "lfm25_2_6b" },
   defaults: { systemPrompt: "" },
   providers: [
@@ -116,6 +120,7 @@ window.__TAURI__ = {
       return window.__settingsData;
     }
     if (name === "settings_save") {
+      if (window.__rejectNumberSave) return { conflicts: [], invalid: [{ key: "PICOAGENT_STREAM_CHAT_FONT_PX", message: "検証用の保存拒否理由" }] };
       window.__savedSettingsPatches.push(args.patch);
       Object.assign(window.__settingsData.values, args.patch);
       sessionStorage.setItem("mockSettingsData", JSON.stringify(window.__settingsData));
@@ -177,6 +182,13 @@ window.__TAURI__ = {
   dpi: {},
 };`;
 
+// numberから編集用textへ切り替わるフォーカスを完了させてから、実操作の全選択・入力を行う。
+async function fillInteger(locator, value) {
+  await locator.focus();
+  await locator.press("ControlOrMeta+A");
+  await locator.fill(value);
+}
+
 const headful = process.env.PICOAGENT_UI_HEADFUL === "1";
 const browser = await chromium.launch({
   executablePath: process.env.PLAYWRIGHT_CHROMIUM || undefined,
@@ -227,10 +239,38 @@ try {
   await page.screenshot({ path: join(OUT, "display-tab.png") });
   const streamFont = page.locator("#setting-PICOAGENT_STREAM_CHAT_FONT_PX");
   if (await streamFont.inputValue() !== "30") throw new Error("配信文字サイズの初期値が30ではありません");
-  await streamFont.fill("42");
+  await streamFont.focus();
+  await fillInteger(streamFont, "49");
+  const beforeInvalidSaves = await page.evaluate(() => window.__savedSettingsPatches.length);
+  await page.locator("#save").click();
+  if (await page.evaluate(() => window.__savedSettingsPatches.length) !== beforeInvalidSaves) throw new Error("範囲外の整数が保存されました");
+  if (!(await page.locator('[data-setting-key="PICOAGENT_STREAM_CHAT_FONT_PX"] .integer-error').textContent()).includes("18〜48")) throw new Error("宣言の範囲を不正欄へ表示していません");
+  await streamFont.focus();
+  await fillInteger(streamFont, "");
+  await streamFont.evaluate(input => input.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true })));
+  await page.keyboard.insertText("３１");
+  await streamFont.evaluate(input => input.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true, data: "３１" })));
+  await streamFont.blur();
+  if (await streamFont.inputValue() !== "31" || await streamFont.getAttribute("type") !== "number") throw new Error("全角IME入力を整数へ正規化していません");
+  await streamFont.focus();
+  await fillInteger(streamFont, "");
+  await streamFont.evaluate(input => {
+    const clipboardData = new DataTransfer(); clipboardData.setData("text", "３１");
+    input.dispatchEvent(new ClipboardEvent("paste", { bubbles: true, cancelable: true, clipboardData }));
+  });
+  await streamFont.blur();
+  if (await streamFont.inputValue() !== "31") throw new Error("全角ペーストを整数として保持しません");
+  await page.evaluate(() => { window.__rejectNumberSave = true; });
+  await page.locator("#save").click();
+  await page.waitForFunction(() => document.getElementById("status")?.textContent?.includes("検証用の保存拒否理由"));
+  if (await streamFont.inputValue() !== "31" || await page.locator("#save").isDisabled()) throw new Error("保存拒否で整数草稿か未保存状態が失われました");
+  await page.evaluate(() => { window.__rejectNumberSave = false; });
+  await streamFont.focus();
+  await fillInteger(streamFont, "42");
   if (await page.locator("#save").isDisabled()) throw new Error("配信文字サイズの変更を未保存として検出しません");
   await page.locator("#save").click();
-  await page.waitForFunction(() => document.getElementById("status")?.textContent?.includes("保存しました"));
+  await page.waitForFunction(() => document.getElementById("status")?.textContent?.includes("保存しました")).catch(async error => { throw new Error(`${error.message} / 保存状態: ${await page.locator("#status").textContent()} / 入力: ${await streamFont.inputValue()} / 宣言: ${JSON.stringify(await page.evaluate(() => window.__settingsData.numberSettings.PICOAGENT_STREAM_CHAT_FONT_PX))}`); });
+  if (await page.locator(".integer-error").count()) throw new Error("正常保存後も不正理由が残っています");
   const savedFont = await page.evaluate(() => window.__savedSettingsPatches.at(-1)?.PICOAGENT_STREAM_CHAT_FONT_PX);
   if (savedFont !== "42") throw new Error(`配信文字サイズを保存していません: ${savedFont}`);
   await page.reload();
@@ -781,13 +821,13 @@ try {
   for (const control of relatedFields) if (!(await control.isDisabled())) throw new Error("一覧失敗中にキャラ関連設定を編集できます");
   if (!(await userListReason.isVisible())) throw new Error("一覧失敗の理由が画面に表示されません");
   const userFont = userListPage.locator("#setting-PICOAGENT_STREAM_CHAT_FONT_PX");
-  await userFont.fill("31");
+  await fillInteger(userFont, "31");
   await userListPage.locator("#save").click();
   await userListPage.waitForFunction(() => document.getElementById("status")?.textContent?.includes("保存しました"));
   const userPatch = await userListPage.evaluate(() => window.__savedSettingsPatches.at(-1));
   if (userPatch.PICOAGENT_STREAM_CHAT_FONT_PX !== "31" || Object.hasOwn(userPatch, "PICOAGENT_CHARACTER")) throw new Error(`他設定の保存がキャラIDを変更しました: ${JSON.stringify(userPatch)}`);
   if (!(await userListReason.textContent()).includes("追加キャラクター一覧の検証用エラー") || !(await userListReason.isVisible())) throw new Error("他設定の保存で一覧失敗の理由が消えました");
-  await userFont.fill("32");
+  await fillInteger(userFont, "32");
   await userListPage.evaluate(() => { window.__userCharactersRecovered = true; });
   await userListPage.getByRole("button", { name: "キャラクター一覧を再取得", exact: true }).click();
   await userListPage.waitForFunction(() => !document.getElementById("save").disabled && document.querySelector('[data-setting-key="PICOAGENT_CHARACTER"] select')?.disabled === false);

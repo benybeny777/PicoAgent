@@ -278,6 +278,13 @@ pub fn run() {
                     )),
                 ),
             }
+            for invalid in state.config.invalid_int_settings() {
+                if let (Some(key), Some(message)) = (invalid["key"].as_str(), invalid["message"].as_str()) {
+                    notice::emit(app.handle(), notice::Notice::background_failure(
+                        &format!("numeric-setting:{key}"), "数値設定を確認してください", message,
+                    ));
+                }
+            }
             // 削除した失敗版を選択したままの旧設定は、2Dむぎへ一度だけ移す。
             // 保存に失敗しても起動は続ける（読み取り専用起動・空き容量不足でも画面は出す）。
             match state.config.migrate_removed_character("mugi-live2d", "mugi") {

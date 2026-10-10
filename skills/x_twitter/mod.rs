@@ -55,12 +55,7 @@ impl Tool for XTwitterTool {
                 "",
             ),
             Field::new("PICOAGENT_X_USER_ID", "X 既定 user ID", "text", ""),
-            Field::new(
-                "PICOAGENT_X_TIMEOUT_SECS",
-                "X API 待ち時間（秒、3〜60）",
-                "text",
-                "20",
-            ),
+            Field::int(&crate::config::ints::X_TIMEOUT_SECS),
         ]
     }
 
@@ -69,7 +64,7 @@ impl Tool for XTwitterTool {
         if token.is_empty() {
             return super::config_guide("X連携", &["PICOAGENT_X_BEARER_TOKEN"], "X API v2 の OAuth2 bearer token が必要です。検索/投稿に必要な権限とAPIプランも確認してください。");
         }
-        let timeout = timeout_secs(cfg, "PICOAGENT_X_TIMEOUT_SECS", 20);
+        let timeout = crate::tool_try!(cfg.int(&crate::config::ints::X_TIMEOUT_SECS)) as u64;
         let client = match reqwest::Client::builder()
             .timeout(Duration::from_secs(timeout))
             .user_agent("PicoAgent/1.0 (X tool)")
@@ -146,14 +141,6 @@ impl Tool for XTwitterTool {
                 .to_string(),
         }
     }
-}
-
-fn timeout_secs(cfg: &Config, key: &str, fallback: u64) -> u64 {
-    cfg.get(key, &fallback.to_string())
-        .parse::<u64>()
-        .ok()
-        .filter(|value| (3..=60).contains(value))
-        .unwrap_or(fallback)
 }
 
 fn text_arg<'a>(args: &'a Value, key: &str, max_chars: usize) -> Result<&'a str, String> {

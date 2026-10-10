@@ -208,12 +208,7 @@ impl Tool for WebFetchTool {
                 "textarea",
                 "example.com,docs.example.com",
             ),
-            Field::new(
-                "PICOAGENT_WEB_FETCH_TIMEOUT_SECS",
-                "web_fetch の待ち時間（秒、3〜60）",
-                "text",
-                "20",
-            ),
+            Field::int(&crate::config::ints::WEB_FETCH_TIMEOUT_SECS),
         ]
     }
 
@@ -241,7 +236,7 @@ impl Tool for WebFetchTool {
         let mut request = crate::tools::http::GuardedRequest::get(
             url,
             policy,
-            crate::tools::http::timeout(cfg, "PICOAGENT_WEB_FETCH_TIMEOUT_SECS", 20, 3, 60),
+            crate::tool_try!(cfg.duration_secs(&crate::config::ints::WEB_FETCH_TIMEOUT_SECS)),
             MAX_RESPONSE_BYTES,
             "PicoAgent/1.0 (Web fetch tool)",
         );

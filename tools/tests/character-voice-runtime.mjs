@@ -10,13 +10,15 @@ const source = readFileSync(new URL("../../ui/app/voice.js", import.meta.url), "
 function setup() {
   const notified = [], active = new Set(), statuses = [];
   let reply = () => Promise.reject(new Error("UUIDがありません"));
-  const voice = runInNewContext(`${source}\ncreateVoice({ motion: {}, lipSync: {}, pager: {}, status, onCancelVisible() {} })`, {
+  const voice = runInNewContext(`${source}\ncreateVoice({ motion: { setSpeaking() {} }, lipSync: { detach() {} }, pager: { cancel() {} }, status, onCancelVisible() {} })`, {
     bridge: { speak: () => reply(), prepareVoiceModel: () => reply() },
-    status: { set: text => statuses.push(text) },
+    status: { set: text => statuses.push(text), clear() {} },
     logApp() {}, errorDetail: String, errorMessage: error => error.message || String(error),
     notifyBackgroundFailure(key, message) { if (!active.has(key)) notified.push({ key, message }); active.add(key); },
     clearBackgroundFailure(key) { active.delete(key); },
   });
+  voice.setVolumeError(null);
+  voice.setVolume(35);
   return { voice, notified, active, statuses, reply: fn => { reply = fn; } };
 }
 
@@ -73,4 +75,19 @@ test("音声APIの橋渡しはmanifestの第4引数を落とさない", () => {
   const api = readFileSync(new URL("../../ui/picoagent.js", import.meta.url), "utf8");
   assert.match(bridge, /api\.setCharacterProfile\(characterId, profile, greeting, voice\)/);
   assert.match(api, /pet_set_character_profile", \{ characterId, profile, greeting, voice \}/);
+});
+
+test("不正音量は既存値で合成せず無音を維持し正常保存後に再開する", async () => {
+  const state = setup();
+  let calls = 0;
+  state.reply(async () => { calls += 1; return { enabled: true, audio: [1] }; });
+  state.voice.setVolumeError("音量が整数ではありません");
+  assert.equal(state.voice.gain(), 0);
+  await state.voice.prepare("本文");
+  assert.equal(calls, 0);
+  state.voice.setVolumeError(null);
+  state.voice.setVolume(35);
+  await state.voice.prepare("本文");
+  assert.equal(calls, 1);
+  assert.ok(state.voice.gain() > 0);
 });

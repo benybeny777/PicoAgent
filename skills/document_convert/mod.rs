@@ -120,16 +120,13 @@ impl Tool for DocumentConvertTool {
                 "text",
                 "pandoc",
             ),
-            Field::new(
-                "PICOAGENT_DOCUMENT_CONVERT_TIMEOUT_SECS",
-                "文書変換タイムアウト秒（5〜300）",
-                "text",
-                "120",
-            ),
+            Field::int(&crate::config::ints::DOCUMENT_CONVERT_TIMEOUT_SECS),
         ]
     }
 
     async fn run(&self, cfg: &Config, args: Value) -> String {
+        let timeout =
+            crate::tool_try!(cfg.int(&crate::config::ints::DOCUMENT_CONVERT_TIMEOUT_SECS)) as u64;
         let Some(input_raw) = args
             .get("input_path")
             .and_then(Value::as_str)
@@ -166,12 +163,6 @@ impl Tool for DocumentConvertTool {
         if let Err(error) = std::fs::create_dir_all(&output_dir) {
             return format!("エラー: 出力フォルダ作成に失敗しました: {}", error);
         }
-        let timeout = cfg
-            .get("PICOAGENT_DOCUMENT_CONVERT_TIMEOUT_SECS", "120")
-            .parse::<u64>()
-            .ok()
-            .filter(|value| (5..=300).contains(value))
-            .unwrap_or(120);
         let engine = args
             .get("engine")
             .and_then(Value::as_str)

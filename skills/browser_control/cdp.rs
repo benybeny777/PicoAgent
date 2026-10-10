@@ -31,10 +31,6 @@ fn lock_child_slot() -> std::sync::MutexGuard<'static, Option<Child>> {
     }
 }
 
-/// 既定のデバッグポート。同梱エンジン 11435 / 同梱 Aivis 11436 / ローカル API 11500 と
-/// 重ならない値にする（重なると起動順によってどちらかが黙って使えなくなる）。
-pub const DEFAULT_PORT: u16 = 11437;
-
 fn probe_client() -> Option<&'static reqwest::Client> {
     static CLIENT: OnceLock<Option<reqwest::Client>> = OnceLock::new();
     CLIENT
@@ -545,14 +541,15 @@ mod tests {
     /// 重なると起動順によってどちらかが黙って使えなくなり、原因が非常に分かりにくい。
     #[test]
     fn 既定ポートは他の同梱プロセスと重ならない() {
-        for (port, owner) in [
-            (11435, "同梱エンジン"),
-            (11436, "同梱 Aivis"),
-            (11500, "ローカル API"),
+        use crate::config::ints;
+        for (setting, owner) in [
+            (&ints::LOCAL_PORT, "同梱エンジン"),
+            (&ints::TTS_PORT, "同梱 Aivis"),
+            (&ints::API_PORT, "ローカル API"),
         ] {
             assert_ne!(
-                super::DEFAULT_PORT,
-                port,
+                ints::BROWSER_PORT.default,
+                setting.default,
                 "{owner} と同じポートを既定にしない"
             );
         }

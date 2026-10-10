@@ -477,16 +477,17 @@ async fn execute_task(app: &AppHandle, cfg: &Config, task: &ScheduledTask) -> St
             cwd.display()
         );
     }
-    let default_timeout = cfg
-        .get("PICOAGENT_COMMAND_TIMEOUT_SECS", "30")
-        .parse::<u64>()
-        .ok()
-        .filter(|value| (1..=120).contains(value))
-        .unwrap_or(30);
-    let timeout_secs = task
-        .timeout_secs
-        .filter(|value| (1..=120).contains(value))
-        .unwrap_or(default_timeout);
+    let default_timeout = match cfg.int(&crate::config::ints::COMMAND_TIMEOUT_SECS) {
+        Ok(value) => value as u64,
+        Err(error) => return format!("エラー: {error}"),
+    };
+    let timeout_secs = match task.timeout_secs {
+        Some(value) if !(1..=120).contains(&value) => {
+            return "エラー: タスクの待ち時間は1〜120秒にしてください".to_string();
+        }
+        Some(value) => value,
+        None => default_timeout,
+    };
 
     let mut command = crate::tools::process::command(&task.program);
     command.args(&task.args).current_dir(&cwd);

@@ -864,12 +864,7 @@ impl Tool for ResearchReportTool {
     }
 
     fn config_schema(&self) -> Vec<Field> {
-        vec![Field::new(
-            "PICOAGENT_RESEARCH_TIMEOUT_SECS",
-            "調査レポート検索待ち時間（秒、3〜60）",
-            "text",
-            "15",
-        )]
+        vec![Field::int(&crate::config::ints::RESEARCH_TIMEOUT_SECS)]
     }
 
     async fn run(&self, cfg: &Config, args: Value) -> String {
@@ -889,12 +884,7 @@ impl Tool for ResearchReportTool {
             .and_then(|value| usize::try_from(value).ok())
             .filter(|value| (1..=MAX_RESULTS_PER_QUERY).contains(value))
             .unwrap_or(3);
-        let timeout = cfg
-            .get("PICOAGENT_RESEARCH_TIMEOUT_SECS", "15")
-            .parse::<u64>()
-            .ok()
-            .filter(|value| (3..=60).contains(value))
-            .unwrap_or(15);
+        let timeout = crate::tool_try!(cfg.int(&crate::config::ints::RESEARCH_TIMEOUT_SECS)) as u64;
         let questions = question_list(topic, &args);
         let client = match reqwest::Client::builder()
             .timeout(Duration::from_secs(timeout))

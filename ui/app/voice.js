@@ -59,7 +59,8 @@ export function readingDelay(text) {
 }
 
 export function createVoice({ motion, lipSync, pager, status, onCancelVisible, onFinished }) {
-  let volume = 0.35; // PICOAGENT_TTS_VOLUME の既定(35)。設定適用前に鳴る音を100%にしない
+  let volume = 0; // 正常な設定の適用前には音声を出さない
+  let volumeError = "音量設定を読み込み中です";
   let enabled = null; // 読み上げが有効か（pet_speak の結果から覚える）。false のとき合成を要求しない
   let current = null;
   let cancelPlayback = null;
@@ -69,7 +70,7 @@ export function createVoice({ motion, lipSync, pager, status, onCancelVisible, o
   let streamSpeech = null;
 
   // 画面の0〜100は人が感じる音量として扱う。振幅へ直線変換すると1%でも大きく聞こえるため二乗する。
-  const gain = () => volume * volume;
+  const gain = () => volumeError ? 0 : volume * volume;
 
   function shouldLipSync(audio) {
     return Boolean(audio && audio === current && enabled !== false && volume > 0.001 && !audio.paused && !audio.ended);
@@ -119,7 +120,7 @@ export function createVoice({ motion, lipSync, pager, status, onCancelVisible, o
   /** 合成だけ行い、再生はしない。失敗・無効・空は null。 */
   async function prepare(text) {
     const speech = String(text ?? "").trim();
-    if (!speech) return null;
+    if (!speech || volumeError) return null;
     const voiceSession = session;
     const selected = character;
     try {
@@ -223,6 +224,7 @@ export function createVoice({ motion, lipSync, pager, status, onCancelVisible, o
 
   /** 事前合成済みの音声を再生する（起動時の挨拶・目覚まし・自発雑談）。 */
   async function playPrepared(result) {
+    if (volumeError) return;
     stop();
     const voiceSession = session;
     onCancelVisible(true);
@@ -233,7 +235,7 @@ export function createVoice({ motion, lipSync, pager, status, onCancelVisible, o
   /** 本文を読み上げる。配信形式では字幕のページと同期して読む。 */
   async function speak(text) {
     // 読み上げが無効・音量0なら合成しない（準備中表示や中止ボタンを出さない）。字幕の送りだけ行う。
-    if (enabled === false || volume <= 0.001) {
+    if (volumeError || enabled === false || volume <= 0.001) {
       stop();
       pager.timed(text);
       return;
@@ -278,7 +280,7 @@ export function createVoice({ motion, lipSync, pager, status, onCancelVisible, o
 
   // ── 生成中の先行読み上げ: 確定した文から順に合成・再生する ──────────────
   function beginStream() {
-    streamSpeech = { queue: [], consumed: "", spoken: false, done: false, disabled: enabled === false || volume <= 0.001, running: false };
+    streamSpeech = { queue: [], consumed: "", spoken: false, done: false, disabled: volumeError || enabled === false || volume <= 0.001, running: false };
   }
 
   function resetStream() {
@@ -375,9 +377,8 @@ export function createVoice({ motion, lipSync, pager, status, onCancelVisible, o
     gain,
     get volume() { return volume; },
     setVolume(value) {
-      const numeric = parseFloat(value);
-      if (!Number.isFinite(numeric)) return;
-      volume = Math.min(1, Math.max(0, numeric / 100));
+      if (!Number.isInteger(value)) throw new Error("音量は検証済みの整数で指定してください");
+      volume = value / 100;
       if (current) current.volume = gain();
       if (volume <= 0.001) endSpeaking();
       else if (shouldLipSync(current)) {
@@ -385,6 +386,7 @@ export function createVoice({ motion, lipSync, pager, status, onCancelVisible, o
         lipSync.attach(current, () => shouldLipSync(current));
       }
     },
+    setVolumeError(error) { volumeError = error; if (error) stop(); },
     get enabled() { return enabled; },
     setEnabled(value) {
       enabled = value !== false;

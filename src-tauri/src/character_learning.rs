@@ -794,7 +794,7 @@ pub async fn settings_character_learning_check_voice(
     let flag = set_active(&state, &id)?;
     let result = async {
         cancellable(crate::aivis::ensure_started(&app), &flag).await?;
-        let endpoint = crate::aivis::endpoint(&app, &ai);
+        let endpoint = crate::aivis::endpoint(&app, &ai)?;
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(300))
             .build()

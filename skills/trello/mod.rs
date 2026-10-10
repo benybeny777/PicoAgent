@@ -59,12 +59,7 @@ impl Tool for TrelloTool {
                 "text",
                 "",
             ),
-            Field::new(
-                "PICOAGENT_TRELLO_TIMEOUT_SECS",
-                "Trello API 待ち時間（秒、3〜60）",
-                "text",
-                "15",
-            ),
+            Field::int(&crate::config::ints::TRELLO_TIMEOUT_SECS),
         ]
     }
 
@@ -92,12 +87,7 @@ impl Tool for TrelloTool {
                 "依頼で list_id を渡すか、既定のリストIDを設定してください。",
             );
         }
-        let timeout = cfg
-            .get("PICOAGENT_TRELLO_TIMEOUT_SECS", "15")
-            .parse::<u64>()
-            .ok()
-            .filter(|value| (3..=60).contains(value))
-            .unwrap_or(15);
+        let timeout = crate::tool_try!(cfg.int(&crate::config::ints::TRELLO_TIMEOUT_SECS)) as u64;
         let client = match reqwest::Client::builder()
             .timeout(Duration::from_secs(timeout))
             .user_agent("PicoAgent/1.0 (Trello tool)")

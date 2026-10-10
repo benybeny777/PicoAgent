@@ -2,7 +2,7 @@
 
 import * as bridge from "./bridge.js";
 import { clearBackgroundFailure, notifyBackgroundFailure, toast } from "./toast.js";
-import { errorDetail, errorMessage, logApp, waitWithLimit } from "./util.js";
+import { errorDetail, errorMessage, logApp, waitWithLimit, readIntegerSetting } from "./util.js";
 
 const POLL_MS = 20000;
 // 会話ターン待機と生成上限はバックエンドが管理する。音声は文字表示後に上限まで待つ。
@@ -22,7 +22,7 @@ export function createAmbient({ chat, voice, host, motion, isBusy, isExpanded })
   let dailyTimer = null;
   let alarmTimer = null;
   let napTimer = null;
-  let napMinutes = 15;
+  let napMinutes = null;
   let lastActivityAt = Date.now();
   let revision = 0;
   let snooze = null;
@@ -307,25 +307,32 @@ export function createAmbient({ chat, voice, host, motion, isBusy, isExpanded })
       setTimeout(flushNotice, 0);
     },
     applyChatter(config) {
-      if (!config) return;
-      const seconds = (value, fallback) => {
-        const numeric = parseFloat(value);
-        return Number.isFinite(numeric) ? Math.min(3600, Math.max(30, numeric)) : fallback;
-      };
-      chatter.enabled = Boolean(config.chatterEnabled);
-      chatter.minSecs = seconds(config.chatterMinSecs, 90);
-      chatter.maxSecs = Math.max(chatter.minSecs, seconds(config.chatterMaxSecs, 240));
+      if (!config?.numberSettings) return;
+      if (Object.hasOwn(config, "chatterMinSecs") || Object.hasOwn(config, "chatterMaxSecs")) {
+        const minimum = readIntegerSetting(config, "PICOAGENT_CHATTER_MIN_SECS", "chatterMinSecs");
+        const maximum = readIntegerSetting(config, "PICOAGENT_CHATTER_MAX_SECS", "chatterMaxSecs");
+        const error = minimum.error || maximum.error || (minimum.value > maximum.value ? "雑談の最短間隔は最長間隔以下にしてください" : null);
+        chatter.enabled = Boolean(config.chatterEnabled) && !error;
+        if (error) notifyBackgroundFailure("integer-chatter", `自発会話を停止しました: ${error}`, error);
+        else { chatter.minSecs = minimum.value; chatter.maxSecs = maximum.value; clearBackgroundFailure("integer-chatter"); }
+      }
+      if (Object.hasOwn(config, "napMinutes")) {
+        const nap = readIntegerSetting(config, "PICOAGENT_NAP_MINUTES", "napMinutes");
+        napMinutes = nap.value;
+        if (nap.error) notifyBackgroundFailure("integer-nap", `居眠りを停止しました: ${nap.error}`, nap.error);
+        else clearBackgroundFailure("integer-nap");
+      }
       scheduleChatter();
     },
-    start({ napMinutes: nap }) {
-      napMinutes = Number(nap) > 0 ? Number(nap) : 0;
+    start(config) {
+      this.applyChatter(config);
       markActivity();
       dailyTimer = setInterval(checkDaily, POLL_MS);
       checkDaily();
       alarmTimer = setInterval(checkAlarms, POLL_MS);
       checkAlarms();
       napTimer = setInterval(() => {
-        if (napMinutes > 0 && !host.sleeping && Date.now() - lastActivityAt > napMinutes * 60 * 1000) fallAsleep();
+        if (napMinutes > 0 && !host.sleeping && BigInt(Date.now() - lastActivityAt) > BigInt(napMinutes) * 60000n) fallAsleep();
       }, 30 * 1000);
     },
     reset() {

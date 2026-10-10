@@ -231,12 +231,7 @@ impl Tool for MsOfficeTool {
     }
 
     fn config_schema(&self) -> Vec<Field> {
-        vec![Field::new(
-            "PICOAGENT_MS_OFFICE_TIMEOUT_SECS",
-            "Office 操作タイムアウト秒（5〜300）",
-            "text",
-            "120",
-        )]
+        vec![Field::int(&crate::config::ints::MS_OFFICE_TIMEOUT_SECS)]
     }
 
     async fn run(&self, cfg: &Config, args: Value) -> String {
@@ -260,12 +255,8 @@ impl Tool for MsOfficeTool {
             },
             None => None,
         };
-        let timeout = cfg
-            .get("PICOAGENT_MS_OFFICE_TIMEOUT_SECS", "120")
-            .parse::<u64>()
-            .ok()
-            .filter(|value| (5..=300).contains(value))
-            .unwrap_or(120);
+        let timeout =
+            crate::tool_try!(cfg.int(&crate::config::ints::MS_OFFICE_TIMEOUT_SECS)) as u64;
 
         match action {
             "replace_text" => {

@@ -4,6 +4,7 @@ import test from "node:test";
 import vm from "node:vm";
 
 const settings = await readFile(new URL("../../ui/settings.js", import.meta.url), "utf8");
+const integerInput = await readFile(new URL("../../ui/settings-number.js", import.meta.url), "utf8");
 const loadModels = settings.slice(settings.indexOf("async function loadModels("), settings.indexOf("\n}", settings.indexOf("async function loadModels(")) + 2);
 
 function harness(listModels, value = "codex") {
@@ -11,16 +12,17 @@ function harness(listModels, value = "codex") {
     modelLoadGeneration: 0,
     providerModelDraftValues: {},
     modelOptions: { append() {} },
-    modelInput: { value },
+    modelInput: { type: "text", dataset: {}, value },
     cliModelSelect: { replaceChildren(...options) { this.options = options; } },
     statusEl: {},
     window: { picoagent: { settings: { listModels } } },
-    data: { active: { providerId: "agent_cli" } },
+    data: { active: { providerId: "agent_cli" }, numberSettings: {} },
     providerDefaultModel: () => "codex",
     el: (tag, props) => ({ tag, ...props }),
     updateDirtyState() {}, logApp() {}, errorDetail: String, errorMessage: String,
   };
   vm.createContext(context);
+  vm.runInContext(integerInput, context);
   vm.runInContext(loadModels, context);
   return context;
 }
@@ -56,9 +58,9 @@ test("モデル一覧の取得前に切替先AIのモデルを保存収集へ確
   ctx.data.values = {};
   ctx.data.providers = [{ id: "ollama", defaultModel: "qwen3:8b" }];
   ctx.inputs = new Map([
-    ["PICOAGENT_PROVIDER", { type: "select", value: "ollama" }],
+    ["PICOAGENT_PROVIDER", { type: "select", dataset: {}, value: "ollama" }],
     ["PICOAGENT_MODEL", ctx.modelInput],
-    ["OLLAMA_MODEL", { type: "text", value: "gemma3" }],
+    ["OLLAMA_MODEL", { type: "text", dataset: {}, value: "gemma3" }],
   ]);
   ctx.cloneSettings = value => JSON.parse(JSON.stringify(value));
   vm.runInContext(`const savedSnapshot = {}; const providerDraftValues = {};
@@ -152,6 +154,10 @@ test("モデル一覧待ちの保存中に旧一覧が完了しても保存値�
   ctx.savedSnapshot = {};
   ctx.settingsMutationBusy = false;
   ctx.validateSettingsNumberFields = () => true;
+  ctx.modelInput.removeAttribute = () => {};
+  ctx.inputs = new Map([["PICOAGENT_MODEL", ctx.modelInput]]);
+  ctx.inputWrappers = new Map();
+  vm.runInContext(settings.slice(settings.indexOf("function clearNumberErrors()"), settings.indexOf("function showNumberErrors(")), ctx);
   ctx.setSettingsMutationBusy = busy => { ctx.settingsMutationBusy = busy; };
   ctx.collect = () => ({ PICOAGENT_MODEL: ctx.modelInput.value });
   ctx.settingsChangeRequest = current => ({ patch: current, baseRevisions: {} });

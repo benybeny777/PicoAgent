@@ -210,10 +210,15 @@ test("選択キャラ失敗時は別キャラを出さず診断を表示する",
   assert.doesNotMatch(startup, /loadCharacter\("mugi"/);
 });
 
-test("プロバイダ疎通は起動時の短い上限でfalseへ正規化する", () => {
+test("プロバイダ疎通は短い上限を保ち確認不能の理由を停止状態と区別する", () => {
   assert.match(commands, /STARTUP_PROVIDER_PROBE_TIMEOUT[\s\S]*from_secs\(3\)/);
   assert.match(commands, /probe_with_timeout\(p\.is_up/);
-  assert.match(commands, /timeout\(timeout, probe\)\.await\.unwrap_or\(false\)/);
+  assert.match(commands, /timeout\(timeout, probe\)\.await\.map_err/);
+  assert.doesNotMatch(commands, /timeout\(timeout, probe\)\.await\.unwrap_or\(false\)/);
+  assert.match(commands, /Err\(error\) => \(None, Some\(error\)\)/);
+  assert.match(commands, /"providerError": provider_error/);
+  assert.match(engine, /info\.up === null/);
+  assert.match(engine, /接続状態不明/);
   // 起動経路は短い上限を保つ。設定保存後の確認は利用者が結果を待つ場面なので、
   // 同じ3秒だと「遅いが生きている」リモートプロバイダを停止中と誤表示する。
   assert.match(commands, /current_up\(&state, STARTUP_PROVIDER_PROBE_TIMEOUT\)/);

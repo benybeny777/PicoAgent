@@ -44,9 +44,24 @@ impl Provider for Mistral {
 
     fn config_schema(&self) -> Vec<Field> {
         vec![
-            Field::new("PICOAGENT_MISTRAL_API_KEY", "Mistral API キー", "password", ""),
-            Field::new("PICOAGENT_MISTRAL_MODEL", "既定モデル", "text", DEFAULT_MODEL),
-            Field::new("PICOAGENT_MISTRAL_BASE_URL", "エンドポイント", "text", DEFAULT_BASE_URL),
+            Field::new(
+                "PICOAGENT_MISTRAL_API_KEY",
+                "Mistral API キー",
+                "password",
+                "",
+            ),
+            Field::new(
+                "PICOAGENT_MISTRAL_MODEL",
+                "既定モデル",
+                "text",
+                DEFAULT_MODEL,
+            ),
+            Field::new(
+                "PICOAGENT_MISTRAL_BASE_URL",
+                "エンドポイント",
+                "text",
+                DEFAULT_BASE_URL,
+            ),
         ]
     }
 
@@ -57,17 +72,23 @@ impl Provider for Mistral {
     async fn list_models(&self, cfg: &Config) -> anyhow::Result<Vec<String>> {
         let key = api_key(cfg);
         if key.is_empty() {
-            return Ok(STATIC_MODELS.iter().map(|model| model.to_string()).collect());
+            return Ok(STATIC_MODELS
+                .iter()
+                .map(|model| model.to_string())
+                .collect());
         }
         let url = format!("{}/models", base_url(cfg));
         let res = crate::tools::http::client()
             .get(&url)
             .bearer_auth(&key)
-            .timeout(crate::tools::http::metadata_timeout(cfg))
+            .timeout(crate::tools::http::metadata_timeout(cfg).map_err(anyhow::Error::msg)?)
             .send()
             .await?;
         if !res.status().is_success() {
-            return Ok(STATIC_MODELS.iter().map(|model| model.to_string()).collect());
+            return Ok(STATIC_MODELS
+                .iter()
+                .map(|model| model.to_string())
+                .collect());
         }
         let data: Value = res.json().await?;
         let mut models: Vec<String> = data
@@ -87,25 +108,27 @@ impl Provider for Mistral {
         Ok(models)
     }
 
-    async fn is_up(&self, cfg: &Config) -> bool {
-        let key = api_key(cfg);
-        if key.is_empty() {
-            return false;
-        }
-        let url = format!("{}/models", base_url(cfg));
-        match reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(3))
-            .build()
-        {
-            Ok(c) => c
-                .get(&url)
-                .bearer_auth(&key)
-                .send()
-                .await
-                .map(|r| r.status().is_success())
-                .unwrap_or(false),
-            Err(_) => false,
-        }
+    async fn is_up(&self, cfg: &Config) -> Result<bool, String> {
+        Ok({
+            let key = api_key(cfg);
+            if key.is_empty() {
+                return Ok(false);
+            }
+            let url = format!("{}/models", base_url(cfg));
+            match reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(3))
+                .build()
+            {
+                Ok(c) => c
+                    .get(&url)
+                    .bearer_auth(&key)
+                    .send()
+                    .await
+                    .map(|r| r.status().is_success())
+                    .unwrap_or(false),
+                Err(_) => false,
+            }
+        })
     }
 
     async fn chat(
@@ -135,7 +158,10 @@ impl Provider for Mistral {
             let text = crate::tools::http::response_text(res)
                 .await
                 .map_err(anyhow::Error::msg)?;
-            anyhow::bail!("{}", crate::tools::http::service_error("Mistral", "/chat/completions", status, &text));
+            anyhow::bail!(
+                "{}",
+                crate::tools::http::service_error("Mistral", "/chat/completions", status, &text)
+            );
         }
         let data: Value = res.json().await?;
         let message = data

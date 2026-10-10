@@ -39,12 +39,8 @@ fn enabled(cfg: &Config) -> bool {
         .eq_ignore_ascii_case("true")
 }
 
-fn max_ops_per_min(cfg: &Config) -> usize {
-    cfg.get("PICOAGENT_DESKTOP_MAX_OPS_PER_MIN", "60")
-        .parse::<usize>()
-        .ok()
-        .filter(|value| (1..=600).contains(value))
-        .unwrap_or(60)
+fn max_ops_per_min(cfg: &Config) -> Result<usize, String> {
+    Ok(cfg.int(&crate::config::ints::DESKTOP_MAX_OPS_PER_MIN)? as usize)
 }
 
 /// 直近1分の操作時刻。暴走したときに際限なく入力し続けないための歯止め。
@@ -249,12 +245,7 @@ impl Tool for DesktopControlTool {
                 "checkbox",
                 "false",
             ),
-            Field::new(
-                "PICOAGENT_DESKTOP_MAX_OPS_PER_MIN",
-                "1分あたりの操作回数の上限（1〜600）",
-                "text",
-                "60",
-            ),
+            Field::int(&crate::config::ints::DESKTOP_MAX_OPS_PER_MIN),
         ]
     }
 
@@ -273,6 +264,7 @@ impl Tool for DesktopControlTool {
             .trim()
             .to_string();
 
+        let max_ops = crate::tool_try!(max_ops_per_min(cfg));
         let mut enigo = match make_enigo() {
             Ok(enigo) => enigo,
             Err(error) => return error,
@@ -301,7 +293,7 @@ impl Tool for DesktopControlTool {
             _ => {}
         }
 
-        if let Err(error) = check_rate(max_ops_per_min(cfg)) {
+        if let Err(error) = check_rate(max_ops) {
             return error;
         }
 
@@ -553,11 +545,11 @@ mod tests {
     }
 
     #[test]
-    fn 待ち時間の上限は範囲外なら既定へ戻す() {
-        assert_eq!(max_ops_per_min(&Config::new()), 60);
+    fn 操作回数の設定は範囲外を拒否する() {
+        assert_eq!(max_ops_per_min(&Config::new()).unwrap(), 60);
         let cfg = Config::new();
         cfg.set("PICOAGENT_DESKTOP_MAX_OPS_PER_MIN", "9999");
-        assert_eq!(max_ops_per_min(&cfg), 60, "範囲外は既定へ戻す");
+        assert!(max_ops_per_min(&cfg).is_err());
     }
 
     #[test]

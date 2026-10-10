@@ -85,7 +85,11 @@ fn from_wire(message: &Value) -> Message {
     Message {
         role: "assistant".to_string(),
         content,
-        tool_calls: if tool_calls.is_empty() { None } else { Some(tool_calls) },
+        tool_calls: if tool_calls.is_empty() {
+            None
+        } else {
+            Some(tool_calls)
+        },
         tool_call_id: None,
         name: None,
         images: None,
@@ -103,7 +107,12 @@ impl Provider for Ollama {
     }
     fn config_schema(&self) -> Vec<Field> {
         vec![
-            Field::new("OLLAMA_HOST", "Ollama 接続先", "text", "http://127.0.0.1:11434"),
+            Field::new(
+                "OLLAMA_HOST",
+                "Ollama 接続先",
+                "text",
+                "http://127.0.0.1:11434",
+            ),
             Field::new("OLLAMA_MODEL", "既定モデル", "text", "qwen3:8b"),
         ]
     }
@@ -115,7 +124,7 @@ impl Provider for Ollama {
         let url = format!("{}/api/tags", host(cfg));
         let res = crate::tools::http::client()
             .get(&url)
-            .timeout(crate::tools::http::metadata_timeout(cfg))
+            .timeout(crate::tools::http::metadata_timeout(cfg).map_err(anyhow::Error::msg)?)
             .send()
             .await?;
         if !res.status().is_success() {
@@ -136,15 +145,22 @@ impl Provider for Ollama {
             .unwrap_or_default())
     }
 
-    async fn is_up(&self, cfg: &Config) -> bool {
-        let url = format!("{}/api/tags", host(cfg));
-        let client = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(2))
-            .build();
-        match client {
-            Ok(c) => c.get(&url).send().await.map(|r| r.status().is_success()).unwrap_or(false),
-            Err(_) => false,
-        }
+    async fn is_up(&self, cfg: &Config) -> Result<bool, String> {
+        Ok({
+            let url = format!("{}/api/tags", host(cfg));
+            let client = reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(2))
+                .build();
+            match client {
+                Ok(c) => c
+                    .get(&url)
+                    .send()
+                    .await
+                    .map(|r| r.status().is_success())
+                    .unwrap_or(false),
+                Err(_) => false,
+            }
+        })
     }
 
     async fn chat(
@@ -164,13 +180,20 @@ impl Provider for Ollama {
             body["tools"] = json!(tools);
         }
         let url = format!("{}/api/chat", host(cfg));
-        let res = crate::tools::http::client().post(&url).json(&body).send().await?;
+        let res = crate::tools::http::client()
+            .post(&url)
+            .json(&body)
+            .send()
+            .await?;
         if !res.status().is_success() {
             let status = res.status();
             let text = crate::tools::http::response_text(res)
                 .await
                 .map_err(anyhow::Error::msg)?;
-            anyhow::bail!("{}", crate::tools::http::service_error("Ollama", "/api/chat", status, &text));
+            anyhow::bail!(
+                "{}",
+                crate::tools::http::service_error("Ollama", "/api/chat", status, &text)
+            );
         }
         let data: Value = res.json().await?;
         let message = data.get("message").cloned().unwrap_or_else(|| json!({}));
@@ -199,13 +222,25 @@ impl Provider for Ollama {
             body["tools"] = json!(tools);
         }
         let url = format!("{}/api/chat", host(cfg));
-        let res = crate::tools::http::client().post(&url).json(&body).send().await?;
+        let res = crate::tools::http::client()
+            .post(&url)
+            .json(&body)
+            .send()
+            .await?;
         if !res.status().is_success() {
             let status = res.status();
             let text = crate::tools::http::response_text(res)
                 .await
                 .map_err(anyhow::Error::msg)?;
-            anyhow::bail!("{}", crate::tools::http::service_error("Ollama", "/api/chat（ストリーミング）", status, &text));
+            anyhow::bail!(
+                "{}",
+                crate::tools::http::service_error(
+                    "Ollama",
+                    "/api/chat（ストリーミング）",
+                    status,
+                    &text
+                )
+            );
         }
 
         let mut full_content = String::new();

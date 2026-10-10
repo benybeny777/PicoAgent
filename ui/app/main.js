@@ -19,7 +19,7 @@ import { createOnboarding } from "./onboarding.js";
 import { createRelationship } from "./relationship.js";
 import { createStage } from "./stage.js";
 import { toast, notifyBackgroundFailure, clearBackgroundFailure } from "./toast.js";
-import { copyText, el, errorDetail, errorMessage, fetchJson, isImeComposing, logApp } from "./util.js";
+import { copyText, el, errorDetail, errorMessage, fetchJson, isImeComposing, logApp, readIntegerSetting } from "./util.js";
 import { createVoice } from "./voice.js";
 import { createWindowChrome } from "./window-chrome.js";
 import { createCharacterHost } from "../character/index.js";
@@ -39,7 +39,7 @@ window.addEventListener("error", event => {
 window.addEventListener("unhandledrejection", event => logApp("error", "未処理 Promise rejection", errorDetail(event.reason)));
 
 // ── 部品の組み立て ───────────────────────────────────────────
-const context = { toast };
+const context = { toast, openSettings: tab => bridge.openSettings(tab) };
 const sources = createSources(sceneRoot, context);
 context.sources = sources;
 const chat = sources.get("chat");
@@ -503,13 +503,29 @@ bridge.on("pet:show-onboarding", () => {
   voice.stop();
   onboarding.show();
 });
+function applyIntegerSettings(payload) {
+  if (!payload.numberSettings) return;
+  chat.setNumberSettings(payload.numberSettings);
+  const entries = [
+    ["PICOAGENT_BUBBLE_FONT_PX", "fontPx", value => chat.setFontPx(value), error => chat.setFontError("bubble", error)],
+    ["PICOAGENT_STREAM_CHAT_FONT_PX", "streamChatFontPx", value => chat.setStreamFontPx(value), error => chat.setFontError("column", error)],
+    ["PICOAGENT_TTS_VOLUME", "voiceVolume", value => voice.setVolume(value), error => voice.setVolumeError(error)],
+  ];
+  for (const [key, property, apply, diagnose] of entries) {
+    if (!Object.hasOwn(payload, property)) continue;
+    const result = readIntegerSetting(payload, key, property);
+    diagnose(result.error);
+    if (result.error) notifyBackgroundFailure(`integer-${key}`, `${key}: ${result.error}`, result.error);
+    else { apply(result.value); clearBackgroundFailure(`integer-${key}`); }
+  }
+}
+
 bridge.on("pet:ui", ui => {
   if (!ui) return;
   applyTheme(ui.theme, ui.uiTheme);
   if (ui.titleBarPinned != null) chrome.setPinned(ui.titleBarPinned === true);
-  if (ui.fontPx != null) chat.setFontPx(ui.fontPx);
-  if (ui.streamChatFontPx != null) chat.setStreamFontPx(ui.streamChatFontPx);
-  if (ui.voiceVolume != null) voice.setVolume(ui.voiceVolume);
+  applyIntegerSettings(ui);
+  if (Object.hasOwn(ui, "up")) engine.applyProviderStatus(ui);
   if (ui.relationshipMemoryEnabled != null) relationship.setMemoryEnabled(ui.relationshipMemoryEnabled, characterSource.heart);
   if (ui.gazeTrackingEnabled != null) host.setGazeTracking(ui.gazeTrackingEnabled);
   applyStreamAppearance(ui);
@@ -545,9 +561,7 @@ async function loadSceneDefinitions() {
   document.querySelector(".beta-badge")?.toggleAttribute("hidden", info.betaBuild !== true);
   applyTheme(info.theme, info.uiTheme);
   chrome.setPinned(info.titleBarPinned === true);
-  if (info.fontPx != null) chat.setFontPx(info.fontPx);
-  if (info.streamChatFontPx != null) chat.setStreamFontPx(info.streamChatFontPx);
-  if (info.voiceVolume != null) voice.setVolume(info.voiceVolume);
+  applyIntegerSettings(info);
   voice.setEnabled(info.ttsEnabled !== false);
   host.setGazeTracking(info.gazeTrackingEnabled === true);
   relationship.setMemoryEnabled(info.relationshipMemoryEnabled, characterSource.heart);
@@ -634,8 +648,7 @@ async function loadSceneDefinitions() {
   composer.setQuickActions(info.quickActions);
   composer.refreshDefaultQuickActions();
   sender.updateButtons();
-  ambient.applyChatter(info);
-  ambient.start({ napMinutes: info.napMinutes });
+  ambient.start(info);
   notices.loadScheduleRuns();
   notices.loadDurableJobs();
   if (!info.onboardingDone) {

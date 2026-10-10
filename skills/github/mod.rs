@@ -69,12 +69,7 @@ impl Tool for GitHubTool {
                 "text",
                 "repo",
             ),
-            Field::new(
-                "PICOAGENT_GITHUB_TIMEOUT_SECS",
-                "GitHub API 待ち時間（秒、3〜60）",
-                "text",
-                "20",
-            ),
+            Field::int(&crate::config::ints::GITHUB_TIMEOUT_SECS),
         ]
     }
 
@@ -101,12 +96,8 @@ impl Tool for GitHubTool {
                 "依頼で owner/repo を渡すか、既定のリポジトリを設定してください。",
             );
         }
-        let timeout_secs = cfg
-            .get("PICOAGENT_GITHUB_TIMEOUT_SECS", "20")
-            .parse::<u64>()
-            .ok()
-            .filter(|value| (3..=60).contains(value))
-            .unwrap_or(20);
+        let timeout_secs =
+            crate::tool_try!(cfg.int(&crate::config::ints::GITHUB_TIMEOUT_SECS)) as u64;
         let token = cfg.get("PICOAGENT_GITHUB_TOKEN", "");
         let client = match reqwest::Client::builder()
             .timeout(Duration::from_secs(timeout_secs))

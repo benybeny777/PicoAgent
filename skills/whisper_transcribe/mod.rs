@@ -199,9 +199,15 @@ fn remove_internal_file(path: &std::path::Path) -> Result<(), String> {
     }
 }
 
+/// 音声会話は120秒の応答期限を保つ。合法な設定待機時間の範囲内で短い方を使う。
+fn voice_input_timeout(cfg: &Config) -> Result<u64, String> {
+    Ok((cfg.int(&crate::config::ints::TRANSCRIBE_TIMEOUT_SECS)? as u64).min(120))
+}
+
 /// 音声ファイルを文字起こしして本文を返す（マイク入力コマンドなど内部利用向け）。
-/// スキル本体と同じ同梱 Whisper / 設定を使う。失敗はエラーメッセージ文字列で返す。
+/// 同じ設定を検査し、会話用の応答期限内で実行する。
 pub async fn transcribe_file(cfg: &Config, audio: &SafePath) -> Result<String, String> {
+    let timeout = voice_input_timeout(cfg)?;
     let model = crate::tools::whisper::model(cfg)?;
     let program = crate::tools::whisper::program(cfg)?;
     let converted = convert_to_wav(cfg, audio).await?;
@@ -212,7 +218,7 @@ pub async fn transcribe_file(cfg: &Config, audio: &SafePath) -> Result<String, S
         "-m {model} -f {audio} -otxt -of {output_stem}",
     );
     let args_list = split_args_template(&template, source, &model, &output_stem);
-    let output = run_command(&program, &args_list, 120).await;
+    let output = run_command(&program, &args_list, timeout).await;
     if let Some(temp) = &converted {
         remove_internal_file(temp.as_path())?;
     }
@@ -325,16 +331,13 @@ impl Tool for WhisperTranscribeTool {
                 "text",
                 "",
             ),
-            Field::new(
-                "PICOAGENT_TRANSCRIBE_TIMEOUT_SECS",
-                "Whisper文字起こしタイムアウト秒",
-                "text",
-                "1800",
-            ),
+            Field::int(&crate::config::ints::TRANSCRIBE_TIMEOUT_SECS),
         ]
     }
 
     async fn run(&self, cfg: &Config, args: Value) -> String {
+        let timeout =
+            crate::tool_try!(cfg.int(&crate::config::ints::TRANSCRIBE_TIMEOUT_SECS)) as u64;
         let base = meeting_root(cfg);
         let audio = if let Some(path_text) = args
             .get("audio_path")
@@ -385,12 +388,6 @@ impl Tool for WhisperTranscribeTool {
                 .and_then(Value::as_bool)
                 .unwrap_or(false),
         );
-        let timeout = cfg
-            .get("PICOAGENT_TRANSCRIBE_TIMEOUT_SECS", "1800")
-            .parse::<u64>()
-            .ok()
-            .filter(|value| (10..=7200).contains(value))
-            .unwrap_or(1800);
         let output = run_command(&program, &args_list, timeout).await;
         if let Some(temp) = &converted {
             if let Err(error) = remove_internal_file(temp.as_path()) {
@@ -555,6 +552,44 @@ mod tests {
             started.elapsed(),
             transcript.len()
         );
+    }
+    #[tokio::test]
+    async fn 不正な文字起こし待ち時間は前処理や出力先作成より前に返す() {
+        use crate::tools::meeting_recorder::MeetingRecorderTool;
+        let cases: [(&dyn Tool, serde_json::Value); 2] = [
+            (&WhisperTranscribeTool, serde_json::json!({})),
+            (
+                &MeetingRecorderTool,
+                serde_json::json!({"action":"transcribe"}),
+            ),
+        ];
+        for (tool, args) in cases {
+            let cfg = crate::config::Config::new();
+            cfg.set("PICOAGENT_TRANSCRIBE_TIMEOUT_SECS", "abc");
+            let result = tool.run(&cfg, args).await;
+            assert!(
+                result.contains("PICOAGENT_TRANSCRIBE_TIMEOUT_SECS"),
+                "{}: {result}",
+                tool.name()
+            );
+        }
+    }
+    #[tokio::test]
+    async fn 音声入力は有効設定と応答期限の短い方を使い不正なら前処理しない() {
+        let cfg = crate::config::Config::new();
+        for (configured, expected) in [("1800", 120), ("7200", 120), ("10", 10)] {
+            cfg.set("PICOAGENT_TRANSCRIBE_TIMEOUT_SECS", configured);
+            assert_eq!(super::voice_input_timeout(&cfg).unwrap(), expected);
+        }
+        cfg.set("PICOAGENT_TRANSCRIBE_TIMEOUT_SECS", "abc");
+        let result = super::transcribe_file(
+            &cfg,
+            &SafePath::app_owned(std::path::PathBuf::from("未使用の入力.mp3")),
+        )
+        .await;
+        assert!(result
+            .unwrap_err()
+            .contains("PICOAGENT_TRANSCRIBE_TIMEOUT_SECS"));
     }
 }
 

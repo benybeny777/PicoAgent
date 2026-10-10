@@ -35,8 +35,18 @@ impl Provider for Gemini {
     }
     fn config_schema(&self) -> Vec<Field> {
         vec![
-            Field::new("PICOAGENT_GEMINI_API_KEY", "Gemini API キー", "password", "AIza..."),
-            Field::new("PICOAGENT_GEMINI_MODEL", "既定モデル", "text", DEFAULT_MODEL),
+            Field::new(
+                "PICOAGENT_GEMINI_API_KEY",
+                "Gemini API キー",
+                "password",
+                "AIza...",
+            ),
+            Field::new(
+                "PICOAGENT_GEMINI_MODEL",
+                "既定モデル",
+                "text",
+                DEFAULT_MODEL,
+            ),
             Field::new(
                 "PICOAGENT_GEMINI_BASE_URL",
                 "エンドポイント（OpenAI 互換）",
@@ -58,7 +68,7 @@ impl Provider for Gemini {
         let res = crate::tools::http::client()
             .get(&url)
             .bearer_auth(&key)
-            .timeout(crate::tools::http::metadata_timeout(cfg))
+            .timeout(crate::tools::http::metadata_timeout(cfg).map_err(anyhow::Error::msg)?)
             .send()
             .await?;
         if !res.status().is_success() {
@@ -81,25 +91,27 @@ impl Provider for Gemini {
             .unwrap_or_default())
     }
 
-    async fn is_up(&self, cfg: &Config) -> bool {
-        let key = api_key(cfg);
-        if key.is_empty() {
-            return false;
-        }
-        let url = format!("{}/models", base_url(cfg));
-        match reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(3))
-            .build()
-        {
-            Ok(c) => c
-                .get(&url)
-                .bearer_auth(&key)
-                .send()
-                .await
-                .map(|r| r.status().is_success())
-                .unwrap_or(false),
-            Err(_) => false,
-        }
+    async fn is_up(&self, cfg: &Config) -> Result<bool, String> {
+        Ok({
+            let key = api_key(cfg);
+            if key.is_empty() {
+                return Ok(false);
+            }
+            let url = format!("{}/models", base_url(cfg));
+            match reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(3))
+                .build()
+            {
+                Ok(c) => c
+                    .get(&url)
+                    .bearer_auth(&key)
+                    .send()
+                    .await
+                    .map(|r| r.status().is_success())
+                    .unwrap_or(false),
+                Err(_) => false,
+            }
+        })
     }
 
     async fn chat(
@@ -115,7 +127,8 @@ impl Provider for Gemini {
             anyhow::bail!("Gemini API キーが未設定です（設定画面の Gemini で入力してください）");
         }
         let send = |with_tools: bool| {
-            let mut body = json!({ "model": model, "messages": to_wire(messages), "temperature": 0.6 });
+            let mut body =
+                json!({ "model": model, "messages": to_wire(messages), "temperature": 0.6 });
             if with_tools && !tools.is_empty() {
                 body["tools"] = json!(tools);
             }
@@ -136,7 +149,10 @@ impl Provider for Gemini {
             let text = crate::tools::http::response_text(res)
                 .await
                 .map_err(anyhow::Error::msg)?;
-            anyhow::bail!("{}", crate::tools::http::service_error("Gemini", "/chat/completions", status, &text));
+            anyhow::bail!(
+                "{}",
+                crate::tools::http::service_error("Gemini", "/chat/completions", status, &text)
+            );
         }
         let data: Value = res.json().await?;
         let message = data

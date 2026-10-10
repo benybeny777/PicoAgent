@@ -193,7 +193,7 @@ pub trait Provider: Send + Sync {
     fn config_schema(&self) -> Vec<Field> { Vec::new() }
     fn default_model(&self, cfg: &Config) -> String;
     async fn list_models(&self, cfg: &Config) -> anyhow::Result<Vec<String>>;
-    async fn is_up(&self, cfg: &Config) -> bool;  // 接続不可・キー無は false に正規化してよい
+    async fn is_up(&self, cfg: &Config) -> Result<bool, String>;  // 接続不可・キー無はOk(false)、不正設定・確認不能は理由を返す
     async fn chat(&self, cfg: &Config, model: &str, messages: &[Message], tools: &[Value]) -> anyhow::Result<Message>;
     // 既定実装は chat() の完了後に on_chunk を1回呼ぶ。openai.rs / local.rs は OpenAI 互換 SSE（stream_chat を共用）、
     // ollama.rs は /api/chat の NDJSON をオーバーライドで受信し、on_chunk を逐次呼ぶ。
@@ -219,7 +219,7 @@ inventory::submit! { ProviderReg { make: || Box::new(MyProvider) } }
 | `xai` | xAI `/chat/completions` | `PICOAGENT_XAI_API_KEY`。候補は `grok-4.3` / `grok-build-0.1` |
 | `mistral` | Mistral `/chat/completions` | `PICOAGENT_MISTRAL_API_KEY`。Medium / Small / Large / Ministral 系 |
 
-- キーが未設定のクラウドプロバイダは `is_up()=false`。
+- キーが未設定のクラウドプロバイダは `is_up()=Ok(false)`。不正な数値設定や確認のタイムアウトは理由つきの`Err`とし、画面の`up:null`と`providerError`で正常な停止状態と区別する。
 - `openai` は `OPENAI_BASE_URL` を変えれば任意の OpenAI 形式ゲートウェイへつながる。`OPENAI_API_KEY` は HTTPS の `api.openai.com:443` にだけ送る。
 - `anthropic` は正規形とツール呼び出しを `tool_use` / `tool_result` content block へ相互変換する。
 - `deepseek` / `gemini` / `xai` / `mistral` / `local` は `openai.rs` の `to_wire`/`from_wire` を再利用する。`PICOAGENT_DEEPSEEK_THINKING` が有効なら V4 系へ `thinking: {type:"enabled"}` を付ける。`gemini` と `local` は tools 付きで失敗したら tools 無しで1度だけ再試行する。
@@ -286,7 +286,7 @@ inventory::submit! { ProviderReg { make: || Box::new(MyProvider) } }
 - 実行ファイルとモデルはリポジトリに含めない。開発版は `cargo xtask setup whisper` で `src-tauri/resources/bundled/whisper/` に、軽量販売版は公式 Release と公式モデル配布から利用者データ側へ取得する。
 - `PICOAGENT_TRANSCRIBE_PROGRAM` / `PICOAGENT_TRANSCRIBE_MODEL` が設定されていれば手動導入物を最優先し、空のときだけ同梱物を使う。
 - `meeting_recorder` と `whisper_transcribe` は `tools::whisper` で実行ファイル・モデルを共通解決する。既定モデルは `crates/picoagent-core/src/paths.rs` の固定 `models/ggml-small.bin` で、取得・管理・実行が同じ定義を使う。別の `WHISPER_MODEL` で導入したモデルを使うときは `PICOAGENT_TRANSCRIBE_MODEL` に明示する。任意の `.bin` を名前順で選ばず、欠損は修復エラーにする。
-- 文字起こしごとに1回だけ起動し、完了・失敗・タイムアウト（`PICOAGENT_TRANSCRIBE_TIMEOUT_SECS`）で終える。標準入力は使わない。
+- 文字起こしごとに1回だけ起動し、完了・失敗・タイムアウトで終える。ファイル指定は`PICOAGENT_TRANSCRIBE_TIMEOUT_SECS`の設定秒、音声入力は同じ設定の範囲内で最大120秒の操作期限を持つ。不正設定は両経路で理由付きエラーとし、操作期限へ置換しない。標準入力は使わない。
 - `diarize=true` のときだけ `PICOAGENT_TRANSCRIBE_DIARIZE_ARGS`（既定は tinydiarize の `-tdrz`）を足す。精度とマーカー形式はローカル実装とモデルに依存する。
 - 設定画面から消せるのは利用者データ側の管理領域だけで、手動導入物や開発用同梱物は消さない。
 
@@ -636,7 +636,7 @@ PR #472の利用者決定により、既定のPATH探索とripgrep欠損時の�
 JSON-RPC 2.0、プロトコルバージョン `2024-11-05`。
 
 - **サーバ側**: `POST /mcp` が `initialize` / `tools/list` / `tools/call` / `ping` に応答し、`agent_callable` なスキルを公開する。**公開していないスキルは `tools/call` でも拒否する**。「エラー」始まりの結果は `isError: true` へ写す。通知（id なし）には本文なしの 202。Claude Code からは `claude mcp add --transport http picoagent http://127.0.0.1:11500/mcp` で登録できる。
-- **クライアント側**: `PICOAGENT_MCP_SERVERS` の stdio サーバを起動時に spawn し、`initialize` → `tools/list` の結果を `mcp__<サーバ名>__<ツール名>` として登録する。`tools::schemas_for_text` が候補へ加え、`tools::dispatch` が `mcp__` 接頭辞をクライアントへ回して `tools/call` へ中継する。応答の読み取りは**1行8MBで打ち切る**。tokio の `read_line` はキャンセル安全でないため、タイムアウト・I/O 失敗後はその接続を切って再利用しない。`RunEvent::Exit` で全子プロセスを止める。
+- **クライアント側**: `PICOAGENT_MCP_SERVERS` の stdio サーバを起動時に spawn し、`initialize` → `tools/list` の結果を `mcp__<サーバ名>__<ツール名>` として登録する。`tools::schemas_for_conversation` が候補へ加え、`tools::dispatch` が `mcp__` 接頭辞をクライアントへ回して `tools/call` へ中継する。応答の読み取りは**1行8MBで打ち切る**。tokio の `read_line` はキャンセル安全でないため、タイムアウト・I/O 失敗後はその接続を切って再利用しない。`RunEvent::Exit` で全子プロセスを止める。
 
 ---
 
@@ -716,6 +716,14 @@ JSON-RPC 2.0、プロトコルバージョン `2024-11-05`。
 - 記録1件の削除と全消去は、対象を画面内で案内し、同じボタンをもう一度押したときだけ実行する（フォーカスが外れたときと失敗時は確認状態を解除。ブラウザ標準の確認ダイアログは使わない）。
 - ふれあい（`touch_*`）はフロントで5秒に1回へ間引いてから記録し、反応の台詞とモーションは毎回返す。
 - **感情**: `emotion.rs` が推定した mood / energy を `.character` の `data-emotion` / `data-energy-level` に付け、CSS がオーラ色と `--pet-tone`（顔色）を切り替える。常駐アプリとして目障りにならないよう、全身を揺らし続ける状態別モーションは持たず、動きはまばたき・口パク・Live2D のモデルモーションと、成功時の1px級の反応だけで見せる。
+
+### 整数設定の検証
+
+整数設定の既定値・範囲・単位・`auto`許可は共通の宣言で管理し、設定画面の入力属性と読み取り・保存時の検証で共有する。全角数字は半角へ正規化する。未設定や空欄は宣言した既定値を使い、`auto`は許可した項目だけが使える。不正な文字・整数でない値・範囲外は既定値や近い値へ置き換えない。
+
+保存パッチに不正な整数が1件でもあれば、そのパッチ全体を保存せず欄ごとの理由を返す。画面は理由を表示し、入力草稿と未保存状態を保持する。修正して正常に保存できた時に理由を解除する。既存ファイルや環境変数の不正値も起動時に通知し、該当機能は読み取りエラーを理由つきで返す。ローカルコンテキストの小さい値の自動引き上げやスーパーエージェントの範囲内への丸めは行わない。
+
+音量不正は音声出力、自発会話の間隔不正は自発会話、居眠り時間不正は居眠りを停止する。文字サイズが不正な会話欄は表示・入力を固定スタイルの診断へ止め、設定への導線を残す。正しい値の保存後に復旧し、無関係な機能は止めない。
 
 ### 会話ターンと停止
 
