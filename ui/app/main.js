@@ -567,19 +567,21 @@ async function loadSceneDefinitions() {
   if (info.historySaveBlocked === true) {
     notifyBackgroundFailure("history-save-blocked", "会話履歴を読めなかったため、この会話は保存されません（元の履歴は残しています）", "history save blocked");
   }
+  // 履歴の復元は描画の成否から独立させ、診断から復旧しても一度だけ確実に済ませる。
+  status.set("会話履歴を画面へ復元中…", "boot");
+  chat.history.hydrate(info.history);
+  composer.hydratePrompts(chat.history.items);
+  const last = [...chat.history.items].reverse().find(item => item.role === "assistant");
+  if (last) chat.lastAssistantText = last.content;
   let startupGreeting = "";
   let preparedGreeting = null;
   let startupError = "";
+  let characterError = "";
   let voiceError = "";
   try {
     status.set("選択中のキャラクターを読み込み中…", "boot");
     const pack = await loadCharacter(info.characterId || "mugi", { speakGreeting: false });
     characterName = pack?.name || characterName;
-    status.set("会話履歴を画面へ復元中…", "boot");
-    chat.history.hydrate(info.history);
-    composer.hydratePrompts(chat.history.items);
-    const last = [...chat.history.items].reverse().find(item => item.role === "assistant");
-    if (last) chat.lastAssistantText = last.content;
     let greeting = pack?.manifest?.greeting || "";
     try {
       status.set("今日のあいさつを確認中…", "boot");
@@ -614,7 +616,7 @@ async function loadSceneDefinitions() {
   } catch (error) {
     logApp("error", "キャラクター読込に失敗しました", errorDetail(error));
     characterSource.element.style.visibility = "hidden";
-    startupError = `選択したキャラを読み込めません: ${errorMessage(error)}。設定からキャラを確認してください`;
+    characterError = `選択したキャラを読み込めません: ${errorMessage(error)}。設定からキャラを確認してください`;
   } finally {
     status.set(`${characterName}を起こしているよ…`, "boot");
     stage.layoutNow();
@@ -628,6 +630,7 @@ async function loadSceneDefinitions() {
   catch (error) { logApp("warn", "エンジン状態取得に失敗しました", errorDetail(error)); }
   if (voiceError && engine.phase !== "error") status.setSticky(voiceError, "error");
   if (startupError) status.setSticky(startupError, "error");
+  if (characterError) status.set(characterError, "character-load");
   composer.setQuickActions(info.quickActions);
   composer.refreshDefaultQuickActions();
   sender.updateButtons();

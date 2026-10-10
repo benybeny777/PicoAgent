@@ -41,7 +41,7 @@ const server = http.createServer((request, response) => {
 await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
 const base = `http://127.0.0.1:${server.address().port}/`;
 
-function mockScript({ layout, characterId = "mugi", scenes = {}, onboardingDone = true, history = [], uiTheme = "pastel" }) {
+function mockScript({ layout, characterId = "mugi", providerId = "local", scenes = {}, onboardingDone = true, history = [], uiTheme = "pastel" }) {
   return `
 window.__calls = [];
 window.__listeners = {};
@@ -51,7 +51,7 @@ window.__TAURI__ = {
   core: { invoke: (name, args = {}) => {
     window.__calls.push({ name, args: JSON.parse(JSON.stringify(args)) });
     if (name === "pet_init") return Promise.resolve({
-      up: true, providerId: "local", theme: "system", uiTheme: ${JSON.stringify(uiTheme)}, fontPx: "14", streamChatFontPx: "22", voiceVolume: "35",
+      up: true, providerId: ${JSON.stringify(providerId)}, theme: "system", uiTheme: ${JSON.stringify(uiTheme)}, fontPx: "14", streamChatFontPx: "22", voiceVolume: "35",
       characterId: ${JSON.stringify(characterId)}, characterOverrides: {}, live2dSdkOverrides: {}, rendererOverrides: window.__rendererConfig,
       layout: ${JSON.stringify(layout)}, scenes: window.__saved, history: ${JSON.stringify(history)},
       quickActions: "", napMinutes: "0", onboardingDone: ${JSON.stringify(onboardingDone)},
@@ -106,7 +106,7 @@ const report = [];
 const fail = (label, detail) => { failures.push(`${label}: ${detail}`); console.error(`NG ${label}: ${detail}`); };
 const ok = label => console.log(`OK ${label}`);
 
-async function openApp({ layout, width, height, characterId, scenes, onboardingDone, history, uiTheme, beforeNavigate, diagnostic = false }) {
+async function openApp({ layout, width, height, characterId, providerId, scenes, onboardingDone, history, uiTheme, beforeNavigate, diagnostic = false }) {
   // 窓とモニターは別の寸法。キャラ拡大時の窓拡張も実ブリッジと同じく検査する。
   const context = await browser.newContext({ viewport: { width, height }, screen: { width: 1920, height: 1080 }, deviceScaleFactor: 1 });
   const page = await context.newPage();
@@ -114,7 +114,7 @@ async function openApp({ layout, width, height, characterId, scenes, onboardingD
   await page.exposeFunction("__resizeWindow", size => page.setViewportSize({ width: Math.round(size.width), height: Math.round(size.height) }));
   page.on("pageerror", error => errors.push(String(error)));
   page.on("console", message => { if (message.type() === "error") errors.push(message.text()); });
-  await page.addInitScript(mockScript({ layout, characterId, scenes, onboardingDone, history, uiTheme }));
+  await page.addInitScript(mockScript({ layout, characterId, providerId, scenes, onboardingDone, history, uiTheme }));
   await beforeNavigate?.(page);
   await page.goto(base);
   await page.waitForFunction(() => !document.getElementById("petApp").classList.contains("is-booting"), null, { timeout: 30000 });
@@ -654,8 +654,12 @@ for (const [layout, width, height, key, initial, step] of [["pet", 900, 600, "PI
 for (const layout of Object.keys(LAYOUTS)) {
   const label = `${layout}/描画失敗の診断`;
   const { context, page } = await openApp({
-    layout, width: 200, height: 240, characterId: "mugi", diagnostic: true,
+    layout, width: 200, height: 240, characterId: "mugi", providerId: "openai", diagnostic: true,
+    history: [{ role: "user", content: "復旧前に保存した依頼" }, { role: "assistant", content: "復旧前に保存した回答" }],
     beforeNavigate: async page => {
+      await page.addInitScript(() => {
+        Object.defineProperty(navigator, "clipboard", { value: { writeText: async text => { window.__copiedReply = text; } } });
+      });
       await page.route("**/assets/characters/mugi/character.json*", async route => {
         const manifest = JSON.parse(fs.readFileSync(path.join(uiDir, "assets/characters/mugi/character.json"), "utf8"));
         manifest.live2d = { model: "検査用の存在しない.model3.json" };
@@ -685,6 +689,18 @@ for (const layout of Object.keys(LAYOUTS)) {
     await page.getByRole("button", { name: "このキャラを2D表示にする" }).click();
     await page.waitForFunction(() => document.querySelector(".character-diagnostic").hidden && document.querySelector(".character-view")?.dataset.renderKind === "2d");
     if (await page.evaluate(() => window.__rendererConfig.mugi) !== "image") fail(label, "明示2Dが保存されませんでした");
+    const restored = await page.evaluate(() => {
+      const input = document.querySelector("#input");
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true }));
+      document.querySelector('[aria-label="回答をコピー"]').click();
+      return { input: input.value, copied: window.__copiedReply, status: document.querySelector("#status").textContent,
+        history: document.querySelector(".history-log").textContent };
+    });
+    if (restored.input !== "復旧前に保存した依頼" || restored.copied !== "復旧前に保存した回答"
+      || /キャラ.*読み込めません/.test(restored.status)
+      || (layout === "stream" && !restored.history.includes("復旧前に保存した回答"))) {
+      fail(label, `復旧後の履歴・入力履歴・回答・診断解除が不正です: ${JSON.stringify(restored)}`);
+    }
     await page.reload();
     await page.waitForFunction(() => !document.getElementById("petApp").classList.contains("is-booting") && document.querySelector(".character-view")?.dataset.renderKind === "2d");
     if (await page.locator(".character-diagnostic").isVisible()) fail(label, "保存済み2Dの再起動で診断が残ります");
