@@ -80,6 +80,12 @@ log "キャラクター素材を ui/assets/characters/ へ同期"
 if ! cargo xtask sync-characters; then
   log "キャラクター素材の同期に失敗（Git LFS 未取得の可能性）。画像を伴わない検証だけ続行する"
 fi
+# build-ui は Git 管理外の ui/vendor/pixi/pixi.min.js を必須にしており、無いと
+# ui-dist/ を作らずに失敗する（このフックが無条件で落ちていた原因）。固定 SHA-256 と
+# 一致する取得済みファイルがあれば通信せずに終わる。取得元の cdn.jsdelivr.net を
+# 環境のネットワーク許可へ入れていないと、ここで理由付きで止まる。
+log "PIXI 実行ファイルを準備"
+cargo xtask setup pixi
 log "ui/ を ui-dist/ へ配信ビルド"
 cargo xtask build-ui
 
