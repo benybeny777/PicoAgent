@@ -104,17 +104,7 @@ pub(super) async fn self_improve(
     if !too_short && !refusal {
         return Ok(answer);
     }
-    let clean: Vec<Message> = messages
-        .iter()
-        .filter(|message| {
-            message.role == "system"
-                || message.role == "user"
-                || (message.role == "assistant"
-                    && message.tool_calls.is_none()
-                    && !message.content.is_empty())
-        })
-        .cloned()
-        .collect();
+    let clean = super::context::request_view(messages)?;
     // 再生成の失敗はターン全体へ伝播する。元の不十分な回答も公開・保存しない。
     let message = provider
         // 非公開利用: 再生成した本文もagent::runの公開検査を通るまでは利用者へ渡さない。
@@ -254,6 +244,87 @@ mod tests {
 
     fn 複雑な依頼() -> String {
         "工程の順序と検査の観点を詳しく説明してください。".repeat(6)
+    }
+
+    #[tokio::test]
+    async fn 通常送信と自己評価と公開再生成は同じ私有資料を参照し公開履歴には残さない() {
+        use super::super::context::{ProtocolHistory, TurnContext, TurnContextSession};
+        use std::sync::{Arc, Mutex};
+        const MATERIAL: &str = "月の図書館で司書を務める設定";
+        for self_eval in [true, false] {
+            let cfg = 計画設定(false);
+            cfg.set(
+                "PICOAGENT_SELF_EVAL_ENABLED",
+                if self_eval { "true" } else { "false" },
+            );
+            let provider =
+                検査プロバイダ(if self_eval { "はい" } else { MATERIAL }, Some(正常回答));
+            let mut messages = vec![crate::message::Message::new("user", "工程を説明して")];
+            let original = messages[0].content.clone();
+            let mut context = TurnContext::default();
+            context.push("長期メモリ", MATERIAL);
+            let session = TurnContextSession::new(
+                ProtocolHistory::default(),
+                &messages,
+                context,
+                6000,
+                Arc::new(Mutex::new(crate::tools::ToolSchemaSet::default())),
+                1,
+            );
+            let answer = super::super::with_turn_context(
+                session.clone(),
+                super::super::run(&cfg, &provider, "test", &mut messages, 2, None, None),
+            )
+            .await
+            .unwrap();
+            assert_eq!(answer, 正常回答);
+            let requests = provider.main_requests.lock().unwrap();
+            assert_eq!(requests.len(), 2);
+            for request in requests.iter() {
+                assert!(request
+                    .iter()
+                    .any(|message| message.role == "user" && message.content.contains(MATERIAL)));
+            }
+            assert_eq!(messages[0].content, original);
+            assert!(messages
+                .iter()
+                .all(|message| !message.content.contains(MATERIAL)));
+            session.finish(&messages, &messages).unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn 中断ターンは安全な公開履歴があってもprotocolを確定しない() {
+        use super::super::context::{ProtocolHistory, TurnContext, TurnContextSession};
+        use std::sync::{Arc, Mutex};
+        let cfg = 計画設定(false);
+        let provider = 検査プロバイダ(正常回答, None);
+        let mut messages = vec![crate::message::Message::new("user", "工程を説明して")];
+        let session = TurnContextSession::new(
+            ProtocolHistory::default(),
+            &messages,
+            TurnContext::default(),
+            6000,
+            Arc::new(Mutex::new(crate::tools::ToolSchemaSet::default())),
+            1,
+        );
+        let cancel = std::sync::atomic::AtomicBool::new(true);
+        super::super::with_turn_context(
+            session.clone(),
+            super::super::run(
+                &cfg,
+                &provider,
+                "test",
+                &mut messages,
+                2,
+                None,
+                Some(&cancel),
+            ),
+        )
+        .await
+        .unwrap();
+        assert_eq!(provider.calls.load(std::sync::atomic::Ordering::SeqCst), 0);
+        assert!(session.finish(&messages, &messages).is_err());
     }
 
     #[tokio::test]

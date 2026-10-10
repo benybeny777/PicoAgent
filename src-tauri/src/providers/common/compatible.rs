@@ -298,6 +298,24 @@ mod tests {
     fn specs() -> [&'static CompatSpec; 4] {
         [&mistral::SPEC, &deepseek::SPEC, &xai::SPEC, &gemini::SPEC]
     }
+
+    #[test]
+    fn 四社とも共通protocolと固定ツールを先頭一致のまま送る() {
+        let (before, after, _) = crate::agent::context::protocol_fixture();
+        let tools = vec![
+            json!({"type":"function","function":{"name":"doc_search","parameters":{"type":"object"}}}),
+        ];
+        let cfg = Config::new();
+        for spec in specs() {
+            let provider = CompatProvider(spec);
+            let earlier = provider.body(&cfg, spec.default_model, &before, &tools);
+            let later = provider.body(&cfg, spec.default_model, &after, &tools);
+            assert_eq!(earlier["tools"], later["tools"], "{}", spec.id);
+            assert_eq!(later["messages"], json!(to_wire(&after)), "{}", spec.id);
+            let prefix = &later["messages"].as_array().unwrap()[..before.len()];
+            assert_eq!(earlier["messages"], json!(prefix), "{}", spec.id);
+        }
+    }
     fn config(spec: &CompatSpec, server: &Server, key: &str) -> Config {
         let cfg = Config::new();
         cfg.set(spec.api_key_key, key);

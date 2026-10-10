@@ -52,19 +52,12 @@ pub fn base(config: &Config) -> String {
     }
     // 小型モデルは「今から調べるね、待ってて」と実行しない作業を約束しがちなため、毎回明示する。
     prompt.push_str("\n\nまだ実行していない作業について「今から調べる」「確認してみる」「ちょっと待ってて」のように後で行う約束をしないでください。調べる・作るなどが必要なら、その応答の中でスキルを実行して結果を伝え、実行できないときはできない理由を正直に伝えてください。");
-    crate::user_skills::append_prompt_context(&mut prompt, config);
     // 作業フォルダの AGENTS.md（この案件の作法）。許可ルートを切り替えると内容も入れ替わる。
     crate::project_rules::append_prompt_context(&mut prompt, config);
     prompt
 }
 
-pub fn compose(
-    config: &Config,
-    character_profile: &str,
-    character_id: &str,
-    memory_context: &str,
-    relationship_context: &str,
-) -> String {
+pub fn compose(config: &Config, character_profile: &str, character_id: &str) -> String {
     let mut prompt = base(config);
     if !character_profile.is_empty() {
         prompt.push_str("\n\n選択中キャラクターの人格設定:\n");
@@ -73,12 +66,6 @@ pub fn compose(
             config,
             character_id,
         ));
-    }
-    for context in [memory_context, relationship_context] {
-        if !context.is_empty() {
-            prompt.push_str("\n\n");
-            prompt.push_str(context);
-        }
     }
     // 人格を組み立てたこの場所が、公開検査の照合元を更新する唯一の入り口。
     // 呼び出し側（会話の作り直し・キャラ切替・設定変更）へ登録を任せると、
@@ -110,19 +97,19 @@ mod tests {
     }
 
     #[test]
-    fn 新しい会話でも明示した関係設定と各文脈を保つ() {
+    fn 固定人格と明示した関係設定だけを正本へ保持する() {
         // `compose` は公開検査の照合元を更新するので、同じ静的変数を触るテストと直列化する。
         let _lock = crate::agent::PRIVATE_CONTEXT_TEST_LOCK
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         let config = Config::new();
         config.set("PICOAGENT_RELATIONSHIP", "sister_younger");
-        let prompt = compose(&config, "名前: むぎ", "mugi", "長期メモリ", "関係性メモリ");
+        let prompt = compose(&config, "名前: むぎ", "mugi");
 
         assert!(prompt.contains("利用者が関係設定で明示した場合を除き"));
         assert!(prompt.contains("ユーザーの妹として接する"));
-        assert!(prompt.contains("長期メモリ"));
-        assert!(prompt.contains("関係性メモリ"));
+        assert!(!prompt.contains("長期メモリ"));
+        assert!(!prompt.contains("関係性メモリ"));
         // 組み立てた人格がそのまま公開検査の照合元になる（登録漏れの経路を作らない）。
         assert!(super::super::guard_public_answer("名前: むぎ".to_string(), "").is_err());
         super::super::remember_private_context("");

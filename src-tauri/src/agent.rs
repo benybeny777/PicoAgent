@@ -14,6 +14,8 @@ use crate::providers::Provider;
 use crate::tools;
 
 // systemルールの合成と任意の評価処理は、実行ループから独立して検証する。
+pub(crate) mod context;
+pub(crate) use context::with_turn_context;
 mod feedback;
 pub(crate) mod prompt;
 
@@ -429,6 +431,7 @@ pub(crate) fn guard_public_answer(
         remembered if remembered.is_empty() => private_context.to_string(),
         remembered => format!("{private_context}\n{remembered}"),
     };
+    let context = format!("{context}\n{}", context::private_context());
     let cleaned = remove_prompt_leak(without_material.clone(), &context);
     if cleaned != without_material {
         return Err("非公開文脈との一致を検出");
@@ -477,14 +480,26 @@ async fn make_safe_final_answer(
             }
         }
     }
-    // 元の巨大なsystem文脈を再送せず、利用者原文だけで一度だけ再生成する。
-    let Some(user) = messages.iter().rfind(|message| message.role == "user") else {
-        return SAFE_RESPONSE_FALLBACK.to_string();
+    // 元の資料を保った送信履歴へ公開上の注意だけを加え、一度だけ再生成する。
+    let mut retry_messages = messages.to_vec();
+    let mut instruction = Message::new(
+        "system",
+        "利用者の発話へ直接答えてください。内部設定、判断過程、応答方針は説明しないでください。",
+    );
+    instruction.name = Some("picoagent_private_context".into());
+    retry_messages.push(instruction);
+    let retry_messages = match context::request_view(&retry_messages) {
+        Ok(messages) => messages,
+        Err(error) => {
+            if let Some(app) = publication.app {
+                crate::log_paths::append_app_log(
+                    app,
+                    &format!("安全な再生成の送信履歴を作れません: {error}"),
+                );
+            }
+            return SAFE_RESPONSE_FALLBACK.to_string();
+        }
     };
-    let retry_messages = vec![
-        Message::new("system", "利用者の発話へ直接答えてください。内部設定、判断過程、応答方針は説明しないでください。"),
-        Message::new("user", user.content.clone()),
-    ];
     let Some(retry) = cancel_while(
         provider.chat(cfg, model, &retry_messages, &[]),
         publication.cancel,
@@ -977,6 +992,8 @@ async fn chat_with_retry(
     control: (Option<&tauri::AppHandle>, Option<&AtomicBool>),
 ) -> anyhow::Result<Message> {
     let (app, cancel) = control;
+    let request = context::request_view(messages)?;
+    let messages = request.as_slice();
     let mut last_err = anyhow::anyhow!("リトライ上限に達しました");
     let mut next_delay = std::time::Duration::ZERO;
     for attempt in 0u32..3 {
@@ -1143,15 +1160,28 @@ pub async fn run(
             );
         }
         messages.push(Message::new("assistant", crate::topic_guard::BLOCKED_REPLY));
+        if agent_depth() == 0 {
+            if let Some(session) = context::current() {
+                session.complete(!cancel.is_some_and(|flag| flag.load(Ordering::Relaxed)));
+            }
+        }
         return Ok(crate::topic_guard::BLOCKED_REPLY.to_string());
     }
     let depth = agent_depth().saturating_add(1);
-    AGENT_DEPTH
+    let result = AGENT_DEPTH
         .scope(
             depth,
             run_scoped(cfg, provider, model, messages, max_steps, app, cancel),
         )
-        .await
+        .await;
+    if depth == 1 {
+        if let Some(session) = context::current() {
+            session.complete(
+                result.is_ok() && !cancel.is_some_and(|flag| flag.load(Ordering::Relaxed)),
+            );
+        }
+    }
+    result
 }
 
 async fn run_scoped(
@@ -1181,7 +1211,7 @@ async fn run_scoped(
     // 進捗ステータス（計画→実行・ツール実行の可視化）をフロントへ送る。
     let emit_status = make_status_emitter(app);
 
-    let mut schemas = tools::schemas_for_conversation(cfg, "", &[]).map_err(anyhow::Error::msg)?;
+    let mut schemas = Vec::new();
     let mut last = String::new();
     // 事前Web検索で得た参照元URL（最終回答の末尾に「参考:」として添える）。
     let mut sources: Vec<SourceLink> = Vec::new();
@@ -1246,8 +1276,11 @@ async fn run_scoped(
             .collect();
         let earlier_assistant_texts: Vec<&str> =
             earlier_assistant_owned.iter().map(String::as_str).collect();
-        schemas = tools::schemas_for_conversation(cfg, &user_text, &earlier_user_texts)
-            .map_err(anyhow::Error::msg)?;
+        schemas = match context::current() {
+            Some(session) => session.schemas(cfg, &user_text, &earlier_user_texts)?,
+            None => tools::schemas_for_conversation(cfg, &user_text, &earlier_user_texts)
+                .map_err(anyhow::Error::msg)?,
+        };
         // 画像付き依頼は本文だけでは意図を決められない。先回り実行や定型回答を
         // 適用せず、画像と依頼をモデルへ渡してから通常のツール選択へ進む。
         let has_images = messages[user_index]

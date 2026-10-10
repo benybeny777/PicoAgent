@@ -350,7 +350,9 @@ fn model_choices(
         if !choices.iter().any(|value| value == prefix) {
             choices.push(prefix.into());
         }
-        let models = read(selected).map_err(|error| error.context(format!("{prefix}のモデル候補を取得できませんでした")))?;
+        let models = read(selected).map_err(|error| {
+            error.context(format!("{prefix}のモデル候補を取得できませんでした"))
+        })?;
         choices.extend(models.into_iter().map(|model| format!("{prefix}:{model}")));
     }
     Ok(choices)
@@ -379,7 +381,16 @@ fn truncate_keep_edges(text: &str, limit: usize) -> String {
 fn flatten(messages: &[Message], limit: usize) -> String {
     let mut blocks: Vec<(bool, String)> = Vec::new();
     for message in messages {
-        if message.content.trim().is_empty() {
+        let mut content = message.content.clone();
+        if let Some(calls) = &message.tool_calls {
+            if !calls.is_empty() {
+                content.push_str(&format!("\n［ツール呼び出し］{}", serde_json::json!(calls)));
+            }
+        }
+        if let Some(id) = &message.tool_call_id {
+            content.push_str(&format!("\n［結果の呼び出しID］{id}"));
+        }
+        if content.trim().is_empty() {
             continue;
         }
         let label = match message.role.as_str() {
@@ -388,10 +399,7 @@ fn flatten(messages: &[Message], limit: usize) -> String {
             "tool" => "［ツールの結果］",
             _ => "［ユーザー］",
         };
-        blocks.push((
-            message.role == "system",
-            format!("{label}\n{}", message.content.trim()),
-        ));
+        blocks.push((message.role == "system", format!("{label}\n{content}")));
     }
     let full = blocks
         .iter()
@@ -697,6 +705,10 @@ impl Provider for AgentCli {
         messages: &[Message],
         tools: &[Value],
     ) -> anyhow::Result<Message> {
+        anyhow::ensure!(
+            !messages.iter().any(|message| message.images.as_ref().is_some_and(|images| !images.is_empty())),
+            "CLIエージェントは会話画像の入力に対応していません。画像対応プロバイダを明示的に選択してください"
+        );
         let timeout = timeout_secs(cfg).map_err(anyhow::Error::msg)?;
         let selected = kind_for_model(cfg, model);
         let session = ACTIVE_SESSION.try_with(Clone::clone).ok();
@@ -890,6 +902,56 @@ mod tests {
     };
     use crate::config::Config;
     use crate::message::Message;
+
+    #[test]
+    fn 共通protocolの非公開資料と原文と空本文の呼出pairをcli履歴へ残す() {
+        let (before, after, _) = crate::agent::context::protocol_fixture();
+        let earlier = flatten(&before, MAX_PROMPT_CHARS);
+        let later = flatten(&after, MAX_PROMPT_CHARS);
+        assert!(later.starts_with(&earlier));
+        assert_eq!(system_text(&before), system_text(&after));
+        assert_eq!(system_text(&after), after[0].content);
+        assert!(later.contains(&after[1].content));
+        assert!(later.contains(&after.last().unwrap().content));
+        let call = &after[2].tool_calls.as_ref().unwrap()[0];
+        assert!(later.contains(&serde_json::json!(&after[2].tool_calls).to_string()));
+        assert!(later.contains(&format!("［結果の呼び出しID］{}", call.id)));
+        assert!(later.contains(&after[3].content));
+        assert!(
+            later.find("［ツール呼び出し］").unwrap() < later.find("［結果の呼び出しID］").unwrap()
+        );
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn 画像未対応では本文へ降格せずcliプロセスを起動しない() {
+        use super::Provider;
+        let directory = crate::installer::fs::test_directory();
+        let marker = directory.path().join("起動記録");
+        let program = directory.path().join("確認用.cmd");
+        std::fs::write(
+            &program,
+            format!(
+                "@echo off\r\necho started>\"{}\"\r\necho 回答\r\n",
+                marker.display()
+            ),
+        )
+        .unwrap();
+        let cfg = Config::new();
+        cfg.set("PICOAGENT_AGENT_CLI_KIND", "custom");
+        cfg.set("PICOAGENT_AGENT_CLI_PATH", program.to_str().unwrap());
+        let (_, messages, _) = crate::agent::context::protocol_fixture();
+        let reason = super::AgentCli
+            .chat(&cfg, "custom", &messages, &[])
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(reason.contains("会話画像の入力に対応していません"));
+        assert!(
+            !marker.exists(),
+            "未対応画像を捨ててCLIを起動してはいけない"
+        );
+    }
 
     #[test]
     fn 再開時の差分が空になる会話では全文へ戻す() {

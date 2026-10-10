@@ -177,11 +177,24 @@ pub(crate) async fn stream_chat(
     body: Value,
     on_chunk: Arc<dyn Fn(String) + Send + Sync>,
 ) -> anyhow::Result<Message> {
+    stream_chat_measured(cfg, url, api_key, body, on_chunk, None).await
+}
+
+/// localだけが任意の計測器を渡す。他のプロバイダは従来の入口を使う。
+pub(crate) async fn stream_chat_measured(
+    cfg: &Config,
+    url: &str,
+    api_key: &str,
+    body: Value,
+    on_chunk: Arc<dyn Fn(String) + Send + Sync>,
+    mut measurement: Option<super::local::TimingMeasurement>,
+) -> anyhow::Result<Message> {
     use futures::StreamExt;
 
     // API キー不要のローカルエンジン（llama-server）からも呼ばれるため、
     // 空キーのときは Authorization ヘッダ自体を付けない（空 Bearer で弾かれるのを防ぐ）。
-    let request = crate::tools::http::client().map_err(anyhow::Error::msg)?
+    let request = crate::tools::http::client()
+        .map_err(anyhow::Error::msg)?
         .post(url)
         .json(&body)
         .timeout(Duration::from_secs(600));
@@ -234,16 +247,28 @@ pub(crate) async fn stream_chat(
             };
             let data = data.trim();
             if data == "[DONE]" {
+                if let Some(measurement) = &mut measurement {
+                    measurement.complete();
+                }
                 break 'outer;
             }
             let Ok(json) = serde_json::from_str::<Value>(data) else {
+                if let Some(measurement) = &mut measurement {
+                    measurement.invalid_json();
+                }
                 continue;
             };
+            if let Some(measurement) = &mut measurement {
+                measurement.observe(&json);
+            }
             let delta = &json["choices"][0]["delta"];
 
             // テキストチャンク。
             if let Some(content) = delta.get("content").and_then(Value::as_str) {
                 if !content.is_empty() {
+                    if let Some(measurement) = &mut measurement {
+                        measurement.first_text();
+                    }
                     anyhow::ensure!(
                         full_content.len().saturating_add(content.len()) <= MAX_STREAM_BUFFER_BYTES,
                         "OpenAI互換APIの応答内容が上限（8 MiB）を超えました"
@@ -363,7 +388,8 @@ impl Provider for OpenAI {
                 .collect());
         }
         let url = format!("{}/models", base_url(cfg));
-        let res = crate::tools::http::client().map_err(anyhow::Error::msg)?
+        let res = crate::tools::http::client()
+            .map_err(anyhow::Error::msg)?
             .get(&url)
             .bearer_auth(&key)
             .timeout(crate::tools::http::metadata_timeout(cfg).map_err(anyhow::Error::msg)?)
@@ -428,7 +454,8 @@ impl Provider for OpenAI {
             body["tools"] = json!(tools);
         }
         let url = format!("{}/chat/completions", base_url(cfg));
-        let res = crate::tools::http::client().map_err(anyhow::Error::msg)?
+        let res = crate::tools::http::client()
+            .map_err(anyhow::Error::msg)?
             .post(&url)
             .bearer_auth(api_key(cfg))
             .json(&body)
@@ -502,7 +529,8 @@ impl Provider for OpenAI {
             body["response_format"] = json!({"type": "json_object"});
         }
         let url = format!("{}/chat/completions", base_url(cfg));
-        let res = crate::tools::http::client().map_err(anyhow::Error::msg)?
+        let res = crate::tools::http::client()
+            .map_err(anyhow::Error::msg)?
             .post(&url)
             .bearer_auth(api_key(cfg))
             .json(&body)
@@ -539,6 +567,32 @@ inventory::submit! { ProviderReg { make: || Box::new(OpenAI) } }
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn 共通protocolの先頭一致と原文と画像とツールpairをそのまま変換する() {
+        let (before, after, _) = crate::agent::context::protocol_fixture();
+        let earlier = to_wire(&before);
+        let later = to_wire(&after);
+        assert_eq!(earlier, later[..earlier.len()]);
+        assert_eq!(later[0]["content"], after[0].content);
+        assert_eq!(later[1]["content"][0]["text"], after[1].content);
+        assert_eq!(
+            later[1]["content"][1]["image_url"]["url"],
+            after[1].images.as_ref().unwrap()[0]
+        );
+        assert_eq!(
+            later[2]["tool_calls"][0]["id"],
+            after[2].tool_calls.as_ref().unwrap()[0].id
+        );
+        assert_eq!(
+            later[3]["tool_call_id"],
+            after[3].tool_call_id.as_ref().unwrap().as_str()
+        );
+        assert_eq!(
+            later.last().unwrap()["content"],
+            after.last().unwrap().content
+        );
+    }
 
     fn assistant_with_call(arguments: Value) -> Message {
         Message {

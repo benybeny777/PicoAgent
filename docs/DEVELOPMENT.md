@@ -348,6 +348,7 @@ NSIS アンインストーラは、インストール先またはPicoAgent管理
 |---|---|
 | `src-tauri/src/main.rs` / `lib.rs` | エントリ・Builder（state・command・menu イベント・setup） |
 | `src-tauri/src/commands.rs` | Tauri command（`pet_*` / `settings_*`）と共有状態 `AppState`。会話入口はターン所有後に文脈を読み、後処理と履歴保存まで直列化する。雑談は混雑なら生成せず、目覚ましは取得後の生成だけ20秒を上限とする |
+| `src-tauri/src/agent/context.rs` | 非公開資料、モデル送信用履歴、世代・圧縮による再構築、全プロバイダ共通の資料配置。公開履歴と別に会話中だけ保持する |
 | `src-tauri/src/conversation_turn.rs` | 会話ターンの直列化と現在ターンの停止旗・RAII解放。会話状態と世代照合の書き戻し確定は状態所有者の `commands.rs` が担当 |
 | `src-tauri/src/menu.rs` | 右クリックネイティブメニューと選択イベント処理 |
 | `src-tauri/src/config.rs` | 設定の正本（`app_config_dir/config.json`）。`get()` でシークレットを透過復号 |

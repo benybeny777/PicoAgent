@@ -122,7 +122,8 @@ impl Provider for Ollama {
 
     async fn list_models(&self, cfg: &Config) -> anyhow::Result<Vec<String>> {
         let url = format!("{}/api/tags", host(cfg));
-        let res = crate::tools::http::client().map_err(anyhow::Error::msg)?
+        let res = crate::tools::http::client()
+            .map_err(anyhow::Error::msg)?
             .get(&url)
             .timeout(crate::tools::http::metadata_timeout(cfg).map_err(anyhow::Error::msg)?)
             .send()
@@ -171,7 +172,8 @@ impl Provider for Ollama {
             body["tools"] = json!(tools);
         }
         let url = format!("{}/api/chat", host(cfg));
-        let res = crate::tools::http::client().map_err(anyhow::Error::msg)?
+        let res = crate::tools::http::client()
+            .map_err(anyhow::Error::msg)?
             .post(&url)
             .json(&body)
             .send()
@@ -205,7 +207,8 @@ impl Provider for Ollama {
             body["tools"] = json!(tools);
         }
         let url = format!("{}/api/chat", host(cfg));
-        let res = crate::tools::http::client().map_err(anyhow::Error::msg)?
+        let res = crate::tools::http::client()
+            .map_err(anyhow::Error::msg)?
             .post(&url)
             .json(&body)
             .send()
@@ -261,6 +264,31 @@ mod tests {
     use super::{Ollama, Provider};
     use crate::message::Message;
     use std::sync::{Arc, Mutex};
+
+    #[test]
+    fn 共通protocolの先頭一致と原文と画像とツール結果の順序を維持する() {
+        let (before, after, _) = crate::agent::context::protocol_fixture();
+        let earlier = super::to_wire(&before);
+        let later = super::to_wire(&after);
+        assert_eq!(earlier, later[..earlier.len()]);
+        assert_eq!(later[0]["content"], after[0].content);
+        assert_eq!(later[1]["content"], after[1].content);
+        assert_eq!(later[1]["images"][0], "aW1hZ2U=");
+        assert_eq!(
+            later[2]["tool_calls"][0]["function"]["name"],
+            after[2].tool_calls.as_ref().unwrap()[0].name
+        );
+        assert_eq!(
+            later[2]["tool_calls"][0]["function"]["arguments"],
+            after[2].tool_calls.as_ref().unwrap()[0].arguments
+        );
+        assert_eq!(later[3]["role"], "tool");
+        assert_eq!(later[3]["content"], after[3].content);
+        assert_eq!(
+            later.last().unwrap()["content"],
+            after.last().unwrap().content
+        );
+    }
 
     // NDJSON を返すスタブ Ollama サーバに対して、チャンクが逐次届き最終 Message が
     // 組み上がることを検証する（実 TCP 経由）。
