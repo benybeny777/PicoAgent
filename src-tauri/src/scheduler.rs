@@ -436,15 +436,9 @@ pub fn validate_task(cfg: &Config, task: &ScheduledTask) -> Result<(), String> {
 }
 
 fn trim_output(label: &str, bytes: &[u8]) -> String {
-    let text = String::from_utf8_lossy(bytes);
-    if text.len() <= MAX_OUTPUT_BYTES {
-        return format!("{}:\n{}", label, text);
-    }
     format!(
-        "{}:\n{}\n…（{} バイトで打ち切り）",
-        label,
-        crate::text::truncate_bytes(&text, MAX_OUTPUT_BYTES),
-        MAX_OUTPUT_BYTES
+        "{label}:\n{}",
+        crate::text::command_output_within(bytes, MAX_OUTPUT_BYTES)
     )
 }
 

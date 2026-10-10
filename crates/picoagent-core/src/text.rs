@@ -54,6 +54,30 @@ pub fn truncate_bytes(text: &str, max_bytes: usize) -> &str {
     &text[..end]
 }
 
+/// バイト上限を超えた場合だけ文字境界で切り詰め、切ったことを示す `notice` を末尾へ付ける。
+///
+/// 黙って切ると、読み手（モデル）は途中までの出力を全文として扱ってしまう。
+pub fn truncate_bytes_with_notice(text: &mut String, max_bytes: usize, notice: &str) {
+    if text.len() <= max_bytes {
+        return;
+    }
+    let end = truncate_bytes(text, max_bytes).len();
+    text.truncate(end);
+    text.push_str(notice);
+}
+
+/// バイト上限で切ったことを、上限を十進MBにして伝える末尾の注記。
+pub fn byte_limit_notice(max_bytes: usize) -> String {
+    format!("\n…（約{:.2}MBで打ち切り）", max_bytes as f64 / 1_000_000.0)
+}
+
+/// 外部コマンドの出力をバイト上限まで文字列にし、切った場合は上限を添える。
+pub fn command_output_within(bytes: &[u8], max_bytes: usize) -> String {
+    let mut text = String::from_utf8_lossy(bytes).into_owned();
+    truncate_bytes_with_notice(&mut text, max_bytes, &byte_limit_notice(max_bytes));
+    text
+}
+
 /// チャンク境界で分断されたUTF-8末尾を、次のチャンクまで保持する逐次デコーダ。
 #[derive(Default)]
 pub struct Utf8Stream {
@@ -99,7 +123,10 @@ impl Utf8Stream {
 
 #[cfg(test)]
 mod tests {
-    use super::{preview, tail, truncate_bytes, Utf8Stream};
+    use super::{
+        command_output_within, preview, tail, truncate_bytes, truncate_bytes_with_notice,
+        Utf8Stream,
+    };
 
     #[test]
     fn tailは末尾を残して先頭に省略記号を付ける() {
@@ -112,6 +139,22 @@ mod tests {
         assert_eq!(preview("こんにちは", 3), "こんに…");
         assert_eq!(truncate_bytes("あああ", 4), "あ");
         assert_eq!(truncate_bytes("abc", 2), "ab");
+    }
+
+    #[test]
+    fn 上限を超えたときだけ文字境界で切って打ち切りを添える() {
+        let mut fits = "あい".to_string();
+        truncate_bytes_with_notice(&mut fits, 6, "[切]");
+        assert_eq!(fits, "あい");
+        let mut cut = "あいう".to_string();
+        truncate_bytes_with_notice(&mut cut, 7, "[切]");
+        assert_eq!(cut, "あい[切]");
+        assert_eq!(command_output_within("abc".as_bytes(), 3), "abc");
+        assert!(command_output_within("あいう".as_bytes(), 4).starts_with("あ\n…（約"));
+        assert_eq!(
+            command_output_within(&vec![b'x'; 40_000], 32 * 1024).len(),
+            32 * 1024 + "\n…（約0.03MBで打ち切り）".len()
+        );
     }
 
     #[test]

@@ -6,7 +6,10 @@
 // ここの関数を使うこと（直接のバイト添字による切り出しは `text::guard` が検出する）。
 
 // UTF-8処理は非公開の内部共通crateであるpicoagent-coreへ置き、既存のアプリ内パスを保つ。
-pub use picoagent_core::text::{command_output, preview, truncate_bytes, Utf8Stream};
+pub use picoagent_core::text::{
+    byte_limit_notice, command_output, command_output_within, preview, truncate_bytes,
+    truncate_bytes_with_notice, Utf8Stream,
+};
 
 /// 名前の文字種と、既存の入力・出力上限を保つ生成方針。
 #[derive(Clone, Copy)]
@@ -398,6 +401,30 @@ mod guard {
         ] {
             assert!(!fixed_byte_slice(source), "誤検出しました: {source}");
         }
+    }
+
+    /// バイト上限での切り詰めは `truncate_bytes` / `truncate_bytes_with_notice` /
+    /// `command_output_within` を通す。文字境界まで1バイトずつ戻るループを各所へ写すと、
+    /// 打ち切り注記の書式や上限の表記が経路ごとにずれる（実際に7か所へ複写されていた）。
+    #[test]
+    fn バイト上限の切り詰めを各所で再実装しない() {
+        let mut offenders = Vec::new();
+        for source in guard_scan::all_sources() {
+            if source.name == "text.rs" {
+                continue; // 定義元
+            }
+            let body = source.body();
+            let lines: Vec<&str> = body.lines().collect();
+            for (number, pair) in lines.windows(2).enumerate() {
+                if pair[0].contains("is_char_boundary(") && pair[1].trim().ends_with("-= 1;") {
+                    offenders.push(format!("{}:{}", source.path.display(), number + 1));
+                }
+            }
+        }
+        assert!(
+            offenders.is_empty(),
+            "バイト上限の切り詰めは text::truncate_bytes_with_notice などを使ってください: {offenders:?}"
+        );
     }
 
     /// ストリーミング受信は `text::Utf8Stream` を通す。`from_utf8_lossy` を直接使うと、

@@ -211,18 +211,6 @@ fn search_query_in_conversation(text: &str, earlier_user_texts: &[&str]) -> Stri
     combined.chars().take(MAX_QUERY_CHARS).collect()
 }
 
-fn trim_to_bytes(text: &mut String, max_bytes: usize) {
-    if text.len() <= max_bytes {
-        return;
-    }
-    let mut end = max_bytes;
-    while !text.is_char_boundary(end) {
-        end -= 1;
-    }
-    text.truncate(end);
-    text.push_str("\n…（応答サイズ上限で打ち切り）");
-}
-
 fn extract_results(html: &str, query: &str, max_results: usize) -> Result<String, String> {
     let document = Html::parse_document(html);
     let result_selector = Selector::parse(".result")
@@ -273,7 +261,11 @@ fn extract_results(html: &str, query: &str, max_results: usize) -> Result<String
             "検索結果を取得できませんでした。検索語を変えて再試行してください。".to_string(),
         );
     }
-    trim_to_bytes(&mut output, MAX_RESPONSE_BYTES);
+    crate::text::truncate_bytes_with_notice(
+        &mut output,
+        MAX_RESPONSE_BYTES,
+        "\n…（応答サイズ上限で打ち切り）",
+    );
     Ok(output)
 }
 

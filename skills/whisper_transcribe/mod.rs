@@ -91,22 +91,6 @@ fn append_diarize_args(cfg: &Config, args_list: &mut Vec<String>, enabled: bool)
     );
 }
 
-fn trim_output(bytes: &[u8]) -> String {
-    let text = String::from_utf8_lossy(bytes);
-    if text.len() <= MAX_COMMAND_OUTPUT_BYTES {
-        return text.to_string();
-    }
-    let mut end = MAX_COMMAND_OUTPUT_BYTES;
-    while !text.is_char_boundary(end) {
-        end -= 1;
-    }
-    format!(
-        "{}\n…（約{:.3}MBで打ち切り）",
-        &text[..end],
-        MAX_COMMAND_OUTPUT_BYTES as f64 / 1_000_000.0
-    )
-}
-
 /// 共通層でタイムアウト付き実行する。起動失敗・タイムアウト・出力回収の
 /// 打ち切りはすべて共通層の判断に任せ、ここでは案内文の先頭だけ揃える。
 async fn run_command(program: &str, args_list: &[String], timeout: u64) -> Result<Output, String> {
@@ -219,7 +203,7 @@ async fn convert_to_wav(cfg: &Config, audio: &SafePath) -> Result<Option<SafePat
                 Ok(output) => format!(
                     "音声をWAVへ変換できません（終了コード {:?}）: {}",
                     output.status.code(),
-                    trim_output(&output.stderr)
+                    crate::text::command_output_within(&output.stderr, MAX_COMMAND_OUTPUT_BYTES)
                 ),
             };
             match remove_internal_file(&out) {
@@ -270,7 +254,7 @@ pub async fn transcribe_file(cfg: &Config, audio: &SafePath) -> Result<String, S
     if !output.status.success() {
         return Err(format!(
             "Whisper文字起こしが失敗しました: {}",
-            trim_output(&output.stderr)
+            crate::text::command_output_within(&output.stderr, MAX_COMMAND_OUTPUT_BYTES)
         ));
     }
     let generated = output_stem.sibling(cfg, &format!("{}.txt", output_stem.file_stem_lossy()))?;
@@ -280,7 +264,7 @@ pub async fn transcribe_file(cfg: &Config, audio: &SafePath) -> Result<String, S
         remove_internal_file(generated.as_path())?;
         content
     } else {
-        trim_output(&output.stdout)
+        crate::text::command_output_within(&output.stdout, MAX_COMMAND_OUTPUT_BYTES)
     };
     Ok(text.trim().to_string())
 }
@@ -445,8 +429,8 @@ impl Tool for WhisperTranscribeTool {
         if !output.status.success() {
             return format!(
                 "エラー: Whisper文字起こしが失敗しました。\nstdout:\n{}\nstderr:\n{}",
-                trim_output(&output.stdout),
-                trim_output(&output.stderr)
+                crate::text::command_output_within(&output.stdout, MAX_COMMAND_OUTPUT_BYTES),
+                crate::text::command_output_within(&output.stderr, MAX_COMMAND_OUTPUT_BYTES)
             );
         }
         let generated =
@@ -464,7 +448,7 @@ impl Tool for WhisperTranscribeTool {
             }
             content
         } else {
-            trim_output(&output.stdout)
+            crate::text::command_output_within(&output.stdout, MAX_COMMAND_OUTPUT_BYTES)
         };
         let target = if let Some(path_text) = args
             .get("output_path")
