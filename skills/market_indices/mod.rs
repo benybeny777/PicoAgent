@@ -8,35 +8,13 @@ use serde_json::{json, Value};
 use super::{Tool, ToolReg};
 use crate::config::Config;
 use crate::message::Field;
+use crate::tools::datetime_words::parse_days;
 
 const YAHOO_CHART_BASE: &str = "https://query1.finance.yahoo.com/v8/finance/chart";
 
 pub struct MarketIndicesTool;
 
-fn parse_days(text: &str) -> Option<i64> {
-    let chars: Vec<char> = text.chars().collect();
-    for (index, character) in chars.iter().enumerate() {
-        if character.is_ascii_digit() {
-            continue;
-        }
-        let unit_month = *character == 'ヶ' || *character == 'か' || *character == '月';
-        if !unit_month && *character != '日' {
-            continue;
-        }
-        let mut cursor = index;
-        let mut number = String::new();
-        while cursor > 0 && chars[cursor - 1].is_ascii_digit() {
-            number.insert(0, chars[cursor - 1]);
-            cursor -= 1;
-        }
-        if let Ok(number) = number.parse::<i64>() {
-            return Some(if unit_month { number * 30 } else { number }.clamp(2, 365));
-        }
-    }
-    None
-}
-
-fn direct_query(text: &str) -> Option<Value> {
+fn direct_query(text: &str) -> Result<Option<Value>, String> {
     let lower = text.to_lowercase();
     let market_words = [
         "日経平均",
@@ -59,7 +37,7 @@ fn direct_query(text: &str) -> Option<Value> {
         .iter()
         .any(|word| lower.contains(&word.to_lowercase()))
     {
-        return None;
+        return Ok(None);
     }
     let symbol = if lower.contains("topix") || text.contains("トピックス") {
         "topix"
@@ -79,11 +57,11 @@ fn direct_query(text: &str) -> Option<Value> {
     args.insert("symbol".to_string(), json!(symbol));
     if chart {
         args.insert("chart".to_string(), json!(true));
-        if let Some(days) = parse_days(text) {
+        if let Some(days) = parse_days(text)? {
             args.insert("days".to_string(), json!(days));
         }
     }
-    Some(Value::Object(args))
+    Ok(Some(Value::Object(args)))
 }
 
 fn symbol_info(input: &str) -> (&'static str, &'static str) {
@@ -152,7 +130,10 @@ impl Tool for MarketIndicesTool {
     }
 
     fn intent_invocation(&self, text: &str) -> Option<crate::tools::IntentInvocation> {
-        direct_query(text).map(crate::tools::IntentInvocation::direct)
+        match direct_query(text) {
+            Ok(args) => args.map(crate::tools::IntentInvocation::direct),
+            Err(reason) => Some(crate::tools::IntentInvocation::invalid(reason)),
+        }
     }
 
     fn label(&self) -> &'static str {
@@ -265,7 +246,10 @@ impl Tool for MarketIndicesTool {
                 out.push_str(&format!(
                     "\n直近{}日の推移\n{}\n始値 {:.2} / 終値 {:.2}",
                     days,
-                    crate::text::sparkline(&values),
+                    match crate::text::sparkline(&values) {
+                        Ok(chart) => chart,
+                        Err(reason) => return format!("エラー: {reason}"),
+                    },
                     first,
                     last
                 ));

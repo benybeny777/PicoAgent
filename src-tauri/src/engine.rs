@@ -140,28 +140,6 @@ fn existing_backend_candidates(
         .collect()
 }
 
-#[cfg(unix)]
-fn ensure_executable(path: &Path) -> anyhow::Result<()> {
-    use std::os::unix::fs::PermissionsExt;
-    let mut permissions = std::fs::metadata(path)?.permissions();
-    if permissions.mode() & 0o111 != 0 {
-        return Ok(());
-    }
-    permissions.set_mode(permissions.mode() | 0o755);
-    if let Err(error) = std::fs::set_permissions(path, permissions) {
-        // .app 配下など実行時に chmod できない同梱リソースは spawn 側の成否に委ねる。
-        if error.kind() != std::io::ErrorKind::PermissionDenied {
-            return Err(error.into());
-        }
-    }
-    Ok(())
-}
-
-#[cfg(not(unix))]
-fn ensure_executable(_path: &Path) -> anyhow::Result<()> {
-    Ok(())
-}
-
 fn model_url(app: &AppHandle) -> String {
     let state = app.state::<AppState>();
     local::model_url(&state.config)
@@ -620,7 +598,7 @@ fn spawn_server(
     start_generation: u64,
 ) -> anyhow::Result<()> {
     let server = &candidate.server;
-    ensure_executable(server)?;
+    crate::installer::fs::prepare_executable(app, server)?;
     let state = app.state::<AppState>();
     let port = local::port(&state.config)
         .map_err(anyhow::Error::msg)?

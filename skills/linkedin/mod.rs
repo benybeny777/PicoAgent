@@ -8,6 +8,7 @@ use serde_json::{json, Value};
 use super::{Tool, ToolReg};
 use crate::config::Config;
 use crate::message::Field;
+use crate::tools::social_post::text_arg;
 
 const LINKEDIN_BASE: &str = "https://api.linkedin.com";
 const MAX_TEXT_CHARS: usize = 3000;
@@ -142,22 +143,6 @@ impl Tool for LinkedInTool {
             _ => "エラー: action は post/userinfo のいずれかを指定してください。".to_string(),
         }
     }
-}
-
-fn text_arg<'a>(args: &'a Value, key: &str, max_chars: usize) -> Result<&'a str, String> {
-    let text = args
-        .get(key)
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| format!("{} が指定されていません。", key))?;
-    if text.chars().count() > max_chars {
-        return Err(format!(
-            "{} は {} 文字以内で指定してください。",
-            key, max_chars
-        ));
-    }
-    Ok(text)
 }
 
 inventory::submit! { ToolReg { make: || Box::new(LinkedInTool) } }

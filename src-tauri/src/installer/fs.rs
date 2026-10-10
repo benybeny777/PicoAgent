@@ -329,6 +329,33 @@ pub(crate) fn sha256_file(path: &std::path::Path) -> std::io::Result<String> {
     picoagent_core::hash::sha256_reader(&mut file)
 }
 
+/// chmod拒否を明示してから、既存配置の起動結果で実行可否を判定する。
+pub(crate) fn prepare_executable(app: &tauri::AppHandle, path: &Path) -> anyhow::Result<()> {
+    use picoagent_core::permissions::{ExecutableOutcome, ExecutablePolicy};
+    static PERMISSIONS: crate::notice::FailureLatch = crate::notice::FailureLatch::new();
+    let notification =
+        match picoagent_core::permissions::ensure_executable(path, ExecutablePolicy::CheckAtSpawn)?
+        {
+            ExecutableOutcome::Ready => Ok(()),
+            ExecutableOutcome::PermissionDenied(error) => {
+                let reason = format!(
+                "実行権限を変更できません（{}）: {error}。既存配置の実際の起動結果で判定します。",
+                path.display()
+            );
+                crate::log_paths::append_app_log(app, &reason);
+                Err(reason)
+            }
+        };
+    PERMISSIONS.report(
+        app,
+        "executable-permissions",
+        "実行権限の確認",
+        notification,
+        "実行権限を確認できました",
+    );
+    Ok(())
+}
+
 // OS標準tempがリンク経由でも、検査へ渡す入口は確定した実体パスにする。
 #[cfg(test)]
 pub(crate) fn test_directory() -> tempfile::TempDir {
