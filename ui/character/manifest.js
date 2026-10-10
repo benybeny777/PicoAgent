@@ -1,7 +1,8 @@
 // manifest.js - キャラクターの一覧と定義（character.json）を読み、描画器へ渡す「パック」にまとめる。
 
 import * as bridge from "../app/bridge.js";
-import { errorDetail, fetchJson, logApp } from "../app/util.js";
+import * as uiStore from "../app/ui-store.js";
+import { fetchJson } from "../app/util.js";
 
 const MANIFEST_CACHE_KEY = "2026-07-03-live2d-jp-voice-v1";
 
@@ -36,14 +37,22 @@ export async function listCharacters() {
 }
 
 /** 保存された見た目の違い（variant）の選択。キャラごとに WebView の localStorage へ覚える。 */
+function variantChoice(characterId) {
+  const result = uiStore.read(`picoagent.variant.${characterId}`);
+  if (!result.ok) throw new Error(`見た目の選択を読めません: ${result.reason}`);
+  if (result.value === null) return { id: "default", saved: false };
+  if (typeof result.value !== "string" || !result.value.trim()) throw new Error("保存した見た目の選択の形式が壊れています");
+  return { id: result.value, saved: true };
+}
+
 export function savedVariant(characterId) {
-  try { return localStorage.getItem(`picoagent.variant.${characterId}`) || "default"; }
-  catch { return "default"; } // 保存領域を読めない環境では既定の見た目で表示する。
+  return variantChoice(characterId).id;
 }
 
 export function rememberVariant(characterId, variantId) {
-  try { localStorage.setItem(`picoagent.variant.${characterId}`, variantId); }
-  catch (error) { logApp("warn", "見た目の選択を保存できませんでした", errorDetail(error)); }
+  if (typeof variantId !== "string" || !variantId.trim()) throw new Error("保存する見た目の選択が空です");
+  const result = uiStore.write(`picoagent.variant.${characterId}`, variantId);
+  if (!result.ok) throw new Error(`見た目の選択を保存できません: ${result.reason}`);
 }
 
 export function personaText(manifest, override) {
@@ -85,7 +94,9 @@ export async function loadPack(characterId, { sdkPreference = "auto", onUserChar
     throw new Error(`キャラクター定義のID「${manifest.id}」が選択ID「${entry.id}」と一致しません`);
   }
   const variants = Array.isArray(manifest.variants) ? manifest.variants : [];
-  const variant = variants.find(item => item.id === savedVariant(manifest.id)) || variants[0] || null;
+  const choice = variantChoice(manifest.id);
+  const variant = variants.find(item => item.id === choice.id) || (!choice.saved ? variants[0] || null : null);
+  if (choice.saved && !variant) throw new Error("保存したスタイルがこのキャラクターの定義にありません。選択を確認してください");
   let root = entry.root;
   if (variant?.root) root = `${entry.root}/${String(variant.root).replace(/^\/+|\/+$/g, "")}`;
   const live2d = variant?.live2d === false ? null : (variant?.live2d || manifest.live2d || null);

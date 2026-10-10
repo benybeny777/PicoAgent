@@ -18,33 +18,34 @@ const NOW = Date.UTC(2026, 8, 12, 9, 0, 0);
 
 test("保存した書きかけをそのまま戻す", () => {
   const raw = draftStore.serializeDraft("あとで聞きたいこと", NOW);
-  assert.equal(draftStore.readDraft(raw, NOW + 60_000), "あとで聞きたいこと");
+  assert.equal(draftStore.readDraft(raw, NOW + 60_000).draft, "あとで聞きたいこと");
 });
 
-test("壊れた保存値は書きかけ無しとして扱い、例外にしない", () => {
-  for (const raw of [null, "", "{", "[]", '"文字列"', "{}", '{"draft":123,"draftAt":1}']) {
-    assert.equal(draftStore.readDraft(raw, NOW), "", `raw=${String(raw)}`);
+test("不在と壊れた保存値を区別して回復を呼出側へ委ねる", () => {
+  assert.deepEqual(draftStore.readDraft(null, NOW), { draft: "", corrupted: false });
+  for (const raw of [ "", "{", "[]", '"文字列"', "{}", '{"draft":123,"draftAt":1}']) {
+    assert.deepEqual(draftStore.readDraft(raw, NOW), { draft: "", corrupted: true });
   }
 });
 
 test("日時が無い・壊れている書きかけは戻さない", () => {
-  assert.equal(draftStore.readDraft('{"draft":"あ"}', NOW), "");
-  assert.equal(draftStore.readDraft('{"draft":"あ","draftAt":"きのう"}', NOW), "");
-  assert.equal(draftStore.readDraft('{"draft":"あ","draftAt":0}', NOW), "");
+  assert.equal(draftStore.readDraft('{"draft":"あ"}', NOW).draft, "");
+  assert.equal(draftStore.readDraft('{"draft":"あ","draftAt":"きのう"}', NOW).draft, "");
+  assert.equal(draftStore.readDraft('{"draft":"あ","draftAt":0}', NOW).draft, "");
 });
 
 test("古い書きかけは戻さない（いまの話題と食い違うため）", () => {
   const raw = draftStore.serializeDraft("きのうの書きかけ", NOW);
-  assert.equal(draftStore.readDraft(raw, NOW + draftStore.DRAFT_TTL_MS - 1), "きのうの書きかけ");
-  assert.equal(draftStore.readDraft(raw, NOW + draftStore.DRAFT_TTL_MS), "");
+  assert.equal(draftStore.readDraft(raw, NOW + draftStore.DRAFT_TTL_MS - 1).draft, "きのうの書きかけ");
+  assert.deepEqual(draftStore.readDraft(raw, NOW + draftStore.DRAFT_TTL_MS), { draft: "", corrupted: false });
 });
 
 test("極端に長い書きかけは上限で切り、絵文字を割らない", () => {
   const long = "あ".repeat(draftStore.DRAFT_MAX_CHARS + 500);
-  assert.equal(Array.from(draftStore.readDraft(draftStore.serializeDraft(long, NOW), NOW)).length, draftStore.DRAFT_MAX_CHARS);
+  assert.equal(Array.from(draftStore.readDraft(draftStore.serializeDraft(long, NOW), NOW).draft).length, draftStore.DRAFT_MAX_CHARS);
   // サロゲートペアを UTF-16 単位で切ると壊れた文字が残る。
   const emoji = "🙂".repeat(draftStore.DRAFT_MAX_CHARS + 10);
-  const stored = draftStore.readDraft(draftStore.serializeDraft(emoji, NOW), NOW);
+  const stored = draftStore.readDraft(draftStore.serializeDraft(emoji, NOW), NOW).draft;
   assert.ok(!stored.includes("�"));
   assert.equal(Array.from(stored).every(char => char === "🙂"), true);
 });
@@ -52,7 +53,8 @@ test("極端に長い書きかけは上限で切り、絵文字を割らない",
 test("画面は専用モジュールを読み込み、正規化を自前で書かない", () => {
   assert.match(html, /<script src="composer-draft\.js"><\/script>/);
   assert.match(composer, /const draftStore = window\.PicoComposerDraft;/);
-  assert.match(composer, /draftStore\.readDraft\(localStorage\.getItem\(DRAFT_KEY\)\)/);
+  assert.match(composer, /uiStore\.read\(DRAFT_KEY\)/);
+  assert.match(composer, /draftStore\.readDraft\(result\.value\)/);
   assert.match(composer, /draftStore\.serializeDraft\(draft\)/);
   // 保存キーは旧画面と同じ（書き換えで利用者の書きかけを失わない）。
   assert.match(composer, /const DRAFT_KEY = "picoagent\.composerDraft\.v1";/);

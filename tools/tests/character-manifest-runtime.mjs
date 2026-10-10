@@ -24,7 +24,7 @@ function setup({ users = [], error = null, variants = {}, manifests = {} } = {})
         return { entries: users, error, root: "user-root" };
       }, errorMessage: error => error.message || String(error),
     } },
-    localStorage: { getItem: key => variants[key.slice("picoagent.variant.".length)] },
+    uiStore: { read: key => ({ ok: true, value: variants[key.slice("picoagent.variant.".length)] ?? null }), write: () => ({ ok: true }) },
     errorDetail: String, logApp() {},
   });
   return { ...api, fetched, calls, bridge };
@@ -122,4 +122,11 @@ test("同梱パックは追加一覧失敗と復旧を通知し不明IDも停止
     assert.equal(results.length, 2);
     assert.equal(results[1].error, error);
   }
+});
+
+test("保存したスタイルが消えていても先頭へ切り替えない", async () => {
+  const state = setup({ variants: { bundled: "removed" }, manifests: { bundled: {
+    id: "bundled", variants: [{ id: "default" }, { id: "another" }], animations: { idle: { path: "idle" } },
+  } } });
+  await assert.rejects(state.loadPack("bundled"), /保存したスタイルがこのキャラクターの定義にありません/);
 });

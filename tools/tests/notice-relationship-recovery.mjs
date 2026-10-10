@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import vm from "node:vm";
 import { installFakeDom } from "./lib/fake-dom.mjs";
+import { installStorageRuntime } from "./lib/storage-runtime.mjs";
 import { uiFile } from "./lib/ui-source.mjs";
 
 const document = installFakeDom();
@@ -18,6 +19,7 @@ function load(file, factory, extra) {
   const context = vm.createContext({ el, logApp() {}, toast() {}, errorDetail: String, errorMessage: String,
     notifyBackgroundFailure() {}, clearBackgroundFailure() {},
     setTimeout, clearTimeout, twoStepAction: window.PicoUI.twoStepAction, ...extra });
+  if (file === "app/notice.js") installStorageRuntime(context);
   vm.runInContext(uiFile(file).replace(/^import .*;\r?$/gm, "").replace("export function", "function")
     + `\nthis.factory = ${factory};`, context);
   return context.factory;
@@ -27,7 +29,7 @@ function noticesHarness() {
   let stored = "[]";
   const factory = load("app/notice.js", "createNotices", {
     bridge: { scheduleRuns: () => snapshot.promise },
-    localStorage: { getItem: () => stored, setItem: (_key, value) => { stored = value; } },
+    localStorage: { getItem: () => stored, setItem: (_key, value) => { stored = value; }, removeItem: () => { stored = null; } },
     window: { addEventListener() {}, PicoFrameScheduler: { create: callback => ({ schedule: callback }) } },
   });
   const panel = el("div"), button = el("button");
@@ -66,7 +68,7 @@ for (const [method, command, label] of [["loadScheduleRuns", "scheduleRuns", "�
       bridge: { [command]: async () => { if (mode === "失敗") throw new Error("取得失敗の検査"); return mode === "不正" ? {} : []; } },
       notifyBackgroundFailure: (key, message) => failures.push({ key, message }),
       clearBackgroundFailure: key => recovered.push(key),
-      localStorage: { getItem: () => stored, setItem: (_key, value) => { stored = value; } },
+      localStorage: { getItem: () => stored, setItem: (_key, value) => { stored = value; }, removeItem: () => { stored = null; } },
       window: { addEventListener() {}, PicoFrameScheduler: { create: callback => ({ schedule: callback }) } },
     });
     const notices = factory({ panel: el("div"), button: el("button"), status: { flash() {} } });

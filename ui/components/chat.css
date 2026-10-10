@@ -233,6 +233,25 @@ body.is-editing .font-size-panel { display: none; }
   font-size: 11px;
   white-space: nowrap;
 }
+/* 診断と質問選択肢は狭幅でも残し、長い理由と復旧操作をパネル内で辿れるようにする。 */
+.quick-actions[data-state="loading"],
+.quick-actions[data-state="error"],
+.quick-actions[data-state="choices"] {
+  flex-wrap: wrap;
+  flex: 0 0 auto;
+  min-width: 0;
+  max-height: 64px;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+.quick-actions > .hint { flex: 1 1 100%; min-width: 0; overflow-wrap: anywhere; }
+.quick-actions[data-state="choices"] button { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+.draft-recovery { max-height: 64px; overflow-y: auto; overflow-wrap: anywhere; }
+.draft-recovery > span { display: block; }
+.draft-recovery button { max-width: 100%; white-space: normal; }
+.chat:has(.draft-recovery:not([hidden])),
+.chat:has(.quick-actions[data-state="error"]),
+.chat:has(.quick-actions[data-state="loading"]) { overflow-y: auto; }
 .quick-actions button:not(:disabled):hover, .attachment-suggestions button:hover { color: var(--text); border-color: var(--accent); }
 .image-preview { display: flex; flex-wrap: wrap; gap: 6px; }
 .image-thumb-wrap, .file-chip { position: relative; display: flex; align-items: center; gap: 6px; }
@@ -256,7 +275,7 @@ body.is-editing .font-size-panel { display: none; }
 
 /* 狭い窓では優先度の低い順に畳む（履歴検索 → クイック操作 → 回答本文の高さ）。 */
 @container (max-width: 260px) {
-  .quick-actions { display: none; }
+  .quick-actions[data-state="ready"] { display: none; }
   .history-tools .chip { display: none; }
   .voice-loop-button { display: none; }
   .composer-actions button { padding: 0 10px; }

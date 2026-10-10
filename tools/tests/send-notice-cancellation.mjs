@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import vm from "node:vm";
+import { installStorageRuntime } from "./lib/storage-runtime.mjs";
 import { uiFile } from "./lib/ui-source.mjs";
 
 const deferred = () => { let resolve; const promise = new Promise(done => { resolve = done; }); return { promise, resolve }; };
@@ -11,6 +12,7 @@ function element(_tag, attributes = {}, children = []) {
 }
 function load(file, factory, values) {
   const context = vm.createContext({ logApp() {}, notifyBackgroundFailure() {}, clearBackgroundFailure() {}, errorDetail: String, errorMessage: String, ...values });
+  if (file === "app/notice.js") installStorageRuntime(context);
   vm.runInContext(uiFile(file).replace(/^import .*;\r?$/gm, "").replace("export function", "function") + `\nthis.factory = ${factory};`, context);
   return context.factory;
 }
@@ -105,7 +107,7 @@ test("会話ジョブを繰り返してもアクションセンターは直近50
 
 test("起動で非表示になったキャラは有効なキャラの読込成功後に再表示する", async () => {
   const source = uiFile("app/main.js");
-  const body = source.slice(source.indexOf("async function loadCharacter("), source.indexOf("function localStorageVariant("));
+  const body = source.slice(source.indexOf("async function loadCharacter("), source.indexOf("function applyLayout("));
   const characterSource = { element: { dataset: {}, style: { visibility: "hidden" } } };
   const diagnostics = [];
   const context = vm.createContext({

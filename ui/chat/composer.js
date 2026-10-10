@@ -3,8 +3,10 @@
 // 送信の実行は send.js が行い、ここは「何を送るか」を組み立てて渡すだけ。
 
 import * as bridge from "../app/bridge.js";
-import { toast } from "../app/toast.js";
+import { toast, createBackgroundFailureReporter } from "../app/toast.js";
 import { el, errorDetail, isImeComposing, logApp, preview } from "../app/util.js";
+
+import * as uiStore from "../app/ui-store.js";
 
 const DRAFT_KEY = "picoagent.composerDraft.v1";
 const PROMPT_HISTORY_LIMIT = 40;
@@ -23,31 +25,75 @@ export function createComposer({ form, input, preview: previewBox, suggestions, 
   const quick = window.PicoQuickActions;
   const promptHistory = [];
   let historyIndex = null;
-  let draft = readDraft();
+  let draft = "";
+  let draftWritable = false;
+  const failures = createBackgroundFailureReporter("composer");
+  let draftTouched = Boolean(input.value);
+  const draftRecovery = el("div", { className: "hint draft-recovery", hidden: true });
   let draftTimer = 0;
   let images = [];
   let files = [];
   let pendingReads = 0;
   let blocked = { busy: false, reason: "" };
   let quickItems = null; // 利用者定義（null なら既定）
-  let defaultItems = quick.visibleQuickActions(quick.DEFAULT_QUICK_ACTIONS, {});
+  let defaultItems = null;
+  let quickError = "";
+  let quickRevision = 0;
   let choices = null; // 質問カード（ask_user）の選択肢
   let onSubmit = () => {};
   let onOpenChange = () => {};
   let persistent = false;
 
-  function readDraft() {
-    try { return draftStore.readDraft(localStorage.getItem(DRAFT_KEY)); }
-    catch (error) {
-      // localStorage を読めない環境では書きかけの復元だけを諦めて会話は続ける。
-      logApp("warn", "書きかけを読めませんでした", errorDetail(error));
-      return "";
+  function draftFailure(operation, reason) {
+    status.set(`書きかけを${operation === "read" ? "復元" : operation === "remove" ? "消去" : "保存"}できません: ${reason}`, "draft-store");
+    failures.failure(operation, reason, `書きかけの保存領域で失敗しました: ${reason}`);
+    draftRecovery.hidden = false;
+    const retry = el("button", { type: "button", className: "chip", textContent: "書きかけを再読込" });
+    retry.addEventListener("click", () => loadDraft());
+    const discard = el("button", { type: "button", className: "chip", textContent: "保存済みの書きかけを破棄" });
+    discard.addEventListener("click", () => {
+      const result = uiStore.remove(DRAFT_KEY);
+      if (!result.ok) { draftWritable = false; draftFailure("remove", result.reason); return; }
+      draftWritable = true;
+      clearDraftFailure("read");
+      clearDraftFailure("remove");
+      draftRecovery.hidden = true;
+      status.set("保存済みの書きかけを消しました。入力中の本文は保持しています", "draft-store");
+    });
+    draftRecovery.replaceChildren(el("span", { textContent: reason }), retry, discard);
+  }
+  function clearDraftFailure(operation) {
+    failures.recover(operation);
+  }
+  function loadDraft() {
+    const result = uiStore.read(DRAFT_KEY);
+    if (!result.ok) { draftWritable = false; draftFailure("read", result.reason); return false; }
+    clearDraftFailure("read");
+    const restored = draftStore.readDraft(result.value);
+    if (restored.corrupted) {
+      const removed = uiStore.remove(DRAFT_KEY);
+      if (!removed.ok) { draftWritable = false; draftFailure("remove", removed.reason); return false; }
+      status.set("書きかけの保存値が壊れていたため消しました", "draft-store");
+    } else {
+      // 再読込は編集中の本文を上書きしない。
+      if (!draftTouched && !input.value) { draft = restored.draft; setValue(draft); draftTouched = false; }
+      status.clear("draft-store");
     }
+    draftWritable = true;
+    clearDraftFailure("read");
+    clearDraftFailure("remove");
+    draftRecovery.hidden = true;
+    return true;
   }
   function persistDraft() {
     if (draftTimer) { clearTimeout(draftTimer); draftTimer = 0; }
-    try { localStorage.setItem(DRAFT_KEY, draftStore.serializeDraft(draft)); }
-    catch (error) { logApp("warn", "書きかけを保存できませんでした", errorDetail(error)); }
+    if (!draftWritable) return false;
+    const result = uiStore.write(DRAFT_KEY, draftStore.serializeDraft(draft));
+    if (!result.ok) { draftFailure("write", result.reason); return false; }
+    clearDraftFailure("write");
+    draftRecovery.hidden = true;
+    status.clear("draft-store");
+    return true;
   }
 
   function autosize() {
@@ -68,6 +114,7 @@ export function createComposer({ form, input, preview: previewBox, suggestions, 
   }
 
   function setValue(value) {
+    draftTouched = true;
     input.value = String(value ?? "");
     autosize();
     updateState();
@@ -142,6 +189,18 @@ export function createComposer({ form, input, preview: previewBox, suggestions, 
 
   function renderQuickActions() {
     const items = choices || quickItems || defaultItems;
+    quickActions.dataset.state = choices ? "choices" : items ? "ready" : quickError ? "error" : "loading";
+    if (!items) {
+      const nodes = [el("span", { className: "hint", textContent: quickError || "クイック操作の設定を確認中…" })];
+      if (quickError) {
+        const retry = el("button", { type: "button", className: "chip", textContent: "再試行" });
+        retry.addEventListener("click", () => composer.refreshDefaultQuickActions());
+        nodes.push(retry);
+      }
+      quickActions.replaceChildren(...nodes);
+      updateState();
+      return;
+    }
     quickActions.replaceChildren(...items.map(action => {
       const node = el("button", { type: "button", textContent: action.label, title: action.title || action.text });
       node.addEventListener("click", () => {
@@ -200,6 +259,7 @@ export function createComposer({ form, input, preview: previewBox, suggestions, 
 
   // ── イベント ───────────────────────────────────────────────
   input.addEventListener("input", () => {
+    draftTouched = true;
     autosize();
     updateState();
     historyIndex = null;
@@ -384,13 +444,23 @@ export function createComposer({ form, input, preview: previewBox, suggestions, 
     },
     /** 連携スキルに頼る既定ボタンは、必要な設定に値が入っているかを確かめてから出す。 */
     async refreshDefaultQuickActions() {
+      const revision = ++quickRevision;
+      defaultItems = null;
+      quickError = "";
+      renderQuickActions();
       try {
-        const presence = await bridge.configPresence(quick.requiredKeys(quick.DEFAULT_QUICK_ACTIONS));
+        const keys = quick.requiredKeys(quick.DEFAULT_QUICK_ACTIONS);
+        const presence = await bridge.configPresence(keys);
+        if (revision !== quickRevision) return;
+        if (!presence || typeof presence !== "object" || Array.isArray(presence)
+            || !keys.every(key => typeof presence[key] === "boolean")) throw new Error("設定の有無の返却形式が不正です");
         defaultItems = quick.visibleQuickActions(quick.DEFAULT_QUICK_ACTIONS, presence);
-      } catch (error) {
-        // 確認できないときは連携設定の要らないボタンだけを出す。
-        logApp("warn", "クイック操作の設定状態を確認できませんでした", errorDetail(error));
-        defaultItems = quick.visibleQuickActions(quick.DEFAULT_QUICK_ACTIONS, {});
+        failures.recover("quick-actions");
+      } catch {
+        if (revision !== quickRevision) return;
+        // 設定値やバックエンド例外の本文を通知へ渡さない。
+        quickError = "クイック操作を準備できません: 設定の有無を確認できませんでした";
+        failures.failure("quick-actions", "設定の有無を確認できませんでした", quickError);
       }
       renderQuickActions();
     },
@@ -399,6 +469,8 @@ export function createComposer({ form, input, preview: previewBox, suggestions, 
       persistDraft();
     },
   };
+  form.append(draftRecovery);
+  loadDraft();
   renderQuickActions();
   return composer;
 }

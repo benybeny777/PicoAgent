@@ -120,7 +120,7 @@ test("音声・提案・再利用で入れた文は、入力履歴の途中で�
     const draft = input.value;
     assert.notEqual(draft, "直前の入力");
     // 書きかけとしてすぐ書き切る（遅延保存を待つ間に閉じても消えない）。
-    assert.equal(window.PicoComposerDraft.readDraft(localStorage.getItem("picoagent.composerDraft.v1")), draft);
+    assert.equal(window.PicoComposerDraft.readDraft(localStorage.getItem("picoagent.composerDraft.v1")).draft, draft);
     input.selectionStart = input.selectionEnd = 0;
     press("ArrowUp");
     input.selectionStart = input.selectionEnd = input.value.length;

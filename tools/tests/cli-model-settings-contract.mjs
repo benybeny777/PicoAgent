@@ -199,8 +199,8 @@ test("狭い設定画面では見出しごとスクロールし、タブと保�
 
 test("キャラ一覧のアイコンは顔を切り出し、旧構図プレビューを表示しない", () => {
   // メッシュ化したキャラは待機アニメーションを持たず、一覧が同梱の仮画像（灰色の人型）になっていた。
-  assert.match(settings, /async function meshFaceIconUrl\(rigUrl, version\)/);
-  assert.match(settings, /if \(\["live2d", "mmd"\]\.includes\(characterRenderKind\(manifest\)\)\) return "";/);
+  assert.match(settings, /async function meshFaceIconUrl\(rigUrl, version,/);
+  assert.match(settings, /if \(\["live2d", "mmd"\]\.includes\(characterRenderKind\(manifest\)\)\) return \{ kind: "none" \};/);
   assert.match(settings, /メイン画面のキャラにマウスを乗せ/);
   assert.doesNotMatch(settings, /characterIconUrl\(character, \{ face: false \}\)/);
 });
