@@ -142,6 +142,8 @@ function voiceHarness() {
     pager: { cancel() {}, timed() {} }, status: { set: text => messages.push(text), flash: text => messages.push(text), clear() {} },
     onCancelVisible() {},
   });
+  voice.setVolumeError(null);
+  voice.setVolume(35);
   return { ...env, voice, synth, revoked, audio, messages, speaking };
 }
 

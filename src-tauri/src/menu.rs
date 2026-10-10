@@ -530,21 +530,16 @@ pub fn handle_event(app: &tauri::AppHandle, id: &str) {
                     app,
                     &format!("会話のリセットに失敗しました: {error}"),
                 );
-                if let Some(win) = app.get_webview_window("main") {
-                    if let Err(notice_error) = win.emit(
-                        "pet:notice",
-                        serde_json::json!({
-                            "kind": "error",
-                            "title": "会話をリセットできませんでした",
-                            "message": error,
-                        }),
-                    ) {
-                        crate::log_paths::append_app_log(
-                            app,
-                            &format!("会話リセット失敗の画面通知も送れません: {notice_error}"),
-                        );
-                    }
-                }
+                crate::notice::emit(
+                    app,
+                    crate::notice::Notice::info(
+                        "error",
+                        "会話をリセットできませんでした",
+                        &error,
+                        false,
+                    )
+                    .detail("message", serde_json::json!(error)),
+                );
             }
         }
         "reset_layout" => reset_bubble_and_window_layout(app),

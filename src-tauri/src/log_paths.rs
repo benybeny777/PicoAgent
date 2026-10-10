@@ -23,7 +23,7 @@ pub fn remove_legacy_layout_dir(app: &AppHandle, name: &str) {
     match remove_legacy_layout_dir_at(&root, name) {
         Ok(true) => append_app_log(app, &format!("旧配置を削除しました: {}", path.display())),
         Ok(false) => {}
-        // フォールバック許可: 旧配置の削除失敗だけで、準備済みの新しい配置の利用を止めない。
+        // 旧配置の削除失敗だけで、準備済みの新しい配置の利用を止めない。
         Err(error) => append_app_log(
             app,
             &format!("旧配置を削除できません: {} ({error})", path.display()),
@@ -131,7 +131,7 @@ pub fn prune_old_logs(app: &AppHandle) {
             continue;
         };
         if date < cutoff {
-            // フォールバック許可: 使用中ファイル等で削除に失敗しても起動を止めない。
+            // 使用中ファイル等で削除に失敗しても起動を止めない。
             if let Err(error) = std::fs::remove_file(entry.path()) {
                 append_app_log(app, &format!("古いログを削除できません: {error}"));
             }
@@ -188,7 +188,7 @@ fn tail_lines(text: &str, max_lines: usize, partial_head: bool) -> String {
 }
 
 pub fn append_app_log(app: &AppHandle, message: &str) {
-    // フォールバック許可: ログ書き込み失敗時もアプリ動作を止めない。
+    // ログ書き込み失敗時もアプリ動作を止めない。
     if let Err(error) = append_log(app, "app.log", message) {
         eprintln!("app.log への書き込みに失敗しました: {error}");
     }

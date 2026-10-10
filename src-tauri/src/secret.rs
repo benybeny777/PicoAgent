@@ -4,7 +4,7 @@
 // macOS は値そのものをログインキーチェーンへ預け、`config.json` には項目名だけを置く。
 // どちらも同じPC・同じOSユーザーでだけ元の値へ戻せる。
 // `config.get()` が読み取り時に透過的に復号し、設定保存時にパスワード型の項目だけを保護する。
-// Linux は同等のOS機能を使っていないため平文で保存する（フォールバック許可: OS機能が無いため）。
+// Linux は同等のOS機能を使っていないため平文で保存する（フォールバック許可: OS機能が無いため）。（根拠: AGENTS.md 設定値・シークレット）
 
 #[cfg(windows)]
 use base64::Engine;
@@ -72,7 +72,7 @@ pub fn encrypt(key: &str, plain: &str) -> Result<String, String> {
         })?;
         Ok(format!("{KEYCHAIN_PREFIX}{key}"))
     }
-    // フォールバック許可: DPAPIもキーチェーンも無いため平文で保存する。
+    // フォールバック許可: DPAPIもキーチェーンも無いため平文で保存する。（根拠: AGENTS.md 設定値・シークレット）
     #[cfg(not(any(windows, target_os = "macos")))]
     {
         let _ = key;
@@ -103,7 +103,7 @@ pub fn decrypt(value: &str) -> String {
             }
         }
     }
-    // フォールバック許可: 別ユーザー/別PC/別OS/破損で復号できない場合は元の文字列を返す。
+    // フォールバック許可: 別ユーザー/別PC/別OS/破損で復号できない場合は元の文字列を返す。（根拠: AGENTS.md 設定値・シークレット）
     // 呼び出し側は `is_encrypted()` が真のままであることで「この端末では使えない値」と判断する。
     value.to_string()
 }

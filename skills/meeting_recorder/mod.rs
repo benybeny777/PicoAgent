@@ -136,57 +136,6 @@ fn minutes_path_from_transcript(
     transcript_path.sibling(cfg, &format!("{stem}.minutes.md"))
 }
 
-fn bundled_whisper_dirs() -> Vec<PathBuf> {
-    crate::components::runtime_dirs("whisper")
-}
-
-fn bundled_whisper_dir() -> Option<PathBuf> {
-    bundled_whisper_dirs()
-        .into_iter()
-        .find(|path| path.join(whisper_exe_name()).exists())
-}
-
-fn whisper_exe_name() -> &'static str {
-    if cfg!(windows) {
-        "whisper-cli.exe"
-    } else {
-        "whisper-cli"
-    }
-}
-
-fn first_bundled_model(dir: &Path) -> Option<PathBuf> {
-    let model_dir = dir.join("models");
-    let entries = std::fs::read_dir(model_dir).ok()?;
-    let mut models: Vec<PathBuf> = entries
-        .flatten()
-        .map(|entry| entry.path())
-        .filter(|path| path.extension().and_then(|ext| ext.to_str()) == Some("bin"))
-        .collect();
-    models.sort();
-    models.into_iter().next()
-}
-
-fn transcribe_program(cfg: &Config) -> String {
-    let configured = cfg.get("PICOAGENT_TRANSCRIBE_PROGRAM", "");
-    if !configured.trim().is_empty() {
-        return configured;
-    }
-    bundled_whisper_dir()
-        .map(|dir| dir.join(whisper_exe_name()).to_string_lossy().to_string())
-        .unwrap_or_else(|| "whisper-cli".to_string())
-}
-
-fn transcribe_model(cfg: &Config) -> String {
-    let configured = cfg.get("PICOAGENT_TRANSCRIBE_MODEL", "");
-    if !configured.trim().is_empty() {
-        return configured;
-    }
-    bundled_whisper_dir()
-        .and_then(|dir| first_bundled_model(&dir))
-        .map(|path| path.to_string_lossy().to_string())
-        .unwrap_or_default()
-}
-
 fn wav_spec(config: &cpal::SupportedStreamConfig) -> WavSpec {
     WavSpec {
         channels: config.channels(),
@@ -554,6 +503,7 @@ async fn run_transcribe_command(
 }
 
 async fn transcribe(cfg: &Config, args: &Value) -> String {
+    let timeout = crate::tool_try!(cfg.int(&crate::config::ints::TRANSCRIBE_TIMEOUT_SECS)) as u64;
     let base = meeting_root(cfg);
     let audio = if let Some(audio_text) = args
         .get("audio_path")
@@ -580,15 +530,8 @@ async fn transcribe(cfg: &Config, args: &Value) -> String {
     if !audio.exists() {
         return format!("エラー: 音声ファイルが見つかりません: {}", audio.display());
     }
-    let program = transcribe_program(cfg);
-    let model = transcribe_model(cfg);
-    if model.trim().is_empty() {
-        return super::config_guide(
-            "ローカル文字起こし",
-            &["PICOAGENT_TRANSCRIBE_MODEL"],
-            "cargo xtask setup whisper で同梱Whisperとモデルを取得するか、ローカルWhisperモデルのパスを指定してください。外部APIは使いません。",
-        );
-    }
+    let program = crate::tool_try!(crate::tools::whisper::program(cfg));
+    let model = crate::tool_try!(crate::tools::whisper::model(cfg));
     let output_stem = match output_stem(cfg, &audio) {
         Ok(path) => path,
         Err(error) => return format!("エラー: {error}"),
@@ -605,12 +548,6 @@ async fn transcribe(cfg: &Config, args: &Value) -> String {
             .and_then(Value::as_bool)
             .unwrap_or(false),
     );
-    let timeout = cfg
-        .get("PICOAGENT_TRANSCRIBE_TIMEOUT_SECS", "1800")
-        .parse::<u64>()
-        .ok()
-        .filter(|value| (10..=7200).contains(value))
-        .unwrap_or(1800);
     let output = match run_transcribe_command(&program, &args_list, timeout).await {
         Ok(output) => output,
         Err(error) => return error,
@@ -900,12 +837,7 @@ impl Tool for MeetingRecorderTool {
                 "text",
                 "-tdrz",
             ),
-            Field::new(
-                "PICOAGENT_TRANSCRIBE_TIMEOUT_SECS",
-                "ローカル文字起こしタイムアウト秒",
-                "text",
-                "1800",
-            ),
+            Field::int(&crate::config::ints::TRANSCRIBE_TIMEOUT_SECS),
         ]
     }
 

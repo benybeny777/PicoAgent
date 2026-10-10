@@ -21,8 +21,8 @@ test("配信字幕は実DOM寸法で複数ページへ分ける", () => {
 
 test("音声ありは字幕ページと発話単位を同期し音声なしも時間差表示する", () => {
   assert.match(voice, /const chunks = pager\.paginates\(\) \? pager\.pages\(text\) : splitSpeechChunks\(text\);/);
-  // 音声なし（無効・音量0）は合成を待たず時間差で送る。
-  assert.match(voice, /if \(enabled === false \|\| volume <= 0\.001\) \{\s*stop\(\);\s*pager\.timed\(text\);/);
+  // 音声なし（設定不正・無効・音量0）は合成を待たず時間差で送る。
+  assert.match(voice, /if \(volumeError \|\| enabled === false \|\| volume <= 0\.001\) \{\s*stop\(\);\s*pager\.timed\(text\);/);
 });
 
 test("字幕は子要素まで選択できず、入り込んだ選択も解除する", () => {

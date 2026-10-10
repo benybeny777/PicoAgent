@@ -150,7 +150,7 @@ fn ensure_executable(path: &Path) -> anyhow::Result<()> {
     }
     permissions.set_mode(permissions.mode() | 0o755);
     if let Err(error) = std::fs::set_permissions(path, permissions) {
-        // フォールバック許可: .app 配下など実行時に chmod できない同梱リソースは spawn 側の成否に委ねる。
+        // .app 配下など実行時に chmod できない同梱リソースは spawn 側の成否に委ねる。
         if error.kind() != std::io::ErrorKind::PermissionDenied {
             return Err(error.into());
         }
@@ -197,7 +197,7 @@ pub fn active_model_filename(app: &AppHandle) -> Option<String> {
 
 async fn running_server_model_ids(app: &AppHandle) -> anyhow::Result<Vec<String>> {
     let state = app.state::<AppState>();
-    let port = local::port(&state.config);
+    let port = local::port(&state.config).map_err(anyhow::Error::msg)?;
     let url = format!("http://127.0.0.1:{port}/v1/models");
     let data: Value = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(2))
@@ -470,7 +470,11 @@ async fn download_model(app: &AppHandle, dest: &PathBuf) -> anyhow::Result<()> {
     let expected = local::preset_by_url(&url);
     set_status(app, json!({ "phase": "download", "percent": 0 }));
 
-    let mut res = crate::tools::http::client().get(&url).send().await?;
+    let mut res = crate::tools::http::client()
+        .map_err(anyhow::Error::msg)?
+        .get(&url)
+        .send()
+        .await?;
     if !res.status().is_success() {
         anyhow::bail!("モデル取得に失敗: {} {}", res.status(), url);
     }
@@ -558,7 +562,7 @@ async fn download_model(app: &AppHandle, dest: &PathBuf) -> anyhow::Result<()> {
         }
     }
     // 取得と検証は済んでいるので、回収に失敗しても起動は止めず理由を残す。
-    // フォールバック許可: 残った一時ファイルは次の取得成功時に再び回収を試みる。
+    // 残った一時ファイルは次の取得成功時に再び回収を試みる。
     if let Err(error) = remove_stale_model_parts(dest, std::process::id()) {
         crate::log_paths::append_app_log(app, &format!("警告: {error:#}"));
     }
@@ -640,7 +644,7 @@ async fn gpu_vram_bytes() -> Option<u64> {
     {
         let mut command = crate::tools::process::command("nvidia-smi.exe");
         command.args(["--query-gpu=memory.total", "--format=csv,noheader,nounits"]);
-        // フォールバック許可: nvidia-smi が無い、または3秒以内に応答しないPCでは
+        // nvidia-smi が無い、または3秒以内に応答しないPCでは
         // 専用VRAMを不明としてRAMだけで候補を案内する。
         let output = crate::tools::process::output(command, 3, "NVIDIA GPUメモリ量の確認")
             .await
@@ -754,10 +758,13 @@ fn spawn_server(
     let server = &candidate.server;
     ensure_executable(server)?;
     let state = app.state::<AppState>();
-    let port = local::port(&state.config).to_string();
-    // 保存値が旧既定（8,192）のままでも下限まで引き上げて起動する。狭いコンテキストだと
-    // スキル定義が入らず、モデルが道具を選べなくなる。
-    let ctx = local::context_length(&state.config).to_string();
+    let port = local::port(&state.config)
+        .map_err(anyhow::Error::msg)?
+        .to_string();
+    // 設定値を起動前に検証し、不正な文脈長のままサーバを起動しない。
+    let ctx = local::context_length(&state.config)
+        .map_err(anyhow::Error::msg)?
+        .to_string();
     // GPU 優先: 既定で全レイヤを GPU へオフロード（999）。GPU 非対応ビルド/環境では
     // llama-server が自動で CPU にフォールバックする。CPU 強制は 0 を設定する。
     let ngl = &candidate.ngl;
@@ -887,6 +894,20 @@ fn start_generation_is_current(engine: &EngineState, generation: u64) -> bool {
 }
 
 async fn ensure_and_start_inner(app: AppHandle, start_generation: u64) {
+    // 不正設定がある場合は、資産の移行・取得や既存サーバへの接続より前に止める。
+    let config = &app.state::<AppState>().config;
+    let validated = config.int(&crate::config::ints::LOCAL_NGL).and_then(|ngl| {
+        local::port(config)?;
+        local::context_length(config)?;
+        Ok(ngl.to_string())
+    });
+    let configured_ngl = match validated {
+        Ok(value) => value,
+        Err(error) => {
+            set_status(&app, json!({"phase":"error", "message":error}));
+            return;
+        }
+    };
     if let Err(error) = ensure_local_model_selection(&app).await {
         set_status(
             &app,
@@ -922,7 +943,7 @@ async fn ensure_and_start_inner(app: AppHandle, start_generation: u64) {
             &format!("検証済み現行版へ移行し、旧ローカルモデル{removed}件を削除しました"),
         ),
         Ok(_) => {}
-        // フォールバック許可: 旧ファイルの掃除失敗だけで検証済み現行モデルの起動を止めない。失敗はログへ残す。
+        // 旧ファイルの掃除失敗だけで検証済み現行モデルの起動を止めない。失敗はログへ残す。
         Err(error) => crate::log_paths::append_app_log(
             &app,
             &format!("旧ローカルモデルの掃除に失敗しました: {error}"),
@@ -942,7 +963,13 @@ async fn ensure_and_start_inner(app: AppHandle, start_generation: u64) {
     // 要求モデルまで一致する場合だけ再利用する。モデル変更後の古いプロセスを誤用しないため。
     if let Some(provider) = crate::providers::get("local") {
         let state = app.state::<AppState>();
-        if provider.is_up(&state.config).await {
+        if match provider.is_up(&state.config).await {
+            Ok(ready) => ready,
+            Err(error) => {
+                set_status(&app, json!({"phase":"error", "message":error}));
+                return;
+            }
+        } {
             if running_server_uses_model(&app, &model).await
                 && (projector.is_none() || VISION_READY.load(Ordering::SeqCst))
             {
@@ -960,10 +987,6 @@ async fn ensure_and_start_inner(app: AppHandle, start_generation: u64) {
         }
     }
     let bundled_server = server_path(&app);
-    let configured_ngl = app
-        .state::<AppState>()
-        .config
-        .get("PICOAGENT_LOCAL_NGL", "999");
     let candidates = existing_backend_candidates(
         crate::engine_backend::candidates(&app, bundled_server, configured_ngl).await,
     );
@@ -1007,7 +1030,13 @@ async fn ensure_and_start_inner(app: AppHandle, start_generation: u64) {
         }
         let mut failed = None;
         for _ in 0..300 {
-            if provider.is_up(&state.config).await {
+            if match provider.is_up(&state.config).await {
+                Ok(ready) => ready,
+                Err(error) => {
+                    set_status(&app, json!({"phase":"error", "message":error}));
+                    return;
+                }
+            } {
                 VISION_READY.store(projector.is_some(), Ordering::SeqCst);
                 crate::log_paths::append_app_log(
                     &app,

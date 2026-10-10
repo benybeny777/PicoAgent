@@ -58,19 +58,22 @@ fn request(method: &str, path: &str, body: Option<Value>) -> Result<Value> {
     })?;
 
     let status = response.status();
-    let json: Value = response.json().unwrap_or_else(|_| json!({}));
-    if !status.is_success() {
-        let message = json
-            .get("error")
-            .and_then(|error| {
-                error
-                    .get("message")
-                    .and_then(Value::as_str)
-                    .or(error.as_str())
-            })
-            .map(str::to_string)
-            .unwrap_or_else(|| format!("HTTP {status}"));
-        bail!("{message}");
+    let text = response.text().context("API応答本文を読めません")?;
+    parse_response(status.is_success(), status.as_u16(), &text)
+}
+
+fn parse_response(success: bool, status: u16, text: &str) -> Result<Value> {
+    let preview: String = text.chars().take(200).collect();
+    let json: Value = serde_json::from_str(text)
+        .with_context(|| format!("HTTP {status}: API応答がJSONではありません: {preview}"))?;
+    if !success {
+        let message = json.get("error").and_then(|error| {
+            error
+                .get("message")
+                .and_then(Value::as_str)
+                .or(error.as_str())
+        });
+        bail!("HTTP {status}: {}", message.unwrap_or(&preview));
     }
     Ok(json)
 }
@@ -218,4 +221,45 @@ fn repl() -> Result<()> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn 非jsonのhttp失敗も本文理由と状態を保持する() {
+        for (status, body) in [
+            (500, "サーバー故障"),
+            (401, "資格情報がありません"),
+            (200, "壊れた成功応答"),
+        ] {
+            let error = format!(
+                "{:#}",
+                parse_response(status == 200, status, body).unwrap_err()
+            );
+            assert!(error.contains(&status.to_string()) && error.contains(body));
+        }
+        let error = parse_response(
+            false,
+            422,
+            r#"{"error":{"message":"入力を確認してください"}}"#,
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("入力を確認してください"));
+        assert_eq!(
+            parse_response(true, 200, r#"{"ok":true}"#).unwrap()["ok"],
+            true
+        );
+    }
+    #[test]
+    fn http応答のjson読込失敗を空値へ降格しない() {
+        let production = include_str!("cli.rs").split("#[cfg(test)]").next().unwrap();
+        for forbidden in [
+            ".json().unwrap_or",
+            ".json().ok()",
+            ".json().unwrap_or_else",
+        ] {
+            assert!(!production.contains(forbidden));
+        }
+    }
 }

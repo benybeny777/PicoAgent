@@ -11,6 +11,10 @@ const settingsSearch = document.getElementById("settingsSearch");
 const clearSettingsSearch = document.getElementById("clearSettingsSearch");
 const dirtySummary = document.getElementById("dirtySummary");
 const { errorDetail, errorMessage, logApp, tail, twoStepAction } = window.PicoUI;
+const characterListDiagnostic = document.createElement("div");
+characterListDiagnostic.className = "character-list-diagnostic-container";
+characterListDiagnostic.hidden = true;
+form.before(characterListDiagnostic);
 
 // 公式モデルの取得・規約リンクは、WebViewの新窓ではなく既定ブラウザで開く。
 function officialModelLink(label, href, status) {
@@ -40,6 +44,10 @@ let renderingSettings = false;
 let characterOverrides = {};
 let characterVoiceOverrides = {};
 let characterLive2dSdkOverrides = {};
+let characterRendererOverrides = {};
+let characterRendererSelect;
+let characterRendererField;
+let userCharactersError = null;
 let characterFramingEditor = null;
 let characterStreamProfiles = {};
 let characterStreamProfileEditor = null;
@@ -263,6 +271,8 @@ function updateDirtyStateNow() {
     "changed",
     stableStringify(current.PICOAGENT_LIVE2D_SDK_OVERRIDES) !== stableStringify(savedSnapshot.PICOAGENT_LIVE2D_SDK_OVERRIDES)
   );
+  characterRendererField?.classList.toggle("changed",
+    stableStringify(current.PICOAGENT_RENDERER_OVERRIDES) !== stableStringify(savedSnapshot.PICOAGENT_RENDERER_OVERRIDES));
   form.querySelector(".alarm-editor")?.closest(".card-config")?.classList.toggle(
     "changed",
     stableStringify(current.PICOAGENT_ALARMS) !== stableStringify(savedSnapshot.PICOAGENT_ALARMS)
@@ -624,7 +634,8 @@ function groupedModelField(key, label, value, groups, options = {}) {
 }
 
 // 1つの設定項目を描画して inputs に登録する。
-function field(key, label, type, value, placeholder) {
+function field(key, label, type, value, placeholder, schema = null) {
+  const numberSchema = data?.numberSettings?.[key] || (schema?.range ? schema : null);
   if (key === "PICOAGENT_LOCAL_MODEL_PRESET") {
     return localModelPresetField(key, label, value || "auto");
   }
@@ -639,24 +650,17 @@ function field(key, label, type, value, placeholder) {
     const cb = el("input", { type: "checkbox", checked: Boolean(value) });
     return registerInput(key, cb, markSearchable(el("div", { className: "field inline" }, [cb, el("label", { textContent: label })]), key, label));
   }
-  const inputType = type === "password" ? "password" : type === "number" ? "number" : "text";
-  const input = el("input", { type: inputType, value: value ?? "", placeholder: placeholder || "" });
-  if (key === "PICOAGENT_TTS_VOLUME") {
-    input.min = "0";
-    input.max = "100";
-    input.step = "1";
-  }
-  if (key === "PICOAGENT_STREAM_CHAT_FONT_PX") {
-    input.min = "18";
-    input.max = "48";
-    input.step = "1";
-  }
+  const inputType = numberSchema ? "text" : type === "password" ? "password" : type === "number" ? "number" : "text";
+  const input = el("input", { type: inputType, value: value ?? "", placeholder: numberSchema?.default ?? placeholder ?? "" });
+  if (numberSchema) window.PicoIntegerInput.attach(input, numberSchema);
   if (key === "PICOAGENT_MODEL") input.setAttribute("list", "modelOptions");
   // 天気の地点は一覧から選べるようにする（自由入力も残す）。
   if (key === "PICOAGENT_WEATHER_DEFAULT_LOCATION") {
     input.setAttribute("list", "weatherLocationOptions");
   }
-  return registerInput(key, input, markSearchable(el("div", { className: "field" }, [el("label", { textContent: label }), input]), key, label, placeholder));
+  const children = [el("label", { textContent: label }), input];
+  if (numberSchema) children.push(el("p", { className: "hint", textContent: `範囲: ${numberSchema.range.join("〜")}${numberSchema.unit || ""}。空欄は既定値${numberSchema.default ?? placeholder ?? ""}${numberSchema.allow_auto ? "。autoも指定できます" : ""}` }));
+  return registerInput(key, input, markSearchable(el("div", { className: "field" }, children), key, label, placeholder));
 }
 
 function multiAiSettingsField(values) {
@@ -1159,6 +1163,55 @@ function advancedGroup(title, note, children) {
   ].filter(Boolean));
 }
 
+// 検出と選択は草稿だけを変更する。永続化は既存の「変更を保存」に一本化する。
+function buildCliDetection(detect, applyPath) {
+  const button = el("button", { type: "button", className: "cli-detect", textContent: "ImageMagickを検出" });
+  const choices = el("select", { className: "cli-candidates", disabled: true, ariaLabel: "検出したImageMagickの実行パス" });
+  const apply = el("button", { type: "button", className: "cli-apply", disabled: true, textContent: "選択したパスを設定へ反映" });
+  const note = el("p", { className: "hint cli-diagnostic", textContent: "手動導入済みのImageMagick 7/6を確認します。選択後に変更を保存してください。" });
+  note.setAttribute("role", "status");
+  let report = null;
+  let detecting = false;
+  button.addEventListener("click", async () => {
+    if (detecting || settingsMutationBusy) return;
+    detecting = true;
+    button.disabled = true;
+    choices.disabled = true;
+    apply.disabled = true;
+    note.textContent = "ImageMagickの実行パスと名乗りを確認中…";
+    try {
+      const found = await detect("imagemagick");
+      if (!found || typeof found.settingKey !== "string" || !Array.isArray(found.candidates) || !Array.isArray(found.warnings)
+          || found.candidates.some(item => typeof item.path !== "string" || !item.path || typeof item.version !== "string")) {
+        throw new Error("CLI検出結果の形式が不正です");
+      }
+      report = found;
+      choices.replaceChildren(el("option", { value: "", textContent: "保存する候補を選択してください" }));
+      for (const candidate of found.candidates) choices.append(el("option", { value: candidate.path, textContent: candidate.path + "（" + candidate.version + "）" }));
+      choices.value = "";
+      choices.disabled = !found.candidates.length;
+      note.textContent = found.candidates.length ? "候補を選択して設定へ反映し、変更を保存してください。" : "ImageMagickは見つかりませんでした。同梱物を導入するか、手動導入したパスを設定してください。";
+      if (found.warnings.length) note.textContent += " 確認できなかった候補: " + found.warnings.join(" / ");
+    } catch (error) {
+      report = null;
+      choices.replaceChildren();
+      note.textContent = "検出できませんでした: " + errorMessage(error);
+    } finally {
+      detecting = false;
+      button.disabled = false;
+    }
+  });
+  choices.addEventListener("change", () => { apply.disabled = detecting || !report?.candidates.some(item => item.path === choices.value); });
+  apply.addEventListener("click", () => {
+    if (detecting || settingsMutationBusy || !report?.candidates.some(item => item.path === choices.value)) return;
+    try {
+      applyPath(report.settingKey, choices.value);
+      note.textContent = "選択したパスを草稿へ反映しました。「変更を保存」で確定してください。";
+    } catch (error) { note.textContent = "反映できませんでした: " + errorMessage(error); }
+  });
+  return el("div", { className: "field cli-detection" }, [button, choices, apply, note]);
+}
+
 function componentPresentation(item) {
   const managed = item.installMode === "managed";
   let actionLabel = "公式ページを開く";
@@ -1367,6 +1420,15 @@ function buildComponentManager() {
         });
         actions.append(remove);
       }
+      const cliDetection = item.id === "tools" ? buildCliDetection(
+          id => window.picoagent.settings.detectCli(id),
+          (key, path) => {
+            const input = inputs.get(key);
+            if (!input) throw new Error("ImageMagickの設定入力がありません。設定画面を読み直してください。");
+            input.value = path;
+            input.dispatchEvent(new Event("change", { bubbles: true }));
+          },
+        ) : null;
       const sourceLinks = el("div", { className: "component-source-links" });
       for (const source of item.sources || []) {
         sourceLinks.append(el("a", {
@@ -1385,6 +1447,7 @@ function buildComponentManager() {
           item.versionError ? el("small", { className: "component-version-warning", textContent: item.versionError }) : null,
           sourceLinks,
           licenseConsent,
+          cliDetection,
         ].filter(Boolean)),
         el("span", { className: "component-badge", textContent: badgeText }),
         actions,
@@ -2008,7 +2071,7 @@ function renderSkillCard(tool, values) {
     } else if (tool.name === "task_scheduler") {
       panel.append(buildScheduleEditor(values.PICOAGENT_SCHEDULED_TASKS));
     } else {
-      for (const f of tool.configSchema) panel.append(field(f.key, f.label, f.type, values[f.key], f.placeholder));
+      for (const f of tool.configSchema) panel.append(field(f.key, f.label, f.type, values[f.key], f.placeholder, f));
     }
     panel.addEventListener("click", event => event.stopPropagation());
     card.addEventListener("click", () => {
@@ -2066,27 +2129,12 @@ function buildSkillCategoryList(tools, values) {
 // 自分で追加したキャラクター（PicoAgent/characters 配下）を一覧の形へそろえる。
 // 同梱と同じ id は同梱側を優先し、追加分が同梱キャラを乗っ取らないようにする。
 async function loadUserCharacters(bundled) {
-  const known = new Set(bundled.map(character => character.id));
-  try {
-    const result = await window.picoagent.settings.userCharacters();
-    userCharacterRoot = result?.root || "";
-    return (result?.characters || [])
-      .filter(character => !known.has(character.id))
-      .map(character => ({
-        id: character.id,
-        name: character.name,
-        description: character.description || "",
-        manifest: `${character.id}/character.json`,
-        root: window.picoagent.assetUrl(character.path),
-        user: true,
-        live2d: !!character.live2d,
-        mmd: !!character.mmd,
-      }));
-  } catch (error) {
-    // フォールバック許可: 追加キャラを取れなくても同梱キャラの設定は開けるようにする。
-    statusEl.textContent = `追加キャラクターを読み込めませんでした: ${errorMessage(error)}`;
-    return [];
-  }
+  const result = await window.PicoUI.loadUserCharacters(
+    () => window.picoagent.settings.userCharacters(), path => window.picoagent.assetUrl(path), bundled,
+  );
+  userCharacterRoot = result.root;
+  userCharactersError = result.error;
+  return result.entries;
 }
 
 async function loadCharacterPersona(id) {
@@ -2107,7 +2155,7 @@ async function loadCharacterPersona(id) {
 }
 
 function captureCharacterSettingsFields() {
-  const fields = [characterPersona, characterSpeaker, characterLive2dSdkSelect]
+  const fields = [characterPersona, characterSpeaker, characterLive2dSdkSelect, characterRendererSelect]
     .filter(Boolean).map(field => ({ field, value: field.value }));
   const sdkHidden = characterLive2dSdkField?.hidden;
   const sdkHint = characterLive2dSdkHint?.textContent;
@@ -2122,10 +2170,22 @@ function captureCharacterSettingsFields() {
 }
 
 function saveCurrentCharacterPersona(id) {
-  if (!characterPersona) return;
+  if (!characterPersona || userCharactersError) return;
   const value = characterPersona.value;
   if (value === characterDefaultPersonas[id]) delete characterOverrides[id];
   else characterOverrides[id] = value;
+}
+
+async function loadCharacterRenderer(id) {
+  if (!characterRendererSelect) return;
+  const entry = characterCatalog.characters.find(character => character.id === id);
+  if (!entry) return;
+  const manifest = await loadCharacterManifestForSettings(entry);
+  const { imageAnimationsOf, savedVariant } = await import("./character/manifest.js");
+  const variants = Array.isArray(manifest.variants) ? manifest.variants : [];
+  const variant = variants.find(item => item.id === savedVariant(id)) || variants[0] || null;
+  characterRendererSelect.options[1].disabled = !imageAnimationsOf(manifest, variant).idle;
+  characterRendererSelect.value = characterRendererOverrides[id] || "auto";
 }
 
 function live2dModelEntries(config) {
@@ -2225,7 +2285,7 @@ async function meshFaceIconUrl(rigUrl, version) {
     canvas.getContext("2d").drawImage(image, centerX - size / 2, centerY - size / 2, size, size, 0, 0, 128, 128);
     return canvas.toDataURL("image/png");
   } catch (error) {
-    // フォールバック許可: 顔の切り出しに失敗しても、呼び出し側の通常の画像候補で表示できる。
+    // 顔の切り出しに失敗しても、呼び出し側の通常の画像候補で表示できる。
     logApp("warn", "キャラクターアイコンの顔切り出しに失敗しました", errorDetail(error));
     return "";
   }
@@ -3276,13 +3336,14 @@ async function render() {
   characterOverrides = v.PICOAGENT_CHARACTER_OVERRIDES || {};
   characterVoiceOverrides = v.PICOAGENT_TTS_CHARACTER_OVERRIDES || {};
   characterLive2dSdkOverrides = v.PICOAGENT_LIVE2D_SDK_OVERRIDES || {};
+  characterRendererOverrides = cloneSettings(v.PICOAGENT_RENDERER_OVERRIDES || {});
   characterStreamProfiles = cloneSettings(v.PICOAGENT_STREAM_PROFILES || {});
   const characterSec = section("キャラクター設定");
   characterSelect = el("select");
   const requestedCharacter = v.PICOAGENT_CHARACTER || characterCatalog.default;
-  const selectedCharacter = characterCatalog.characters.some(character => character.id === requestedCharacter)
-    ? requestedCharacter
-    : characterCatalog.default;
+  const requestedExists = characterCatalog.characters.some(character => character.id === requestedCharacter);
+  const missingSavedCharacter = !requestedExists && !userCharactersError;
+  const selectedCharacter = requestedExists || userCharactersError ? requestedCharacter : characterCatalog.default;
   const selectedCharacterEntry = characterCatalog.characters.find(character => character.id === selectedCharacter);
   let displayedCharacterId = selectedCharacter;
   setQuickSettingsSummary("character", selectedCharacterEntry?.name || selectedCharacter);
@@ -3293,6 +3354,9 @@ async function render() {
       selected: character.id === selectedCharacter,
     }));
   }
+  if (!selectedCharacterEntry) characterSelect.append(el("option", {
+    value: selectedCharacter, textContent: `${selectedCharacter} — 一覧から確認できません`, selected: true,
+  }));
   characterSec.append(registerInput(
     "PICOAGENT_CHARACTER",
     characterSelect,
@@ -3341,10 +3405,10 @@ async function render() {
   ));
   characterFramingEditor = buildCharacterFramingEditor();
   characterSec.append(characterFramingEditor.node);
-  await characterFramingEditor.load();
+  if (selectedCharacterEntry) await characterFramingEditor.load();
   characterStreamProfileEditor = buildCharacterStreamProfileEditor(v);
   characterSec.append(characterStreamProfileEditor.node);
-  characterStreamProfileEditor.load();
+  if (selectedCharacterEntry) characterStreamProfileEditor.load();
   characterLive2dSdkSelect = el("select");
   for (const option of [
     { value: "auto", label: "自動（推奨）" },
@@ -3362,16 +3426,31 @@ async function render() {
     updateDirtyState();
   });
   characterSec.append(characterLive2dSdkField);
+  characterRendererSelect = el("select", {}, [
+    el("option", { value: "auto", textContent: "パックの通常描画" }),
+    el("option", { value: "image", textContent: "2D画像表示" }),
+  ]);
+  characterRendererField = el("div", { className: "field" }, [
+    el("label", { textContent: "このキャラの描画方式" }), characterRendererSelect,
+    el("p", { className: "hint", textContent: "2Dは画像のあるキャラだけ選べます。骨・物理・視線などモデル固有の表現は使いません。通常描画を選ぶと保存済みの2D指定を解除します。" }),
+  ]);
+  characterRendererSelect.addEventListener("change", () => {
+    if (characterRendererSelect.value === "image") characterRendererOverrides[displayedCharacterId] = "image";
+    else delete characterRendererOverrides[displayedCharacterId];
+    updateDirtyState();
+  });
+  characterSec.append(characterRendererField);
+  if (selectedCharacterEntry) await loadCharacterRenderer(selectedCharacter);
   characterPersona = el("textarea", { placeholder: "性格・口調・一人称など" });
   characterPersona.addEventListener("input", () => {
     saveCurrentCharacterPersona(displayedCharacterId);
     updateDirtyState();
   });
   characterSec.append(el("div", { className: "field" }, [el("label", { textContent: "このキャラの性格・口調" }), characterPersona]));
-  await loadCharacterPersona(selectedCharacter);
+  if (selectedCharacterEntry) await loadCharacterPersona(selectedCharacter);
   loadCharacterVoice(selectedCharacter);
   updateCharacterVoiceContext(selectedCharacter);
-  await loadCharacterLive2dSdk(selectedCharacter);
+  if (selectedCharacterEntry) await loadCharacterLive2dSdk(selectedCharacter);
   let previousCharacter = selectedCharacter;
   let characterSwitchQueue = Promise.resolve();
   let characterSwitchPending = 0;
@@ -3399,6 +3478,7 @@ async function render() {
         await loadCharacterPersona(requestedCharacter);
         loadCharacterVoice(requestedCharacter);
         await loadCharacterLive2dSdk(requestedCharacter);
+        await loadCharacterRenderer(requestedCharacter);
         await characterFramingEditor?.load();
         characterStreamProfileEditor?.load();
         characterSelect.value = requestedCharacter;
@@ -3532,6 +3612,30 @@ async function render() {
 
   // --- 導入済みキャラクターの検索・形式フィルター・選択 ---
   const charSec = section("キャラクターを探して選ぶ");
+  if (userCharactersError || !selectedCharacterEntry || missingSavedCharacter) {
+    const warning = el("section", { className: "character-list-diagnostic" });
+    warning.setAttribute("role", "status");
+    warning.append(el("strong", { textContent: "キャラクター一覧を確認できません" }), el("p", {
+      textContent: userCharactersError ? errorMessage(userCharactersError)
+        : missingSavedCharacter ? `保存されていたキャラ「${requestedCharacter}」は一覧にありません。「${selectedCharacter}」を選択しました。保存するまで設定のIDは変更しません。`
+          : `${selectedCharacter} が一覧にありません。保存されたIDは変更していません。`,
+    }));
+    const retry = el("button", { type: "button", className: "secondary", textContent: "キャラクター一覧を再取得" });
+    retry.addEventListener("click", async () => {
+      data.values = cloneSettings(collect());
+      renderingSettings = true;
+      setSettingsMutationBusy(true);
+      try { await render(); }
+      catch (error) { statusEl.textContent = `一覧の再取得に失敗: ${errorMessage(error)}`; }
+      finally { renderingSettings = false; setSettingsMutationBusy(false); updateDirtyState(); }
+    });
+    warning.append(retry);
+    characterListDiagnostic.replaceChildren(warning);
+    characterListDiagnostic.hidden = false;
+  } else {
+    characterListDiagnostic.replaceChildren();
+    characterListDiagnostic.hidden = true;
+  }
   charSec.append(el("p", {
     className: "hint",
     textContent: "名前・ID・説明で検索し、描画形式で絞り込めます。選択後は上の性格・口調などを調整して「保存」してください。",
@@ -4051,6 +4155,12 @@ async function render() {
   panels.character.append(charSec, characterSec);
   panels.voice.append(voiceSec);
   panels["character-register"].append(addSec);
+  if (userCharactersError || !selectedCharacterEntry) {
+    for (const node of [characterSec, charSec, addSec, characterSpeakerField, panels["character-maker"]]) {
+      node.inert = true;
+      for (const control of node.querySelectorAll("button, input, select, textarea")) control.disabled = true;
+    }
+  }
 
   // --- 叩く AI コネクタごとの設定（選択中のプロバイダの設定だけ表示する） ---
   const provSec = section("AIサービスごとの設定");
@@ -4077,7 +4187,7 @@ async function render() {
     block.append(el("div", { className: "subhead", textContent: provider.label }));
     const guide = setupGuideNode(provider.id, provider.configSchema);
     if (guide) block.append(guide);
-    for (const f of provider.configSchema) block.append(field(f.key, f.label, f.type, providerDraftValues[f.key] ?? v[f.key], f.placeholder));
+    for (const f of provider.configSchema) block.append(field(f.key, f.label, f.type, providerDraftValues[f.key] ?? v[f.key], f.placeholder, f));
     activeProviderBlock = block;
     provSec.append(block);
     // CLIからローカルAIへ戻った際に作り直される入力にも、モデル同期を接続する。
@@ -4216,7 +4326,7 @@ function collect() {
   const patch = cloneSettings({ ...(savedSnapshot || {}), ...(data.values || {}) });
   Object.assign(patch, providerDraftValues);
   for (const [key, input] of inputs) {
-    patch[key] = input.type === "checkbox" ? input.checked : input.value;
+    patch[key] = input.type === "checkbox" ? input.checked : input.dataset.integerSetting ? window.PicoIntegerInput.normalize(input.value) : input.value;
   }
   for (const warning of data.unavailableSecrets || []) {
     const input = inputs.get(warning.key);
@@ -4236,6 +4346,7 @@ function collect() {
   patch.PICOAGENT_CHARACTER_OVERRIDES = characterOverrides;
   patch.PICOAGENT_TTS_CHARACTER_OVERRIDES = characterVoiceOverrides;
   patch.PICOAGENT_LIVE2D_SDK_OVERRIDES = characterLive2dSdkOverrides;
+  patch.PICOAGENT_RENDERER_OVERRIDES = characterRendererOverrides;
   patch.PICOAGENT_STREAM_PROFILES = characterStreamProfiles;
   if (alarmEditorState) patch.PICOAGENT_ALARMS = alarmEditorState.getJson();
   if (scheduleEditorState) patch.PICOAGENT_SCHEDULED_TASKS = scheduleEditorState.getJson();
@@ -4302,22 +4413,42 @@ function confirmRestart() {
   });
 }
 
-function validateSettingsNumberFields() {
-  const fields = [
-    ["PICOAGENT_STREAM_CHAT_FONT_PX", "display", "配信チャットの文字サイズ"],
-    ["PICOAGENT_TTS_VOLUME", "voice", "音声・ゲーム効果音の音量"],
-  ];
-  for (const [key, tabId, label] of fields) {
-    const input = inputs.get(key);
-    if (!input || input.checkValidity()) continue;
-    // 別タブや検索で隠れた入力にはブラウザの警告が出せない。入力欄を先に見せる。
-    if (settingsSearch) settingsSearch.value = "";
-    if (clearSettingsSearch) clearSettingsSearch.hidden = true;
-    activateSettingsTab(tabId);
-    statusEl.textContent = `${label}の入力内容を確認してください。`;
-    input.reportValidity();
-    return false;
+function clearNumberErrors() {
+  for (const [key, input] of inputs) {
+    input.removeAttribute("aria-invalid");
+    inputWrappers.get(key)?.querySelector(".integer-error")?.remove();
   }
+}
+
+function showNumberErrors(invalid) {
+  clearNumberErrors();
+  for (const item of invalid) {
+    const input = inputs.get(item.key);
+    const wrapper = inputWrappers.get(item.key);
+    if (!input || !wrapper) continue;
+    input.setAttribute("aria-invalid", "true");
+    wrapper.append(el("div", { className: "field-note integer-error", role: "alert", textContent: item.message }));
+  }
+  const first = invalid[0];
+  const input = inputs.get(first?.key);
+  if (settingsSearch) settingsSearch.value = "";
+  if (clearSettingsSearch) clearSettingsSearch.hidden = true;
+  applySettingsSearch();
+  const panel = input?.closest(".tab-panel");
+  if (panel) activateSettingsTab(panel.id.replace(/^panel-/, ""));
+  statusEl.textContent = invalid.map(item => `${data.numberSettings?.[item.key]?.label || item.key}: ${item.message}`).join(" / ");
+  input?.focus();
+}
+
+function validateSettingsNumberFields() {
+  const invalid = [];
+  for (const [key, input] of inputs) {
+    const schema = data.numberSettings?.[key];
+    if (!schema) continue;
+    const message = window.PicoIntegerInput.reason(input, schema);
+    if (message) invalid.push({ key, message });
+  }
+  if (invalid.length) { showNumberErrors(invalid); return false; }
   return true;
 }
 
@@ -4336,6 +4467,10 @@ saveBtn.addEventListener("click", async () => {
       return;
     }
     const res = await window.picoagent.settings.save(request.patch, request.baseRevisions);
+    if (Array.isArray(res.invalid) && res.invalid.length) {
+      showNumberErrors(res.invalid);
+      return;
+    }
     if (Array.isArray(res.conflicts) && res.conflicts.length) {
       const draft = cloneSettings(request.patch);
       const latest = await window.picoagent.settings.load();
@@ -4349,6 +4484,7 @@ saveBtn.addEventListener("click", async () => {
       statusEl.textContent = `別の操作で更新された設定を読み直しました（${res.conflicts.length}件）。入力内容を確認して、もう一度保存してください`;
       return;
     }
+    clearNumberErrors();
     savedSnapshot = cloneSettings(current);
     data.values = cloneSettings(current);
     data.valueRevisions = cloneSettings(res.valueRevisions || data.valueRevisions);
@@ -4364,7 +4500,7 @@ saveBtn.addEventListener("click", async () => {
         statusEl.textContent = "保存しました（次回の起動時に反映されます）";
       }
     } else {
-      statusEl.textContent = res.up ? "保存しました（接続OK）" : "保存しました（AIに未接続）";
+      statusEl.textContent = res.up === null ? `保存しました（接続状態不明: ${res.providerError || "接続状態を確認できません"}）` : res.up ? "保存しました（接続OK）" : "保存しました（AIに未接続）";
     }
     // ホットキーは保存と同時に張り直す。登録できなかった場合は黙って無効にせず伝える。
     if (res.hotkeyWarning) {

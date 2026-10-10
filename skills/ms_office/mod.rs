@@ -123,7 +123,8 @@ async fn export_pdf(
     output: Option<&SafePath>,
     timeout: u64,
 ) -> String {
-    let program = crate::tools::document_convert::office_cli_path(cfg);
+    let program = crate::tool_try!(crate::tools::document_convert::office_cli_path(cfg));
+    let program = program.to_string_lossy().into_owned();
     let out_dir = output.unwrap_or(input).parent_or_root(cfg);
     if let Err(error) = crate::permissions::fs::create_dir_all(&out_dir) {
         return format!("エラー: 出力フォルダ作成に失敗しました: {error}");
@@ -230,12 +231,7 @@ impl Tool for MsOfficeTool {
     }
 
     fn config_schema(&self) -> Vec<Field> {
-        vec![Field::new(
-            "PICOAGENT_MS_OFFICE_TIMEOUT_SECS",
-            "Office 操作タイムアウト秒（5〜300）",
-            "text",
-            "120",
-        )]
+        vec![Field::int(&crate::config::ints::MS_OFFICE_TIMEOUT_SECS)]
     }
 
     async fn run(&self, cfg: &Config, args: Value) -> String {
@@ -259,12 +255,8 @@ impl Tool for MsOfficeTool {
             },
             None => None,
         };
-        let timeout = cfg
-            .get("PICOAGENT_MS_OFFICE_TIMEOUT_SECS", "120")
-            .parse::<u64>()
-            .ok()
-            .filter(|value| (5..=300).contains(value))
-            .unwrap_or(120);
+        let timeout =
+            crate::tool_try!(cfg.int(&crate::config::ints::MS_OFFICE_TIMEOUT_SECS)) as u64;
 
         match action {
             "replace_text" => {

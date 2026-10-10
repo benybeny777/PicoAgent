@@ -37,7 +37,7 @@ const USAGE: &str = "\
   preview-distribution 販売対象キャラだけのUIを生成（法務ゲート前の確認用）
   release-check       販売前の未完了項目を一覧表示
   bump-version <種別> 公開中の版から major / minor / patch を自動採番して全設定へ反映
-  update-feed <配布物> [説明] 公開Git用latest.jsonへWindows(.exe)／macOS(.dmg)の更新情報を書き出す
+  update-feed <配布物> --output <latest.json> [説明] 公開Git用latest.jsonへWindows(.exe)／macOS(.dmg)の更新情報を書き出す
   license keygen       販売者用の署名鍵を生成（秘密鍵はリポジトリ外）
   license issue ...    BOOTH等の購入者へ渡すProライセンスを発行
   setup <対象…>        取得対象は all / engine / local-vision / aivis / whisper / pixi / live2d / live2d-samples / office / tools
@@ -162,7 +162,7 @@ struct Build {
 
 /// 同梱物を取得する。全対象の取得も `all` の明示を必須にする。
 ///
-/// 個々の失敗は各取得側の方針（ベストエフォートか必須か）に従う。
+/// 同梱表で取得対象の部品は、失敗した時点で停止する。
 fn setup(targets: &[String]) -> Result<()> {
     let all = [
         "pixi",
@@ -240,17 +240,7 @@ fn tauri(mode: &str, extra: &[String], build: Build) -> Result<()> {
     }
     if release && !build.lightweight_bundle {
         office::fetch_aivis()?;
-        // 文字起こしはベストエフォート（公式バイナリ配布が無い OS がある）。
-        if let Err(error) = bundled::fetch_whisper() {
-            util::warn("setup:whisper", error.to_string());
-            util::warn(
-                "setup:whisper",
-                "文字起こしなしでの起動を続行します。必須にする場合は WHISPER_REQUIRED=1 を指定してください。",
-            );
-            if util::flag("WHISPER_REQUIRED") {
-                bail!("同梱 Whisper を取得できませんでした");
-            }
-        }
+        bundled::fetch_whisper()?;
         office::fetch_office()?;
         tools::fetch_all()?;
     }
