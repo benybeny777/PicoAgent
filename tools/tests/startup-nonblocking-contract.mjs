@@ -164,7 +164,12 @@ test("再初期化は通常画面の位置を保存してから起動用の配�
   const start = commands.indexOf("pub fn restart_app(");
   const restart = commands.slice(start, commands.indexOf("\n}", start));
   const remember = restart.indexOf("crate::remember_window_position(&app)?");
-  assert.ok(remember >= 0 && remember < restart.indexOf("state.bump_conversation_epoch()"));
+  const characterLock = restart.indexOf("state.character.lock()");
+  const commitLock = restart.indexOf("state.conversation_commit.lock()");
+  const epoch = restart.indexOf("state.conversation_epoch.fetch_add(");
+  assert.ok(remember >= 0 && remember < characterLock);
+  assert.ok(characterLock < commitLock && commitLock < epoch);
+  assert.ok(epoch < restart.indexOf("state.rebuild_from_character("));
   assert.ok(remember < restart.indexOf("crate::layout::restart_boot(&app)"));
   const finishStart = layout.indexOf("pub fn finish_boot(");
   const finish = layout.slice(finishStart, layout.indexOf("\n}", finishStart));
