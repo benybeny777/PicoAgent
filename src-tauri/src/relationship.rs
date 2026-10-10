@@ -102,6 +102,7 @@ fn path(app: &AppHandle, character_id: &str) -> Result<PathBuf, String> {
 }
 
 fn read(
+    app: &AppHandle,
     path: &std::path::Path,
     character_id: &str,
     mode: &str,
@@ -123,10 +124,15 @@ fn read(
             Ok(state)
         }
         Err(error) => {
-            let backup = crate::store::quarantine_corrupt(path).ok_or_else(|| {
+            let backup = crate::store::quarantine_and_notify(
+                app,
+                path,
+                crate::store::QuarantineArea::Relationship,
+            )
+            .ok_or_else(|| {
                 format!("壊れた関係性データを退避できません。上書きを中止しました: {error}")
             })?;
-            // フォールバック許可: 壊れた元データは backup に残したため、新規状態で継続できる。
+            // フォールバック許可: PR #463 採用案3。退避済みの原本を保持して新規状態で続ける。
             let _ = backup;
             Ok(RelationshipState::new(character_id, mode))
         }
@@ -136,7 +142,7 @@ fn read(
 pub fn load(app: &AppHandle, character_id: &str, mode: &str) -> Result<RelationshipState, String> {
     let path = path(app, character_id)?;
     let _guard = crate::store::lock_state(&format!("relationship:{character_id}"));
-    read(&path, character_id, mode)
+    read(app, &path, character_id, mode)
 }
 
 pub fn set_mode(
@@ -146,7 +152,7 @@ pub fn set_mode(
 ) -> Result<RelationshipState, String> {
     let path = path(app, character_id)?;
     let _guard = crate::store::lock_state(&format!("relationship:{character_id}"));
-    let mut state = read(&path, character_id, mode)?;
+    let mut state = read(app, &path, character_id, mode)?;
     state.mode = normalize_mode(mode).to_string();
     state.last_seen = Local::now().to_rfc3339();
     crate::store::write_json_atomic(&path, &state).map_err(|error| error.to_string())?;
@@ -162,7 +168,7 @@ pub fn record(
 ) -> Result<RelationshipState, String> {
     let path = path(app, character_id)?;
     let _guard = crate::store::lock_state(&format!("relationship:{character_id}"));
-    let mut state = read(&path, character_id, mode)?;
+    let mut state = read(app, &path, character_id, mode)?;
     let now = Local::now();
     state.last_seen = now.to_rfc3339();
     match kind {
@@ -268,7 +274,7 @@ pub fn set_moment_pinned(
 ) -> Result<RelationshipState, String> {
     let path = path(app, character_id)?;
     let _guard = crate::store::lock_state(&format!("relationship:{character_id}"));
-    let mut state = read(&path, character_id, mode)?;
+    let mut state = read(app, &path, character_id, mode)?;
     let moment = state
         .recent_moments
         .iter_mut()
@@ -287,7 +293,7 @@ pub fn delete_moment(
 ) -> Result<RelationshipState, String> {
     let path = path(app, character_id)?;
     let _guard = crate::store::lock_state(&format!("relationship:{character_id}"));
-    let mut state = read(&path, character_id, mode)?;
+    let mut state = read(app, &path, character_id, mode)?;
     let before = state.recent_moments.len();
     state.recent_moments.retain(|moment| moment.id != moment_id);
     if before == state.recent_moments.len() {
