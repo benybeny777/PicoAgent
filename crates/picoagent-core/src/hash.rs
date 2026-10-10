@@ -41,4 +41,50 @@ mod tests {
             std::io::ErrorKind::PermissionDenied
         );
     }
+
+    #[test]
+    fn 短い読取を最後まで計算し途中失敗を成功した部分hashへ降格しない() {
+        struct Pieces {
+            remaining: &'static [u8],
+            width: usize,
+            fail_after: Option<usize>,
+            reads: usize,
+        }
+        impl std::io::Read for Pieces {
+            fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+                if self.fail_after == Some(self.reads) {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::UnexpectedEof,
+                        "検査用途中失敗",
+                    ));
+                }
+                self.reads += 1;
+                let count = self.remaining.len().min(self.width).min(buffer.len());
+                buffer[..count].copy_from_slice(&self.remaining[..count]);
+                self.remaining = &self.remaining[count..];
+                Ok(count)
+            }
+        }
+        for width in [1, 2, 3] {
+            let mut reader = Pieces {
+                remaining: b"abc",
+                width,
+                fail_after: None,
+                reads: 0,
+            };
+            assert_eq!(
+                super::sha256_reader(&mut reader).unwrap(),
+                "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+            );
+        }
+        let mut reader = Pieces {
+            remaining: b"abc",
+            width: 1,
+            fail_after: Some(1),
+            reads: 0,
+        };
+        let error = super::sha256_reader(&mut reader).unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::UnexpectedEof);
+        assert!(error.to_string().contains("検査用途中失敗"));
+    }
 }

@@ -9,6 +9,7 @@ use serde_json::{json, Value};
 use super::{Tool, ToolReg};
 use crate::config::Config;
 use crate::message::Field;
+use crate::tools::social_post::text_arg;
 
 const MAX_TEXT_CHARS: usize = 300;
 
@@ -216,22 +217,6 @@ async fn create_session(
         .ok_or_else(|| "did を取得できません。".to_string())?
         .to_string();
     Ok(BlueskySession { access_jwt, did })
-}
-
-fn text_arg<'a>(args: &'a Value, key: &str, max_chars: usize) -> Result<&'a str, String> {
-    let text = args
-        .get(key)
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| format!("{} が指定されていません。", key))?;
-    if text.chars().count() > max_chars {
-        return Err(format!(
-            "{} は {} 文字以内で指定してください。",
-            key, max_chars
-        ));
-    }
-    Ok(text)
 }
 
 inventory::submit! { ToolReg { make: || Box::new(BlueskyTool) } }

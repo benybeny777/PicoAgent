@@ -8,35 +8,13 @@ use serde_json::{json, Value};
 use super::{Tool, ToolReg};
 use crate::config::Config;
 use crate::message::Field;
+use crate::tools::datetime_words::parse_days;
 
 const FRANKFURTER_BASE: &str = "https://api.frankfurter.app";
 
 pub struct CurrencyRatesTool;
 
-fn parse_days(text: &str) -> Option<i64> {
-    let chars: Vec<char> = text.chars().collect();
-    for (index, character) in chars.iter().enumerate() {
-        if character.is_ascii_digit() {
-            continue;
-        }
-        let unit_month = *character == 'ヶ' || *character == 'か' || *character == '月';
-        if !unit_month && *character != '日' {
-            continue;
-        }
-        let mut cursor = index;
-        let mut number = String::new();
-        while cursor > 0 && chars[cursor - 1].is_ascii_digit() {
-            number.insert(0, chars[cursor - 1]);
-            cursor -= 1;
-        }
-        if let Ok(number) = number.parse::<i64>() {
-            return Some(if unit_month { number * 30 } else { number }.clamp(2, 365));
-        }
-    }
-    None
-}
-
-fn direct_query(text: &str) -> Option<Value> {
+fn direct_query(text: &str) -> Result<Option<Value>, String> {
     let lower = text.to_lowercase();
     const NON_JPY: &[(&str, &str)] = &[
         ("豪ドル", "AUD"),
@@ -70,7 +48,7 @@ fn direct_query(text: &str) -> Option<Value> {
         .iter()
         .any(|word| lower.contains(word));
     if !(strong || base.is_some() || (has_jpy && (chart || lower.contains("換算")))) {
-        return None;
+        return Ok(None);
     }
 
     let mut args = serde_json::Map::new();
@@ -82,11 +60,11 @@ fn direct_query(text: &str) -> Option<Value> {
     }
     if chart {
         args.insert("chart".to_string(), json!(true));
-        if let Some(days) = parse_days(text) {
+        if let Some(days) = parse_days(text)? {
             args.insert("days".to_string(), json!(days));
         }
     }
-    Some(Value::Object(args))
+    Ok(Some(Value::Object(args)))
 }
 
 #[async_trait]
@@ -104,7 +82,10 @@ impl Tool for CurrencyRatesTool {
     }
 
     fn intent_invocation(&self, text: &str) -> Option<crate::tools::IntentInvocation> {
-        direct_query(text).map(crate::tools::IntentInvocation::direct)
+        match direct_query(text) {
+            Ok(args) => args.map(crate::tools::IntentInvocation::direct),
+            Err(reason) => Some(crate::tools::IntentInvocation::invalid(reason)),
+        }
     }
 
     fn label(&self) -> &'static str {
@@ -306,7 +287,7 @@ async fn currency_chart(
         days,
         series.first().map(|(d, _)| d.as_str()).unwrap_or(""),
         series.last().map(|(d, _)| d.as_str()).unwrap_or(""),
-        crate::text::sparkline(&values),
+        match crate::text::sparkline(&values) { Ok(chart) => chart, Err(reason) => return format!("エラー: {reason}"), },
         first,
         last,
         min,

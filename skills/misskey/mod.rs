@@ -8,8 +8,11 @@ use serde_json::{json, Value};
 use super::{Tool, ToolReg};
 use crate::config::Config;
 use crate::message::Field;
+use crate::tools::social_post::text_arg;
 
 const MAX_TEXT_CHARS: usize = 3000;
+
+const VISIBILITIES: &[&str] = &["public", "home", "followers", "specified"];
 
 pub struct MisskeyTool;
 
@@ -37,7 +40,7 @@ impl Tool for MisskeyTool {
             "properties": {
                 "action": { "type": "string", "enum": ["create_note", "timeline", "search_users"], "description": "create_note/timeline/search_users。" },
                 "text": { "type": "string", "description": "create_note の本文。" },
-                "visibility": { "type": "string", "enum": ["public", "home", "followers", "specified"], "description": "公開範囲。省略時 public。" },
+                "visibility": { "type": "string", "enum": VISIBILITIES, "description": "公開範囲。省略時 public。" },
                 "query": { "type": "string", "description": "search_users の検索語。" },
                 "limit": { "type": "integer", "minimum": 1, "maximum": 100, "description": "取得件数。" }
             },
@@ -91,10 +94,11 @@ impl Tool for MisskeyTool {
                     Ok(text) => text,
                     Err(error) => return format!("エラー: {}", error),
                 };
-                let visibility = args
-                    .get("visibility")
-                    .and_then(Value::as_str)
-                    .unwrap_or("public");
+                let visibility = crate::tool_try!(crate::tools::social_post::visibility(
+                    &args,
+                    VISIBILITIES,
+                    "public"
+                ));
                 crate::tools::http::service_reply(
                     cfg,
                     client
@@ -150,22 +154,6 @@ impl Tool for MisskeyTool {
             }
         }
     }
-}
-
-fn text_arg<'a>(args: &'a Value, key: &str, max_chars: usize) -> Result<&'a str, String> {
-    let text = args
-        .get(key)
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| format!("{} が指定されていません。", key))?;
-    if text.chars().count() > max_chars {
-        return Err(format!(
-            "{} は {} 文字以内で指定してください。",
-            key, max_chars
-        ));
-    }
-    Ok(text)
 }
 
 inventory::submit! { ToolReg { make: || Box::new(MisskeyTool) } }

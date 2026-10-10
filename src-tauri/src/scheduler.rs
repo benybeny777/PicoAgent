@@ -410,7 +410,12 @@ pub fn validate_task(cfg: &Config, task: &ScheduledTask) -> Result<(), String> {
                 .split(',')
                 .map(str::trim)
                 .filter(|name| !name.is_empty())
-                .any(|name| name == task.tool_name);
+                .any(|name| {
+                    name == task.tool_name
+                        || (name == "genspark_suite:light"
+                            && task.tool_name == "genspark_suite"
+                            && task.tool_args.get("mode").and_then(Value::as_str) == Some("light"))
+                });
             if !allowed {
                 return Err(format!(
                     "スケジュール実行を許可されていないスキルです: {}。設定の {} で明示的に許可してください。",
@@ -776,7 +781,14 @@ pub async fn rerun_task(
     Ok(record)
 }
 
-pub fn start(app: AppHandle) {
+fn migration_gate(ready: &mut bool, prepare: impl FnOnce() -> bool) -> bool {
+    if !*ready {
+        *ready = prepare();
+    }
+    *ready
+}
+
+pub fn start(app: AppHandle, mut migration_ready: bool) {
     // 検出（tick）と実行（ワーカー）を分ける。実行は 1 本のワーカーで直列に処理するので、
     // 長時間タスクがあっても検出は止まらず、実行履歴の書き込みも競合しない。
     let (tx, mut rx) = tokio::sync::mpsc::channel::<Vec<ScheduledTask>>(64);
@@ -800,6 +812,12 @@ pub fn start(app: AppHandle) {
             let Some(state) = app.try_state::<crate::commands::AppState>() else {
                 continue;
             };
+            // 失敗中は発火状態やキューを変更しない。設定修正後は同じ検出処理で復旧する。
+            if !migration_gate(&mut migration_ready, || {
+                crate::workflow_migration::prepare(&app, &state.config)
+            }) {
+                continue;
+            }
             // 1回の検出結果をまとめて送る。容量を先に確保してから発火状態を更新する。
             match enqueue_due_tasks(&tx, &state.config, Local::now()) {
                 Ok(()) => notify_scheduler_state(&app, None),
@@ -818,6 +836,17 @@ mod tests {
     };
     use crate::config::Config;
     use chrono::TimeZone;
+
+    #[test]
+    fn 移行失敗中は発火へ進まず修正後は一度だけ復旧する() {
+        let mut ready = false;
+        assert!(!super::migration_gate(&mut ready, || false));
+        assert!(!ready);
+        assert!(super::migration_gate(&mut ready, || true));
+        assert!(super::migration_gate(&mut ready, || panic!(
+            "復旧済みの移行を繰り返さない"
+        )));
+    }
 
     fn 固定時刻タスク(time: &str) -> ScheduledTask {
         ScheduledTask {
@@ -839,6 +868,31 @@ mod tests {
             last_run_minute: String::new(),
             last_checked_minute: String::new(),
         }
+    }
+
+    #[test]
+    fn 軽量資料の移行許可を全機能へ広げない() {
+        let cfg = Config::new();
+        let mut task = 固定時刻タスク("07:05");
+        task.kind = "tool".into();
+        task.tool_name = "genspark_suite".into();
+        cfg.set(super::TOOL_ALLOWLIST_KEY, "genspark_suite:light");
+        for args in [
+            serde_json::json!({}),
+            serde_json::json!({"mode":"full"}),
+            serde_json::json!({"mode":true}),
+            serde_json::json!({"mode":"light-extra"}),
+        ] {
+            task.tool_args = args;
+            assert!(validate_task(&cfg, &task).is_err());
+        }
+        task.tool_args = serde_json::json!({"mode":"light", "topic":"資料"});
+        assert!(validate_task(&cfg, &task).is_ok());
+        cfg.set(super::TOOL_ALLOWLIST_KEY, "genspark_suite");
+        task.tool_args = serde_json::json!({"mode":"full"});
+        assert!(validate_task(&cfg, &task).is_ok());
+        cfg.set(super::TOOL_ALLOWLIST_KEY, " , ");
+        assert!(validate_task(&cfg, &task).is_err());
     }
 
     fn test_config(label: &str) -> (Config, std::path::PathBuf) {

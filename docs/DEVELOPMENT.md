@@ -84,6 +84,8 @@ Office・Aivis・Whisper・OSS CLIは同梱表で取得対象の組合せに限�
 
 設計ガードのソース走査は `src-tauri/src/guard_scan.rs` に集約する。スキル、バックエンド、内部共通コアを再帰的に列挙し、読み取り・列挙の失敗は対象パス付きで検査失敗にする。同じテストプロセス内では各ソース本文を一度だけ読み、変更できないスナップショットとして共有する。編集後の検査ではテストプロセスを再実行する。
 
+文字列のslug・HTML/XMLエスケープ・sparklineは`text`、検索結果URLは`tools::search_url`、発話の整数と日数は`tools::datetime_words`、SNS入力は`tools::social_post`を正本とする。違いは引数・ポリシー・許可値表で表す。SHA-256は`picoagent_core::hash::sha256_reader`、OS実行権限は`picoagent_core::permissions`を使い、アプリの理由通知とxtaskの厳格な失敗は各側の薄いアダプタで扱う。資料のfull/lightは登録済みの`genspark_suite`で一度だけ入力を整形・保存する。予約移行は`workflow_migration`が原子的に行い、失敗中はschedulerの検出を止め、設定修正後に同じ検出処理で再試行する。
+
 ## 🧩 コネクタで拡張する
 
 ```mermaid

@@ -294,7 +294,7 @@ cargo xtask setup tools     # 精度向上用 OSS CLI（Pandoc/ripgrep/ffmpeg/qp
 | スキル | 頼み方の例 |
 |---|---|
 | 調査レポート | 「AIスライド生成サービスを出典付きで調査してレポートに」 |
-| 資料ワークスペース | 「Gensparkみたいに資料一式を作って」（brief/deck/sheet/共有HTML…） |
+| 資料ワークスペース | 「Gensparkみたいに資料一式を作って」（`genspark_suite`のlight。brief/deck/sheet/共有HTML…）。「Genspark風の機能を全部やって」はfullで生成 |
 | Genspark風全部 | 「Genspark風の機能を全部やって」（Deep Research 等 10 系統） |
 | サブエージェント | 「競合3社をそれぞれ調べて」（分担して並行調査） |
 

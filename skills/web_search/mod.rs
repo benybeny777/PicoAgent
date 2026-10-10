@@ -4,10 +4,10 @@
 
 use std::time::Duration;
 
+use crate::tools::search_url::direct_url;
 use async_trait::async_trait;
 use scraper::{Html, Selector};
 use serde_json::{json, Value};
-use url::Url;
 
 use super::{Tool, ToolReg};
 use crate::config::Config;
@@ -209,20 +209,6 @@ fn search_query_in_conversation(text: &str, earlier_user_texts: &[&str]) -> Stri
         combined
     };
     combined.chars().take(MAX_QUERY_CHARS).collect()
-}
-
-fn direct_url(href: &str) -> String {
-    let absolute = if href.starts_with("//") {
-        format!("https:{}", href)
-    } else {
-        href.to_string()
-    };
-    if let Ok(parsed) = Url::parse(&absolute) {
-        if let Some((_, destination)) = parsed.query_pairs().find(|(key, _)| key == "uddg") {
-            return destination.into_owned();
-        }
-    }
-    absolute
 }
 
 fn trim_to_bytes(text: &mut String, max_bytes: usize) {

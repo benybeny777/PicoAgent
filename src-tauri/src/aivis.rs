@@ -438,28 +438,6 @@ fn is_executable_file(path: &Path) -> bool {
     path.is_file()
 }
 
-#[cfg(unix)]
-fn ensure_executable(path: &Path) -> anyhow::Result<()> {
-    use std::os::unix::fs::PermissionsExt;
-    let mut permissions = std::fs::metadata(path)?.permissions();
-    if permissions.mode() & 0o111 != 0 {
-        return Ok(());
-    }
-    permissions.set_mode(permissions.mode() | 0o755);
-    if let Err(error) = std::fs::set_permissions(path, permissions) {
-        // .app 配下など実行時に chmod できない同梱リソースは spawn 側の成否に委ねる。
-        if error.kind() != std::io::ErrorKind::PermissionDenied {
-            return Err(error.into());
-        }
-    }
-    Ok(())
-}
-
-#[cfg(not(unix))]
-fn ensure_executable(_path: &Path) -> anyhow::Result<()> {
-    Ok(())
-}
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum DeviceMode {
     Auto,
@@ -1054,7 +1032,7 @@ fn stage_and_replace(app: &tauri::AppHandle, source: &Path, install: &Path) -> a
     let run = find_run_file(&stage)?
         .ok_or_else(|| anyhow::anyhow!("準備した Aivis に run 実行ファイルが見つかりません。"))?;
     validate_runtime_files(&run)?;
-    ensure_executable(&run)?;
+    crate::installer::fs::prepare_executable(app, &run)?;
     replace_install_tree(app, &stage, install)
 }
 
@@ -1071,7 +1049,7 @@ fn copy_resource_to_install(app: &tauri::AppHandle) -> anyhow::Result<Option<Pat
     let Some(path) = runtime_engine_path(app) else {
         anyhow::bail!("Aivis 同梱リソースをコピーしましたが、実行ファイルを見つけられません。");
     };
-    ensure_executable(&path)?;
+    crate::installer::fs::prepare_executable(app, &path)?;
     append_log(
         app,
         &format!(
@@ -1108,12 +1086,12 @@ async fn ensure_installed_ready(
                     }
                 }
             }
-            ensure_executable(&path)?;
+            crate::installer::fs::prepare_executable(app, &path)?;
             return Ok(path);
         }
     }
     if let Some(path) = copy_resource_to_install(app)? {
-        ensure_executable(&path)?;
+        crate::installer::fs::prepare_executable(app, &path)?;
         return Ok(path);
     }
     append_log(
@@ -1187,7 +1165,7 @@ async fn ensure_installed_ready(
     let installed = runtime_engine_path(app).ok_or_else(|| {
         anyhow::anyhow!("Aivis を配置しましたが、実行ファイルを見つけられません。")
     })?;
-    ensure_executable(&installed)?;
+    crate::installer::fs::prepare_executable(app, &installed)?;
     append_log(app, &format!("Aivis 自動取得完了: {}", installed.display()))?;
     Ok(installed)
 }
@@ -1339,7 +1317,7 @@ fn spawn_engine(
     if !is_executable_file(&path) {
         anyhow::bail!("Aivis の実行ファイルが見つかりません: {}", path.display());
     }
-    ensure_executable(&path)?;
+    crate::installer::fs::prepare_executable(app, &path)?;
     let work_dir = path.parent().map(Path::to_path_buf);
     let mut command = crate::tools::process::command_sync(path);
     if let Some(dir) = work_dir {

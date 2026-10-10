@@ -37,6 +37,10 @@ pub struct IntentInvocation {
 }
 
 impl IntentInvocation {
+    /// 発話の不正値を、外部通信や保存を始めず利用者へ返す。
+    pub fn invalid(reason: String) -> Self {
+        Self::direct(json!({"__picoagent_input_error": reason}))
+    }
     pub fn direct(args: Value) -> Self {
         Self {
             args,
@@ -163,8 +167,11 @@ pub trait Tool: Send + Sync {
 }
 
 pub mod cli_detection;
+pub mod datetime_words;
 pub mod http;
 pub mod process;
+pub mod search_url;
+pub mod social_post;
 pub mod walk;
 pub mod whisper;
 
@@ -725,6 +732,12 @@ fn readable_approval_notice(result: String) -> String {
 
 /// ライセンス判定とツール本体の実行だけを行う共通部分。打ち切りは呼び出し側の判断。
 async fn run_tool(cfg: &Config, name: &str, args: Value) -> String {
+    if let Some(reason) = args.get("__picoagent_input_error") {
+        return format!(
+            "エラー: {}",
+            reason.as_str().unwrap_or("入力の検査結果が不正です。")
+        );
+    }
     if crate::license::tool_requires_pro(name) && !crate::license::is_pro(cfg) {
         return "エラー: このスキルは PicoAgent Pro のライセンスが必要です。設定の「製品情報・ライセンス」でライセンスキーを登録してください。".to_string();
     }
@@ -768,6 +781,25 @@ pub async fn dispatch_interactive(cfg: &Config, name: &str, args: Value) -> Stri
 #[cfg(test)]
 mod tests {
     use super::is_failure_text;
+
+    #[tokio::test]
+    async fn 発話の不正値はスキル実行前に理由を返す() {
+        let cfg = crate::config::Config::new();
+        let before = cfg.get_all();
+        for name in [
+            "focus_timer",
+            "reminder",
+            "currency_rates",
+            "market_indices",
+        ] {
+            let invocation = super::IntentInvocation::invalid("数値が大きすぎます".into());
+            assert_eq!(
+                super::dispatch(&cfg, name, invocation.args).await,
+                "エラー: 数値が大きすぎます"
+            );
+            assert_eq!(cfg.get_all(), before);
+        }
+    }
 
     #[test]
     fn スキルの失敗文を見分ける() {
@@ -954,9 +986,10 @@ mod tests {
         assert_eq!(suite.invocation.args["audience"], "一般読者");
 
         let workspace = super::intent_for_text("Gensparkみたいに資料一式を作って").unwrap();
-        assert_eq!(workspace.tool_name, "spark_workspace");
+        assert_eq!(workspace.tool_name, "genspark_suite");
+        assert_eq!(workspace.invocation.args["mode"], "light");
         assert_eq!(
-            workspace.invocation.args["project"],
+            workspace.invocation.args["topic"],
             "Gensparkみたいに資料一式を作って"
         );
     }
@@ -1318,7 +1351,10 @@ mod tests {
     #[test]
     fn 資料ワークスペースを候補に追加する() {
         let names = schema_names("Gensparkみたいに資料一式を作って");
-        assert!(names.contains(&"spark_workspace".to_string()));
+        assert!(names.contains(&"genspark_suite".to_string()));
+        assert!(!super::all()
+            .iter()
+            .any(|tool| tool.name() == "spark_workspace"));
     }
 
     #[test]

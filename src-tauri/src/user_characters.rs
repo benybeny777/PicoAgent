@@ -454,80 +454,140 @@ fn copy_selected_pmx(source: &Path, destination: &Path) -> Result<PathBuf> {
 
 /// フォルダまたは zip を導入する。導入したキャラクターの id と名前を返す。
 /// 配信物の一覧から同梱キャラクターのidを取り出す（`characters` 配列の `id`）。
-fn parse_bundled_ids(index_json: &str) -> Vec<String> {
-    let Ok(index) = serde_json::from_str::<Value>(index_json) else {
-        return Vec::new();
-    };
-    index
+fn parse_bundled_ids(index_json: &str) -> Result<Vec<String>> {
+    let index: Value =
+        serde_json::from_str(index_json).context("同梱キャラクター一覧が不正なJSONです")?;
+    let items = index
         .get("characters")
         .and_then(Value::as_array)
-        .map(|items| {
-            items
-                .iter()
-                .filter_map(|item| item.get("id").and_then(Value::as_str))
-                .map(str::to_string)
-                .collect()
+        .context("同梱キャラクター一覧のcharactersは配列で指定してください")?;
+    items
+        .iter()
+        .map(|item| {
+            let id = character_pack::required_text(item, "id")?;
+            anyhow::ensure!(
+                character_pack::is_valid_id(id),
+                "同梱キャラクター一覧のidが不正です"
+            );
+            Ok(id.to_string())
         })
-        .unwrap_or_default()
+        .collect()
 }
 
-/// 同梱キャラクターと同じidのパックは、一覧で同梱側が優先されるため追加しても選べない。
-/// 一覧（`assets/characters/index.json`）はビルド時に実行ファイルへ焼き込まれるので、
-/// ファイルではなく配信アセットとして読む（開発時は `frontendDist` から読まれる）。
+/// 一覧が読めなければ衝突検査を飛ばさず、入力失敗として導入を止める。
 fn ensure_id_not_bundled(app: &AppHandle, id: &str) -> Result<()> {
-    let Some(asset) = app
+    let asset = app
         .asset_resolver()
         .get("assets/characters/index.json".to_string())
-    else {
-        // 一覧を読めない構成では判定しない（設定画面側でも同じ衝突を弾いている）。
-        return Ok(());
-    };
-    let Ok(text) = String::from_utf8(asset.bytes) else {
-        return Ok(());
-    };
-    if parse_bundled_ids(&text).iter().any(|bundled| bundled == id) {
+        .context("同梱キャラクター一覧を取得できないためidの衝突を確認できません")?;
+    let text =
+        String::from_utf8(asset.bytes).context("同梱キャラクター一覧がUTF-8ではありません")?;
+    if parse_bundled_ids(&text)?
+        .iter()
+        .any(|bundled| bundled == id)
+    {
         bail!("同梱キャラクターと同じidです: {id}（パックのidを変えてください）");
     }
     Ok(())
 }
 
-pub fn install(app: &AppHandle, source: &Path) -> Result<(String, String)> {
+fn import_transaction(
+    root: &Path,
+    source: &Path,
+    identity: Option<(&str, &str)>,
+    check_id: impl Fn(&str) -> Result<()>,
+    build: impl FnOnce(&Path, Option<(&str, &str)>) -> Result<PathBuf>,
+) -> Result<(String, String)> {
+    import_transaction_with_publish(root, source, identity, check_id, build, |from, to| {
+        std::fs::rename(from, to)
+    })
+}
+
+/// 入力・ロック・一時配置・検証・公開を一つの所有者で行う。生成方式と更新は別責務。
+fn import_transaction_with_publish(
+    root: &Path,
+    source: &Path,
+    identity: Option<(&str, &str)>,
+    check_id: impl Fn(&str) -> Result<()>,
+    build: impl FnOnce(&Path, Option<(&str, &str)>) -> Result<PathBuf>,
+    publish: impl FnOnce(&Path, &Path) -> std::io::Result<()>,
+) -> Result<(String, String)> {
     let _state_lock = crate::store::lock_state("user-characters");
     if !source.exists() {
         bail!("指定先が見つかりません: {}", source.display());
     }
-    let root = root(app)?;
-    std::fs::create_dir_all(&root)
-        .with_context(|| format!("置き場を作れません: {}", root.display()))?;
-
-    // 一時フォルダで組み立て、検証を通ってから rename で確定する
-    // （途中で失敗した中途半端なフォルダを導入先へ残さない）。
-    let staging = root.join(format!(".installing-{}", std::process::id()));
-    if staging.exists() {
-        std::fs::remove_dir_all(&staging).with_context(|| {
-            format!("古い導入途中データを掃除できません: {}", staging.display())
-        })?;
+    let identity = identity.map(|(id, name)| (id.trim(), name.trim()));
+    let destination_for = |id: &str| -> Result<PathBuf> {
+        let destination = root.join(id);
+        match std::fs::symlink_metadata(&destination) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(destination),
+            Err(error) => Err(error).context("導入先を確認できません"),
+            Ok(_) => bail!("同じidのキャラクターが既にあります: {id}（先に削除してください）"),
+        }
+    };
+    if let Some((id, name)) = identity {
+        if !character_pack::is_valid_id(id) {
+            bail!(
+                "id は{}文字以内の英数字・ハイフン・アンダースコアだけにしてください",
+                character_pack::MAX_ID_CHARS
+            );
+        }
+        if name.is_empty() {
+            bail!("表示名を入力してください");
+        }
+        check_id(id)?;
+        destination_for(id)?;
     }
-    std::fs::create_dir_all(&staging)?;
-
+    std::fs::create_dir_all(root)
+        .with_context(|| format!("置き場を作れません: {}", root.display()))?;
+    // 一意な自分のstageだけを所有し、別処理の残物や既存キャラを削除しない。
+    let staging = tempfile::Builder::new()
+        .prefix(&format!(".installing-{}-", std::process::id()))
+        .tempdir_in(root)?;
     let result = (|| -> Result<(String, String)> {
-        prepare_source(source, &staging.join("pack"))?;
-        let pack = pack_root(&staging.join("pack"))?;
+        let pack = build(staging.path(), identity)?;
+        let canonical_stage = staging.path().canonicalize()?;
+        anyhow::ensure!(
+            pack.canonicalize()?.starts_with(&canonical_stage),
+            "生成パックが一時配置の外にあります"
+        );
         let manifest = character_pack::validate(&pack)?;
         let id = character_pack::required_text(&manifest, "id")?.to_string();
         let name = character_pack::required_text(&manifest, "name")?.to_string();
-        ensure_id_not_bundled(app, &id)?;
-        let destination = root.join(&id);
-        if destination.exists() {
-            bail!("同じidのキャラクターが既にあります: {id}（先に削除してください）");
+        if let Some((expected_id, expected_name)) = identity {
+            anyhow::ensure!(
+                id == expected_id && name == expected_name,
+                "生成パックのidまたは表示名が指定と一致しません"
+            );
+        } else {
+            check_id(&id)?;
         }
-        std::fs::rename(&pack, &destination)
+        let destination = destination_for(&id)?;
+        publish(&pack, &destination)
             .with_context(|| format!("導入先へ移動できません: {}", destination.display()))?;
         Ok((id, name))
     })();
+    // 清掃失敗も画面へ返し、成功と誤認させない。両方失敗なら両理由を保持する。
+    match (result, staging.close()) {
+        (result, Ok(())) => result,
+        (Ok(_), Err(error)) => {
+            Err(error).context("導入は配置済みですが一時フォルダを掃除できません")
+        }
+        (Err(error), Err(cleanup)) => bail!("{error:#} / 一時フォルダを掃除できません: {cleanup}"),
+    }
+}
 
-    cleanup_staging(app, &staging);
-    result
+pub fn install(app: &AppHandle, source: &Path) -> Result<(String, String)> {
+    import_transaction(
+        &root(app)?,
+        source,
+        None,
+        |id| ensure_id_not_bundled(app, id),
+        |staging, _| {
+            prepare_source(source, &staging.join("pack"))?;
+            pack_root(&staging.join("pack"))
+        },
+    )
 }
 
 /// キャラ作成機能が導入したパックだけを、同じ生成元IDの完成世代で置き換える。
@@ -618,53 +678,20 @@ pub fn install_live2d(
     id: &str,
     name: &str,
 ) -> Result<(String, String)> {
-    let _state_lock = crate::store::lock_state("user-characters");
-    if !source.exists() {
-        bail!("指定先が見つかりません: {}", source.display());
-    }
-    let id = id.trim();
-    let name = name.trim();
-    if !character_pack::is_valid_id(id) {
-        bail!(
-            "id は{}文字以内の英数字・ハイフン・アンダースコアだけにしてください",
-            character_pack::MAX_ID_CHARS
-        );
-    }
-    if name.is_empty() {
-        bail!("表示名を入力してください");
-    }
-    ensure_id_not_bundled(app, id)?;
-    let root = root(app)?;
-    std::fs::create_dir_all(&root)
-        .with_context(|| format!("置き場を作れません: {}", root.display()))?;
-    let destination = root.join(id);
-    if destination.exists() {
-        bail!("同じidのキャラクターが既にあります: {id}（先に削除してください）");
-    }
-
-    let staging = root.join(format!(".installing-live2d-{}", std::process::id()));
-    if staging.exists() {
-        std::fs::remove_dir_all(&staging).with_context(|| {
-            format!("古い導入途中データを掃除できません: {}", staging.display())
-        })?;
-    }
-    std::fs::create_dir_all(&staging)?;
-
-    let result = (|| -> Result<(String, String)> {
-        let extracted = staging.join("source");
-        prepare_source(source, &extracted)?;
-        let pack = staging.join("generated");
-        build_live2d_pack(&extracted, &pack, id, name)?;
-        let validated = character_pack::validate(&pack)?;
-        let validated_id = character_pack::required_text(&validated, "id")?.to_string();
-        let validated_name = character_pack::required_text(&validated, "name")?.to_string();
-        std::fs::rename(&pack, &destination)
-            .with_context(|| format!("導入先へ移動できません: {}", destination.display()))?;
-        Ok((validated_id, validated_name))
-    })();
-
-    cleanup_staging(app, &staging);
-    result
+    import_transaction(
+        &root(app)?,
+        source,
+        Some((id, name)),
+        |id| ensure_id_not_bundled(app, id),
+        |staging, identity| {
+            let (id, name) = identity.context("Live2Dの入力情報がありません")?;
+            let extracted = staging.join("source");
+            prepare_source(source, &extracted)?;
+            let pack = staging.join("generated");
+            build_live2d_pack(&extracted, &pack, id, name)?;
+            Ok(pack)
+        },
+    )
 }
 
 /// 未加工のPMXと素材を利用者領域へ導入する。
@@ -674,62 +701,29 @@ pub fn install_mmd(
     id: &str,
     name: &str,
 ) -> Result<(String, String)> {
-    let _state_lock = crate::store::lock_state("user-characters");
-    if !source.exists() {
-        bail!("指定先が見つかりません: {}", source.display());
-    }
-    let id = id.trim();
-    let name = name.trim();
-    if !character_pack::is_valid_id(id) {
-        bail!(
-            "id は{}文字以内の英数字・ハイフン・アンダースコアだけにしてください",
-            character_pack::MAX_ID_CHARS
-        );
-    }
-    if name.is_empty() {
-        bail!("表示名を入力してください");
-    }
-    ensure_id_not_bundled(app, id)?;
-    let root = root(app)?;
-    std::fs::create_dir_all(&root)
-        .with_context(|| format!("置き場を作れません: {}", root.display()))?;
-    let destination = root.join(id);
-    if destination.exists() {
-        bail!("同じidのキャラクターが既にあります: {id}（先に削除してください）");
-    }
-
-    let staging = root.join(format!(".installing-mmd-{}", std::process::id()));
-    if staging.exists() {
-        std::fs::remove_dir_all(&staging).with_context(|| {
-            format!("古い導入途中データを掃除できません: {}", staging.display())
-        })?;
-    }
-    std::fs::create_dir_all(&staging)?;
-
-    let result = (|| -> Result<(String, String)> {
-        let extracted = staging.join("source");
-        let selected = if source
-            .extension()
-            .and_then(|s| s.to_str())
-            .is_some_and(|s| s.eq_ignore_ascii_case("pmx"))
-        {
-            Some(copy_selected_pmx(source, &extracted)?)
-        } else {
-            prepare_source(source, &extracted)?;
-            None
-        };
-        let pack = staging.join("generated");
-        build_mmd_pack(&extracted, selected.as_deref(), &pack, id, name)?;
-        let validated = character_pack::validate(&pack)?;
-        let validated_id = character_pack::required_text(&validated, "id")?.to_string();
-        let validated_name = character_pack::required_text(&validated, "name")?.to_string();
-        std::fs::rename(&pack, &destination)
-            .with_context(|| format!("導入先へ移動できません: {}", destination.display()))?;
-        Ok((validated_id, validated_name))
-    })();
-
-    cleanup_staging(app, &staging);
-    result
+    import_transaction(
+        &root(app)?,
+        source,
+        Some((id, name)),
+        |id| ensure_id_not_bundled(app, id),
+        |staging, identity| {
+            let (id, name) = identity.context("MMDの入力情報がありません")?;
+            let extracted = staging.join("source");
+            let selected = if source
+                .extension()
+                .and_then(|s| s.to_str())
+                .is_some_and(|s| s.eq_ignore_ascii_case("pmx"))
+            {
+                Some(copy_selected_pmx(source, &extracted)?)
+            } else {
+                prepare_source(source, &extracted)?;
+                None
+            };
+            let pack = staging.join("generated");
+            build_mmd_pack(&extracted, selected.as_deref(), &pack, id, name)?;
+            Ok(pack)
+        },
+    )
 }
 
 /// 追加キャラクターを削除する。ユーザーが持ち込んだデータなので OS のゴミ箱へ移す。
@@ -828,6 +822,36 @@ pub fn rename(app: &AppHandle, id: &str, name: &str) -> Result<String> {
 /// 取り込む側でない**アプリ側**のこのファイルに置く。
 #[cfg(test)]
 mod guard {
+    #[test]
+    fn 三形式の新規取込は共通transactionだけを経由する() {
+        let source = crate::guard_scan::backend_sources()
+            .iter()
+            .find(|source| source.name == "user_characters.rs")
+            .unwrap();
+        let body = source.body();
+        for name in ["install", "install_live2d", "install_mmd"] {
+            let start = body.find(&format!("pub fn {name}(")).unwrap();
+            let rest = &body[start..];
+            let end = rest.find("\n}").unwrap() + 2;
+            let entry = &rest[..end];
+            assert_eq!(
+                entry.matches("import_transaction(").count(),
+                1,
+                "{name}が共通取込を使っていません"
+            );
+            for duplicate in [
+                "lock_state(",
+                "std::fs::rename(",
+                "character_pack::validate(",
+                ".installing-",
+            ] {
+                assert!(
+                    !entry.contains(duplicate),
+                    "{name}へ取込手順が戻っています: {duplicate}"
+                );
+            }
+        }
+    }
     /// `character_pack.rs` は xtask が `#[path]` で取り込むため、`crate::` の
     /// アプリ内部モジュールを参照してはいけない（依存は std / serde_json / anyhow だけ）。
     ///
@@ -941,6 +965,143 @@ mod tests {
             json!({ "id": id, "name": marker }).to_string(),
         )
         .unwrap();
+    }
+
+    fn write_image_pack(path: &std::path::Path, id: &str, name: &str) {
+        std::fs::create_dir_all(path).unwrap();
+        std::fs::write(path.join("idle.png"), [0u8; 8]).unwrap();
+        std::fs::write(
+            path.join("character.json"),
+            json!({"id":id,"name":name,"animations":{"idle":{"path":"idle.png","frames":1}}})
+                .to_string(),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn 共通取込の準備検証配置の故障でも既存データを保ち一時物を残さない() {
+        use std::cell::Cell;
+        for failure in [
+            "正常",
+            "準備",
+            "検証",
+            "配置",
+            "指定不一致",
+            "重複",
+            "同梱一覧",
+        ] {
+            let temp = crate::installer::fs::test_directory();
+            let root = temp.path().join("characters");
+            let source = temp.path().join("source");
+            write_image_pack(&source, "new-id", "新しい名前");
+            write_image_pack(&root.join("kept"), "kept", "既存データ");
+            if failure == "重複" {
+                write_image_pack(&root.join("new-id"), "new-id", "既存の同じID");
+            }
+            let kept = std::fs::read(root.join("kept/character.json")).unwrap();
+            let duplicate = (failure == "重複")
+                .then(|| std::fs::read(root.join("new-id/character.json")).unwrap());
+            let builds = Cell::new(0);
+            let publishes = Cell::new(0);
+            let result = super::import_transaction_with_publish(
+                &root,
+                &source,
+                Some((" new-id ", " 新しい名前 ")),
+                |_| {
+                    if failure == "同梱一覧" {
+                        anyhow::bail!("同梱一覧取得の故障");
+                    }
+                    Ok(())
+                },
+                |staging, _| {
+                    builds.set(builds.get() + 1);
+                    let pack = staging.join("pack");
+                    super::copy_dir(&source, &pack, super::PACK_LIMITS)?;
+                    if failure == "準備" {
+                        anyhow::bail!("準備の故障");
+                    }
+                    if failure == "検証" {
+                        std::fs::write(pack.join("character.json"), b"{")?;
+                    }
+                    if failure == "指定不一致" {
+                        write_image_pack(&pack, "other-id", "新しい名前");
+                    }
+                    Ok(pack)
+                },
+                |from, to| {
+                    publishes.set(publishes.get() + 1);
+                    if failure == "配置" {
+                        return Err(std::io::Error::other("配置の故障"));
+                    }
+                    std::fs::rename(from, to)
+                },
+            );
+            assert_eq!(result.is_ok(), failure == "正常", "{failure}: {result:?}");
+            assert_eq!(
+                std::fs::read(root.join("kept/character.json")).unwrap(),
+                kept
+            );
+            if let Some(bytes) = duplicate {
+                assert_eq!(
+                    std::fs::read(root.join("new-id/character.json")).unwrap(),
+                    bytes
+                );
+            } else {
+                assert_eq!(root.join("new-id").exists(), failure == "正常");
+            }
+            assert!(
+                !std::fs::read_dir(&root).unwrap().any(|entry| entry
+                    .unwrap()
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with(".installing-")),
+                "{failure}"
+            );
+            if ["重複", "同梱一覧"].contains(&failure) {
+                assert_eq!(builds.get(), 0);
+            }
+            if ["準備", "検証", "指定不一致", "重複", "同梱一覧"].contains(&failure)
+            {
+                assert_eq!(publishes.get(), 0);
+            }
+        }
+    }
+
+    #[test]
+    fn 入力不正は置き場生成や準備前に止めパック由来情報も同じ確定段で検査する() {
+        let temp = crate::installer::fs::test_directory();
+        let source = temp.path().join("source");
+        write_image_pack(&source, "image-id", "画像パック");
+        for identity in [Some(("../escape", "名前")), Some(("id", " \n"))] {
+            let root = temp.path().join("not-created");
+            let result = super::import_transaction(
+                &root,
+                &source,
+                identity,
+                |_| Ok(()),
+                |_, _| panic!("入力失敗後に準備へ進んだ"),
+            );
+            assert!(result.is_err());
+            assert!(!root.exists());
+        }
+        let root = temp.path().join("images");
+        let result = super::import_transaction(
+            &root,
+            &source,
+            None,
+            |id| {
+                assert_eq!(id, "image-id");
+                Ok(())
+            },
+            |staging, _| {
+                let pack = staging.join("pack");
+                super::copy_dir(&source, &pack, super::PACK_LIMITS)?;
+                Ok(pack)
+            },
+        )
+        .unwrap();
+        assert_eq!(result, ("image-id".into(), "画像パック".into()));
+        assert!(root.join("image-id/idle.png").is_file());
     }
 
     /// 更新中に落ちて退避先だけが残ったキャラは、再起動後（別のプロセスID）に元の場所へ戻る。
@@ -1153,12 +1314,14 @@ mod tests {
     #[test]
     fn 配信物の一覧から同梱キャラのidだけを取り出す() {
         let ids = parse_bundled_ids(
-            r#"{"default":"mugi","characters":[{"id":"mugi","name":"むぎ"},{"name":"id無し"},{"id":"rin"}]}"#,
-        );
+            r#"{"default":"mugi","characters":[{"id":"mugi","name":"むぎ"},{"id":"rin"}]}"#,
+        )
+        .unwrap();
         assert_eq!(ids, vec!["mugi".to_string(), "rin".to_string()]);
-        // 読めない一覧では判定材料を持たない（呼び出し側は素通しする）。
-        assert!(parse_bundled_ids("{").is_empty());
-        assert!(parse_bundled_ids(r#"{"characters":{}}"#).is_empty());
+        // 読めない一覧は衝突判定を飛ばさず導入失敗にする。
+        assert!(parse_bundled_ids("{").is_err());
+        assert!(parse_bundled_ids(r#"{"characters":[{"name":"id無し"}]}"#).is_err());
+        assert!(parse_bundled_ids(r#"{"characters":{}}"#).is_err());
     }
 
     #[test]
