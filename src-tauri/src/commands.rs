@@ -778,22 +778,29 @@ pub async fn pet_init(app: AppHandle, state: State<'_, AppState>) -> Result<Valu
         .collect();
     let character_id = state.config.get("PICOAGENT_CHARACTER", "mugi");
     let relationship_mode = state.config.get("PICOAGENT_COMPANION_MODE", "both");
-    // フォールバック許可: 関係性データが読めないだけで起動シーケンス全体を止めない
+    // フォールバック許可: PR #463 採用案6。読込失敗を画面へ知らせて起動を続ける
     // （`pet_init` が失敗するとフロントはローディングから先へ進めない）。
-    // 読めなかった理由はログへ残し、まっさらな関係性として続行する。
-    let relationship = match crate::relationship::load(&app, &character_id, &relationship_mode) {
-        Ok(relationship) => relationship,
-        Err(error) => {
-            crate::log_paths::append_app_log(
-                &app,
-                &format!("関係性データを読めないため初期状態で続行します: {error}"),
-            );
-            crate::relationship::RelationshipState::empty(&character_id, &relationship_mode)
-        }
-    };
+    // 読めなかった理由を戻り値で画面へ渡し、元のファイルは保存し直さない。
+    let (relationship, relationship_error) =
+        match crate::relationship::load(&app, &character_id, &relationship_mode) {
+            Ok(relationship) => (relationship, None),
+            Err(error) => {
+                crate::log_paths::append_app_log(
+                    &app,
+                    &format!("関係性データを読めないため初期状態で続行します: {error}"),
+                );
+                (
+                    crate::relationship::RelationshipState::empty(
+                        &character_id,
+                        &relationship_mode,
+                    ),
+                    Some(error),
+                )
+            }
+        };
     let bond_label = relationship.bond_label();
     let stream = crate::stream_profile::resolve(&state.config, &character_id);
-    Ok(json!({
+    let info = json!({
         "betaBuild": cfg!(feature = "beta-full"),
         "model": model,
         "providerId": state.config.get("PICOAGENT_PROVIDER", "local"),
@@ -834,8 +841,11 @@ pub async fn pet_init(app: AppHandle, state: State<'_, AppState>) -> Result<Valu
         "companionMode": relationship_mode,
         "relationshipMemoryEnabled": state.config.get_bool("PICOAGENT_RELATIONSHIP_MEMORY_ENABLED", true),
         "relationship": relationship,
+        "relationshipError": relationship_error,
         "bondLabel": bond_label,
-    }))
+    });
+    crate::notice::flush(&app);
+    Ok(info)
 }
 
 #[tauri::command]
@@ -1937,9 +1947,21 @@ pub async fn pet_send(
             }
         }
         capture_project_rules(&app, &state.config, &user_text);
-        if let Some(memory_context) =
-            crate::memory::update_from_turn(&app, &state.config, &user_text)
-        {
+        let memory_result = crate::memory::update_from_turn(&app, &state.config, &user_text);
+        static MEMORY_SAVE: crate::notice::FailureLatch = crate::notice::FailureLatch::new();
+        // 候補なしのターンはI/Oを試していないため復旧とは扱わない。
+        if !matches!(memory_result, Ok(None)) {
+            MEMORY_SAVE.report(
+                &app,
+                "memory-save",
+                "長期メモリの保存",
+                memory_result.as_ref().map(|_| ()).map_err(|error| {
+                    format!("長期メモリを保存できないため、この会話の内容は覚えられません: {error}")
+                }),
+                "長期メモリの保存が復旧しました",
+            );
+        }
+        if let Ok(Some(memory_context)) = memory_result {
             *state.memory_context.lock().unwrap() = memory_context;
             state.reset_conversation();
             let refreshed = state.messages.lock().unwrap().clone();
@@ -2898,6 +2920,7 @@ pub(crate) fn encrypt_existing_secrets(app: &AppHandle, config: &Config) {
     let all = config.get_all();
     let schema_keys = secret_keys();
     let mut patch = Map::new();
+    let mut failures = Vec::new();
     for (key, value) in &all {
         if !is_secret_setting(&schema_keys, key) {
             continue;
@@ -2909,24 +2932,31 @@ pub(crate) fn encrypt_existing_secrets(app: &AppHandle, config: &Config) {
                         patch.insert(key.clone(), Value::String(value));
                     }
                     Err(error) => {
-                        crate::log_paths::append_app_log(
-                            app,
-                            &format!("既存シークレットを保護できないため平文を維持します: {key} ({error})"),
-                        );
+                        failures.push(format!("{key}: {error}"));
                     }
                 }
             }
         }
     }
     if !patch.is_empty() {
-        // フォールバック許可: 移行保存に失敗してもアプリ起動は止めない。
         if let Err(error) = config.set_all(patch) {
-            crate::log_paths::append_app_log(
-                app,
-                &format!("既存シークレットの保護保存に失敗しました: {error}"),
-            );
+            failures.push(error.to_string());
         }
     }
+    // フォールバック許可: PR #463 採用案4。平文が残ることを通知し起動を続ける。
+    static SECRET_MIGRATION: crate::notice::FailureLatch = crate::notice::FailureLatch::new();
+    let result = if failures.is_empty() {
+        Ok(())
+    } else {
+        Err(format!("APIキーを暗号化して保存できませんでした。平文のまま残っています。設定画面で保存し直してください: {}", failures.join("、")))
+    };
+    SECRET_MIGRATION.report(
+        app,
+        "secret-migration",
+        "APIキーの保護",
+        result,
+        "APIキーの保護保存が復旧しました",
+    );
 }
 
 #[tauri::command]
@@ -3474,21 +3504,17 @@ fn capture_project_rules(app: &AppHandle, config: &crate::config::Config, user_t
             // 既に書いてある作法は静かに飛ばす（同じ通知を毎回出さない）。
             Ok(None) => {}
             Ok(Some(path)) => {
-                let payload = json!({
-                    "kind": "project_rule",
-                    "title": "AGENTS.mdへ作法を追記しました",
-                    "body": rule,
-                    "ok": true,
-                    "rule": rule,
-                    "path": path.display().to_string(),
-                    "at": chrono::Local::now().to_rfc3339(),
-                });
-                if let Err(error) = app.emit("pet:notice", payload) {
-                    crate::log_paths::append_app_log(
-                        app,
-                        &format!("AGENTS.md追記を画面へ通知できません: {error}"),
-                    );
-                }
+                crate::notice::emit(
+                    app,
+                    crate::notice::Notice::info(
+                        "project_rule",
+                        "AGENTS.mdへ作法を追記しました",
+                        &rule,
+                        true,
+                    )
+                    .detail("rule", json!(rule))
+                    .detail("path", json!(path.display().to_string())),
+                );
             }
             Err(error) => crate::log_paths::append_app_log(
                 app,
@@ -3834,6 +3860,7 @@ pub fn pet_reset_layout(app: AppHandle) {
 /// これが届かないと `boot_screen` が読み込み失敗と判断し、案内画面へ切り替える。
 #[tauri::command]
 pub fn pet_frontend_ready(app: AppHandle) {
+    crate::notice::begin_boot();
     crate::boot_screen::mark_started(&app);
     if let Err(error) = crate::layout::restart_boot(&app) {
         crate::log_paths::append_app_log(
@@ -4443,6 +4470,14 @@ pub fn spawn_update_check(app: AppHandle) {
                     &app,
                     &format!("起動時の更新確認に失敗しました: {error}"),
                 );
+                crate::notice::emit(
+                    &app,
+                    crate::notice::Notice::background_failure(
+                        "update-check",
+                        "更新確認",
+                        format!("起動時の更新確認に失敗しました: {error}"),
+                    ),
+                );
                 return;
             }
         };
@@ -4452,6 +4487,14 @@ pub fn spawn_update_check(app: AppHandle) {
                 crate::log_paths::append_app_log(
                     &app,
                     &format!("更新情報を解析できません: {error}"),
+                );
+                crate::notice::emit(
+                    &app,
+                    crate::notice::Notice::background_failure(
+                        "update-check",
+                        "更新確認",
+                        format!("更新情報を解析できません: {error}"),
+                    ),
                 );
                 return;
             }
@@ -4475,21 +4518,7 @@ pub fn spawn_update_check(app: AppHandle) {
             .get("releasePage")
             .and_then(Value::as_str)
             .unwrap_or("https://github.com/benybeny777/PicoAgent-Distribution/releases");
-        if let Err(error) = app.emit(
-            "pet:notice",
-            json!({
-                "kind": "update",
-                "ok": true,
-                "title": format!("新しいバージョン v{latest} があるよ"),
-                "body": format!("現在は v{current}。設定の「製品情報・ライセンス」からアップデートできます。詳細: {link}"),
-                "at": chrono::Utc::now().to_rfc3339(),
-            }),
-        ) {
-            crate::log_paths::append_app_log(
-                &app,
-                &format!("更新案内を画面へ通知できません: {error}"),
-            );
-        }
+        crate::notice::emit(&app, crate::notice::Notice::info("update", format!("新しいバージョン v{latest} があるよ"), format!("現在は v{current}。設定の「製品情報・ライセンス」からアップデートできます。詳細: {link}"), true));
     });
 }
 

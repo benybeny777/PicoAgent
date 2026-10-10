@@ -8,10 +8,9 @@
 
 use std::collections::HashSet;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
 
-use tauri::{AppHandle, Emitter};
+use tauri::AppHandle;
 
 use crate::message::Message;
 
@@ -222,12 +221,17 @@ pub fn load_recent(app: &AppHandle, character_id: &str) -> anyhow::Result<Vec<Me
             ));
         }
     };
-    // フォールバック許可: 履歴ファイルが壊れていても会話継続を優先し、空履歴で起動する。
+    // フォールバック許可: PR #463 採用案3。退避と通知に成功した領域だけ新規状態で続ける。
     // ただし次の保存で上書きして会話を失わないよう、破損ファイルは退避してから続ける。
     let all: Vec<Message> = match serde_json::from_str(&text) {
         Ok(all) => all,
         Err(error) => {
-            let saved = crate::store::quarantine_corrupt(&target).ok_or_else(|| {
+            let saved = crate::store::quarantine_and_notify(
+                app,
+                &target,
+                crate::store::QuarantineArea::History,
+            )
+            .ok_or_else(|| {
                 block_saving(character_id);
                 anyhow::anyhow!("壊れた会話履歴を退避できません。上書きを中止しました: {error}")
             })?;
@@ -296,70 +300,38 @@ pub fn save(app: &AppHandle, character_id: &str, messages: &[Message]) {
         crate::store::write_json_atomic(&target, &recent)?;
         Ok(())
     })();
-    // フォールバック許可: 履歴保存の失敗で会話は止めない。ただし黙ってもいけない。
-    match result {
-        Ok(()) => {
-            // 直前まで失敗していたなら、画面の警告を解いて次の失敗をまた知らせる。
-            if SAVE_FAILED.swap(false, Ordering::Relaxed) {
-                notify_save_state(app, true, "会話履歴の保存が復旧しました");
-            }
-        }
-        Err(error) => {
-            let message = format!("会話履歴の保存に失敗しました: {error}");
-            crate::log_paths::append_app_log(app, &message);
-            // 同じ原因が毎ターン届くので、状態が変わったときだけ画面へ送る
-            // （画面側 `notifyBackgroundFailure` も原因ごとに1度へ間引く）。
-            if !SAVE_FAILED.swap(true, Ordering::Relaxed) {
-                notify_save_state(
-                    app,
-                    false,
-                    "会話履歴を保存できません。このままだと再起動で今の会話が残りません",
-                );
-            }
-        }
-    }
+    // フォールバック許可: PR #463 採用案。保存失敗を通知して会話を継続する。
+    BLOCKED.report(
+        app,
+        "history-save-blocked",
+        "会話履歴の保存",
+        Ok(()),
+        "会話履歴の保存停止が解除されました",
+    );
+    SAVE_FAILED.report(
+        app,
+        "history-save",
+        "会話履歴の保存",
+        result.map_err(|error| {
+            format!("会話履歴を保存できません。再起動で今の会話が残りません: {error}")
+        }),
+        "会話履歴の保存が復旧しました",
+    );
 }
 
-/// 直前の保存が失敗していたか。復旧を知らせるために覚えておく。
-static SAVE_FAILED: AtomicBool = AtomicBool::new(false);
+static SAVE_FAILED: crate::notice::FailureLatch = crate::notice::FailureLatch::new();
+static BLOCKED: crate::notice::FailureLatch = crate::notice::FailureLatch::new();
 
-/// 原本保護で保存を止めていることを画面へ知らせる（画面側が原因ごとに1度へ間引く）。
 fn notify_blocked(app: &AppHandle) {
-    let payload = serde_json::json!({
-        "kind": "background_failure",
-        "key": "history-save-blocked",
-        "title": "会話履歴の保存",
-        "body": "会話履歴を読めなかったため、この会話は保存されません（元の履歴は残しています）",
-        "ok": false,
-        "at": chrono::Local::now().to_rfc3339(),
-    });
-    if let Err(error) = app.emit("pet:notice", payload) {
-        crate::log_paths::append_app_log(
-            app,
-            &format!("会話履歴の保存停止を画面へ通知できません: {error}"),
-        );
-    }
-}
-
-/// 会話履歴の保存状態を画面へ知らせる。
-///
-/// ログだけで済ませると、利用者は「保存できている」と思ったまま会話を続け、
-/// 再起動でその分がまるごと消える（AGENTS.md の「ログだけで済ませない」）。
-fn notify_save_state(app: &AppHandle, ok: bool, message: &str) {
-    let payload = serde_json::json!({
-        "kind": "background_failure",
-        "key": "history-save",
-        "title": "会話履歴の保存",
-        "body": message,
-        "ok": ok,
-        "at": chrono::Local::now().to_rfc3339(),
-    });
-    if let Err(error) = app.emit("pet:notice", payload) {
-        crate::log_paths::append_app_log(
-            app,
-            &format!("会話履歴の保存状態を画面へ通知できません: {error}"),
-        );
-    }
+    BLOCKED.report(
+        app,
+        "history-save-blocked",
+        "会話履歴の保存",
+        Err(
+            "会話履歴を読めなかったため、この会話は保存されません（元の履歴は残しています）".into(),
+        ),
+        "会話履歴の保存停止が解除されました",
+    );
 }
 
 /// 指定キャラクターの履歴ファイルを削除する（会話の完全リセット用）。

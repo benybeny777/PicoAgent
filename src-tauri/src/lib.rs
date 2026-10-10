@@ -41,6 +41,7 @@ mod memory_embedding_install;
 mod menu;
 mod message;
 mod migration;
+mod notice;
 mod permissions;
 mod project_rules;
 mod providers;

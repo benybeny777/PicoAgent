@@ -5,6 +5,8 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use tauri::AppHandle;
 
+static SAVE: crate::notice::FailureLatch = crate::notice::FailureLatch::new();
+
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct TokenUsage {
     pub prompt_tokens: u32,
@@ -103,10 +105,15 @@ pub fn load(app: &AppHandle) -> anyhow::Result<UsageStore> {
     };
     match serde_json::from_str(&text) {
         Ok(store) => Ok(store),
-        // フォールバック許可: 破損時は空ストアで継続する。次の保存で上書きして
+        // フォールバック許可: PR #463 採用案3。退避と通知に成功した領域だけ新規状態で続ける。
         // 集計を失わないよう、破損ファイルは退避してから続ける。
         Err(error) => {
-            let saved = crate::store::quarantine_corrupt(&target).ok_or_else(|| {
+            let saved = crate::store::quarantine_and_notify(
+                app,
+                &target,
+                crate::store::QuarantineArea::Usage,
+            )
+            .ok_or_else(|| {
                 anyhow::anyhow!(
                     "壊れたトークン使用量を退避できません。上書きを中止しました: {error}"
                 )
@@ -132,10 +139,14 @@ pub fn save(app: &AppHandle, store: &UsageStore) {
         crate::store::write_json_atomic(&target, store)?;
         Ok(())
     })();
-    // フォールバック許可: 使用量保存失敗は会話を止めずログだけ残す。
-    if let Err(e) = result {
-        crate::log_paths::append_app_log(app, &format!("トークン使用量の保存に失敗しました: {e}"));
-    }
+    // フォールバック許可: PR #463 採用案。保存失敗を通知し会話を継続する。
+    SAVE.report(
+        app,
+        "usage-save",
+        "トークン使用量の保存",
+        result.map_err(|error| format!("トークン使用量を保存できません: {error}")),
+        "トークン使用量の保存が復旧しました",
+    );
 }
 
 /// 1回の chat 呼び出しのトークン使用量を記録する。total_tokens が 0 の場合は無視する。
@@ -150,6 +161,13 @@ pub fn record(app: &AppHandle, provider_id: &str, model: &str, usage: TokenUsage
         Ok(store) => store,
         Err(error) => {
             crate::log_paths::append_app_log(app, &error.to_string());
+            SAVE.report(
+                app,
+                "usage-save",
+                "トークン使用量の保存",
+                Err(format!("トークン使用量を読めないため保存しません: {error}")),
+                "トークン使用量の保存が復旧しました",
+            );
             return;
         }
     };

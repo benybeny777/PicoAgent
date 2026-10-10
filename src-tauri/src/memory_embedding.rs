@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use serde_json::{json, Value};
-use tauri::{AppHandle, Emitter};
+use tauri::AppHandle;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, Lines};
 use tokio::process::{Child, ChildStdin, ChildStdout};
 
@@ -18,7 +18,7 @@ static WORKER: tokio::sync::Mutex<Option<Worker>> = tokio::sync::Mutex::const_ne
 static CANCEL: tokio::sync::Notify = tokio::sync::Notify::const_new();
 static EXITING: AtomicBool = AtomicBool::new(false);
 static GENERATION: AtomicU64 = AtomicU64::new(0);
-static FAILURE: Mutex<String> = Mutex::new(String::new());
+static FAILURE: crate::notice::FailureLatch = crate::notice::FailureLatch::new();
 static STATUS: Mutex<Option<Value>> = Mutex::new(None);
 static CLEANUP: Mutex<Vec<tauri::async_runtime::JoinHandle<Result<()>>>> = Mutex::new(Vec::new());
 /// 進行中の準備（導入とモデル起動）の数。設定保存と会話の両方から重ねて始まりうるため数で持つ。
@@ -128,23 +128,13 @@ fn set_status(phase: &str, message: &str, device: &str) {
 }
 
 fn notify(app: &AppHandle, error: Option<&str>) {
-    let mut previous = FAILURE.lock().unwrap();
-    let next = error.unwrap_or_default();
-    if previous.as_str() == next {
-        return;
-    }
-    *previous = next.to_string();
-    let payload = json!({
-        "kind":"background_failure", "key":"memory-embedding", "title":"長期メモリ検索",
-        "body":error.unwrap_or("長期メモリ検索が復旧しました"), "ok":error.is_none(),
-        "at":chrono::Local::now().to_rfc3339(),
-    });
-    if let Err(failure) = app.emit("pet:notice", payload) {
-        crate::log_paths::append_app_log(
-            app,
-            &format!("記憶検索の状態を通知できません: {failure}"),
-        );
-    }
+    FAILURE.report(
+        app,
+        "memory-embedding",
+        "長期メモリ検索",
+        error.map_or(Ok(()), |error| Err(error.to_string())),
+        "長期メモリ検索が復旧しました",
+    );
 }
 
 fn device(cfg: &Config) -> Result<String> {
@@ -369,7 +359,7 @@ pub fn report_fallback(app: &AppHandle, error: &anyhow::Error) {
         Some(Skipped::Interrupted) => return,
         Some(Skipped::Preparing) => {
             // 準備の失敗を通知済みなら、会話のたびに「準備中」と交互に出して煩くしない。
-            if !FAILURE.lock().unwrap().is_empty() {
+            if FAILURE.is_failed() {
                 return;
             }
             "長期メモリ検索を準備中のため、言及回数の多い記憶で応答しました".to_string()
