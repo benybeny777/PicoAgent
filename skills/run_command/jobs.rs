@@ -100,7 +100,7 @@ fn lock() -> Result<std::sync::MutexGuard<'static, Vec<Job>>, String> {
 fn next_id(jobs: &[Job]) -> String {
     static COUNTER: OnceLock<Mutex<usize>> = OnceLock::new();
     let counter = COUNTER.get_or_init(|| Mutex::new(0));
-    // フォールバック許可: 番号採番のロックが毒されても採番は続ける（中身は数値のみ）。
+    // 番号採番のロックが毒されても採番は続ける（中身は数値のみ）。
     let mut value = counter
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -133,7 +133,7 @@ fn pump<R: Read + Send + 'static>(mut reader: R, buffer: Arc<Mutex<Buffer>>) {
                     };
                     buffer.append(&text);
                 }
-                // フォールバック許可: 読み取りエラーはパイプ終了として扱い、スレッドを畳む。
+                // 読み取りエラーはパイプ終了として扱い、スレッドを畳む。
                 Err(_) => break,
             }
         }
@@ -322,7 +322,7 @@ fn summary(jobs: &[Job]) -> String {
 
 /// アプリ終了時に、走らせたままの子プロセスを確実に止める。
 pub fn stop_all() {
-    // フォールバック許可: 終了処理なのでロックが毒されていても停止を試みる。
+    // 終了処理なのでロックが毒されていても停止を試みる。
     let mut jobs = registry()
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());

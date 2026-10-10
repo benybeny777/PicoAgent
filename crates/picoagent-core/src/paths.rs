@@ -2,6 +2,12 @@
 
 use std::path::{Path, PathBuf};
 
+/// アプリと取得ツールが共有するWhisper既定モデル名。
+pub const WHISPER_DEFAULT_MODEL: &str = "ggml-small.bin";
+pub fn whisper_model_at(root: &Path) -> PathBuf {
+    root.join("models").join(WHISPER_DEFAULT_MODEL)
+}
+
 /// OSの利用者データ領域を受け取り、開発専用の根を返す。
 pub fn development_root(os_data_dir: &Path) -> PathBuf {
     os_data_dir.join("PicoAgent-Dev")

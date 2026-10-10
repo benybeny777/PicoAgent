@@ -15,36 +15,6 @@ const MAX_RESPONSE_BYTES: usize = 64 * 1024;
 
 pub struct HttpApiTool;
 
-fn allowed_domain(cfg: &Config, url: &Url) -> bool {
-    let allowed = cfg.get("PICOAGENT_HTTP_ALLOWED_DOMAINS", "");
-    if allowed.trim().is_empty() {
-        return false;
-    }
-    let Some(host) = url.host_str() else {
-        return false;
-    };
-    allowed
-        .split(',')
-        .map(str::trim)
-        .filter(|entry| !entry.is_empty())
-        .any(|entry| host == entry || host.ends_with(&format!(".{}", entry)))
-}
-
-fn trim_response(text: &str) -> String {
-    if text.len() <= MAX_RESPONSE_BYTES {
-        return text.to_string();
-    }
-    let mut end = MAX_RESPONSE_BYTES;
-    while !text.is_char_boundary(end) {
-        end -= 1;
-    }
-    format!(
-        "{}\n…（{} バイトで打ち切り）",
-        &text[..end],
-        MAX_RESPONSE_BYTES
-    )
-}
-
 #[async_trait]
 impl Tool for HttpApiTool {
     fn name(&self) -> &'static str {
@@ -103,12 +73,7 @@ impl Tool for HttpApiTool {
                 "password",
                 "",
             ),
-            Field::new(
-                "PICOAGENT_HTTP_TIMEOUT_SECS",
-                "http_api 待ち時間（秒、3〜60）",
-                "text",
-                "20",
-            ),
+            Field::int(&crate::config::ints::HTTP_TIMEOUT_SECS),
         ]
     }
 
@@ -122,70 +87,132 @@ impl Tool for HttpApiTool {
             Ok(_) => return "エラー: url は http または https を指定してください。".to_string(),
             Err(error) => return format!("エラー: url の解析に失敗しました: {}", error),
         };
-        if !allowed_domain(cfg, &url) {
-            return "エラー: PICOAGENT_HTTP_ALLOWED_DOMAINS で許可されていないドメインです。"
-                .to_string();
-        }
-        let timeout = crate::tools::http::timeout(cfg, "PICOAGENT_HTTP_TIMEOUT_SECS", 20, 3, 60);
-        let client = match reqwest::Client::builder()
-            .timeout(timeout)
-            .user_agent("PicoAgent/1.0 (HTTP API tool)")
-            .build()
-        {
-            Ok(client) => client,
-            Err(error) => return format!("エラー: HTTP API の準備に失敗しました: {}", error),
-        };
+        let timeout = crate::tool_try!(cfg.duration_secs(&crate::config::ints::HTTP_TIMEOUT_SECS));
+        let mut request = crate::tools::http::GuardedRequest::get(
+            url,
+            crate::tools::http::UrlPolicy::domains(&cfg.get("PICOAGENT_HTTP_ALLOWED_DOMAINS", "")),
+            timeout,
+            MAX_RESPONSE_BYTES,
+            "PicoAgent/1.0 (HTTP API tool)",
+        );
         let method = args.get("method").and_then(Value::as_str).unwrap_or("GET");
-        let mut request = match method {
-            "GET" => client.get(url),
-            "POST" => client.post(url),
-            "PUT" => client.put(url),
-            "PATCH" => client.patch(url),
-            "DELETE" => client.delete(url),
+        request.method = match method {
+            "GET" | "POST" | "PUT" | "PATCH" | "DELETE" => {
+                match reqwest::Method::from_bytes(method.as_bytes()) {
+                    Ok(method) => method,
+                    Err(_) => return "エラー: method が不正です".into(),
+                }
+            }
             _ => {
                 return "エラー: method は GET/POST/PUT/PATCH/DELETE のいずれかを指定してください。"
-                    .to_string()
+                    .into()
             }
         };
         let bearer = cfg.get("PICOAGENT_HTTP_BEARER_TOKEN", "");
         if !bearer.is_empty() {
-            request = request.bearer_auth(bearer);
+            let value = match reqwest::header::HeaderValue::from_str(&format!("Bearer {bearer}")) {
+                Ok(value) => value,
+                Err(_) => return "エラー: Bearer token が不正です".into(),
+            };
+            request
+                .headers
+                .insert(reqwest::header::AUTHORIZATION, value);
         }
-        let api_key_header = cfg.get("PICOAGENT_HTTP_API_KEY_HEADER", "");
-        let api_key_value = cfg.get("PICOAGENT_HTTP_API_KEY_VALUE", "");
-        if !api_key_header.is_empty() && !api_key_value.is_empty() {
-            request = request.header(api_key_header, api_key_value);
+        let header = cfg.get("PICOAGENT_HTTP_API_KEY_HEADER", "");
+        let value = cfg.get("PICOAGENT_HTTP_API_KEY_VALUE", "");
+        if !header.is_empty() && !value.is_empty() {
+            let name = match reqwest::header::HeaderName::from_bytes(header.as_bytes()) {
+                Ok(name) => name,
+                Err(_) => return "エラー: API key ヘッダー名が不正です".into(),
+            };
+            let value = match reqwest::header::HeaderValue::from_str(&value) {
+                Ok(value) => value,
+                Err(_) => return "エラー: API key 値が不正です".into(),
+            };
+            request.secret_headers.push(name.clone());
+            request.headers.insert(name, value);
         }
-        if let Some(body) = args.get("json_body") {
-            request = request.json(body);
-        } else if let Some(text) = args.get("text_body").and_then(Value::as_str) {
-            if text.len() > MAX_BODY_BYTES {
-                return format!(
-                    "エラー: text_body は {} バイト以内で指定してください。",
-                    MAX_BODY_BYTES
-                );
-            }
-            request = request
-                .header(
-                    "Content-Type",
-                    args.get("content_type")
-                        .and_then(Value::as_str)
-                        .unwrap_or("text/plain"),
-                )
-                .body(text.to_string());
-        }
-        let response = match request.send().await {
-            Ok(response) => response,
-            Err(error) => return format!("エラー: HTTP API への接続に失敗しました: {}", error),
-        };
-        let status = response.status();
-        let body = crate::tool_response_text!(response);
-        if status.is_success() {
-            format!("HTTP {}\n{}", status, trim_response(&body))
+        let content_type = if let Some(body) = args.get("json_body") {
+            request.body = match serde_json::to_vec(body) {
+                Ok(body) => Some(body),
+                Err(_) => return "エラー: JSON本文を組み立てられません".into(),
+            };
+            "application/json"
         } else {
-            format!("エラー: HTTP API が HTTP {} を返しました。", status)
+            request.body = args
+                .get("text_body")
+                .and_then(Value::as_str)
+                .map(|s| s.as_bytes().to_vec());
+            args.get("content_type")
+                .and_then(Value::as_str)
+                .unwrap_or("text/plain")
+        };
+        if request
+            .body
+            .as_ref()
+            .is_some_and(|body| body.len() > MAX_BODY_BYTES)
+        {
+            return "エラー: 本文は0.13 MB以内で指定してください".into();
+        }
+        let content_type = match reqwest::header::HeaderValue::from_str(content_type) {
+            Ok(value) => value,
+            Err(_) => return "エラー: Content-Type が不正です".into(),
+        };
+        request
+            .headers
+            .insert(reqwest::header::CONTENT_TYPE, content_type);
+        let response = match crate::tools::http::fetch_guarded(request).await {
+            Ok(response) => response,
+            Err(error) => return format!("エラー: {error}"),
+        };
+        let body = match String::from_utf8(response.body) {
+            Ok(body) => body,
+            Err(_) => return "エラー: HTTP API の応答がUTF-8ではありません".into(),
+        };
+        if response.status.is_success() {
+            format!("HTTP {}\n{body}", response.status)
+        } else {
+            format!(
+                "エラー: {}",
+                crate::tools::http::safe_service_error(cfg, "HTTP API", response.status, &body)
+            )
         }
     }
 }
 
 inventory::submit! { ToolReg { make: || Box::new(HttpApiTool) } }
+
+#[cfg(test)]
+mod numeric_tests {
+    use crate::config::Config;
+    use crate::tools::{
+        http_api::HttpApiTool, rss_feed::RssFeedTool, web_fetch::WebFetchTool, Tool,
+    };
+    use serde_json::json;
+
+    #[tokio::test]
+    async fn 不正な整数設定はスキルから理由を返し要求を送らない() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let url = format!("http://{}/", listener.local_addr().unwrap());
+        let tools: [(&dyn Tool, &str); 3] = [
+            (&HttpApiTool, "PICOAGENT_HTTP_TIMEOUT_SECS"),
+            (&RssFeedTool, "PICOAGENT_RSS_TIMEOUT_SECS"),
+            (&WebFetchTool, "PICOAGENT_WEB_FETCH_TIMEOUT_SECS"),
+        ];
+        for (tool, key) in tools {
+            for invalid in ["abc", "-1", "0", "61", "１．５", "9223372036854775808"] {
+                let cfg = Config::new();
+                cfg.set(key, invalid);
+                cfg.set("PICOAGENT_HTTP_ALLOWED_DOMAINS", "127.0.0.1");
+                let result = tool.run(&cfg, json!({"url":url})).await;
+                assert!(result.starts_with("エラー:"), "{}: {result}", tool.name());
+                assert!(result.contains(key), "{}: {result}", tool.name());
+                assert_eq!(
+                    listener.accept().unwrap_err().kind(),
+                    std::io::ErrorKind::WouldBlock
+                );
+            }
+        }
+    }
+}

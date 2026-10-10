@@ -10,12 +10,11 @@ use std::path::PathBuf;
 
 #[cfg(windows)]
 use anyhow::{Context, Result};
-#[cfg(windows)]
-use futures::StreamExt;
 use serde::{Deserialize, Serialize};
-#[cfg(windows)]
-use sha2::{Digest, Sha256};
 use tauri::AppHandle;
+
+#[cfg(windows)]
+static GPU_PREPARATION_FAILURE: crate::notice::FailureLatch = crate::notice::FailureLatch::new();
 
 // 以下の定数・型・判定関数はWindows本番コードから使われるが、
 // クロスプラットフォームのテスト（tests モジュール、OS問わず実行）からも参照するため
@@ -262,18 +261,39 @@ pub async fn candidates(
                 serde_json::json!({ "phase": "download", "message": backend.preparing }),
             );
             match ensure_gpu_engine(app, backend).await {
-                Ok(server) => result.push(BackendCandidate {
-                    label: backend.label,
-                    server,
-                    ngl: configured_ngl.clone(),
-                }),
-                Err(error) => crate::log_paths::append_app_log(
-                    app,
-                    &format!(
+                Ok(server) => {
+                    GPU_PREPARATION_FAILURE.report(
+                        app,
+                        "engine-gpu-prepare",
+                        "GPU推論エンジンの準備",
+                        Ok(()),
+                        "GPU推論エンジンの準備が復旧しました",
+                    );
+                    result.push(BackendCandidate {
+                        label: backend.label,
+                        server,
+                        ngl: configured_ngl.clone(),
+                    });
+                }
+                Err(error) => {
+                    let message = format!(
                         "{}推論エンジンを利用できないためVulkanへ切り替えます: {error}",
                         backend.label
-                    ),
-                ),
+                    );
+                    crate::log_paths::append_app_log(app, &message);
+                    GPU_PREPARATION_FAILURE.report(
+                        app,
+                        "engine-gpu-prepare",
+                        "GPU推論エンジンの準備",
+                        Err(message.clone()),
+                        "GPU推論エンジンの準備が復旧しました",
+                    );
+                    // フォールバック許可: GPU準備失敗時にVulkanへ切り替える（根拠: SPEC.md「ローカルLLM」）。
+                    crate::engine::set_status(
+                        app,
+                        serde_json::json!({ "phase": "backend-failure", "message": message }),
+                    );
+                }
             }
         }
     }
@@ -403,28 +423,61 @@ fn is_stale_engine_work_dir(name: &str, current_pid: u32) -> bool {
 
 /// PicoAgent は同時に1つしか動かないため、他プロセスIDの残骸は回収してよい。
 #[cfg(windows)]
-fn sweep_stale_engine_work_dirs(app: &AppHandle, parent: &Path, completed_backend: Option<&str>) {
-    let current = std::process::id();
-    let Ok(entries) = std::fs::read_dir(parent) else {
-        return;
+fn sweep_stale_engine_work_dirs(
+    _app: &AppHandle,
+    parent: &Path,
+    completed_backend: Option<&str>,
+) -> Result<()> {
+    let mut entries = match std::fs::read_dir(parent) {
+        Ok(entries) => entries.collect::<std::io::Result<Vec<_>>>()?,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error.into()),
     };
-    for entry in entries.flatten() {
+    entries.sort_by_key(|entry| entry.file_name());
+    for entry in entries {
         let name = entry.file_name();
         let Some(name) = name.to_str() else { continue };
-        let stale = match completed_backend {
-            Some(id) => is_completed_engine_backup(name, id, current),
-            None => is_stale_engine_work_dir(name, current),
-        };
-        if !stale {
+        if !is_stale_engine_work_dir(name, std::process::id()) {
             continue;
         }
-        if let Err(error) = std::fs::remove_dir_all(entry.path()) {
-            crate::log_paths::append_app_log(
-                app,
-                &format!("前回の推論エンジン取得の残骸を削除できませんでした（{name}）: {error}"),
+        if completed_backend
+            .is_some_and(|id| !is_completed_engine_backup(name, id, std::process::id()))
+        {
+            continue;
+        }
+        for backend in GPU_BACKENDS {
+            if completed_backend.is_some_and(|id| id != backend.id) {
+                continue;
+            }
+            let backup_prefix = format!(".engine-{}-backup-", backend.id);
+            let stage_prefix = format!(".engine-{}-stage-", backend.id);
+            let (suffix, backup) = if let Some(suffix) = name.strip_prefix(&backup_prefix) {
+                (suffix, true)
+            } else if let Some(suffix) = name.strip_prefix(&stage_prefix) {
+                (suffix, false)
+            } else {
+                continue;
+            };
+            let Ok(pid) = suffix.parse::<u32>() else {
+                continue;
+            };
+            if crate::installer::swap::process_alive(pid)? {
+                continue;
+            }
+            let destination = parent.join(format!("engine-{}", backend.id));
+            anyhow::ensure!(
+                entry.file_type()?.is_dir() && !entry.file_type()?.is_symlink(),
+                "推論エンジン復旧先が通常のディレクトリではありません"
             );
+            crate::installer::fs::checked_directory(&entry.path())?;
+            if backup && !destination.try_exists()? {
+                std::fs::rename(entry.path(), destination)?;
+            } else {
+                std::fs::remove_dir_all(entry.path())?;
+            }
         }
     }
+    Ok(())
 }
 
 #[cfg_attr(not(windows), allow(dead_code))]
@@ -437,6 +490,9 @@ fn is_completed_engine_backup(name: &str, id: &str, current_pid: u32) -> bool {
 #[cfg(windows)]
 async fn ensure_gpu_engine(app: &AppHandle, backend: &GpuBackend) -> Result<PathBuf> {
     let root = crate::app_paths::bundled_dir(app).join(format!("engine-{}", backend.id));
+    if let Some(parent) = root.parent() {
+        crate::installer::swap::recover(parent)?;
+    }
     let server = root.join("llama-server.exe");
     let manifest_path = root.join("picoagent-engine-backend.json");
     if server.is_file()
@@ -449,14 +505,15 @@ async fn ensure_gpu_engine(app: &AppHandle, backend: &GpuBackend) -> Result<Path
         // 正常な既存エンジンは取得処理へ進まないため、この経路でも削除失敗した
         // 旧版を回収する。確認済みの方式だけに限定し、別方式の復旧用には触れない。
         if let Some(parent) = root.parent() {
-            sweep_stale_engine_work_dirs(app, parent, Some(backend.id));
+            sweep_stale_engine_work_dirs(app, parent, Some(backend.id))?;
         }
         return Ok(server);
     }
 
     let parent = root.parent().context("推論エンジンの配置先が不正です")?;
     std::fs::create_dir_all(parent)?;
-    sweep_stale_engine_work_dirs(app, parent, None);
+    crate::installer::swap::recover(parent)?;
+    sweep_stale_engine_work_dirs(app, parent, None)?;
     let work = parent.join(format!(
         ".engine-{}-stage-{}",
         backend.id,
@@ -466,15 +523,18 @@ async fn ensure_gpu_engine(app: &AppHandle, backend: &GpuBackend) -> Result<Path
         std::fs::remove_dir_all(&work)?;
     }
     std::fs::create_dir_all(&work)?;
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(1800))
-        .build()?;
     let staged_server = work.join("llama-server.exe");
     let install = async {
         for (name, size, sha256) in backend.archives {
             let archive = work.join(format!("{name}.part"));
-            download_fixed(&client, asset_url(name), &archive, *size).await?;
-            verify_sha256(&archive, sha256)?;
+            crate::installer::download::fetch_fixed(
+                crate::installer::download::FetchSpec {
+                    url: &asset_url(name), destination: &archive, expected_size: Some(*size),
+                    max_size: MAX_ARCHIVE_SIZE, sha256: Some(sha256),
+                }, &mut |received, total| crate::engine::set_status(app, serde_json::json!({
+                    "phase": "download", "message": backend.preparing, "downloaded": received, "total": total,
+                })),
+            ).await?;
             extract_zip_merge(&archive, &work)?;
             std::fs::remove_file(&archive)?;
         }
@@ -506,46 +566,13 @@ async fn ensure_gpu_engine(app: &AppHandle, backend: &GpuBackend) -> Result<Path
         }
         return Err(error);
     }
-    replace_directory(&work, &root, backend.id)?;
+    replace_directory(app, &work, &root, backend.id)?;
     Ok(server)
 }
 
 #[cfg(windows)]
-fn replace_directory(stage: &Path, destination: &Path, id: &str) -> Result<()> {
-    let parent = destination
-        .parent()
-        .context("推論エンジンの配置先が不正です")?;
-    let backup = parent.join(format!(".engine-{id}-backup-{}", std::process::id()));
-    if backup.exists() {
-        std::fs::remove_dir_all(&backup)?;
-    }
-    if destination.exists() {
-        std::fs::rename(destination, &backup)?;
-    }
-    if let Err(error) = std::fs::rename(stage, destination) {
-        // 戻しにも失敗すると、動いていたエンジンが退避先に残ったまま本来の場所から消える。
-        // 「入れ替えに失敗した」だけを返すと、利用者は復旧先を知らないまま再取得へ進む。
-        if backup.exists() {
-            if let Err(restore) = std::fs::rename(&backup, destination) {
-                anyhow::bail!(
-                    "推論エンジンの入れ替えに失敗し、元の内容も戻せませんでした。退避先: {} ({error} / {restore})",
-                    backup.display()
-                );
-            }
-        }
-        return Err(error.into());
-    }
-    // 新版はもう配置済み。旧版を消せないだけで失敗扱いにすると、使えるエンジンを捨てて
-    // Vulkan へ落ちるので成功として返す（残りは次回の `sweep_stale_engine_work_dirs` が消す）。
-    if backup.exists() {
-        if let Err(error) = std::fs::remove_dir_all(&backup) {
-            crate::log_paths::log_detached(&format!(
-                "入れ替え前の推論エンジンを削除できません（次回の起動時に消します）: {} ({error})",
-                backup.display()
-            ));
-        }
-    }
-    Ok(())
+fn replace_directory(app: &AppHandle, stage: &Path, destination: &Path, id: &str) -> Result<()> {
+    crate::installer::swap::complete(app, crate::installer::swap::replace(stage, destination, id))
 }
 
 #[cfg(windows)]
@@ -554,100 +581,23 @@ fn asset_url(name: &str) -> String {
 }
 
 #[cfg(windows)]
-async fn download_fixed(
-    client: &reqwest::Client,
-    url: String,
-    path: &Path,
-    expected: u64,
-) -> Result<()> {
-    anyhow::ensure!(
-        expected <= MAX_ARCHIVE_SIZE,
-        "推論エンジン配布物がサイズ上限を超えています"
-    );
-    let response = client.get(url).send().await?.error_for_status()?;
-    if let Some(length) = response.content_length() {
-        anyhow::ensure!(
-            length == expected,
-            "推論エンジン配布物のサイズが固定値と一致しません"
-        );
-    }
-    use tokio::io::AsyncWriteExt;
-    let mut file = tokio::fs::File::create(path).await?;
-    let mut total = 0_u64;
-    let mut stream = response.bytes_stream();
-    while let Some(chunk) = stream.next().await {
-        let chunk = chunk?;
-        total = total.saturating_add(chunk.len() as u64);
-        anyhow::ensure!(
-            total <= expected,
-            "推論エンジン配布物が予定サイズを超えました"
-        );
-        file.write_all(&chunk).await?;
-    }
-    file.flush().await?;
-    anyhow::ensure!(
-        total == expected,
-        "推論エンジン配布物のサイズが固定値と一致しません"
-    );
-    Ok(())
-}
-
-#[cfg(windows)]
-fn verify_sha256(path: &Path, expected: &str) -> Result<()> {
-    use std::io::Read;
-    let mut file = std::fs::File::open(path)?;
-    let mut digest = Sha256::new();
-    let mut buffer = vec![0_u8; 1024 * 1024];
-    loop {
-        let count = file.read(&mut buffer)?;
-        if count == 0 {
-            break;
-        }
-        digest.update(&buffer[..count]);
-    }
-    anyhow::ensure!(
-        hex::encode(digest.finalize()) == expected,
-        "推論エンジン配布物のSHA-256が一致しません"
-    );
-    Ok(())
-}
-
-#[cfg(windows)]
 fn extract_zip_merge(archive: &Path, destination: &Path) -> Result<()> {
-    let file = std::fs::File::open(archive)?;
-    let mut zip = zip::ZipArchive::new(file)?;
-    anyhow::ensure!(
-        zip.len() <= MAX_FILES,
-        "推論エンジン配布物のファイル数が上限を超えています"
-    );
-    let mut extracted = 0_u64;
-    for index in 0..zip.len() {
-        let mut entry = zip.by_index(index)?;
-        let relative = entry
-            .enclosed_name()
-            .context("推論エンジン配布物に危険なパスがあります")?
-            .to_path_buf();
-        let output = destination.join(relative);
-        if entry.is_dir() {
-            std::fs::create_dir_all(output)?;
-            continue;
-        }
-        if let Some(parent) = output.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        let remaining = MAX_EXTRACTED_BYTES.saturating_sub(extracted);
-        let mut target = std::fs::File::create(output)?;
-        let copied = std::io::copy(
-            &mut std::io::Read::take(&mut entry, remaining.saturating_add(1)),
-            &mut target,
-        )?;
-        anyhow::ensure!(
-            copied <= remaining,
-            "推論エンジン配布物の展開サイズが上限を超えています"
-        );
-        extracted = extracted.saturating_add(copied);
-    }
-    Ok(())
+    use crate::installer::archive::{ExtractOptions, Mode, NameEncoding, Permissions};
+    crate::installer::archive::extract_zip(
+        archive,
+        destination,
+        crate::installer::Limits {
+            max_entries: MAX_FILES,
+            max_total_bytes: MAX_EXTRACTED_BYTES,
+            max_file_bytes: MAX_EXTRACTED_BYTES,
+            file_limit: None,
+        },
+        ExtractOptions {
+            mode: Mode::Merge,
+            name_encoding: NameEncoding::Utf8,
+            permissions: Permissions::Plain,
+        },
+    )
 }
 
 #[cfg(windows)]

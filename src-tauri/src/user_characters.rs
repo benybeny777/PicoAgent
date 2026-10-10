@@ -16,9 +16,25 @@ use serde_json::{json, Value};
 use tauri::AppHandle;
 
 use crate::character_pack;
+use crate::installer::{
+    archive::{extract_zip, ExtractOptions, Mode, NameEncoding, Permissions},
+    fs::copy_dir_plain as copy_dir,
+    Limits,
+};
+
+const PACK_LIMITS: Limits = Limits {
+    max_entries: character_pack::MAX_FILES,
+    max_total_bytes: character_pack::MAX_TOTAL_BYTES,
+    max_file_bytes: character_pack::MAX_FILE_BYTES,
+    file_limit: Some(character_pack::file_limit),
+};
+const PACK_OPTIONS: ExtractOptions = ExtractOptions {
+    mode: Mode::Fresh,
+    name_encoding: NameEncoding::Utf8OrCp932,
+    permissions: Permissions::Plain,
+};
 
 /// zip の展開上限（ZIP 爆弾で保存領域を埋めないための安全弁）。
-const MAX_ENTRIES: usize = character_pack::MAX_FILES;
 const MAX_TOTAL_BYTES: u64 = character_pack::MAX_TOTAL_BYTES;
 const MAX_NAME_CHARS: usize = 80;
 
@@ -151,147 +167,6 @@ fn pack_root(extracted: &Path) -> Result<PathBuf> {
     }
 }
 
-/// zip を展開先へ取り出す。パス脱出・件数・総量を展開しながら検査する。
-fn extract_zip(archive: &Path, destination: &Path) -> Result<()> {
-    let file = std::fs::File::open(archive)
-        .with_context(|| format!("zip を開けません: {}", archive.display()))?;
-    let mut zip = zip::ZipArchive::new(file).context("zip を読めません")?;
-    if zip.len() > MAX_ENTRIES {
-        bail!("zip の項目が多すぎます（{MAX_ENTRIES} 件まで）");
-    }
-    let mut total = 0u64;
-    for index in 0..zip.len() {
-        let mut entry = zip.by_index(index)?;
-        let raw = entry.name_raw();
-        let name = match std::str::from_utf8(raw) {
-            Ok(value) => value.to_owned(),
-            Err(_) => {
-                let (value, _, errors) = encoding_rs::SHIFT_JIS.decode(raw);
-                if errors {
-                    bail!("zipのファイル名をUTF-8またはCP932で読めません");
-                }
-                value.into_owned()
-            }
-        };
-        let normalized = name.replace('\\', "/");
-        if normalized.contains(':') || normalized.starts_with('/') {
-            bail!("zipに安全でないパスが含まれています: {name}");
-        }
-        let relative = character_pack::safe_relative(&normalized, "zipのパス")
-            .context("zipに安全でないパスが含まれています")?;
-        if entry
-            .unix_mode()
-            .is_some_and(|mode| mode & 0o170000 == 0o120000)
-        {
-            bail!("zip内にシンボリックリンクは置けません");
-        }
-        let target = destination.join(&relative);
-        if target.is_file() {
-            bail!("zip内のファイル名が重複しています: {name}");
-        }
-        if entry.is_dir() {
-            std::fs::create_dir_all(&target)?;
-            continue;
-        }
-        if entry.size() > character_pack::file_limit(&target) {
-            bail!("zip の中身が大きすぎます（合計262MB・通常形式42MB・MMD非圧縮画像128MBまで）");
-        }
-        if let Some(parent) = target.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        let mut out = std::fs::File::create(&target)
-            .with_context(|| format!("展開できません: {}", target.display()))?;
-        let remaining = MAX_TOTAL_BYTES.saturating_sub(total);
-        let limit = remaining.min(character_pack::file_limit(&target));
-        let mut limited = std::io::Read::take(&mut entry, limit.saturating_add(1));
-        let copied = std::io::copy(&mut limited, &mut out)?;
-        if copied > limit {
-            bail!("zip の中身が大きすぎます（合計262MB・通常形式42MB・MMD非圧縮画像128MBまで）");
-        }
-        total = total.saturating_add(copied);
-    }
-    Ok(())
-}
-
-fn copy_dir(source: &Path, destination: &Path) -> Result<()> {
-    std::fs::create_dir_all(destination)?;
-    let source_root = std::fs::canonicalize(source)?;
-    let destination_root = std::fs::canonicalize(destination)?;
-    if destination_root.starts_with(&source_root) || source_root.starts_with(&destination_root) {
-        bail!("コピー元とコピー先が重なっています。別のフォルダを選んでください。");
-    }
-    let mut entries = 0usize;
-    let mut total = 0u64;
-    let mut visited = std::collections::HashSet::new();
-    visited.insert(source_root.clone());
-    copy_dir_bounded(
-        source,
-        destination,
-        &source_root,
-        &mut visited,
-        &mut entries,
-        &mut total,
-    )
-}
-
-fn copy_dir_bounded(
-    source: &Path,
-    destination: &Path,
-    source_root: &Path,
-    visited: &mut std::collections::HashSet<PathBuf>,
-    entries: &mut usize,
-    total: &mut u64,
-) -> Result<()> {
-    std::fs::create_dir_all(destination)?;
-    for entry in std::fs::read_dir(source)? {
-        let entry = entry?;
-        *entries = entries.saturating_add(1);
-        if *entries > MAX_ENTRIES {
-            bail!("フォルダの項目が多すぎます（{MAX_ENTRIES} 件まで）");
-        }
-        let from = entry.path();
-        let resolved = std::fs::canonicalize(&from)?;
-        if !resolved.starts_with(source_root) {
-            bail!(
-                "パック外を指すリンクやジャンクションは置けません: {}",
-                from.display()
-            );
-        }
-        // シンボリックリンクは辿らない（実体がパック外を指す可能性がある）。
-        if std::fs::symlink_metadata(&from)?.file_type().is_symlink() {
-            bail!(
-                "パック内にシンボリックリンクは置けません: {}",
-                from.display()
-            );
-        }
-        let to = destination.join(entry.file_name());
-        if from.is_dir() {
-            if !visited.insert(resolved) {
-                bail!(
-                    "パック内のリンクやジャンクションが同じフォルダを再び指しています: {}",
-                    from.display()
-                );
-            }
-            copy_dir_bounded(&from, &to, source_root, visited, entries, total)?;
-        } else {
-            if let Some(parent) = to.parent() {
-                std::fs::create_dir_all(parent)?;
-            }
-            let mut input = std::fs::File::open(&from)?;
-            let mut output = std::fs::File::create(&to)?;
-            let remaining = MAX_TOTAL_BYTES.saturating_sub(*total);
-            let limit = remaining.min(character_pack::file_limit(&to));
-            let mut limited = std::io::Read::take(&mut input, limit.saturating_add(1));
-            let copied = std::io::copy(&mut limited, &mut output)?;
-            if copied > limit {
-                bail!("フォルダの中身が大きすぎます（合計262MB・通常形式42MB・MMD非圧縮画像128MBまで）");
-            }
-            *total = total.saturating_add(copied);
-        }
-    }
-    Ok(())
-}
-
 /// 配布zip／フォルダから、組み込み用の `.model3.json` を再帰的に探す。
 ///
 /// Cubismの配布物は編集用データと `runtime/` が一緒に包まれていることが多い。
@@ -333,7 +208,7 @@ fn find_live2d_model(root: &Path) -> Result<PathBuf> {
 
 fn prepare_source(source: &Path, destination: &Path) -> Result<()> {
     if source.is_dir() {
-        copy_dir(source, destination)
+        copy_dir(source, destination, PACK_LIMITS)
     } else {
         let extension = source
             .extension()
@@ -343,7 +218,7 @@ fn prepare_source(source: &Path, destination: &Path) -> Result<()> {
         if extension != "zip" {
             bail!("フォルダか .zip を指定してください: {}", source.display());
         }
-        extract_zip(source, destination)
+        extract_zip(source, destination, PACK_LIMITS, PACK_OPTIONS)
     }
 }
 
@@ -451,7 +326,7 @@ fn build_live2d_pack(extracted: &Path, pack: &Path, id: &str, name: &str) -> Res
         .and_then(|value| value.to_str())
         .context("Live2Dのmodel3.jsonファイル名を読み取れません")?;
 
-    copy_dir(model_root, &pack.join("live2d"))?;
+    copy_dir(model_root, &pack.join("live2d"), PACK_LIMITS)?;
     let manifest = json!({
         "id": id,
         "name": name,
@@ -516,7 +391,7 @@ fn build_mmd_pack(
         .strip_prefix(extracted)?
         .to_string_lossy()
         .replace('\\', "/");
-    copy_dir(extracted, &pack.join("mmd"))?;
+    copy_dir(extracted, &pack.join("mmd"), PACK_LIMITS)?;
     let manifest = json!({
         "id": id, "name": name, "description": "自分で追加したMMDモデル。",
         "greeting": format!("こんにちは、{name}です。よろしくね。"),
@@ -674,7 +549,7 @@ pub fn install_or_update_generated(
             root.display()
         );
     }
-    copy_dir(source, &staging)?;
+    copy_dir(source, &staging, PACK_LIMITS)?;
     let result = (|| -> Result<(String, String, bool)> {
         let manifest = character_pack::validate(&staging)?;
         let id = character_pack::required_text(&manifest, "id")?.to_string();
@@ -1049,21 +924,14 @@ mod guard {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_live2d_pack, extract_zip, find_live2d_model, pack_root, parse_bundled_ids,
+        build_live2d_pack, find_live2d_model, pack_root, parse_bundled_ids,
         recover_interrupted_work, rename_manifest,
     };
     use serde_json::json;
-    use std::io::Write;
     use std::path::PathBuf;
 
-    fn temp_dir(label: &str) -> PathBuf {
-        let nanos = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_nanos())
-            .unwrap_or(0);
-        let dir = std::env::temp_dir().join(format!("picoagent-uc-{label}-{nanos}"));
-        std::fs::create_dir_all(&dir).unwrap();
-        dir
+    fn temp_dir(_label: &str) -> PathBuf {
+        crate::installer::fs::test_directory().keep()
     }
 
     fn write_character(dir: &std::path::Path, id: &str, marker: &str) {
@@ -1160,54 +1028,6 @@ mod tests {
         }
     }
 
-    /// zip slip（`../` で展開先の外へ書き出す攻撃）を拒否すること。
-    #[test]
-    fn zipの危険なパスを展開しない() {
-        let dir = temp_dir("zipslip");
-        let archive = dir.join("evil.zip");
-        {
-            let file = std::fs::File::create(&archive).unwrap();
-            let mut zip = zip::ZipWriter::new(file);
-            let options = zip::write::SimpleFileOptions::default();
-            zip.start_file("../escaped.txt", options).unwrap();
-            zip.write_all(b"x").unwrap();
-            zip.finish().unwrap();
-        }
-        let out = dir.join("out");
-        let error = extract_zip(&archive, &out).unwrap_err().to_string();
-        assert!(error.contains("安全でないパス"), "error: {error}");
-        assert!(
-            !dir.join("escaped.txt").exists(),
-            "展開先の外へ書き出している"
-        );
-        std::fs::remove_dir_all(&dir).ok();
-    }
-
-    #[test]
-    fn cp932の日本語ファイル名をそのまま展開する() {
-        let dir = temp_dir("cp932");
-        let archive = dir.join("pack.zip");
-        let mut writer = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
-        writer
-            .start_file("aa.txt", zip::write::SimpleFileOptions::default())
-            .unwrap();
-        writer.write_all(b"original").unwrap();
-        let mut bytes = writer.finish().unwrap().into_inner();
-        let positions: Vec<_> = bytes
-            .windows(6)
-            .enumerate()
-            .filter_map(|(i, p)| (p == b"aa.txt").then_some(i))
-            .collect();
-        assert_eq!(positions.len(), 2);
-        for i in positions {
-            bytes[i..i + 2].copy_from_slice(&[0x82, 0xa0]);
-        }
-        std::fs::write(&archive, bytes).unwrap();
-        extract_zip(&archive, &dir.join("out")).unwrap();
-        assert_eq!(std::fs::read(dir.join("out/あ.txt")).unwrap(), b"original");
-        std::fs::remove_dir_all(dir).unwrap();
-    }
-
     #[test]
     fn 複数pmxは自動で選ばず直接指定なら原本を保持する() {
         let dir = temp_dir("mmd-select");
@@ -1273,24 +1093,6 @@ mod tests {
             .to_string();
         assert!(missing.contains("PMXテクスチャがありません: tex/skin.png"));
         std::fs::remove_dir_all(dir).unwrap();
-    }
-
-    #[test]
-    fn 通常のzipは展開できる() {
-        let dir = temp_dir("zipok");
-        let archive = dir.join("pack.zip");
-        {
-            let file = std::fs::File::create(&archive).unwrap();
-            let mut zip = zip::ZipWriter::new(file);
-            let options = zip::write::SimpleFileOptions::default();
-            zip.start_file("MyModel/character.json", options).unwrap();
-            zip.write_all(b"{}").unwrap();
-            zip.finish().unwrap();
-        }
-        let out = dir.join("out");
-        extract_zip(&archive, &out).unwrap();
-        assert!(out.join("MyModel/character.json").is_file());
-        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]

@@ -41,25 +41,41 @@ const server = http.createServer((request, response) => {
 await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
 const base = `http://127.0.0.1:${server.address().port}/`;
 
-function mockScript({ layout, characterId = "mugi", scenes = {}, onboardingDone = true, history = [], uiTheme = "pastel" }) {
+function mockScript({ layout, characterId = "mugi", providerId = "local", scenes = {}, onboardingDone = true, history = [], uiTheme = "pastel" }) {
   return `
+window.__numberSettings = {
+ PICOAGENT_BUBBLE_FONT_PX: { range: ["10", "28"], unit: "px", default: "13" },
+ PICOAGENT_STREAM_CHAT_FONT_PX: { range: ["18", "48"], unit: "px", default: "22" },
+ PICOAGENT_TTS_VOLUME: { range: ["0", "100"], unit: "%" },
+ PICOAGENT_CHATTER_MIN_SECS: { range: ["30", "3600"], unit: "秒" },
+ PICOAGENT_CHATTER_MAX_SECS: { range: ["30", "3600"], unit: "秒" },
+ PICOAGENT_NAP_MINUTES: { range: ["0", "9223372036854775807"], unit: "分" },
+};
 window.__calls = [];
 window.__listeners = {};
 window.__saved = ${JSON.stringify(scenes)};
+window.__rendererConfig = JSON.parse(localStorage.getItem("test.renderer-config") || "{}");
 window.__TAURI__ = {
   core: { invoke: (name, args = {}) => {
     window.__calls.push({ name, args: JSON.parse(JSON.stringify(args)) });
     if (name === "pet_init") return Promise.resolve({
-      up: true, providerId: "local", theme: "system", uiTheme: ${JSON.stringify(uiTheme)}, fontPx: "14", streamChatFontPx: "22", voiceVolume: "35",
-      characterId: ${JSON.stringify(characterId)}, characterOverrides: {}, live2dSdkOverrides: {},
+      up: true, providerId: ${JSON.stringify(providerId)}, theme: "system", uiTheme: ${JSON.stringify(uiTheme)}, fontPx: 14, streamChatFontPx: 22, voiceVolume: 35, numberSettings: window.__numberSettings, invalidNumbers: [],
+      characterId: ${JSON.stringify(characterId)}, characterOverrides: {}, live2dSdkOverrides: {}, rendererOverrides: window.__rendererConfig,
       layout: ${JSON.stringify(layout)}, scenes: window.__saved, history: ${JSON.stringify(history)},
-      quickActions: "", napMinutes: "0", onboardingDone: ${JSON.stringify(onboardingDone)},
+      quickActions: "", napMinutes: 0, onboardingDone: ${JSON.stringify(onboardingDone)},
       relationshipMemoryEnabled: true, relationship: {}, bondLabel: "いっしょの相棒",
       gazeTrackingEnabled: false, bootProgressIntervalMs: 10000, ttsEnabled: false,
       streamBackground: "pastel", streamDisplay: "dashboard", streamCaptionColor: "#5a3b4b",
-      chatterEnabled: false, chatterMinSecs: "9999", chatterMaxSecs: "9999", betaBuild: false,
+      chatterEnabled: false, chatterMinSecs: 90, chatterMaxSecs: 240, betaBuild: false,
     });
     if (name === "pet_save_scene") { window.__saved = args.scenes; return Promise.resolve(); }
+    if (name === "pet_set_character_renderer") {
+      if (window.__rendererSaveFailure) return Promise.reject("描画設定の検証用保存失敗");
+      if (args.renderer == null) delete window.__rendererConfig[args.characterId];
+      else window.__rendererConfig[args.characterId] = args.renderer;
+      localStorage.setItem("test.renderer-config", JSON.stringify(window.__rendererConfig));
+      return Promise.resolve({ rendererOverrides: window.__rendererConfig });
+    }
     if (name === "engine_status") return Promise.resolve({ phase: "ready" });
     if (name === "aivis_status") return Promise.resolve({ enabled: false });
     if (name === "pet_speak") return Promise.resolve({ enabled: false });
@@ -98,7 +114,7 @@ const report = [];
 const fail = (label, detail) => { failures.push(`${label}: ${detail}`); console.error(`NG ${label}: ${detail}`); };
 const ok = label => console.log(`OK ${label}`);
 
-async function openApp({ layout, width, height, characterId, scenes, onboardingDone, history, uiTheme }) {
+async function openApp({ layout, width, height, characterId, providerId, scenes, onboardingDone, history, uiTheme, beforeNavigate, diagnostic = false }) {
   // 窓とモニターは別の寸法。キャラ拡大時の窓拡張も実ブリッジと同じく検査する。
   const context = await browser.newContext({ viewport: { width, height }, screen: { width: 1920, height: 1080 }, deviceScaleFactor: 1 });
   const page = await context.newPage();
@@ -106,10 +122,11 @@ async function openApp({ layout, width, height, characterId, scenes, onboardingD
   await page.exposeFunction("__resizeWindow", size => page.setViewportSize({ width: Math.round(size.width), height: Math.round(size.height) }));
   page.on("pageerror", error => errors.push(String(error)));
   page.on("console", message => { if (message.type() === "error") errors.push(message.text()); });
-  await page.addInitScript(mockScript({ layout, characterId, scenes, onboardingDone, history, uiTheme }));
+  await page.addInitScript(mockScript({ layout, characterId, providerId, scenes, onboardingDone, history, uiTheme }));
+  await beforeNavigate?.(page);
   await page.goto(base);
   await page.waitForFunction(() => !document.getElementById("petApp").classList.contains("is-booting"), null, { timeout: 30000 });
-  await page.waitForFunction(() => {
+  if (!diagnostic) await page.waitForFunction(() => {
     const canvas = document.querySelector("[data-source=character] canvas");
     return canvas && canvas.width > 1 && canvas.height > 1;
   }, null, { timeout: 30000 });
@@ -199,6 +216,9 @@ const characters = process.env.UI_CHECK_CHARACTERS === "all"
   : (process.env.UI_CHECK_CHARACTERS || "mugi,rin,photoreal-prototype").split(",");
 const layoutIds = (process.env.UI_CHECK_LAYOUTS || "pet,mascot,stream").split(",");
 
+try {
+if (process.env.PICOAGENT_UI_QUANTITY_ONLY !== "1") {
+if (process.env.UI_CHECK_DIAGNOSTIC_ONLY !== "1") {
 for (const characterId of characters) {
   for (const layout of layoutIds) {
     const [width, height] = LAYOUTS[layout];
@@ -305,7 +325,7 @@ for (const characterId of characters) {
         if (send.disabled || send.background === "none" || send.font < 22 || send.inputFont < 22 || send.controlFont < 18 || send.width < 720) {
           fail(`${label}/chat`, `配信の入力・送信操作が見づらいか使えません ${JSON.stringify(send)}`);
         } else ok(`${label} 読める履歴文字と押せる送信ボタン`);
-        await page.evaluate(() => window.__emit("pet:ui", { streamChatFontPx: "42" }));
+        await page.evaluate(() => window.__emit("pet:ui", { numberSettings: window.__numberSettings, streamChatFontPx: 42 }));
         const largerFont = await page.evaluate(() => {
           const chat = document.querySelector('.chat[data-variant="column"]');
           return { body: parseFloat(getComputedStyle(chat).fontSize),
@@ -315,7 +335,7 @@ for (const characterId of characters) {
         if (largerFont.body !== 42 || largerFont.input !== 42 || largerFont.controls !== 34) {
           fail(`${label}/chat-font`, `保存後の配信文字サイズが即反映されません ${JSON.stringify(largerFont)}`);
         } else ok(`${label} 配信文字サイズを再起動なしで変更`);
-        await page.evaluate(() => window.__emit("pet:ui", { streamChatFontPx: "22" }));
+        await page.evaluate(() => window.__emit("pet:ui", { numberSettings: window.__numberSettings, streamChatFontPx: 22 }));
         await page.fill("#input", "");
         const subtitle = page.locator(".subtitle .reply");
         await subtitle.evaluate(node => { node.textContent = "字幕の文字をドラッグしても選択されないか確認します"; });
@@ -638,11 +658,102 @@ for (const [layout, width, height, key, initial, step] of [["pet", 900, 600, "PI
   await context.close();
 }
 
+}
+// 実際の読み込み失敗から診断・保存・再起動までを通し、自動PNG切替を見逃さない。
+for (const layout of Object.keys(LAYOUTS)) {
+  const label = `${layout}/描画失敗の診断`;
+  const { context, page } = await openApp({
+    layout, width: 200, height: 240, characterId: "mugi", providerId: "openai", diagnostic: true,
+    history: [{ role: "user", content: "復旧前に保存した依頼" }, { role: "assistant", content: "復旧前に保存した回答" }],
+    beforeNavigate: async page => {
+      await page.addInitScript(() => {
+        Object.defineProperty(navigator, "clipboard", { value: { writeText: async text => { window.__copiedReply = text; } } });
+      });
+      await page.route("**/assets/characters/mugi/character.json*", async route => {
+        const manifest = JSON.parse(fs.readFileSync(path.join(uiDir, "assets/characters/mugi/character.json"), "utf8"));
+        manifest.live2d = { model: "検査用の存在しない.model3.json" };
+        await route.fulfill({ json: manifest });
+      });
+    },
+  });
+  try {
+    await page.locator(".character-diagnostic").waitFor();
+    const current = await page.evaluate(() => ({
+      hidden: getComputedStyle(document.querySelector("[data-source=character]")).visibility === "hidden",
+      renderer: document.querySelector(".character-view")?.dataset.renderKind || "",
+      reason: document.querySelector(".character-diagnostic-reason").textContent,
+      config: window.__rendererConfig,
+    }));
+    if (!current.hidden || current.renderer || !current.reason || Object.keys(current.config).length) fail(label, `黙った描画切替または理由欠損: ${JSON.stringify(current)}`);
+    for (const selector of [".character-diagnostic-actions button:first-child", ".character-diagnostic-actions button:last-child"]) {
+      await page.locator(selector).scrollIntoViewIfNeeded();
+      const fit = await fullyInside(page, selector);
+      if (!fit.inside) fail(label, `最小窓で診断操作が隠れています: ${JSON.stringify(fit)}`);
+    }
+    await page.evaluate(() => { window.__rendererSaveFailure = true; });
+    await page.getByRole("button", { name: "このキャラを2D表示にする" }).click();
+    await page.waitForFunction(() => document.querySelector(".character-diagnostic-reason").textContent.includes("検証用保存失敗"));
+    if (await page.evaluate(() => Object.keys(window.__rendererConfig).length)) fail(label, "保存失敗で描画指定が変わりました");
+    await page.evaluate(() => { window.__rendererSaveFailure = false; });
+    await page.getByRole("button", { name: "このキャラを2D表示にする" }).click();
+    await page.waitForFunction(() => document.querySelector(".character-diagnostic").hidden && document.querySelector(".character-view")?.dataset.renderKind === "2d");
+    if (await page.evaluate(() => window.__rendererConfig.mugi) !== "image") fail(label, "明示2Dが保存されませんでした");
+    const restored = await page.evaluate(() => {
+      const input = document.querySelector("#input");
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true }));
+      document.querySelector('[aria-label="回答をコピー"]').click();
+      return { input: input.value, copied: window.__copiedReply, status: document.querySelector("#status").textContent,
+        history: document.querySelector(".history-log").textContent };
+    });
+    if (restored.input !== "復旧前に保存した依頼" || restored.copied !== "復旧前に保存した回答"
+      || /キャラ.*読み込めません/.test(restored.status)
+      || (layout === "stream" && !restored.history.includes("復旧前に保存した回答"))) {
+      fail(label, `復旧後の履歴・入力履歴・回答・診断解除が不正です: ${JSON.stringify(restored)}`);
+    }
+    await page.reload();
+    await page.waitForFunction(() => !document.getElementById("petApp").classList.contains("is-booting") && document.querySelector(".character-view")?.dataset.renderKind === "2d");
+    if (await page.locator(".character-diagnostic").isVisible()) fail(label, "保存済み2Dの再起動で診断が残ります");
+    await page.screenshot({ path: path.join(outDir, `${layout}-explicit-image.png`), omitBackground: true });
+    ok(`${label} 保存失敗の保護・明示2D・再起動`);
+  } finally { await context.close(); }
+}
+
+}
+
+for (const layout of ["pet", "mascot", "stream"]) {
+  const label = `${layout} 整数診断と復旧`;
+  const { page, context } = await openApp({ layout, width: 520, height: 620 });
+  try {
+    const key = layout === "stream" ? "PICOAGENT_STREAM_CHAT_FONT_PX" : "PICOAGENT_BUBBLE_FONT_PX";
+    await page.evaluate(key => {
+      const payload = { numberSettings: window.__numberSettings, fontPx: 14, streamChatFontPx: 22, voiceVolume: 35, chatterEnabled: false, chatterMinSecs: 90, chatterMaxSecs: 240, napMinutes: 0, invalidNumbers: [{ key, message: "文字サイズの検証用不正理由" }] };
+      payload[key === "PICOAGENT_BUBBLE_FONT_PX" ? "fontPx" : "streamChatFontPx"] = null;
+      window.__emit("pet:ui", payload);
+    }, key);
+    await page.getByText("文字サイズの検証用不正理由", { exact: true }).waitFor();
+    const diagnostic = page.locator(".quantity-diagnostic");
+    const state = await page.evaluate(() => ({ inert: document.querySelector("#composer").inert, replyHidden: getComputedStyle(document.querySelector("#reply")).visibility === "hidden" }));
+    const diagnosticFit = await fullyInside(page, ".quantity-diagnostic button");
+    if (!state.inert || !state.replyHidden || !diagnosticFit.inside) fail(label, `旧表示・入力の停止または設定導線の配置が不正です: ${JSON.stringify({ state, diagnosticFit })}`);
+    await diagnostic.getByRole("button", { name: "文字サイズの設定を開く" }).click();
+    if (!(await page.evaluate(() => window.__calls.some(call => call.name === "pet_open_settings" && call.args.tab === "display")))) fail(label, "診断から設定を開けません");
+    await page.evaluate(() => { window.__emit("pet:ui", { up: null, providerError: "接続検査の不正理由" }); });
+    if (!(await diagnostic.isVisible())) fail(label, "接続部分payloadで文字診断が解除されました");
+    await page.evaluate(() => { window.__emit("pet:ui", { numberSettings: window.__numberSettings, invalidNumbers: [], fontPx: 14, streamChatFontPx: 31, voiceVolume: 35, chatterEnabled: false, chatterMinSecs: 90, chatterMaxSecs: 240, napMinutes: 0, up: true, providerError: null }); });
+    await diagnostic.waitFor({ state: "hidden" });
+    if (await page.locator("#composer").evaluate(node => node.inert)) fail(label, "正常保存後も入力が停止しています");
+    ok(label);
+  } finally { await context.close(); }
+}
+
 fs.writeFileSync(path.join(outDir, "report.json"), JSON.stringify({ report, failures }, null, 2));
-await browser.close();
-server.close();
 if (failures.length) {
   console.error(`\n${failures.length} 件の失敗`);
-  process.exit(1);
+  process.exitCode = 1;
+} else {
+  console.log("\nすべて合格");
 }
-console.log("\nすべて合格");
+} finally {
+  await browser.close();
+  await new Promise(resolve => server.close(resolve));
+}

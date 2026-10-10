@@ -9,7 +9,14 @@ test('選択動画モデルの導入先と生成参照先が同じコンポー�
   const setup = source('character-maker/sidecar/media/setup_models.py');
   const tool = source('skills/comfyui/mod.rs');
   assert.match(installer, /"--runtime",\s*&stage\.to_string_lossy\(\)/);
-  assert.match(installer, /replace_installed\(&stage, &installed_dir\(app, id\), id\)/);
+  assert.match(installer, /replace_installed\(app, &stage, &installed_dir\(app, id\), id\)\?/);
+  assert.match(installer, /fn installed_dir\([\s\S]*?app_paths::data_path\(app, crate::app_paths::DataPath::Runtime\(id\)\)/);
+  // 配置・復旧・完了通知の所有者は共通swap。呼出元で退避処理を複製しない。
+  assert.match(installer, /fn replace_installed\([\s\S]*?swap::complete\(app, crate::installer::swap::replace\(stage, destination, id\)\)/);
+  const swap = source('src-tauri/src/installer/swap.rs');
+  assert.match(swap, /checked_directory\(parent\)\?/);
+  assert.match(swap, /stage[\s\S]*?\.canonicalize\(\)\?[\s\S]*?== parent[\s\S]*?destination[\s\S]*?\.canonicalize\(\)\?[\s\S]*?== parent/);
+  assert.match(swap, /CLEANUP_FAILURE\.report\([\s\S]*?installer-cleanup/);
   // 導入先は `--runtime` で受けたコンポーネント直下。`checked_root()` が絶対パス化し、
   // 導入先と親にリンク（シンボリックリンク・ジャンクション）が無いことを確かめてから解決する。
   assert.match(setup, /root = checked_root\(args\.runtime\)/);

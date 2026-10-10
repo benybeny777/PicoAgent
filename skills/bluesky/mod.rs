@@ -66,12 +66,7 @@ impl Tool for BlueskyTool {
                 "password",
                 "",
             ),
-            Field::new(
-                "PICOAGENT_BLUESKY_TIMEOUT_SECS",
-                "Bluesky API 待ち時間（秒、3〜60）",
-                "text",
-                "20",
-            ),
+            Field::int(&crate::config::ints::BLUESKY_TIMEOUT_SECS),
         ]
     }
 
@@ -92,12 +87,7 @@ impl Tool for BlueskyTool {
                 "Bluesky のハンドル/メールアドレスと app password を入れてください。",
             );
         }
-        let timeout = cfg
-            .get("PICOAGENT_BLUESKY_TIMEOUT_SECS", "20")
-            .parse::<u64>()
-            .ok()
-            .filter(|value| (3..=60).contains(value))
-            .unwrap_or(20);
+        let timeout = crate::tool_try!(cfg.int(&crate::config::ints::BLUESKY_TIMEOUT_SECS)) as u64;
         let client = match reqwest::Client::builder()
             .timeout(Duration::from_secs(timeout))
             .user_agent("PicoAgent/1.0 (Bluesky tool)")
@@ -106,7 +96,7 @@ impl Tool for BlueskyTool {
             Ok(client) => client,
             Err(error) => return format!("エラー: Bluesky API の準備に失敗しました: {}", error),
         };
-        let session = match create_session(&client, &base, &identifier, &password).await {
+        let session = match create_session(cfg, &client, &base, &identifier, &password).await {
             Ok(session) => session,
             Err(error) => return format!("エラー: {}", error),
         };
@@ -125,7 +115,8 @@ impl Tool for BlueskyTool {
                         "createdAt": Utc::now().to_rfc3339()
                     }
                 });
-                handle_text_response(
+                crate::tools::http::service_reply(
+                    cfg,
                     client
                         .post(format!("{}/xrpc/com.atproto.repo.createRecord", base))
                         .bearer_auth(session.access_jwt)
@@ -147,7 +138,8 @@ impl Tool for BlueskyTool {
                     .filter(|value| (1..=100).contains(value))
                     .unwrap_or(25)
                     .to_string();
-                handle_text_response(
+                crate::tools::http::service_reply(
+                    cfg,
                     client
                         .get(format!("{}/xrpc/app.bsky.feed.searchPosts", base))
                         .bearer_auth(session.access_jwt)
@@ -165,7 +157,8 @@ impl Tool for BlueskyTool {
                     .map(str::trim)
                     .filter(|value| !value.is_empty())
                     .unwrap_or(&identifier);
-                handle_text_response(
+                crate::tools::http::service_reply(
+                    cfg,
                     client
                         .get(format!("{}/xrpc/app.bsky.actor.getProfile", base))
                         .bearer_auth(session.access_jwt)
@@ -188,6 +181,7 @@ struct BlueskySession {
 }
 
 async fn create_session(
+    cfg: &Config,
     client: &reqwest::Client,
     base: &str,
     identifier: &str,
@@ -202,9 +196,11 @@ async fn create_session(
     let status = response.status();
     let body = crate::tools::http::response_text(response).await?;
     if !status.is_success() {
-        return Err(format!(
-            "Bluesky セッション作成が HTTP {} を返しました。",
-            status
+        return Err(crate::tools::http::safe_service_error(
+            cfg,
+            "Bluesky セッション作成",
+            status,
+            &body,
         ));
     }
     let parsed: Value = serde_json::from_str(&body)
@@ -236,23 +232,6 @@ fn text_arg<'a>(args: &'a Value, key: &str, max_chars: usize) -> Result<&'a str,
         ));
     }
     Ok(text)
-}
-
-async fn handle_text_response(
-    response: Result<reqwest::Response, reqwest::Error>,
-    label: &str,
-) -> String {
-    let response = match response {
-        Ok(response) => response,
-        Err(error) => return format!("エラー: {} への接続に失敗しました: {}", label, error),
-    };
-    let status = response.status();
-    let body = crate::tool_response_text!(response);
-    if status.is_success() {
-        body
-    } else {
-        format!("エラー: {} が HTTP {} を返しました。", label, status)
-    }
 }
 
 inventory::submit! { ToolReg { make: || Box::new(BlueskyTool) } }

@@ -42,8 +42,15 @@ test("設定画面のアクセント面と角丸はUIモードに従う", () => 
 });
 
 test("設定タブの件数更新はアイコンを消さない", () => {
-  assert.doesNotMatch(settings, /getElementById\(["`]tab-[^)]*\)[^;\n]*\n?[^;\n]*\.textContent\s*=/);
-  assert.match(settings, /function setSettingsTabLabel\(tabId, label\) \{\n\s*const name = document\.querySelector\(`#tab-\$\{tabId\} \.tab-name`\);/);
+  const label = { textContent: "追加機能・更新" };
+  const lookups = [];
+  const context = vm.createContext({ document: { querySelector: selector => { lookups.push(selector); return label; }, getElementById() { throw new Error("ボタン全体を変更しない"); } } });
+  const start = settings.indexOf("function setSettingsTabLabel(");
+  assert.ok(start >= 0);
+  vm.runInContext(settings.slice(start, settings.indexOf("function createTabs(", start)), context);
+  context.setSettingsTabLabel("components", "追加機能・更新（2）");
+  assert.equal(label.textContent, "追加機能・更新（2）");
+  assert.deepEqual(lookups, ["#tab-components .tab-name"]);
 });
 
 test("設定のUIモードは未知値を可愛いへ戻し保存済みのかっこいいを尊重する", () => {

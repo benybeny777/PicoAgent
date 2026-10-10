@@ -115,7 +115,8 @@ export function createWindowChrome({ menu, appElement, bootScreen, stageElement,
     const bar = menu.getBoundingClientRect();
     const overlaps = shown() && rect.left < bar.right && rect.right > bar.left && rect.top < bar.bottom;
     const scale = chat.offsetWidth ? rect.width / chat.offsetWidth : 1;
-    const inset = overlaps ? Math.max(0, (bar.bottom + 6 - rect.top) / scale - 12) : 0;
+    const basePadding = Number.parseFloat(getComputedStyle(chat).getPropertyValue("--chat-chrome-base-padding"));
+    const inset = overlaps ? Math.max(0, (bar.bottom + 6 - rect.top) / scale - basePadding) : 0;
     const value = `${inset}px`;
     if (chat.style.getPropertyValue("--chat-chrome-inset") !== value) chat.style.setProperty("--chat-chrome-inset", value);
   }

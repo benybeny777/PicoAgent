@@ -433,13 +433,12 @@ fn render_projects(projects: &[Project], active: &str) -> String {
 }
 
 /// system 文脈へ差し込む「いまのプロジェクト」まとめ。空文字なら差し込まない。
-pub fn project_context(cfg: &Config) -> String {
+pub fn project_context(cfg: &Config) -> Result<String, String> {
     let active = active_project(cfg);
-    // フォールバック許可: 文脈生成は読み取り専用の付加情報なので、
-    // 読めなければ差し込まずに会話を続ける（保存は一切しないのでデータは消えない）。
-    let projects = load(cfg).unwrap_or_default();
+    let projects =
+        load(cfg).map_err(|error| format!("プロジェクト文脈を読み取れません: {error}"))?;
     let Some(project) = projects.into_iter().find(|project| project.id == active) else {
-        return String::new();
+        return Ok(String::new());
     };
     let today = today();
     let mut open: Vec<Task> = project
@@ -450,7 +449,7 @@ pub fn project_context(cfg: &Config) -> String {
         .collect();
     sort_tasks(&mut open);
     if open.is_empty() && project.notes.is_empty() {
-        return String::new();
+        return Ok(String::new());
     }
 
     let mut out = format!(
@@ -487,7 +486,7 @@ pub fn project_context(cfg: &Config) -> String {
     out.push_str(
         "\n（保存済みの台帳から自動で添えた情報。変更するときは project スキルを呼ぶこと）",
     );
-    text::preview(&out, MAX_CONTEXT_CHARS)
+    Ok(text::preview(&out, MAX_CONTEXT_CHARS))
 }
 
 pub struct ProjectTool;
@@ -1023,6 +1022,19 @@ mod tests {
     };
     use crate::config::Config;
     use serde_json::json;
+
+    #[test]
+    fn 壊れた台帳をプロジェクトなしへ降格せず原本を保持する() {
+        let cfg = Config::new();
+        for raw in ["{破損", "{}", "[null]"] {
+            cfg.set(super::KEY, raw);
+            let error = super::project_context(&cfg).unwrap_err();
+            assert!(error.contains("プロジェクト文脈を読み取れません"));
+            assert_eq!(cfg.get(super::KEY, ""), raw);
+        }
+        cfg.set(super::KEY, "[]");
+        assert_eq!(super::project_context(&cfg).unwrap(), "");
+    }
 
     fn task(id: &str, due: &str, priority: &str, status: &str) -> Task {
         Task {

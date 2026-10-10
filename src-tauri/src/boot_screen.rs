@@ -18,13 +18,17 @@ pub const SCHEME: &str = "picoboot";
 
 /// フロントの開始通知、または開始後の進捗通知が途絶えてから失敗とする時間（ミリ秒）。
 /// 初回はモデルや音声の取得とウイルス検査で長くなるため、2分の無通信だけを停止扱いにする。
-const DEFAULT_TIMEOUT_MS: u64 = 120_000;
+const DEFAULT_TIMEOUT_MS: u64 = match crate::config::ints::BOOT_TIMEOUT_MS.default {
+    Some(value) => value as u64,
+    None => panic!("起動待ち時間には整数の既定が必要です"),
+};
 /// 読込開始通知（`pet_frontend_ready`）だけを待つ時間（ミリ秒）。
 /// webview がページを出せない障害は起動準備の長さと無関係なので、進捗監視と同じだけ待たせない。
 const START_TIMEOUT_MS: u64 = 12_000;
-/// 待ち時間の下限・上限（設定値が極端でも実用範囲へ収める）。
-const MIN_TIMEOUT_MS: u64 = 3_000;
-const MAX_TIMEOUT_MS: u64 = 120_000;
+/// 起動通知の運用範囲。設定の検証は共通整数宣言で行う。
+const MIN_TIMEOUT_MS: u64 = crate::config::ints::BOOT_TIMEOUT_MS.min as u64;
+#[cfg(test)]
+const MAX_TIMEOUT_MS: u64 = crate::config::ints::BOOT_TIMEOUT_MS.max as u64;
 /// 生存通知の間隔の下限・上限（詰まりすぎず、しきい値より十分に短く保つ）。
 const MIN_PROGRESS_INTERVAL_MS: u64 = 1_000;
 const MAX_PROGRESS_INTERVAL_MS: u64 = 10_000;
@@ -233,14 +237,12 @@ fn progress_remaining(last_progress: Option<Instant>, timeout: Duration) -> Opti
 }
 
 /// フロントの読込開始を待ち、開始後は進捗通知が途絶えた場合だけ案内ページへ切り替える。
-/// 進捗が途絶えたと判定するまでの時間（設定値を実用範囲へ収めたもの）。
-pub fn timeout_ms(app: &AppHandle) -> u64 {
-    let config = &app.state::<crate::commands::AppState>().config;
-    config
-        .get("PICOAGENT_BOOT_TIMEOUT_MS", "")
-        .parse::<u64>()
-        .unwrap_or(DEFAULT_TIMEOUT_MS)
-        .clamp(MIN_TIMEOUT_MS, MAX_TIMEOUT_MS)
+/// 進捗通知の待ち時間。不正設定は起動画面へ理由を返す。
+pub fn timeout_ms(app: &AppHandle) -> Result<u64, String> {
+    app.state::<crate::commands::AppState>()
+        .config
+        .int(&crate::config::ints::BOOT_TIMEOUT_MS)
+        .map(|value| value as u64)
 }
 
 /// フロントが生存通知を送る間隔。しきい値から決めるため、設定を短くしても
@@ -259,7 +261,13 @@ fn outdated(app: &AppHandle, generation: u64) -> bool {
 }
 
 pub fn watch(app: AppHandle) {
-    let timeout_ms = timeout_ms(&app);
+    let timeout_ms = match timeout_ms(&app) {
+        Ok(timeout) => timeout,
+        Err(error) => {
+            show_failure(&app, 0, error);
+            return;
+        }
+    };
 
     // 読込開始が来ない障害（配信元の停止・スクリプトの構文エラー）は準備の長さと無関係なので、
     // 案内ページまで2分待たせない。設定で待ち時間を短くした場合はそちらへ合わせる。

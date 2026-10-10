@@ -18,6 +18,28 @@ import { createEmitter, el, errorDetail, errorMessage, logApp } from "../app/uti
 
 export const RENDERERS = [MmdRenderer, Live2dRenderer, MeshRenderer, ImageRenderer];
 
+/** 読込失敗の方式・原因・確定済みパックと、利用者が選べる2Dの可否。 */
+export class CharacterRenderError extends Error {
+  constructor(kind, cause, pack = null, imageAvailable = false) {
+    super(`${kind === "pack" ? "キャラクター定義" : kind}を読み込めません: ${errorMessage(cause)}`, { cause });
+    this.name = "CharacterRenderError";
+    this.kind = kind;
+    this.pack = pack;
+    this.imageAvailable = imageAvailable;
+  }
+}
+
+function pickRenderer(loaded, preference) {
+  if (preference != null) {
+    if (preference !== "image") throw new Error(`描画方式の指定が不正です: ${preference}`);
+    if (!ImageRenderer.supports(loaded)) throw new Error("このキャラクターには2D表示用の画像がありません");
+    return ImageRenderer;
+  }
+  const selected = RENDERERS.find(Renderer => Renderer.supports(loaded));
+  if (!selected) throw new Error("このキャラクターを表示できる描画方式がありません");
+  return selected;
+}
+
 const GPU_FAILURE_PATTERN = /webgl|shader|gpu|context ?lost|getcontext|シェーダ/i;
 
 export function createCharacterHost({ container }) {
@@ -69,14 +91,14 @@ export function createCharacterHost({ container }) {
     }
   }
 
-  function applyState() {
-    if (!renderer) return;
-    renderer.setLayoutId?.(layoutId);
-    renderer.setFraming(framing);
-    renderer.setMotion(motion);
-    renderer.setSpeaking(speaking);
-    renderer.setActive(active && displayReady && !sleeping && !document.hidden);
-    if (size) renderer.resize(size.width, size.height, size.pixelRatio);
+  function applyState(target = renderer) {
+    if (!target) return;
+    target.setLayoutId?.(layoutId);
+    target.setFraming(framing);
+    target.setMotion(motion);
+    target.setSpeaking(speaking);
+    target.setActive(active && displayReady && !sleeping && !document.hidden);
+    if (size) target.resize(size.width, size.height, size.pixelRatio);
   }
 
   const host = {
@@ -91,32 +113,40 @@ export function createCharacterHost({ container }) {
      * キャラを読み込む。窓は隠したまま読み込むので、読込中の姿は見せない。
      * 表示の準備（描画器の load）が終わってから古い描画器と入れ替える。
      */
-    async load(characterId, { overrides = {}, sdkOverrides = {} } = {}) {
+    async load(characterId, { overrides = {}, sdkOverrides = {}, rendererOverrides = {} } = {}) {
       const loadGeneration = ++generation;
-      const loaded = await loadPack(characterId, { sdkPreference: sdkOverrides[characterId] });
-      if (loadGeneration !== generation) return null;
-      const candidates = RENDERERS.filter(Renderer => Renderer.supports(loaded));
-      let next = null;
-      let lastError = null;
-      for (const Renderer of candidates) {
-        try {
-          next = await createRenderer(Renderer, loaded);
-          break;
-        } catch (error) {
-          lastError = error;
-          reportGpuFailure(error);
-          // フォールバック許可: Live2D ランタイム未取得・メッシュの WebGL 失敗でも、フレーム画像を持つ
-          // キャラは2D表示で続ける。理由はログと状態行へ出す。
-          logApp("error", `${Renderer.kind} の描画を初期化できませんでした（次の方式を試します）`, errorDetail(error));
-          events.emit("fallback", { kind: Renderer.kind, error });
-        }
+      let loaded;
+      try {
+        loaded = await loadPack(characterId, {
+          sdkPreference: sdkOverrides[characterId],
+          onUserCharacters: result => {
+            if (loadGeneration === generation) events.emit("userCharacters", result);
+          },
+        });
+      } catch (error) {
         if (loadGeneration !== generation) return null;
+        throw new CharacterRenderError("pack", error);
       }
-      if (loadGeneration !== generation) {
+      if (loadGeneration !== generation) return null;
+      let Renderer;
+      let next = null;
+      try {
+        Renderer = pickRenderer(loaded, rendererOverrides[characterId]);
+        next = await createRenderer(Renderer, loaded);
+        if (loadGeneration !== generation) {
+          next.dispose();
+          return null;
+        }
+        applyState(next);
+      } catch (error) {
         next?.dispose();
-        return null;
+        if (loadGeneration !== generation) return null;
+        if (Renderer) reportGpuFailure(error);
+        const kind = Renderer?.kind || "selection";
+        logApp("error", `${kind}の描画を初期化できませんでした`, errorDetail(error));
+        throw new CharacterRenderError(kind, error, loaded,
+          Renderer !== ImageRenderer && ImageRenderer.supports(loaded));
       }
-      if (!next) throw lastError || new Error("このキャラクターを表示できる描画方式がありません");
       renderer?.dispose();
       renderer = next;
       pack = loaded;
@@ -124,7 +154,6 @@ export function createCharacterHost({ container }) {
       sleepImage.hidden = true;
       container.dataset.renderKind = renderer.constructor.kind;
       events.emit("loaded", pack);
-      applyState();
       renderer.element.style.visibility = "";
       return {
         pack,

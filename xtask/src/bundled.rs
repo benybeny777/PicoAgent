@@ -87,14 +87,20 @@ fn flatten(root: &Path, out: &Path, exe_stem: &str) -> Result<bool> {
         }
         let dest = out.join(&name);
         if file != dest {
-            // rename が失敗する（別デバイス等）場合はコピーで代替する。
-            if fs::rename(&file, &dest).is_err() {
-                fs::copy(&file, &dest)
-                    .with_context(|| format!("配置できません: {}", file.display()))?;
-            }
+            crate::util::rename_or_copy(
+                &file,
+                &dest,
+                |from, to| fs::rename(from, to),
+                || {
+                    fs::copy(&file, &dest)
+                        .with_context(|| format!("配置できません: {}", file.display()))?;
+                    fs::remove_file(&file)?;
+                    Ok(())
+                },
+            )?;
         }
         if is_exe {
-            make_executable(&dest);
+            make_executable(&dest)?;
             found_exe = true;
         }
     }
@@ -105,18 +111,18 @@ fn flatten(root: &Path, out: &Path, exe_stem: &str) -> Result<bool> {
 ///
 /// staging は一時ディレクトリ配下に作るため、TEMP がリポジトリと別ドライブ（Windows）や
 /// tmpfs（Linux コンテナ）にあると `rename` が EXDEV で必ず失敗する。`flatten` と同じく
-/// コピーで代替し、失敗したときは中途半端な配置先を残さない。
+/// 別ボリュームのときだけコピーし、失敗したときは中途半端な配置先を残さない。
 ///
 /// **配置が済んだあとの後処理失敗で `Err` を返してはいけない。** 呼び出し側は `Err` を
 /// 「配置できなかった」と解釈して旧版を同じパスへ `rename` し戻すため、配置先が埋まった
 /// まま `Err` を返すと Windows では復元も失敗し、旧版が `*-old-*` に取り残される
 /// （AGENTS.md の「取得・更新・ビルドの正常終了後は旧版・退避を残さない」に反する）。
-/// staging は一時ディレクトリ配下で、呼び出し側が作業フォルダごと掃除する。
+/// stagingは一時ディレクトリ配下で、呼び出し側が作業フォルダごと掃除する。
 fn place_dir(staged: &Path, dest: &Path) -> Result<()> {
-    place_dir_inner(staged, dest, cleanup_dir)
+    place_dir_inner(staged, dest, |from, to| fs::rename(from, to), cleanup_dir)
 }
 
-/// `place_dir` の本体。staging の掃除だけテストから差し替えられるようにしている。
+/// `place_dir`の本体。別ボリュームの移動結果と掃除失敗を検査で注入する。
 ///
 /// 掃除失敗を実ファイルシステムで再現する手が無い（root では権限で削除を阻めず、
 /// `remove_dir_all` はシンボリックリンクを追わずに消して成功する）ため、
@@ -124,14 +130,20 @@ fn place_dir(staged: &Path, dest: &Path) -> Result<()> {
 fn place_dir_inner(
     staged: &Path,
     dest: &Path,
+    rename: impl FnOnce(&Path, &Path) -> std::io::Result<()>,
     cleanup_staged: fn(&Path, &str) -> Result<()>,
 ) -> Result<()> {
-    if fs::rename(staged, dest).is_ok() {
+    let mut copied = false;
+    crate::util::rename_or_copy(staged, dest, rename, || {
+        copied = true;
+        if let Err(error) = copy_dir(staged, dest, &|_| false) {
+            cleanup_dir(dest, "配置に失敗したフォルダ")?;
+            return Err(error);
+        }
+        Ok(())
+    })?;
+    if !copied {
         return Ok(());
-    }
-    if let Err(error) = copy_dir(staged, dest, &|_| false) {
-        cleanup_dir(dest, "配置に失敗したフォルダ")?;
-        return Err(error);
     }
     if let Err(error) = cleanup_staged(staged, "配置済みstagingフォルダ") {
         warn(
@@ -267,7 +279,7 @@ pub fn fetch_engine() -> Result<()> {
     let (asset_selector, expected_sha256) = engine_asset_spec()?;
     let server = dir.join(exe_name("llama-server"));
     if engine_bundle_ready(&dir, &asset_selector, &expected_sha256) && !flag("LLAMACPP_FORCE") {
-        make_executable(&server);
+        make_executable(&server)?;
         log("setup:engine", format!("engine ready: {}", dir.display()));
         return Ok(());
     }
@@ -277,7 +289,7 @@ pub fn fetch_engine() -> Result<()> {
         cleanup_dir(&dir, "旧llama-server配置")?;
         crate::util::copy_dir(&legacy, &dir, &|_| false)?;
         fs::write(dir.join(".gitkeep"), "\n")?;
-        make_executable(&server);
+        make_executable(&server)?;
         log(
             "setup:engine",
             format!("旧 resources/engine から移行しました: {}", dir.display()),
@@ -400,11 +412,15 @@ fn engine_bundle_ready(dir: &Path, asset_selector: &str, expected_sha256: &str) 
 
 /// whisper.cpp の CLI と ggml モデルを `resources/bundled/whisper/` へ配置する。
 ///
-///   `WHISPER_RELEASE` … リリースタグ（既定 latest）
+///   `WHISPER_RELEASE` … 固定binaryReleaseと同じタグだけ明示可
 ///   `WHISPER_ASSET`   … アセット名の一部を直接指定
 ///   `WHISPER_MODEL`   … tiny/base/small/medium/large-v3-turbo または URL（既定 small）
 ///   `WHISPER_FORCE=1` … 既存配置を再取得
 pub fn fetch_whisper() -> Result<()> {
+    crate::tools::fetch_component("whisper", "WHISPER_SKIP", fetch_whisper_inner)
+}
+
+fn fetch_whisper_inner() -> Result<()> {
     let dir = repo_root().join("src-tauri/resources/bundled/whisper");
     fs::create_dir_all(&dir)?;
     fetch_whisper_binary(&dir)?;
@@ -427,44 +443,150 @@ pub fn fetch_whisper() -> Result<()> {
     Ok(())
 }
 
+fn whisper_pin() -> Result<picoagent_core::whisper::ReleasePin> {
+    picoagent_core::whisper::ReleasePin::from_manifest(include_str!(
+        "../../src-tauri/resources/component-manifest.json"
+    ))
+    .map_err(anyhow::Error::msg)
+}
+
+fn whisper_tool(program: &Path, args: &[String]) -> Result<String> {
+    let output = std::process::Command::new(program)
+        .args(args)
+        .output()
+        .with_context(|| format!("Whisperビルドツールを起動できません: {}", program.display()))?;
+    anyhow::ensure!(
+        output.status.success(),
+        "Whisperビルドツールが失敗しました: {}: {}",
+        program.display(),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8(output.stdout).context("Whisperビルドツールの応答がUTF-8ではありません")
+}
+
+fn fetch_whisper_source(
+    pin: &picoagent_core::whisper::ReleasePin,
+    work: &Path,
+    dir: &Path,
+) -> Result<()> {
+    let cmake = Path::new("cmake");
+    let version = whisper_tool(cmake, &["--version".into()])
+        .context("Mac版WhisperにはCMakeが必要です。明示導入後に再試行してください")?;
+    picoagent_core::whisper::validate_cmake(&version).map_err(anyhow::Error::msg)?;
+    let mut paths = Vec::new();
+    for args in picoagent_core::whisper::XCRUN_PROBES {
+        let output = whisper_tool(Path::new("/usr/bin/xcrun"), &args.iter().map(|arg| (*arg).to_owned()).collect::<Vec<_>>())
+            .context("Mac版WhisperにはC/C++コンパイラとmacOS SDKが必要です。XcodeとMetalビルドツールを明示導入してください。SDKは自動取得しません")?;
+        let path = PathBuf::from(output.trim());
+        anyhow::ensure!(
+            path.is_absolute() && path.exists(),
+            "Mac版WhisperのビルドツールまたはSDKの実体がありません"
+        );
+        paths.push(path);
+    }
+    let probe = work.join("compiler-probe.cpp");
+    fs::write(&probe, picoagent_core::whisper::COMPILER_PROBE)?;
+    let checked = whisper_tool(
+        &paths[1],
+        &[
+            "-fsyntax-only".into(),
+            "-isysroot".into(),
+            paths[2].to_string_lossy().into_owned(),
+            probe.to_string_lossy().into_owned(),
+        ],
+    );
+    fs::remove_file(&probe)?;
+    checked.context("取得前コンパイラ・SDK検査に失敗しました。何も取得していません")?;
+    let asset = ReleaseAsset {
+        name: "whisper-source.tar.gz".into(),
+        url: pin.source_url(),
+        size: pin.source_size,
+        sha256: pin.source_sha256.clone(),
+    };
+    let archive = work.join(&asset.name);
+    download_to(&asset.url, &archive)?;
+    verify_release_asset(&archive, &asset)?;
+    let extracted = work.join("source");
+    extract(&archive, &extracted)?;
+    let source = extracted.join(format!("whisper.cpp-{}", pin.source_commit));
+    anyhow::ensure!(
+        source.join("CMakeLists.txt").is_file(),
+        "Whisper固定ソースのCMake定義がありません"
+    );
+    let build = work.join("build");
+    whisper_tool(
+        cmake,
+        &picoagent_core::whisper::configure_args(&source, &build, &paths[0], &paths[1], &paths[2]),
+    )?;
+    whisper_tool(cmake, &picoagent_core::whisper::build_args(&build))?;
+    anyhow::ensure!(
+        build.join("bin/whisper-cli").is_file(),
+        "WhisperソースビルドのCLIがありません"
+    );
+    fs::copy(
+        build.join("bin/whisper-cli"),
+        dir.join(exe_name("whisper-cli")),
+    )?;
+    Ok(())
+}
+
 fn fetch_whisper_binary(dir: &Path) -> Result<()> {
+    let pin = whisper_pin()?;
+    pin.validate_override(std::env::var("WHISPER_RELEASE").ok().as_deref())
+        .map_err(anyhow::Error::msg)?;
+    let record = dir.join("install.json");
+    let recorded: Option<Value> = match fs::read_to_string(&record) {
+        Ok(text) => Some(serde_json::from_str(&text).context("Whisperの導入記録が不正です")?),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) => return Err(error).context("Whisperの導入記録を読めません"),
+    };
     let exe = dir.join(exe_name("whisper-cli"));
-    if exe.exists() && !flag("WHISPER_FORCE") {
-        make_executable(&exe);
+    if exe.is_file()
+        && !flag("WHISPER_FORCE")
+        && recorded.as_ref().is_some_and(|value| {
+            value.get("version").and_then(Value::as_str) == Some(pin.target_version.as_str())
+                && value.get("binaryRelease").and_then(Value::as_str)
+                    == Some(pin.binary_release.as_str())
+                && value.get("sourceCommit").and_then(Value::as_str)
+                    == Some(pin.source_commit.as_str())
+        })
+    {
+        make_executable(&exe)?;
         log(
             "setup:whisper",
-            format!("whisper binary ready: {}", exe.display()),
+            format!("固定版WhisperのCLIを再利用します: {}", exe.display()),
         );
         return Ok(());
     }
-
-    let tag = env_or("WHISPER_RELEASE", "latest");
-    let api = if tag == "latest" {
-        "https://api.github.com/repos/ggml-org/whisper.cpp/releases/latest".to_string()
-    } else {
-        format!("https://api.github.com/repos/ggml-org/whisper.cpp/releases/tags/{tag}")
-    };
-    let release = get_json(&api)?;
-    let asset = pick_asset(&release, whisper_asset_matcher())?;
-
     let work = work_dir("whisper");
     cleanup_dir(&work, "前回のWhisper導入途中フォルダ")?;
     fs::create_dir_all(&work)?;
-    let archive = work.join(&asset.name);
-    let bytes = download_to(&asset.url, &archive)?;
-    verify_release_asset(&archive, &asset)?;
-    log(
-        "setup:whisper",
-        format!("fetched {} ({})", asset.name, mb(bytes)),
-    );
-
-    let extracted = work.join("x");
-    extract(&archive, &extracted)?;
-    let ok = flatten(&extracted, dir, "whisper-cli")?;
-    cleanup_dir(&work, "完了したWhisper導入途中フォルダ")?;
-    if !ok {
-        bail!("whisper-cli が展開物に見つかりません");
+    if picoagent_core::whisper::binary_name(std::env::consts::OS, std::env::consts::ARCH)
+        .map_err(anyhow::Error::msg)?
+        .is_none()
+    {
+        fetch_whisper_source(&pin, &work, dir)?;
+    } else {
+        let release = get_json(&pin.release_api())?;
+        pin.validate_release(&release).map_err(anyhow::Error::msg)?;
+        let asset = pick_asset(&release, whisper_asset_matcher())?;
+        let archive = work.join(&asset.name);
+        download_to(&asset.url, &archive)?;
+        verify_release_asset(&archive, &asset)?;
+        let extracted = work.join("binary");
+        extract(&archive, &extracted)?;
+        anyhow::ensure!(
+            flatten(&extracted, dir, "whisper-cli")?,
+            "Whisper CLIが展開物に見つかりません"
+        );
     }
+    fs::write(
+        &record,
+        serde_json::to_vec_pretty(
+            &serde_json::json!({"version": pin.target_version, "binaryRelease": pin.binary_release, "sourceCommit": pin.source_commit}),
+        )?,
+    )?;
+    cleanup_dir(&work, "完了したWhisper導入途中フォルダ")?;
     Ok(())
 }
 
@@ -474,26 +596,10 @@ fn whisper_asset_matcher() -> impl Fn(&str) -> bool {
         if !override_name.is_empty() {
             return name.contains(&override_name);
         }
-        let arm = cfg!(target_arch = "aarch64");
-        if cfg!(windows) {
-            name.ends_with(if arm {
-                "whisper-bin-arm64.zip"
-            } else {
-                "whisper-bin-x64.zip"
-            })
-        } else if cfg!(target_os = "macos") {
-            name.ends_with(if arm {
-                "whisper-bin-macos-arm64.zip"
-            } else {
-                "whisper-bin-macos-x64.zip"
-            })
-        } else {
-            name.ends_with(if arm {
-                "whisper-bin-ubuntu-arm64.tar.gz"
-            } else {
-                "whisper-bin-ubuntu-x64.tar.gz"
-            })
-        }
+        picoagent_core::whisper::binary_name(std::env::consts::OS, std::env::consts::ARCH)
+            .ok()
+            .flatten()
+            .is_some_and(|expected| name == expected)
     }
 }
 
@@ -524,7 +630,7 @@ fn whisper_model_file() -> String {
 
 fn whisper_small_asset(url: String) -> ReleaseAsset {
     ReleaseAsset {
-        name: "ggml-small.bin".to_string(),
+        name: picoagent_core::paths::WHISPER_DEFAULT_MODEL.to_string(),
         url,
         size: WHISPER_SMALL_SIZE,
         sha256: WHISPER_SMALL_SHA256.to_string(),
@@ -757,35 +863,23 @@ pub fn fetch_live2d_samples() -> Result<()> {
             .next()
             .filter(|e| e.len() <= 4)
             .unwrap_or("jpg");
-        // プレビュー画像は設定画面のアイコンと起動待ち画面に使うだけで、モデルの動作には
-        // 関わらない。配布ページの URL は将来変わりうるので、取れなくても警告に留めて
-        // 共通のプレースホルダーで代替する（ここで失敗すると setup 全体が止まってしまう）。
         let preview = characters.join(sample.id).join(format!("preview.{ext}"));
-        if let Err(error) = ensure_file(sample.preview_url, &preview) {
-            log(
-                "setup:live2d",
-                format!(
-                    "警告: {} のプレビュー画像を取得できませんでした（表示は代替画像で続行します）: {error}",
-                    sample.label
-                ),
-            );
-        }
-        // 1体取得できなくても他のモデルの取得は続ける。配布元が落ちている・その host へ
-        // 到達できないネットワークでも、取れたモデルだけで起動できる方が実用的で、
-        // アプリ側もモデルが無いキャラは選択時にエラーを出すだけで済む。
-        let result = match sample.zip {
-            None => fetch_live2d_raw(&sample, &characters),
-            Some((url, runtime_dir)) => fetch_live2d_zip(&sample, url, runtime_dir, &characters),
-        };
-        if let Err(error) = result {
-            log(
-                "setup:live2d",
-                format!(
-                    "警告: {} のモデルを取得できませんでした（このキャラは選べません）: {error}",
-                    sample.label
-                ),
-            );
-        }
+        fetch_sample_assets(
+            || {
+                ensure_file(sample.preview_url, &preview)
+                    .map(|_| ())
+                    .with_context(|| format!("{}のプレビュー画像を取得できません", sample.label))
+            },
+            || {
+                match sample.zip {
+                    None => fetch_live2d_raw(&sample, &characters),
+                    Some((url, runtime_dir)) => {
+                        fetch_live2d_zip(&sample, url, runtime_dir, &characters)
+                    }
+                }
+                .with_context(|| format!("{}のモデルを取得できません", sample.label))
+            },
+        )?;
     }
 
     log(
@@ -797,6 +891,15 @@ pub fn fetch_live2d_samples() -> Result<()> {
         "  https://www.live2d.com/eula/live2d-free-material-license-agreement_jp.html",
     );
     Ok(())
+}
+
+/// 明示取得したサンプルは画像・モデルの両工程が成功した場合だけ利用可能にする。
+fn fetch_sample_assets(
+    preview: impl FnOnce() -> Result<()>,
+    model: impl FnOnce() -> Result<()>,
+) -> Result<()> {
+    preview()?;
+    model()
 }
 
 fn ensure_file(url: &str, dest: &Path) -> Result<u64> {
@@ -962,10 +1065,39 @@ mod tests {
     }
 
     /// `rename` が使えない状況（別ドライブ・tmpfs の EXDEV 相当）でもコピーで配置し、
-    /// staging を残さないこと。ここでは配置先を非空にして `rename` を失敗させ、
-    /// コピー経路を通す（EXDEV そのものは単体テストから再現できない）。
+    /// stagingを残さないこと。別ボリュームのErrorKindを本番共通境界へ注入する。
     #[test]
-    fn renameできない場合もコピーで配置してstagingを残さない() {
+    fn 配置先が使用中なら元と配置先を変更せず停止する() {
+        let base = test_dir("occupied");
+        let staged = base.join("staged");
+        let dest = base.join("engine");
+        fs::create_dir_all(&staged).unwrap();
+        fs::write(staged.join("new"), b"new").unwrap();
+        fs::create_dir_all(&dest).unwrap();
+        fs::write(dest.join("old"), b"old").unwrap();
+        assert!(place_dir(&staged, &dest).is_err());
+        assert_eq!(fs::read(staged.join("new")).unwrap(), b"new");
+        assert_eq!(fs::read(dest.join("old")).unwrap(), b"old");
+        assert!(!dest.join("new").exists());
+        fs::remove_dir_all(base).unwrap();
+    }
+
+    #[test]
+    fn サンプル画像取得の失敗後にモデル取得へ進まない() {
+        let error = fetch_sample_assets(
+            || bail!("画像取得故障"),
+            || panic!("画像失敗後にモデル取得してはいけない"),
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("画像取得故障"));
+        assert!(fetch_sample_assets(|| Ok(()), || bail!("モデル取得故障"))
+            .unwrap_err()
+            .to_string()
+            .contains("モデル取得故障"));
+    }
+
+    #[test]
+    fn 別ボリュームだけコピーで配置してstagingを残さない() {
         let base = test_dir("copy");
         let staged = base.join("staged");
         let dest = base.join("engine");
@@ -975,7 +1107,13 @@ mod tests {
         fs::create_dir_all(&dest).unwrap();
         fs::write(dest.join("occupied"), b"old").unwrap();
 
-        place_dir(&staged, &dest).unwrap();
+        place_dir_inner(
+            &staged,
+            &dest,
+            |_, _| Err(std::io::ErrorKind::CrossesDevices.into()),
+            cleanup_dir,
+        )
+        .unwrap();
 
         assert_eq!(fs::read(dest.join("llama-server")).unwrap(), b"new");
         assert!(!staged.exists(), "配置後に staging を残してはいけない");
@@ -1002,11 +1140,16 @@ mod tests {
         let dest = base.join("engine");
         fs::create_dir_all(&staged).unwrap();
         fs::write(staged.join("llama-server"), b"new").unwrap();
-        // 非空の配置先があると rename は失敗し、コピー経路（EXDEV 相当）へ入る。
+        // 既存ファイルを保持した別ボリューム配置を注入する。
         fs::create_dir_all(&dest).unwrap();
         fs::write(dest.join("occupied"), b"old").unwrap();
 
-        let result = place_dir_inner(&staged, &dest, 掃除は必ず失敗する);
+        let result = place_dir_inner(
+            &staged,
+            &dest,
+            |_, _| Err(std::io::ErrorKind::CrossesDevices.into()),
+            掃除は必ず失敗する,
+        );
 
         assert!(
             result.is_ok(),
@@ -1046,7 +1189,7 @@ mod tests {
     fn whisperのアセットを選ぶ() {
         let names = [
             "whisper-bin-x64.zip",
-            "whisper-bin-arm64.zip",
+            "whisper-bin-win-cpu-arm64.zip",
             "whisper-bin-macos-x64.zip",
             "whisper-bin-macos-arm64.zip",
             "whisper-bin-ubuntu-x64.tar.gz",
@@ -1054,7 +1197,12 @@ mod tests {
         ];
         let matcher = whisper_asset_matcher();
         let picked: Vec<&str> = names.into_iter().filter(|name| matcher(name)).collect();
-        assert_eq!(picked.len(), 1, "1つだけ選ばれること: {picked:?}");
+        let expected = if cfg!(target_os = "macos") { 0 } else { 1 };
+        assert_eq!(
+            picked.len(),
+            expected,
+            "Macはソース、それ以外は公式資産一つだけ: {picked:?}"
+        );
     }
 
     /// `WHISPER_MODEL` の指定形式（短縮名・ファイル名・URL）を同じ規則で解決すること。

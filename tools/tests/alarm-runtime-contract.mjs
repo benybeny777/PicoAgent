@@ -22,21 +22,22 @@ test("実画面の目覚まし判定が共通の発火記録を使う", () => {
   assert.match(ambient, /PicoAlarmRuntime\.markFired\(firedAlarms, `\$\{due\.alarm\.id\}@\$\{due\.scheduledKey\}`\)/);
 });
 
-test("目覚ましは生成と合成の遅さで表示を止めない", () => {
+test("目覚ましは会話待機を打ち切らず合成より先に文字を表示する", () => {
   const fire = ambient.slice(ambient.indexOf("async function fireAlarm"), ambient.indexOf("async function checkAlarms"));
   // 文字が先。声はあとから。
   assert.ok(fire.indexOf("chat.showAlarm(line") < fire.indexOf("voice.prepare(line)"),
     "音声合成を待ってから表示しています");
   // 再通知の起点も合成待ちで遅らせない。
-  assert.ok(fire.indexOf("armSnooze(alarm)") < fire.indexOf("voice.prepare(line)"),
+  assert.ok(fire.indexOf("armSnooze(alarm, job.consumed)") < fire.indexOf("voice.prepare(line)"),
     "スヌーズの起点が音声合成待ちの後になっています");
-  // 生成・合成のどちらにも上限がある（どちらも数十秒〜数分かかり得る）。
-  assert.match(fire, /waitWithLimit\(wakeRequest, ALARM_WAKE_TIMEOUT_MS\)/);
+  // 会話待機を含む生成応答はバックエンドから届くまで待ち、合成だけ画面側で上限を持つ。
+  assert.match(fire, /await currentAlarmLine\(job\)/);
+  assert.match(ambient, /await bridge\.alarmWake\(job\.alarm\.id, job\.consumed\)/);
+  assert.doesNotMatch(fire, /waitWithLimit\(wake/);
   assert.match(fire, /waitWithLimit\(speechRequest, ALARM_SPEECH_TIMEOUT_MS\)/);
   // 遅れて届いた音声は鳴らさない。合成中に解除された目覚ましも遅れて鳴らさない。
-  assert.match(fire, /if \(armed && !speech\.timedOut && speech\.value && snooze === armed\)/);
+  assert.match(fire, /armed && !speech\.timedOut && speech\.value && snooze === armed/);
   assert.match(fire, /const armed = shouldArm \? snooze : null/);
-  assert.match(ambient, /const ALARM_WAKE_TIMEOUT_MS = 20000/);
   assert.match(ambient, /const ALARM_SPEECH_TIMEOUT_MS = 20000/);
 });
 

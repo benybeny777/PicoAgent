@@ -59,12 +59,7 @@ impl Tool for LinkedInTool {
                 "text",
                 "urn:li:person:...",
             ),
-            Field::new(
-                "PICOAGENT_LINKEDIN_TIMEOUT_SECS",
-                "LinkedIn API 待ち時間（秒、3〜60）",
-                "text",
-                "20",
-            ),
+            Field::int(&crate::config::ints::LINKEDIN_TIMEOUT_SECS),
         ]
     }
 
@@ -77,12 +72,7 @@ impl Tool for LinkedInTool {
                 "LinkedIn API の access token が必要です。",
             );
         }
-        let timeout = cfg
-            .get("PICOAGENT_LINKEDIN_TIMEOUT_SECS", "20")
-            .parse::<u64>()
-            .ok()
-            .filter(|value| (3..=60).contains(value))
-            .unwrap_or(20);
+        let timeout = crate::tool_try!(cfg.int(&crate::config::ints::LINKEDIN_TIMEOUT_SECS)) as u64;
         let client = match reqwest::Client::builder()
             .timeout(Duration::from_secs(timeout))
             .user_agent("PicoAgent/1.0 (LinkedIn tool)")
@@ -93,7 +83,8 @@ impl Tool for LinkedInTool {
         };
         match args.get("action").and_then(Value::as_str).unwrap_or("") {
             "userinfo" => {
-                handle_text_response(
+                crate::tools::http::service_reply(
+                    cfg,
                     client
                         .get(format!("{}/v2/userinfo", LINKEDIN_BASE))
                         .bearer_auth(token)
@@ -135,7 +126,8 @@ impl Tool for LinkedInTool {
                         "com.linkedin.ugc.MemberNetworkVisibility": visibility
                     }
                 });
-                handle_text_response(
+                crate::tools::http::service_reply(
+                    cfg,
                     client
                         .post(format!("{}/v2/ugcPosts", LINKEDIN_BASE))
                         .bearer_auth(token)
@@ -166,23 +158,6 @@ fn text_arg<'a>(args: &'a Value, key: &str, max_chars: usize) -> Result<&'a str,
         ));
     }
     Ok(text)
-}
-
-async fn handle_text_response(
-    response: Result<reqwest::Response, reqwest::Error>,
-    label: &str,
-) -> String {
-    let response = match response {
-        Ok(response) => response,
-        Err(error) => return format!("エラー: {} への接続に失敗しました: {}", label, error),
-    };
-    let status = response.status();
-    let body = crate::tool_response_text!(response);
-    if status.is_success() {
-        body
-    } else {
-        format!("エラー: {} が HTTP {} を返しました。", label, status)
-    }
 }
 
 inventory::submit! { ToolReg { make: || Box::new(LinkedInTool) } }

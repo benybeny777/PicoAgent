@@ -58,12 +58,7 @@ impl Tool for LinearTool {
                 "text",
                 "",
             ),
-            Field::new(
-                "PICOAGENT_LINEAR_TIMEOUT_SECS",
-                "Linear API 待ち時間（秒、3〜60）",
-                "text",
-                "20",
-            ),
+            Field::int(&crate::config::ints::LINEAR_TIMEOUT_SECS),
         ]
     }
 
@@ -76,12 +71,7 @@ impl Tool for LinearTool {
                 "Linear の API key を入れてください。",
             );
         }
-        let timeout = cfg
-            .get("PICOAGENT_LINEAR_TIMEOUT_SECS", "20")
-            .parse::<u64>()
-            .ok()
-            .filter(|value| (3..=60).contains(value))
-            .unwrap_or(20);
+        let timeout = crate::tool_try!(cfg.int(&crate::config::ints::LINEAR_TIMEOUT_SECS)) as u64;
         let client = match reqwest::Client::builder()
             .timeout(Duration::from_secs(timeout))
             .user_agent("PicoAgent/1.0 (Linear tool)")
@@ -133,7 +123,8 @@ impl Tool for LinearTool {
                     .to_string()
             }
         };
-        handle_text_response(
+        crate::tools::http::service_reply(
+            cfg,
             client
                 .post(LINEAR_URL)
                 .bearer_auth(token)
@@ -143,23 +134,6 @@ impl Tool for LinearTool {
             "Linear API",
         )
         .await
-    }
-}
-
-async fn handle_text_response(
-    response: Result<reqwest::Response, reqwest::Error>,
-    label: &str,
-) -> String {
-    let response = match response {
-        Ok(response) => response,
-        Err(error) => return format!("エラー: {} への接続に失敗しました: {}", label, error),
-    };
-    let status = response.status();
-    let body = crate::tool_response_text!(response);
-    if status.is_success() {
-        body
-    } else {
-        format!("エラー: {} が HTTP {} を返しました。", label, status)
     }
 }
 

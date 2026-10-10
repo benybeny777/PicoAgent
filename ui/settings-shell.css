@@ -1,4 +1,19 @@
 /* 設定画面の外枠と案内。各設定項目の入力部品と、テーマ変数への接続は settings.css が所有する。 */
+.character-list-diagnostic-container {
+  flex-shrink: 0;
+  margin: 8px 20px 0;
+  padding: 10px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md, 10px);
+  background: var(--surface);
+  color: var(--ink);
+  overflow-wrap: anywhere;
+  max-height: 180px;
+  overflow: auto;
+  font-size: 13px;
+}
+.character-list-diagnostic-container[hidden] { display: none; }
+.character-list-diagnostic p { margin: 6px 0; white-space: pre-wrap; }
 .visually-hidden {
   position: absolute;
   width: 1px;
