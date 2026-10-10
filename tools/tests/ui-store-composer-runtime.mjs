@@ -95,8 +95,10 @@ function setup({ raw = null, error = null, presence = async () => ({}) } = {}) {
   context.uiStore = runInNewContext(`${storeSource}; ({ read, readJson, write, remove })`, context);
   const createComposer = runInNewContext(`${source("chat/composer.js").replace(/^import .*;$/gm, "").replace(/export /g, "")}; createComposer`, context);
   const form = element("form", { hidden: true }), input = element("textarea"), quickActions = element("div");
+  const diagnostics = element("div", {}, [quickActions]);
+  form.append(diagnostics);
   const status = { text: "", set(text) { this.text = text; }, clear() { this.text = ""; }, flash(text) { this.text = text; } };
-  const composer = createComposer({ form, input, quickActions, status, preview: element("div"), suggestions: element("div"), sendButton: element("button") });
+  const composer = createComposer({ form, input, quickActions, diagnostics, status, preview: element("div"), suggestions: element("div"), sendButton: element("button") });
   const button = text => form.querySelectorAll("button").find(node => node.textContent === text);
   const draftRaw = text => context.PicoComposerDraft.serializeDraft(text);
   return { composer, form, input, quickActions, status, cache, context, key, button, draftRaw };

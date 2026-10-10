@@ -43,7 +43,7 @@ function makeComposer({ value = "下書き", history = ["前の入力", "直前�
   const flashes = [];
   let submitted = 0;
   const composer = createComposer({
-    form, input, preview: make("div"), suggestions: make("div"), quickActions: make("div"), sendButton,
+    form, input, preview: make("div"), suggestions: make("div"), quickActions: make("div"), diagnostics: make("div"), sendButton,
     status: { set() {}, clear() {}, flash: text => flashes.push(text), setBusy() {} },
   });
   composer.onSubmit(() => { submitted += 1; });

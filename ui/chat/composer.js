@@ -20,7 +20,7 @@ const FILE_ICONS = {
   webp: "🖼", avif: "🖼", bmp: "🖼", ico: "🖼",
 };
 
-export function createComposer({ form, input, preview: previewBox, suggestions, quickActions, sendButton, status }) {
+export function createComposer({ form, input, preview: previewBox, suggestions, quickActions, diagnostics, sendButton, status }) {
   const draftStore = window.PicoComposerDraft;
   const quick = window.PicoQuickActions;
   const promptHistory = [];
@@ -469,7 +469,7 @@ export function createComposer({ form, input, preview: previewBox, suggestions, 
       persistDraft();
     },
   };
-  form.append(draftRecovery);
+  diagnostics.append(draftRecovery);
   loadDraft();
   renderQuickActions();
   return composer;

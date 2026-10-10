@@ -92,6 +92,8 @@ test("狭幅で省略するのは通常一覧だけで診断と質問選択肢�
   assert.doesNotMatch(css, /@container \(max-width: 260px\)\s*\{\s*\.quick-actions\s*\{/);
   assert.match(css, /\.quick-actions\[data-state="ready"\] \{ display: none;/);
   for (const state of ["loading", "error", "choices"]) assert.ok(css.includes(`.quick-actions[data-state="${state}"]`));
-  assert.match(css, /\.draft-recovery\s*\{[^}]*overflow-y: auto;/);
-  assert.match(css, /\.chat:has\(\.draft-recovery:not\(\[hidden\]\)\)[^{]*\{[^}]*overflow-y: auto;/);
+  assert.match(css, /\.composer-diagnostics:has\([^}]*overflow-y: auto;/);
+  assert.doesNotMatch(css, /\.chat:has\([^{]*\{[^}]*overflow-y: auto;/);
+  assert.match(css, /grid-template-rows: minmax\(0, 1fr\) auto auto;/);
+  assert.match(css, /padding: calc\(var\(--chat-chrome-base-padding\) \+ var\(--chat-chrome-inset, 0px\)\) 14px 4px;/);
 });
