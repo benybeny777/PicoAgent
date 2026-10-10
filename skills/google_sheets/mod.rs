@@ -59,12 +59,7 @@ impl Tool for GoogleSheetsTool {
                 "text",
                 "",
             ),
-            Field::new(
-                "PICOAGENT_GOOGLE_SHEETS_TIMEOUT_SECS",
-                "Google Sheets API 待ち時間（秒、3〜60）",
-                "text",
-                "20",
-            ),
+            Field::int(&crate::config::ints::GOOGLE_SHEETS_TIMEOUT_SECS),
         ]
     }
 
@@ -99,35 +94,25 @@ impl Tool for GoogleSheetsTool {
         else {
             return "エラー: range が指定されていません。".to_string();
         };
-        let timeout = cfg
-            .get("PICOAGENT_GOOGLE_SHEETS_TIMEOUT_SECS", "20")
-            .parse::<u64>()
-            .ok()
-            .filter(|value| (3..=60).contains(value))
-            .unwrap_or(20);
-        let client = match reqwest::Client::builder()
-            .timeout(Duration::from_secs(timeout))
-            .user_agent("PicoAgent/1.0 (Google Sheets tool)")
-            .build()
-        {
-            Ok(client) => client,
-            Err(error) => {
-                return format!("エラー: Google Sheets API の準備に失敗しました: {}", error)
-            }
-        };
+        let timeout =
+            crate::tool_try!(cfg.int(&crate::config::ints::GOOGLE_SHEETS_TIMEOUT_SECS)) as u64;
+        let request_timeout = Duration::from_secs(timeout);
         let encoded_range: String =
             url::form_urlencoded::byte_serialize(range.as_bytes()).collect();
         match args.get("action").and_then(Value::as_str).unwrap_or("") {
             "read" => {
-                let response = client
-                    .get(format!(
+                let response = crate::tool_try!(crate::tools::http::service(
+                    reqwest::Method::GET,
+                    format!(
                         "{}/{}/values/{}",
                         SHEETS_BASE, spreadsheet_id, encoded_range
-                    ))
-                    .bearer_auth(token)
-                    .send()
-                    .await;
-                handle_text_response(response, "Google Sheets API").await
+                    ),
+                    request_timeout
+                ))
+                .bearer_auth(token)
+                .send()
+                .await;
+                crate::tools::http::service_reply(cfg, response, "Google Sheets API").await
             }
             "update" | "append" => {
                 let values = match args.get("values").and_then(Value::as_array) {
@@ -157,43 +142,32 @@ impl Tool for GoogleSheetsTool {
                     )
                 };
                 let response = if action == "append" {
-                    client
-                        .post(url)
-                        .bearer_auth(token)
-                        .query(&[("valueInputOption", "USER_ENTERED")])
-                        .json(&payload)
-                        .send()
-                        .await
+                    crate::tool_try!(crate::tools::http::service(
+                        reqwest::Method::POST,
+                        url,
+                        request_timeout
+                    ))
+                    .bearer_auth(token)
+                    .query(&[("valueInputOption", "USER_ENTERED")])
+                    .json(&payload)
+                    .send()
+                    .await
                 } else {
-                    client
-                        .put(url)
-                        .bearer_auth(token)
-                        .query(&[("valueInputOption", "USER_ENTERED")])
-                        .json(&payload)
-                        .send()
-                        .await
+                    crate::tool_try!(crate::tools::http::service(
+                        reqwest::Method::PUT,
+                        url,
+                        request_timeout
+                    ))
+                    .bearer_auth(token)
+                    .query(&[("valueInputOption", "USER_ENTERED")])
+                    .json(&payload)
+                    .send()
+                    .await
                 };
-                handle_text_response(response, "Google Sheets API").await
+                crate::tools::http::service_reply(cfg, response, "Google Sheets API").await
             }
             _ => "エラー: action は read/update/append のいずれかを指定してください。".to_string(),
         }
-    }
-}
-
-async fn handle_text_response(
-    response: Result<reqwest::Response, reqwest::Error>,
-    label: &str,
-) -> String {
-    let response = match response {
-        Ok(response) => response,
-        Err(error) => return format!("エラー: {} への接続に失敗しました: {}", label, error),
-    };
-    let status = response.status();
-    let body = crate::tool_response_text!(response);
-    if status.is_success() {
-        body
-    } else {
-        format!("エラー: {} が HTTP {} を返しました。", label, status)
     }
 }
 

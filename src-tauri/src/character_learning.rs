@@ -421,9 +421,8 @@ async fn run_worker(
     let dir = job_dir(app, &job.id)?;
     let runtime = configured_runtime(app, &job.input)?;
     let ffmpeg_name =
-        crate::tools::resolve_cli_path(&state.config, "PICOAGENT_FFMPEG_PATH", "ffmpeg", "ffmpeg");
-    let ffmpeg = crate::tools::process::resolve_executable(&ffmpeg_name)
-        .ok_or("音声変換のffmpeg実体がありません。追加機能の作業ツールを導入してください")?;
+        crate::tools::resolve_cli_path(&state.config, "PICOAGENT_FFMPEG_PATH", "ffmpeg", "ffmpeg")?;
+    let ffmpeg = ffmpeg_name;
     let mut request = json!({"jobDir":dir,"runtimeRoot":runtime,"source":{"kind":job.input.source_kind,"value":job.input.source_value},"mode":job.input.mode,"characterName":job.input.character_name,"asrDevice":job.input.asr_device,"stopAtStep":1000,"scriptsRoot":scripts(app)?,"ffmpeg":ffmpeg,"ownerProcessId":std::process::id()});
     if let Some(Value::Object(extra)) = extra {
         for (key, value) in extra {
@@ -795,21 +794,14 @@ pub async fn settings_character_learning_check_voice(
     let flag = set_active(&state, &id)?;
     let result = async {
         cancellable(crate::aivis::ensure_started(&app), &flag).await?;
-        let endpoint = crate::aivis::endpoint(&app, &ai);
-        let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(300))
-            .build()
-            .map_err(|e| e.to_string())?;
+        let endpoint = crate::aivis::endpoint(&app, &ai)?;
+        let request = crate::tools::http::service(
+            reqwest::Method::GET,
+            format!("{endpoint}/speakers"),
+            Duration::from_secs(300),
+        )?;
         let speakers: Value = cancellable(
-            async {
-                client
-                    .get(format!("{endpoint}/speakers"))
-                    .send()
-                    .await?
-                    .error_for_status()?
-                    .json()
-                    .await
-            },
+            async { request.send().await?.error_for_status()?.json().await },
             &flag,
         )
         .await?;
@@ -840,10 +832,14 @@ pub async fn settings_character_learning_check_voice(
                 length,
             )
             .file_name("learning-candidate.aivmx");
+            let request = crate::tools::http::service(
+                reqwest::Method::POST,
+                format!("{endpoint}/aivm_models/install"),
+                Duration::from_secs(300),
+            )?;
             cancellable(
                 async {
-                    client
-                        .post(format!("{endpoint}/aivm_models/install"))
+                    request
                         .multipart(reqwest::multipart::Form::new().part("file", part))
                         .send()
                         .await?
@@ -856,16 +852,13 @@ pub async fn settings_character_learning_check_voice(
         if flag.load(Ordering::SeqCst) {
             return Err("音声検査を停止しました".into());
         }
+        let request = crate::tools::http::service(
+            reqwest::Method::GET,
+            format!("{endpoint}/speakers"),
+            Duration::from_secs(300),
+        )?;
         let speakers: Value = cancellable(
-            async {
-                client
-                    .get(format!("{endpoint}/speakers"))
-                    .send()
-                    .await?
-                    .error_for_status()?
-                    .json()
-                    .await
-            },
+            async { request.send().await?.error_for_status()?.json().await },
             &flag,
         )
         .await?;
@@ -942,10 +935,8 @@ pub async fn settings_character_learning_setup(
             "PICOAGENT_FFMPEG_PATH",
             "ffmpeg",
             "ffmpeg",
-        );
-        let ffmpeg = crate::tools::process::resolve_executable(&ffmpeg_name).ok_or(
-            "音声変換のffmpegがありません。追加機能の作業ツールを導入してから準備してください",
         )?;
+        let ffmpeg = ffmpeg_name;
         let uv = cancellable(crate::components::acquire_embedding_uv(&app), &flag).await?;
         let shared = cancellable(crate::components::ensure_shared_python(&app, &uv), &flag).await?;
         let mut command = crate::tools::process::command_sync(&shared);

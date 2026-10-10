@@ -2,19 +2,42 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import { installFakeDom } from "./lib/fake-dom.mjs";
 
 const read = path => readFileSync(new URL(`../../${path}`, import.meta.url), "utf8");
 
-test("会話の文字サイズの範囲は画面とバックエンドの検証で一致する", () => {
-  const font = read("ui/chat/font-size.js");
+test("会話の文字サイズは共通宣言の範囲を受け取り不正値を丸めず拒否する", async () => {
+  const document = installFakeDom();
+  const { createFontSizeControl } = await import("../../ui/chat/font-size.js");
+  const declarations = read("src-tauri/src/numeric_settings.rs");
   const commands = read("src-tauri/src/commands.rs");
-  assert.match(font, /bubble: \{ key: "PICOAGENT_BUBBLE_FONT_PX", min: 10, max: 28,/);
-  assert.match(font, /column: \{ key: "PICOAGENT_STREAM_CHAT_FONT_PX", min: 18, max: 48,/);
-  assert.match(commands, /"PICOAGENT_BUBBLE_FONT_PX" => value[\s\S]*?\(10\.\.=28\)\.contains/);
-  assert.match(commands, /\(18\.\.=48\)\.contains/);
-  // 保存はメイン画面専用の狭い入口だけを通す（設定画面の保存処理を流用しない）。
+  const metadata = {};
+  for (const name of ["BUBBLE_FONT_PX", "STREAM_CHAT_FONT_PX"]) {
+    const found = declarations.match(new RegExp(name + ': \\("[^"\\n]*", Some\\((\\d+)\\), (\\d+), (\\d+), "px"\\)'));
+    assert.ok(found, name);
+    metadata["PICOAGENT_" + name] = { default: found[1], range: [found[2], found[3]], unit: "px" };
+  }
+  let variant = "bubble";
+  const control = createFontSizeControl({ panel: document.createElement("div"), variant: () => variant, apply() {} });
+  control.refresh();
+  assert.equal(control.toggle.disabled, true, "設定を受け取るまでは操作させない");
+  control.setNumberSettings(metadata);
+  assert.equal(control.toggle.disabled, true, "宣言だけでは未検証のサイズを生成しない");
+  for (const [kind, key] of [["bubble", "PICOAGENT_BUBBLE_FONT_PX"], ["column", "PICOAGENT_STREAM_CHAT_FONT_PX"]]) {
+    variant = kind;
+    const [min, max] = metadata[key].range.map(Number);
+    control.setSize(kind, min);
+    assert.equal(control.popover.children[1].disabled, true);
+    control.setSize(kind, max);
+    assert.equal(control.popover.children[3].disabled, true);
+    for (const invalid of [min - 1, max + 1, min + 0.5, "不正"]) assert.throws(() => control.setSize(kind, invalid), /整数/);
+    assert.equal(control.popover.children[2].textContent, max + "px", "不正値で公開済み表示を書き換えない");
+  }
+  assert.match(commands, /fn checked_main_ui_pref[\s\S]*?config::validate_int_patch/);
+  const font = read("ui/chat/font-size.js");
   assert.match(font, /bridge\.saveUiPref\(key, String\(sizes\[current\]\)\)/);
-  assert.doesNotMatch(font, /settings\.save|settings_save/);
+  assert.doesNotMatch(font, /settings\.save|settings_save|clampFontPx|fallback/);
+  assert.match(read("ui/app/main.js"), /chat\.setNumberSettings\(payload\.numberSettings\)/);
 });
 
 test("タイトルバーは見えているシーンへ吸着し、隠しても操作要素の位置を変えない", () => {

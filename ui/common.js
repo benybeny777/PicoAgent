@@ -22,11 +22,11 @@
   function logApp(level, message, detail) {
     try {
       window.picoagent?.log?.(level, message, detail == null ? "" : String(detail)).catch(error => {
-        // フォールバック許可: ログ保存自体の失敗は再帰ログにせず、開発者コンソールへだけ出す。
+        // ログ保存自体の失敗は再帰ログにせず、開発者コンソールへだけ出す。
         console.warn("アプリログ保存に失敗しました", error);
       });
     } catch (error) {
-      // フォールバック許可: ログ保存自体の失敗は再帰ログにせず、開発者コンソールへだけ出す。
+      // ログ保存自体の失敗は再帰ログにせず、開発者コンソールへだけ出す。
       console.warn("アプリログ保存に失敗しました", error);
     }
   }
@@ -85,5 +85,31 @@
     return Object.freeze({ request, reset, isArmed: () => armed });
   }
 
-  window.PicoUI = Object.freeze({ errorDetail, errorMessage, logApp, preview, tail, twoStepAction });
+  // 一覧を取得できなかったことと、正常な空一覧を呼出側が区別できる形で返す。
+  async function loadUserCharacters(fetchEntries, assetUrl, bundled = []) {
+    try {
+      const result = await fetchEntries();
+      if (!result || !Array.isArray(result.characters)) throw new Error("追加キャラクター一覧の形式が不正です");
+      const known = new Set(bundled.map(entry => entry.id));
+      const entries = [];
+      for (const character of result.characters) {
+        if (!character || typeof character.id !== "string" || !character.id || typeof character.path !== "string" || !character.path) {
+          throw new Error("追加キャラクター一覧のIDまたは配置先が不正です");
+        }
+        if (known.has(character.id)) continue;
+        known.add(character.id);
+        entries.push({
+          id: character.id, name: character.name || character.id,
+          description: character.description || "", manifest: `${character.id}/character.json`,
+          root: assetUrl(character.path), user: true,
+          live2d: Boolean(character.live2d), mmd: Boolean(character.mmd),
+        });
+      }
+      return { entries, error: null, root: result.root || "" };
+    } catch (error) {
+      return { entries: [], error, root: "" };
+    }
+  }
+
+  window.PicoUI = Object.freeze({ errorDetail, errorMessage, logApp, preview, tail, twoStepAction, loadUserCharacters });
 }());

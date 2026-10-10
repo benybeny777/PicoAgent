@@ -79,7 +79,7 @@ test("遅れて読込完了した描画器を破棄し、新しいキャラへ�
   // 読込の世代が変わっていたら、出来上がった描画器は捨てる（古いキャラが一瞬出ない）。
   const load = host.slice(host.indexOf("async load(characterId"));
   assert.match(load, /const loadGeneration = \+\+generation;/);
-  assert.match(load, /if \(loadGeneration !== generation\) \{\s*\n\s*next\?\.dispose\(\);\s*\n\s*return null;/);
+  assert.match(load, /if \(loadGeneration !== generation\) \{\s*\n\s*next\??\.dispose\(\);\s*\n\s*return null;/);
   // 新しい描画器の準備ができてから古い描画器を捨てる（入れ替えの間に空白を見せない）。
   assert.ok(load.indexOf("renderer?.dispose();") > load.indexOf("next = await createRenderer(Renderer, loaded);"));
 });

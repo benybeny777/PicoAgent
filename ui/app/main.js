@@ -6,6 +6,7 @@
 import * as bridge from "./bridge.js";
 import { createAmbient } from "./ambient.js";
 import { createBoot } from "./boot.js";
+import { createCharacterDiagnostic } from "./character-diagnostic.js";
 import { createContextMenu } from "./context-menu.js";
 import { createEditor } from "./edit.js";
 import { createEngine } from "./engine.js";
@@ -17,12 +18,12 @@ import { createNotices } from "./notice.js";
 import { createOnboarding } from "./onboarding.js";
 import { createRelationship } from "./relationship.js";
 import { createStage } from "./stage.js";
-import { toast, notifyBackgroundFailure } from "./toast.js";
-import { copyText, el, errorDetail, errorMessage, fetchJson, isImeComposing, logApp } from "./util.js";
+import { toast, notifyBackgroundFailure, clearBackgroundFailure } from "./toast.js";
+import { copyText, el, errorDetail, errorMessage, fetchJson, isImeComposing, logApp, readIntegerSetting } from "./util.js";
 import { createVoice } from "./voice.js";
 import { createWindowChrome } from "./window-chrome.js";
 import { createCharacterHost } from "../character/index.js";
-import { listCharacters, personaText, rememberVariant } from "../character/manifest.js";
+import { listCharacters, personaText, rememberVariant, savedVariant } from "../character/manifest.js";
 import { createSender } from "../chat/send.js";
 import { openExternalUrl } from "../chat/markdown.js";
 import { createSources } from "../sources/index.js";
@@ -38,7 +39,7 @@ window.addEventListener("error", event => {
 window.addEventListener("unhandledrejection", event => logApp("error", "未処理 Promise rejection", errorDetail(event.reason)));
 
 // ── 部品の組み立て ───────────────────────────────────────────
-const context = { toast };
+const context = { toast, openSettings: tab => bridge.openSettings(tab) };
 const sources = createSources(sceneRoot, context);
 context.sources = sources;
 const chat = sources.get("chat");
@@ -138,7 +139,11 @@ const chrome = createWindowChrome({
   stageElement,
   onEditLayout: () => (editor.mode === "all" ? editor.stop() : editor.start("all")),
   onGame: () => game.open(),
-  listCharacters: async () => (await listCharacters()).entries.map(entry => ({ id: entry.id, name: entry.name || entry.id })),
+  listCharacters: async () => {
+    const result = await listCharacters();
+    reportUserCharacters({ error: result.userCharactersError });
+    return result.entries.map(entry => ({ id: entry.id, name: entry.name || entry.id }));
+  },
   onPinnedChange: pinned => {
     bridge.saveUiPref("PICOAGENT_TITLE_BAR_PINNED", pinned).catch(error => {
       logApp("error", "タイトルバーの表示設定を保存できませんでした", errorDetail(error));
@@ -151,8 +156,8 @@ createContextMenu({
   openExternalUrl,
   onCharacterAction(action, framing) {
     if (action === "edit-character") editor.start("character");
-    else if (action === "reset-character") stage.resetCharacter().then(() => editor.render()).catch(() => {});
-    else if (action === "set-framing") stage.setFraming(framing).then(() => editor.render()).catch(() => {});
+    else if (action === "reset-character") editor.resetCharacter();
+    else if (action === "set-framing") editor.setFraming(framing);
   },
 });
 
@@ -192,7 +197,9 @@ async function setExpanded(on) {
   stage.setExpanded(on);
   buttons.expandButton.textContent = on ? "戻す" : "拡大";
   // ネイティブ窓への変更は順番に送る。古い失敗で最新の操作を巻き戻さない。
-  const operation = fullscreenQueue.catch(() => undefined).then(async () => {
+  const operation = fullscreenQueue.catch(error => {
+    logApp("warn", "直前の全画面切替失敗後に次の操作を開始します", errorDetail(error));
+  }).then(async () => {
     if (generation !== expandedGeneration) return;
     await bridge.setFullscreen(on);
     confirmedExpanded = on;
@@ -304,10 +311,37 @@ function applyStreamAppearance(info) {
 // ── キャラクター ─────────────────────────────────────────────
 let characterOverrides = {};
 let sdkOverrides = {};
+let rendererOverrides = {};
+let rendererSavePending = false;
+let requestedCharacterId = "";
 let loadedSignature = "";
 let characterName = "キャラクター";
 let characterLoadGeneration = 0;
 let characterLoads = 0;
+
+const characterDiagnostic = createCharacterDiagnostic({
+  container: app,
+  retry: id => {
+    if (!requestedCharacterId) { window.location.reload(); return Promise.resolve(); }
+    loadedSignature = "";
+    return loadCharacter(id, { speakGreeting: false });
+  },
+  useImage: async id => {
+    rendererSavePending = true;
+    try {
+      const result = await bridge.setCharacterRenderer(id, "image");
+      rendererOverrides = result.rendererOverrides;
+      if (result.notificationError) toast(`2D表示は保存しましたが、設定の通知に失敗しました: ${result.notificationError}`, "error");
+    } finally { rendererSavePending = false; }
+    loadedSignature = "";
+    return loadCharacter(id, { speakGreeting: false });
+  },
+});
+function reportUserCharacters({ error }) {
+  if (error) notifyBackgroundFailure("user-characters", `追加キャラクターの一覧を読めません: ${errorMessage(error)}`, error);
+  else clearBackgroundFailure("user-characters");
+}
+host.events.on("userCharacters", reportUserCharacters);
 
 function renderCharacterOptions(pack) {
   const extra = relationship.extra;
@@ -317,17 +351,18 @@ function renderCharacterOptions(pack) {
     select.addEventListener("change", async () => {
       const previous = pack.variantId;
       select.disabled = true;
-      rememberVariant(pack.id, select.value);
-      loadedSignature = "";
+      let saved = false;
       try {
+        rememberVariant(pack.id, select.value);
+        saved = true;
+        loadedSignature = "";
         await loadCharacter(pack.id, { speakGreeting: false });
         motion.react("pleased", 900);
       } catch (error) {
         logApp("error", "雰囲気の切替に失敗しました", errorDetail(error));
-        rememberVariant(pack.id, previous);
-        loadedSignature = "";
-        await loadCharacter(pack.id, { speakGreeting: false }).catch(restoreError => logApp("error", "雰囲気の切替失敗後に元の表示へ戻せませんでした", errorDetail(restoreError)));
-        toast("雰囲気を切り替えられませんでした", "error");
+        // 保存不能なら現在の確定表示を保つ。保存後の読込失敗は同じ選択の診断と再試行へ流す。
+        if (!saved) select.value = previous;
+        toast(`雰囲気を切り替えられません: ${errorMessage(error)}`, "error");
       } finally {
         select.disabled = false;
       }
@@ -346,20 +381,25 @@ function renderCharacterOptions(pack) {
 
 /** 見た目・人格・Live2D の世代・雰囲気のどれかが変わったときだけ描画を作り直す。 */
 function signatureOf(characterId) {
-  return [characterId, JSON.stringify(characterOverrides[characterId] || ""), sdkOverrides[characterId] || "", localStorageVariant(characterId)].join("\n");
+  return [characterId, JSON.stringify(characterOverrides[characterId] || ""), sdkOverrides[characterId] || "", rendererOverrides[characterId] || "", savedVariant(characterId)].join("\n");
 }
 
 async function loadCharacter(characterId, { speakGreeting = true } = {}) {
   const generation = ++characterLoadGeneration;
-  const signature = signatureOf(characterId);
-  if (!characterLoads && signature === loadedSignature) return null;
+  requestedCharacterId = characterId;
   characterLoads++;
   try {
     characterSource.element.style.visibility = "hidden";
     host.setDisplayReady(false);
+    const signature = signatureOf(characterId);
+    if (characterLoads === 1 && signature === loadedSignature) {
+      host.setDisplayReady(true);
+      characterSource.element.style.visibility = "";
+      return null;
+    }
     status.set("選択中のキャラクターを読み込み中…", "character-load");
     voice.stop(); // 切替前のキャラの合成待ち・再生音声を新しい姿へ持ち越さない
-    const loaded = await host.load(characterId, { overrides: characterOverrides, sdkOverrides });
+    const loaded = await host.load(characterId, { overrides: characterOverrides, sdkOverrides, rendererOverrides });
     if (!loaded || generation !== characterLoadGeneration) return null;
     const { pack, greeting } = loaded;
     characterName = pack.name;
@@ -370,11 +410,13 @@ async function loadCharacter(characterId, { speakGreeting = true } = {}) {
     renderCharacterOptions(pack);
     motion.rest();
     // 挨拶も渡す（短い挨拶へモデルを呼ばず返すとき、全キャラ共通の定型文にしないため）。
-    const appearance = await bridge.setCharacterProfile(pack.id, personaText(pack.manifest, characterOverrides[pack.id]), greeting);
+    const appearance = await bridge.setCharacterProfile(pack.id, personaText(pack.manifest, characterOverrides[pack.id]), greeting, pack.manifest.voice ?? null);
     if (generation !== characterLoadGeneration) return null;
     // 人格登録まで確定したキャラの背景へ切り替え、直前のキャラ用背景を残さない。
+    voice.setCharacter(pack);
     if (appearance) applyStreamAppearance(appearance);
     loadedSignature = signature;
+    characterDiagnostic.clear();
     host.setDisplayReady(true);
     characterSource.element.style.visibility = ""; // 起動時の読込失敗後も、有効なキャラへ変更できれば表示を復旧する。
     status.clear("character-load");
@@ -387,21 +429,13 @@ async function loadCharacter(characterId, { speakGreeting = true } = {}) {
     if (generation !== characterLoadGeneration) return null;
     loadedSignature = "";
     characterSource.element.style.visibility = "hidden";
+    characterDiagnostic.show(characterId, error);
     status.set(`キャラクターを読み込めません: ${errorMessage(error)}。設定からキャラを確認してください`, "character-load");
     throw error;
   } finally {
     characterLoads--;
   }
 }
-
-function localStorageVariant(characterId) {
-  try { return localStorage.getItem(`picoagent.variant.${characterId}`) || ""; }
-  catch { return ""; } // フォールバック許可: 保存領域を読めない環境では既定の見た目として扱う。
-}
-
-host.events.on("fallback", ({ kind }) => {
-  status.flash(kind === "live2d" ? "Live2D を読み込めないので PNG 表示で続けるね" : "高品質リグを読み込めないので差分絵表示で続けるね", 5000);
-});
 
 // ── 表示形式 ─────────────────────────────────────────────────
 function applyLayout(id) {
@@ -445,7 +479,7 @@ bridge.on("pet:layout-reset", payload => {
   editor.render();
 });
 bridge.on("pet:layout-edit", target => editor.start(target === "character" ? "character" : "all"));
-bridge.on("pet:notice", notice => notices.push(notice));
+const noticeSubscription = bridge.listen("pet:notice", notice => notices.push(notice));
 bridge.on("pet:model", model => status.flash(String(model), 1800));
 bridge.on("pet:emotion", emotion => {
   if (!emotion?.mood) return;
@@ -467,13 +501,29 @@ bridge.on("pet:show-onboarding", () => {
   voice.stop();
   onboarding.show();
 });
+function applyIntegerSettings(payload) {
+  if (!payload.numberSettings) return;
+  chat.setNumberSettings(payload.numberSettings);
+  const entries = [
+    ["PICOAGENT_BUBBLE_FONT_PX", "fontPx", value => chat.setFontPx(value), error => chat.setFontError("bubble", error)],
+    ["PICOAGENT_STREAM_CHAT_FONT_PX", "streamChatFontPx", value => chat.setStreamFontPx(value), error => chat.setFontError("column", error)],
+    ["PICOAGENT_TTS_VOLUME", "voiceVolume", value => voice.setVolume(value), error => voice.setVolumeError(error)],
+  ];
+  for (const [key, property, apply, diagnose] of entries) {
+    if (!Object.hasOwn(payload, property)) continue;
+    const result = readIntegerSetting(payload, key, property);
+    diagnose(result.error);
+    if (result.error) notifyBackgroundFailure(`integer-${key}`, `${key}: ${result.error}`, result.error);
+    else { apply(result.value); clearBackgroundFailure(`integer-${key}`); }
+  }
+}
+
 bridge.on("pet:ui", ui => {
   if (!ui) return;
   applyTheme(ui.theme, ui.uiTheme);
   if (ui.titleBarPinned != null) chrome.setPinned(ui.titleBarPinned === true);
-  if (ui.fontPx != null) chat.setFontPx(ui.fontPx);
-  if (ui.streamChatFontPx != null) chat.setStreamFontPx(ui.streamChatFontPx);
-  if (ui.voiceVolume != null) voice.setVolume(ui.voiceVolume);
+  applyIntegerSettings(ui);
+  if (Object.hasOwn(ui, "up")) engine.applyProviderStatus(ui);
   if (ui.relationshipMemoryEnabled != null) relationship.setMemoryEnabled(ui.relationshipMemoryEnabled, characterSource.heart);
   if (ui.gazeTrackingEnabled != null) host.setGazeTracking(ui.gazeTrackingEnabled);
   applyStreamAppearance(ui);
@@ -481,8 +531,10 @@ bridge.on("pet:ui", ui => {
   if (ui.layout != null) applyLayout(ui.layout);
   if (ui.characterOverrides) characterOverrides = ui.characterOverrides;
   if (ui.live2dSdkOverrides) sdkOverrides = ui.live2dSdkOverrides;
-  if (ui.characterId) {
-    loadCharacter(ui.characterId).catch(error => {
+  const rendererChanged = ui.rendererOverrides && JSON.stringify(rendererOverrides) !== JSON.stringify(ui.rendererOverrides);
+  if (ui.rendererOverrides) rendererOverrides = ui.rendererOverrides;
+  if (!rendererSavePending && (ui.characterId || rendererChanged)) {
+    loadCharacter(ui.characterId || requestedCharacterId, { speakGreeting: !rendererChanged }).catch(error => {
       logApp("error", "キャラクター変更に失敗しました", errorDetail(error));
       status.flash(`キャラクター変更に失敗: ${errorMessage(error)}`, 8000);
     });
@@ -502,41 +554,46 @@ async function loadSceneDefinitions() {
   // 起動画面のDOMを組み立ててから窓を表示する。以後の終了通知との順序も固定する。
   await bridge.frontendReady();
   status.set("設定と履歴を読み込み中…", "boot");
+  await noticeSubscription;
   const [info, definitions] = await Promise.all([bridge.init(), loadSceneDefinitions()]);
   document.querySelector(".beta-badge")?.toggleAttribute("hidden", info.betaBuild !== true);
   applyTheme(info.theme, info.uiTheme);
   chrome.setPinned(info.titleBarPinned === true);
-  if (info.fontPx != null) chat.setFontPx(info.fontPx);
-  if (info.streamChatFontPx != null) chat.setStreamFontPx(info.streamChatFontPx);
-  if (info.voiceVolume != null) voice.setVolume(info.voiceVolume);
+  applyIntegerSettings(info);
   voice.setEnabled(info.ttsEnabled !== false);
   host.setGazeTracking(info.gazeTrackingEnabled === true);
   relationship.setMemoryEnabled(info.relationshipMemoryEnabled, characterSource.heart);
   relationship.render({ relationship: info.relationship, bondLabel: info.bondLabel });
+  if (info.relationshipError) {
+    notifyBackgroundFailure("relationship-load", `関係性データを読み込めません: ${info.relationshipError}`, info.relationshipError);
+  }
   boot.setProgressInterval(info.bootProgressIntervalMs);
   engine.init(info, up => characterSource.setOnline(up));
   applyStreamAppearance(info);
   characterOverrides = info.characterOverrides || {};
   sdkOverrides = info.live2dSdkOverrides || {};
+  rendererOverrides = info.rendererOverrides || {};
   stage.load(definitions, info.scenes || {});
   applyLayout(info.layout);
   // 原本を読めなかった履歴は保存を止めている。黙っていると再起動でその分が消えるので、起動時に知らせる。
   if (info.historySaveBlocked === true) {
     notifyBackgroundFailure("history-save-blocked", "会話履歴を読めなかったため、この会話は保存されません（元の履歴は残しています）", "history save blocked");
   }
+  // 履歴の復元は描画の成否から独立させ、診断から復旧しても一度だけ確実に済ませる。
+  status.set("会話履歴を画面へ復元中…", "boot");
+  chat.history.hydrate(info.history);
+  composer.hydratePrompts(chat.history.items);
+  const last = [...chat.history.items].reverse().find(item => item.role === "assistant");
+  if (last) chat.lastAssistantText = last.content;
   let startupGreeting = "";
   let preparedGreeting = null;
   let startupError = "";
+  let characterError = "";
   let voiceError = "";
   try {
     status.set("選択中のキャラクターを読み込み中…", "boot");
     const pack = await loadCharacter(info.characterId || "mugi", { speakGreeting: false });
     characterName = pack?.name || characterName;
-    status.set("会話履歴を画面へ復元中…", "boot");
-    chat.history.hydrate(info.history);
-    composer.hydratePrompts(chat.history.items);
-    const last = [...chat.history.items].reverse().find(item => item.role === "assistant");
-    if (last) chat.lastAssistantText = last.content;
     let greeting = pack?.manifest?.greeting || "";
     try {
       status.set("今日のあいさつを確認中…", "boot");
@@ -560,7 +617,7 @@ async function loadSceneDefinitions() {
       if (voice.enabled) {
         status.set("声を準備中…", "boot");
         try {
-          await bridge.prepareVoiceModel();
+          await voice.prepareModel();
           if (startupGreeting) preparedGreeting = await voice.prepare(startupGreeting);
         } catch (error) {
           logApp("error", "音声モデルの準備に失敗しました", errorDetail(error));
@@ -571,7 +628,7 @@ async function loadSceneDefinitions() {
   } catch (error) {
     logApp("error", "キャラクター読込に失敗しました", errorDetail(error));
     characterSource.element.style.visibility = "hidden";
-    startupError = `選択したキャラを読み込めません: ${errorMessage(error)}。設定からキャラを確認してください`;
+    characterError = `選択したキャラを読み込めません: ${errorMessage(error)}。設定からキャラを確認してください`;
   } finally {
     status.set(`${characterName}を起こしているよ…`, "boot");
     stage.layoutNow();
@@ -585,11 +642,11 @@ async function loadSceneDefinitions() {
   catch (error) { logApp("warn", "エンジン状態取得に失敗しました", errorDetail(error)); }
   if (voiceError && engine.phase !== "error") status.setSticky(voiceError, "error");
   if (startupError) status.setSticky(startupError, "error");
+  if (characterError) status.set(characterError, "character-load");
   composer.setQuickActions(info.quickActions);
   composer.refreshDefaultQuickActions();
   sender.updateButtons();
-  ambient.applyChatter(info);
-  ambient.start({ napMinutes: info.napMinutes });
+  ambient.start(info);
   notices.loadScheduleRuns();
   notices.loadDurableJobs();
   if (!info.onboardingDone) {
@@ -603,6 +660,7 @@ async function loadSceneDefinitions() {
   logApp("error", "起動初期化に失敗しました", errorDetail(error));
   characterSource.element.style.visibility = "hidden";
   host.setDisplayReady(false);
+  characterDiagnostic.show(requestedCharacterId || "キャラクター", error);
   status.setSticky(`起動初期化に失敗: ${errorMessage(error)}`, "error");
   boot.release(status);
 });

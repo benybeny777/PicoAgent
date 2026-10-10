@@ -31,34 +31,6 @@ fn lock_child_slot() -> std::sync::MutexGuard<'static, Option<Child>> {
     }
 }
 
-/// 既定のデバッグポート。同梱エンジン 11435 / 同梱 Aivis 11436 / ローカル API 11500 と
-/// 重ならない値にする（重なると起動順によってどちらかが黙って使えなくなる）。
-pub const DEFAULT_PORT: u16 = 11437;
-
-fn probe_client() -> Option<&'static reqwest::Client> {
-    static CLIENT: OnceLock<Option<reqwest::Client>> = OnceLock::new();
-    CLIENT
-        .get_or_init(|| {
-            reqwest::Client::builder()
-                .timeout(Duration::from_millis(1200))
-                .build()
-                .ok()
-        })
-        .as_ref()
-}
-
-fn devtools_client() -> Option<&'static reqwest::Client> {
-    static CLIENT: OnceLock<Option<reqwest::Client>> = OnceLock::new();
-    CLIENT
-        .get_or_init(|| {
-            reqwest::Client::builder()
-                .timeout(Duration::from_secs(10))
-                .build()
-                .ok()
-        })
-        .as_ref()
-}
-
 /// `--user-data-dir` に使う隔離プロファイルの置き場所。
 fn isolated_profile_dir() -> Result<PathBuf, String> {
     // 開発・製品だけでなく、別識別子の検証版も設定や履歴と同じ管理領域へ分ける。
@@ -118,12 +90,10 @@ pub fn resolve_browser(configured: &str) -> Result<String, String> {
 }
 
 /// デバッグポートが応答するか（既に起動済みか）を調べる。
-async fn debug_port_alive(port: u16) -> bool {
-    let Some(client) = probe_client() else {
-        return false;
-    };
+async fn debug_port_alive(client: &reqwest::Client, port: u16) -> bool {
     let Ok(response) = client
         .get(format!("http://127.0.0.1:{port}/json/version"))
+        .timeout(Duration::from_millis(1200))
         .send()
         .await
     else {
@@ -176,7 +146,16 @@ fn managed_child_running() -> Result<bool, String> {
 
 /// ブラウザを起動する（既に応答していれば何もしない）。
 pub async fn ensure_running(options: &LaunchOptions) -> Result<(), String> {
-    if debug_port_alive(options.port).await {
+    ensure_running_prepared(options, crate::tools::http::service_client()).await
+}
+
+// 接続準備を起動より先に確定し、失敗時にプロファイルや子プロセスを作らない。
+async fn ensure_running_prepared(
+    options: &LaunchOptions,
+    prepared: Result<&reqwest::Client, String>,
+) -> Result<(), String> {
+    let client = prepared?;
+    if debug_port_alive(client, options.port).await {
         if managed_child_running()? {
             return Ok(());
         }
@@ -233,7 +212,7 @@ pub async fn ensure_running(options: &LaunchOptions) -> Result<(), String> {
 
     let deadline = std::time::Instant::now() + Duration::from_secs(options.startup_timeout_secs);
     while std::time::Instant::now() < deadline {
-        if debug_port_alive(options.port).await {
+        if debug_port_alive(client, options.port).await {
             return Ok(());
         }
         // 既に同じブラウザが通常起動していると、起動要求は既存インスタンスへ引き継がれ、
@@ -294,7 +273,7 @@ pub fn stop() -> Result<(), String> {
 /// `cargo xtask stop` にも同じ目印での回収がある（`assets::BROWSER_PROFILE_NEEDLE`）。
 fn stop_profile_browsers() -> Result<(), String> {
     let Ok(profile) = isolated_profile_dir() else {
-        return Ok(()); // フォールバック許可: 保存先を決められない環境では起動もしていない。
+        return Ok(()); // 保存先を決められない環境では起動もしていない。
     };
     let needle = profile.display().to_string().replace('\\', "/");
     terminate_by_command_line(&needle)
@@ -347,31 +326,47 @@ pub struct Target {
 }
 
 async fn devtools_get(port: u16, path: &str) -> Result<Value, String> {
-    let client = devtools_client()
-        .ok_or_else(|| "エラー: DevTools への接続準備に失敗しました。".to_string())?;
-    let response = client
-        .get(format!("http://127.0.0.1:{port}{path}"))
-        .send()
-        .await
-        .map_err(|error| format!("エラー: DevTools への接続に失敗しました: {error}"))?;
-    response
-        .json::<Value>()
-        .await
-        .map_err(|error| format!("エラー: DevTools の応答を解析できません: {error}"))
+    let response = crate::tools::http::service(
+        reqwest::Method::GET,
+        format!("http://127.0.0.1:{port}{path}"),
+        Duration::from_secs(10),
+    )?
+    .send()
+    .await
+    .map_err(|error| {
+        format!(
+            "エラー: DevTools への接続に失敗しました: {}",
+            error.without_url()
+        )
+    })?;
+    response.json::<Value>().await.map_err(|error| {
+        format!(
+            "エラー: DevTools の応答を解析できません: {}",
+            error.without_url()
+        )
+    })
 }
 
 async fn devtools_put(port: u16, path: &str) -> Result<Value, String> {
-    let client = devtools_client()
-        .ok_or_else(|| "エラー: DevTools への接続準備に失敗しました。".to_string())?;
-    let response = client
-        .put(format!("http://127.0.0.1:{port}{path}"))
-        .send()
-        .await
-        .map_err(|error| format!("エラー: DevTools への接続に失敗しました: {error}"))?;
-    response
-        .json::<Value>()
-        .await
-        .map_err(|error| format!("エラー: DevTools の応答を解析できません: {error}"))
+    let response = crate::tools::http::service(
+        reqwest::Method::PUT,
+        format!("http://127.0.0.1:{port}{path}"),
+        Duration::from_secs(10),
+    )?
+    .send()
+    .await
+    .map_err(|error| {
+        format!(
+            "エラー: DevTools への接続に失敗しました: {}",
+            error.without_url()
+        )
+    })?;
+    response.json::<Value>().await.map_err(|error| {
+        format!(
+            "エラー: DevTools の応答を解析できません: {}",
+            error.without_url()
+        )
+    })
 }
 
 fn parse_target(entry: &Value) -> Option<Target> {
@@ -539,23 +534,41 @@ impl PageConn {
 
 #[cfg(test)]
 mod tests {
-    use super::{ensure_running, new_page, resolve_browser, stop, LaunchOptions, PageConn};
+    use super::{
+        ensure_running, ensure_running_prepared, new_page, resolve_browser, stop, LaunchOptions,
+        PageConn,
+    };
 
     /// 既定ポートが他の常駐プロセスとぶつかっていないこと。
     /// 重なると起動順によってどちらかが黙って使えなくなり、原因が非常に分かりにくい。
     #[test]
     fn 既定ポートは他の同梱プロセスと重ならない() {
-        for (port, owner) in [
-            (11435, "同梱エンジン"),
-            (11436, "同梱 Aivis"),
-            (11500, "ローカル API"),
+        use crate::config::ints;
+        for (setting, owner) in [
+            (&ints::LOCAL_PORT, "同梱エンジン"),
+            (&ints::TTS_PORT, "同梱 Aivis"),
+            (&ints::API_PORT, "ローカル API"),
         ] {
             assert_ne!(
-                super::DEFAULT_PORT,
-                port,
+                ints::BROWSER_PORT.default,
+                setting.default,
                 "{owner} と同じポートを既定にしない"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn 接続準備失敗ではブラウザ起動へ進まず理由を返す() {
+        let options = LaunchOptions {
+            browser_path: "起動してはいけない実行ファイル".to_string(),
+            port: 11446,
+            headless: true,
+            startup_timeout_secs: 0,
+        };
+        let reason = ensure_running_prepared(&options, Err("共有HTTP接続の準備失敗".to_string()))
+            .await
+            .unwrap_err();
+        assert_eq!(reason, "共有HTTP接続の準備失敗");
     }
 
     /// 実ブラウザを起動して CDP 経由でページを読めることを通しで確かめる。

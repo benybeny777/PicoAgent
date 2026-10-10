@@ -1280,6 +1280,9 @@ button.tab:active {
 }
 .component-card-actions { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:6px; }
 .component-card-actions .danger { border-color:var(--err-border); background:var(--err-bg); color:var(--err-ink); }
+/* 検出候補と失敗理由の長い実行パスを、カードの確定幅内でそのまま読めるようにする。 */
+.cli-detection { min-width:0; max-width:100%; overflow-wrap:anywhere; }
+.cli-detection select { min-width:0; max-width:100%; }
 @media (max-width:760px) {
   .component-card { grid-template-columns:minmax(0,1fr) auto; }
   .component-card-actions { grid-column:1 / -1; width:100%; }
@@ -1311,3 +1314,6 @@ header { backdrop-filter: var(--blur); }
 .learning-actions { display:flex; flex-wrap:wrap; gap:6px; margin-top:14px; }
 .learning-listened { display:flex; align-items:flex-start; gap:8px; margin:10px 0; }
 .learning-listened input { flex:none; }
+
+/* 画像失敗は頭文字に置換せず、アイコン欄で理由を知らせる。 */
+.character-icon-error { font-size: 9px; line-height: 1.25; text-align: center; overflow-wrap: anywhere; color: var(--text); }

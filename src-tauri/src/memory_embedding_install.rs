@@ -35,7 +35,7 @@ pub async fn ensure(app: &AppHandle, requested: &str) -> Result<PathBuf> {
     } else if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
         "mps"
     } else {
-        // フォールバック許可: CUDA非対応構成では正式対応するCPU版だけを取得する。
+        // フォールバック許可: CUDA非対応構成では正式対応するCPU版だけを取得する。（根拠: AGENTS.md 依存と同梱物の取得）
         "cpu"
     };
     let marker_path = root.join("install.json");
@@ -44,7 +44,7 @@ pub async fn ensure(app: &AppHandle, requested: &str) -> Result<PathBuf> {
             .is_ok_and(|metadata| metadata.is_file() && metadata.len() == *size)
     });
     if marker_path.is_file() && python.is_file() && complete {
-        // フォールバック許可: 導入記録だけの破損は固定資産の再検証・再導入で修復する。
+        // 破損した導入記録の読取失敗は、後続PR #478で理由付きのエラーへ変更する対象。
         let marker: serde_json::Value = serde_json::from_slice(&std::fs::read(&marker_path)?)
             .unwrap_or(serde_json::Value::Null);
         if marker["revision"] == REVISION

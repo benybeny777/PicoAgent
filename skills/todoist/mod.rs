@@ -61,12 +61,7 @@ impl Tool for TodoistTool {
                 "text",
                 "",
             ),
-            Field::new(
-                "PICOAGENT_TODOIST_TIMEOUT_SECS",
-                "Todoist API 待ち時間（秒、3〜60）",
-                "text",
-                "15",
-            ),
+            Field::int(&crate::config::ints::TODOIST_TIMEOUT_SECS),
         ]
     }
 
@@ -79,25 +74,16 @@ impl Tool for TodoistTool {
                 "Todoist API token が必要です。",
             );
         }
-        let timeout = cfg
-            .get("PICOAGENT_TODOIST_TIMEOUT_SECS", "15")
-            .parse::<u64>()
-            .ok()
-            .filter(|value| (3..=60).contains(value))
-            .unwrap_or(15);
-        let client = match reqwest::Client::builder()
-            .timeout(Duration::from_secs(timeout))
-            .user_agent("PicoAgent/1.0 (Todoist tool)")
-            .build()
-        {
-            Ok(client) => client,
-            Err(error) => return format!("エラー: Todoist API の準備に失敗しました: {}", error),
-        };
+        let timeout = crate::tool_try!(cfg.int(&crate::config::ints::TODOIST_TIMEOUT_SECS)) as u64;
+        let request_timeout = Duration::from_secs(timeout);
         match args.get("action").and_then(Value::as_str).unwrap_or("") {
             "list" => {
-                let mut request = client
-                    .get(format!("{}/tasks", TODOIST_BASE))
-                    .bearer_auth(token);
+                let mut request = crate::tool_try!(crate::tools::http::service(
+                    reqwest::Method::GET,
+                    format!("{}/tasks", TODOIST_BASE),
+                    request_timeout
+                ))
+                .bearer_auth(token);
                 let project_id = args
                     .get("project_id")
                     .and_then(Value::as_str)
@@ -108,7 +94,7 @@ impl Tool for TodoistTool {
                 if !project_id.is_empty() {
                     request = request.query(&[("project_id", project_id)]);
                 }
-                handle_text_response(request.send().await, "Todoist API").await
+                crate::tools::http::service_reply(cfg, request.send().await, "Todoist API").await
             }
             "create" => {
                 let Some(content) = args
@@ -142,13 +128,17 @@ impl Tool for TodoistTool {
                         payload["project_id"] = json!(project_id);
                     }
                 }
-                handle_text_response(
-                    client
-                        .post(format!("{}/tasks", TODOIST_BASE))
-                        .bearer_auth(token)
-                        .json(&payload)
-                        .send()
-                        .await,
+                crate::tools::http::service_reply(
+                    cfg,
+                    crate::tool_try!(crate::tools::http::service(
+                        reqwest::Method::POST,
+                        format!("{}/tasks", TODOIST_BASE),
+                        request_timeout
+                    ))
+                    .bearer_auth(token)
+                    .json(&payload)
+                    .send()
+                    .await,
                     "Todoist API",
                 )
                 .await
@@ -162,35 +152,22 @@ impl Tool for TodoistTool {
                 else {
                     return "エラー: task_id が指定されていません。".to_string();
                 };
-                handle_text_response(
-                    client
-                        .post(format!("{}/tasks/{}/close", TODOIST_BASE, task_id))
-                        .bearer_auth(token)
-                        .send()
-                        .await,
+                crate::tools::http::service_reply(
+                    cfg,
+                    crate::tool_try!(crate::tools::http::service(
+                        reqwest::Method::POST,
+                        format!("{}/tasks/{}/close", TODOIST_BASE, task_id),
+                        request_timeout
+                    ))
+                    .bearer_auth(token)
+                    .send()
+                    .await,
                     "Todoist API",
                 )
                 .await
             }
             _ => "エラー: action は list/create/close のいずれかを指定してください。".to_string(),
         }
-    }
-}
-
-async fn handle_text_response(
-    response: Result<reqwest::Response, reqwest::Error>,
-    label: &str,
-) -> String {
-    let response = match response {
-        Ok(response) => response,
-        Err(error) => return format!("エラー: {} への接続に失敗しました: {}", label, error),
-    };
-    let status = response.status();
-    let body = crate::tool_response_text!(response);
-    if status.is_success() {
-        body
-    } else {
-        format!("エラー: {} が HTTP {} を返しました。", label, status)
     }
 }
 

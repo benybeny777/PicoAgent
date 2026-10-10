@@ -47,6 +47,14 @@ pub fn cleanup_file(path: &Path, label: &str) -> Result<()> {
 /// Windowsでは既存ファイルへのrenameができないため、先に退避してから差し替える。
 /// 失敗時は元ファイルを戻し、成功時は一時・退避ファイルを残さない。
 pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
+    write_atomic_with(path, bytes, |from, to| fs::rename(from, to))
+}
+
+fn write_atomic_with(
+    path: &Path,
+    bytes: &[u8],
+    mut rename: impl FnMut(&Path, &Path) -> std::io::Result<()>,
+) -> Result<()> {
     let parent = path
         .parent()
         .ok_or_else(|| anyhow::anyhow!("保存先の親フォルダがありません"))?;
@@ -60,17 +68,21 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
     let backup = parent.join(format!(".{name}.{nonce}.backup"));
     let result = (|| -> Result<()> {
         cleanup_file(&temporary, "前回の一時ファイル")?;
-        cleanup_file(&backup, "前回の退避ファイル")?;
+        anyhow::ensure!(
+            !backup.exists(),
+            "前回の退避ファイルが残っています。元ファイルを確認して復元してください: {}",
+            backup.display()
+        );
         let mut file = fs::File::create(&temporary)?;
         file.write_all(bytes)?;
         file.sync_all()?;
         drop(file);
         if path.exists() {
-            fs::rename(path, &backup)?;
+            rename(path, &backup)?;
         }
-        if let Err(error) = fs::rename(&temporary, path) {
+        if let Err(error) = rename(&temporary, path) {
             if backup.exists() {
-                let _ = fs::rename(&backup, path);
+                rename(&backup, path).with_context(|| format!("置き換えに失敗しました: {error}。元ファイルの復元にも失敗しました。退避先: {}", backup.display()))?;
             }
             return Err(error.into());
         }
@@ -79,11 +91,24 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
     })();
     if result.is_err() {
         let _ = fs::remove_file(&temporary);
-        if backup.exists() && !path.exists() {
-            let _ = fs::rename(&backup, path);
-        }
     }
     result
+}
+
+/// 別ボリュームだけ複製を許す。権限・使用中などは元の理由で停止する。
+pub(crate) fn rename_or_copy(
+    from: &Path,
+    to: &Path,
+    rename: impl FnOnce(&Path, &Path) -> std::io::Result<()>,
+    copy: impl FnOnce() -> Result<()>,
+) -> Result<()> {
+    match rename(from, to) {
+        Ok(()) => Ok(()),
+        // フォールバック許可: PR #470の別ボリューム間配置に限る複製。（根拠: PR #470 別ボリューム間の配置）
+        Err(error) if error.kind() == std::io::ErrorKind::CrossesDevices => copy(),
+        Err(error) => Err(error)
+            .with_context(|| format!("配置できません: {} → {}", from.display(), to.display())),
+    }
 }
 
 /// リポジトリのルート（`xtask/` の親）。
@@ -423,19 +448,19 @@ fn collect_files(dir: &Path, out: &mut Vec<PathBuf>) {
 }
 
 /// 非 Windows で実行権限を付ける（取得・コピー直後の実行ファイル向け）。
-pub fn make_executable(path: &Path) {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        if let Ok(meta) = fs::metadata(path) {
-            let mut perm = meta.permissions();
-            perm.set_mode(perm.mode() | 0o755);
-            // フォールバック許可: .app 配下など chmod できない場所は起動結果で判定する。
-            let _ = fs::set_permissions(path, perm);
-        }
-    }
-    #[cfg(not(unix))]
-    let _ = path;
+pub fn make_executable(path: &Path) -> Result<()> {
+    picoagent_core::permissions::ensure_executable(
+        path,
+        picoagent_core::permissions::ExecutablePolicy::Strict,
+    )
+    .with_context(|| format!("実行権限を設定できません: {}", path.display()))?;
+    Ok(())
+}
+
+/// ファイルを開く境界だけを持ち、SHA計算は純粋な共通readerへ渡す。
+pub fn file_sha256(path: &Path) -> Result<String> {
+    let mut file = fs::File::open(path)?;
+    Ok(picoagent_core::hash::sha256_reader(&mut file)?)
 }
 
 /// MB 表記（ログ用）。
@@ -459,6 +484,82 @@ pub fn env_or(name: &str, fallback: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn 別ボリュームだけ複製し他の配置失敗では複製しない() {
+        for kind in [
+            std::io::ErrorKind::PermissionDenied,
+            std::io::ErrorKind::AlreadyExists,
+            std::io::ErrorKind::Other,
+            std::io::ErrorKind::NotFound,
+        ] {
+            let result = rename_or_copy(
+                Path::new("staging"),
+                Path::new("dest"),
+                |_, _| Err(kind.into()),
+                || panic!("非EXDEVで複製してはいけない"),
+            );
+            assert_eq!(
+                result
+                    .unwrap_err()
+                    .downcast_ref::<std::io::Error>()
+                    .unwrap()
+                    .kind(),
+                kind
+            );
+        }
+        let mut copied = 0;
+        rename_or_copy(
+            Path::new("staging"),
+            Path::new("dest"),
+            |_, _| Err(std::io::ErrorKind::CrossesDevices.into()),
+            || {
+                copied += 1;
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert_eq!(copied, 1);
+        rename_or_copy(
+            Path::new("staging"),
+            Path::new("dest"),
+            |_, _| Ok(()),
+            || panic!("移動成功なら複製しない"),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn 保存置換と復元が失敗したら両理由と元の退避先を保持する() {
+        let root = repo_root()
+            .join("temp")
+            .join(format!("atomic-rollback-{}", std::process::id()));
+        fs::create_dir_all(&root).unwrap();
+        let path = root.join("latest.json");
+        fs::write(&path, b"original").unwrap();
+        let mut calls = 0;
+        let error = write_atomic_with(&path, b"next", |from, to| {
+            calls += 1;
+            match calls {
+                1 => fs::rename(from, to),
+                2 => Err(std::io::Error::other("置換故障")),
+                _ => Err(std::io::Error::other("復元故障")),
+            }
+        })
+        .unwrap_err();
+        let message = format!("{error:#}");
+        let backup = root.join(format!(".latest.json.{}.backup", std::process::id()));
+        assert!(message.contains("置換故障") && message.contains("復元故障"));
+        assert!(message.contains(backup.to_str().unwrap()));
+        assert_eq!(fs::read(&backup).unwrap(), b"original");
+        assert_eq!(calls, 3);
+        assert!(write_atomic(&path, b"next")
+            .unwrap_err()
+            .to_string()
+            .contains("退避ファイル"));
+        assert_eq!(fs::read(&backup).unwrap(), b"original");
+        fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn 差分同期は無変更を飛ばし追加編集削除と強制作り直しを扱う() {

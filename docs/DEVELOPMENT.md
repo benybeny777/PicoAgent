@@ -53,6 +53,12 @@ uv pip compile sidecar/requirements-comfy-rocm.in \
 
 ソースからの初回起動は [README.md の「まず動かす」](../README.md#-まず動かす)から始めてください。
 
+## 取得の停止と明示省略
+
+Office・Aivis・Whisper・OSS CLIは同梱表で取得対象の組合せに限って取得し、失敗時は後続ビルドを停止します。取得前に省く場合だけ `OFFICE_SKIP=1` / `AIVIS_SKIP=1` / `WHISPER_SKIP=1` / `TOOLS_SKIP=1` を指定します。軽量ビルドは従来どおり未同梱の追加機能を取得しません。`*_REQUIRED` による失敗後の続行は廃止しました。Aivisの展開ツールは取得前に確認し、欠損時は導入方法を表示します。明示取得したLive2Dサンプルも画像・モデルの取得失敗で停止し、代替画像や一部だけの成功へ降格しません。実行権限の付与失敗も理由付きで停止します。
+
+同梱する組合せの唯一の表は `xtask/src/tools.rs` の `BUNDLE_TARGETS` です。OfficeはWindows x64とmacOS x64/arm64、AivisはWindows x64とmacOS/Linux x64/arm64、WhisperはWindows/macOS/Linux x64/arm64、Pandoc/ripgrep/ffmpegはWindows x64とmacOS/Linux x64/arm64、qpdf/Poppler/ImageMagickはWindows x64を取得対象とします。それ以外は現在の同梱配布対象外なので取得を試みず、手動導入後に設定の検出ボタンで実行パスを保存します。この表は取得候補の規定であり、各OSの実取得・起動確認の合格を示しません。
+
 ## MMDランタイムの準備
 
 `cargo xtask setup mmd`は`node tools/mmd-runtime/build.mjs`を実行する。再生成時はNode.jsとnpmをPATHへ用意する。`tools/mmd-runtime/package-lock.json`に固定したbabylon-mmd 1.3.0、Babylon.js 9.30.0、esbuild 0.28.2を`npm ci`で取得し、`ui/vendor/mmd/`へバンドル、ライセンス、版とSHA-256を含む`runtime.json`を配置する。生成済みランタイムはGit管理し、通常起動・通常ビルドは取得を実行しない。`build-ui`は固定lockと配信ファイルのSHA-256を照合し、欠損・不一致を明示して停止する。ライセンス原文はLFへ揃えてからハッシュを計算し、Windowsと他OSの改行変換で不一致を起こさない。
@@ -77,6 +83,8 @@ uv pip compile sidecar/requirements-comfy-rocm.in \
 ここでいう「作業状態」はPicoAgent製品の長期メモリ機能とは別物です。共通スキル正本とClaude Code用自動認識ファイルの名前・frontmatter・参照先・本文量は`cargo xtask verify`が機械検査します。
 
 設計ガードのソース走査は `src-tauri/src/guard_scan.rs` に集約する。スキル、バックエンド、内部共通コアを再帰的に列挙し、読み取り・列挙の失敗は対象パス付きで検査失敗にする。同じテストプロセス内では各ソース本文を一度だけ読み、変更できないスナップショットとして共有する。編集後の検査ではテストプロセスを再実行する。
+
+文字列のslug・HTML/XMLエスケープ・sparklineは`text`、検索結果URLは`tools::search_url`、発話の整数と日数は`tools::datetime_words`、SNS入力は`tools::social_post`を正本とする。違いは引数・ポリシー・許可値表で表す。SHA-256は`picoagent_core::hash::sha256_reader`、OS実行権限は`picoagent_core::permissions`を使い、アプリの理由通知とxtaskの厳格な失敗は各側の薄いアダプタで扱う。資料のfull/lightは登録済みの`genspark_suite`で一度だけ入力を整形・保存する。予約移行は`workflow_migration`が原子的に行い、失敗中はschedulerの検出を止め、設定修正後に同じ検出処理で再試行する。
 
 ## 🧩 コネクタで拡張する
 
@@ -103,7 +111,7 @@ graph LR
 
 | コマンド | 内容 |
 |---|---|
-| `cargo xtask dev` | 開発起動（未取得の同梱物は自動取得） |
+| `cargo xtask dev` | 最小構成の開発起動（追加機能はsetupで明示取得） |
 | `cargo xtask build` | 製品ビルド（各 OS の配布バンドルを生成） |
 | `cargo xtask stop` | 残存プロセスの停止 |
 | `cargo xtask cli <cmd>` | ローカル API を叩く CLI（status/models/chat/ask/repl） |
@@ -130,7 +138,7 @@ graph LR
 | `cargo xtask verify` | PR前の書式（`skills/`はrustfmtへ直接渡す）・静的解析・テスト・共通スキル正本とClaude Code用自動認識ファイル・JavaScript構文・画面の契約テスト（`tools/tests/*.mjs`）・Git差分の一括検証 |
 
 > `sync-characters` と `build-ui` は `cargo xtask dev` / `build` が自動実行するため、通常は個別に実行する必要はありません。
-> `setup *` も同様に自動実行されるので、明示的に呼ぶのは特定の同梱物だけ取り直したいときです。
+> 追加機能の取得は `setup <対象>` / `setup all` または `build-full` で明示します。通常の開発起動・軽量ビルドには任意の大容量取得を加えません。
 
 LocalVTuberStudio形式の実画面検査は、まずリポジトリ直下を`uv run python -m http.server 8776 --bind 0.0.0.0 --directory .`で配信する。Codex DesktopのPlaywrightは製品依存へ追加せず、`load_workspace_dependencies`で取得した現行パスを指定する。2026年9月7日時点では次の形だが、存在しない場合は固定値を推測せず再取得する。
 
@@ -164,7 +172,7 @@ cargo xtask build-beta --bundles nsis
 cargo xtask build-distribution
 
 # 作成した配布物からlatest.jsonのサイズ・SHA-256を生成（.exe と .dmg を受け付ける）
-cargo xtask update-feed src-tauri\target\release\bundle\nsis\PicoAgent_<版>_x64-setup.exe "更新内容"
+cargo xtask update-feed src-tauri\target\release\bundle\nsis\PicoAgent_<版>_x64-setup.exe --output <配布正本checkout>\site\latest.json "更新内容"
 ```
 
 `bump-version`はソースの現行版を起点に採番する。OS別の公開版が遅れていて`latest.json`がソースより古い場合は許容するが、公開版がソースより新しい場合は二重採番として停止する。
@@ -201,8 +209,10 @@ cargo xtask build-beta --bundles app,dmg
 # src-tauri/target/release/bundle/dmg/PicoAgent_<版>_aarch64.dmg
 
 # latest.json へ登録（OSごとに1回ずつ実行できる）
-cargo xtask update-feed src-tauri/target/release/bundle/dmg/PicoAgent_<版>_aarch64.dmg "更新内容"
+cargo xtask update-feed src-tauri/target/release/bundle/dmg/PicoAgent_<版>_aarch64.dmg --output <配布正本checkout>/site/latest.json "更新内容"
 ```
+
+`update-feed` は `--output <latest.json>` が必須です。旧コマンドには出力先を追加してください。配布正本は `C:/00_PG/21_PicoAgent-LP`（他環境では同じ配布リポジトリのcheckout）であり、その目的別PR内へ出力します。本体側 `distribution/site` へ暗黙に書き込まないため、配布の編集・公開は配布リポジトリの手順で行います。既存フィードの不在だけ新規扱いにし、読込・JSON・schemaの失敗は既存の他OS枠を保持したまま停止します。
 
 `update-feed` は拡張子とファイル名のCPU種別から `windows-x64` / `macos-arm64` / `macos-x64` の枠を選び、`latest.json` の版が同じなら他OSの枠を残したまま該当枠だけを差し替えます。版が上がった場合は前の版のURLを引き継がず枠を空にします。`.exe` はPE署名、`.dmg` はUDIFトレーラ（`koly`）を確認してから登録するため、取り違えた成果物は登録できません。
 
@@ -250,7 +260,7 @@ cargo xtask license issue --customer "購入者名" --purchase-id "BOOTH注文�
 - 軽量販売版はAivisをインストーラへ含めず、初回起動または設定の「追加機能・更新」で選んだ場合だけ、Aivis Project公式GitHub Releaseから `%APPDATA%\PicoAgent\bundled\aivis\` へ直接取得します。GitHub APIのサイズとSHA-256 digestを検証し、PicoAgentのReleaseからは再配布しません。インストール済み版と推奨版は設定画面に併記し、古い場合は更新、新しい場合は明示確認付きで推奨版へ戻す操作を表示します。大容量取得は接続と無通信の待ち時間だけを制限してストリームを止めず、更新・再導入時はステージング済みの新版へ原子的に入れ替え、失敗時は旧版を維持します。推奨版を上げるときは `component-manifest.json` の `targetVersion` と同じ版の公式Releaseリンクを1回の変更で更新します。実行時取得と開発用 `xtask` はこの正本を参照します
 - `PICOAGENT_TTS_ENABLED` が有効なら起動時に内部ポート（既定 `11436`）で裏起動し、アプリ終了時に停止します。旧既定の `10102` が保存済みなら起動時に移行します
 - 推論デバイスは内部設定 `PICOAGENT_TTS_DEVICE` の既定 `auto` で GPU 候補を確認し、あれば GPU、なければ CPU（通常の設定画面には出しません）
-- 話者は設定画面に出さずキャラクター既定声を使います。未導入なら起動時のローディング画面で AIVMX を追加し、合成時に `/speakers` から実際の style ID を解決します
+- 既定声は同梱・追加とも `character.json` の `voice` を正本とし、実際に読み込めたキャラのID・人格と同じ登録で渡します。型でprovider・UUID・声指定を検証し、バックエンドにキャラ別声定数表を複製しません。優先順はキャラ別上書き、manifestの声、声指定なしのキャラだけ全体設定です。上書きは設定「キャラの音声」で変更できます。未導入なら起動時の準備で AIVMX を追加し、合成時に `/speakers` から実際の style ID を解決します。指定話者・指定スタイルの解決失敗は無音で理由を通知し、別の数値IDや全体声へ降格しません
 - 音量は `PICOAGENT_TTS_VOLUME`（0〜100、初期値35）。保存後すぐ、再生中の音声にも反映されます。読み上げをミュート、または音量を0にすると口パクも停止して口を閉じ、再生途中で音量を戻した場合だけその時点から再開します
 
 > 同梱 Aivis の初回起動はモデル確認や BERT 読み込みで数十秒かかることがあります。キャラ固有の音声モデル導入は起動シーケンス中に「声を準備中…」としてまとめて行うため、通常画面での待ちは発生しません。
@@ -326,10 +336,21 @@ NSIS アンインストーラは、インストール先またはPicoAgent管理
 
 ## 📄 主要ファイル
 
+キャラ描画の選択は `ui/character/index.js` の登録表と各方式の `supports()` を正本とし、最優先の対応方式1つだけを初期化する。失敗時に下位方式を試さず、キャラなし診断・再試行へ進む。利用者の明示2D指定は `PICOAGENT_RENDERER_OVERRIDES` のIDごとの `image` だけで、通常へ戻す操作はそのIDを削除する。メイン画面は狭い保存口 `pet_set_character_renderer` の成功後に再読込し、設定画面は草稿・保存・リセットへ同期する。古い世代の読込・診断操作を最新の表示へ混ぜない。
+
+追加キャラ一覧の取得と正規化は両画面で共通化する。取得失敗を空一覧へ降格せず、元の選択ID・未保存草稿を保持する。関連編集だけを停止し、他設定の保存へキャラの既定値を書き戻さない。理由と再取得操作は復旧まで保持する。Live2DのSDKモデル候補の選択と、描画方式をまたぐ切替を混同しない。
+
+外部HTTP取得の安全経路は `src-tauri/src/tools/http.rs` の `fetch_guarded` に集約する。全ホップの用途別URL方針・公開IP確認、検査済みDNS解決先固定、秘密ヘッダ除去、時間・本文・転送上限を一緒に保つ。DNS固定のため `no_proxy()` で直接接続し、プロキシ必須環境ではこの経路を使えない。`web_fetch` の先頭取得＋打切り表示と、API・RSSの上限超過エラーを区別する。通常のAPIは `service(method, url, timeout)` と要求ごとの認証・UAを使い、全体期限のみの接続プールを共有する。既存標準profileの接続10秒・無通信120秒と更新確認の5秒・10秒は用途を分けて保持し、全profileは起動時に一回確定する。API応答は `service_reply` / `service_body` で短い理由とHTTP状態コードを返す。既知の設定秘密値を切詰め前に伏せ、本文取得失敗を空へ降格しない。
+
+外部CLIは `tools::resolve_cli_path` で明示指定、未設定時だけ管理下の同梱物を解決する。コマンド名だけの明示指定時に限り共通探索を使う（macOSではPATHの後に既存Homebrew配置 `/opt/homebrew/bin`・`/usr/local/bin` も確認）。指定先や優先する管理配置の欠損は修復エラーにする。Whisperの2スキルは `tools::whisper` で解決し、固定モデル名は取得側と共通の `crates/picoagent-core/src/paths.rs` を正本とする。別名の導入モデルは `PICOAGENT_TRANSCRIBE_MODEL` へ明示し、`.bin` の名前順探索はしない。
+
+コマンド許可の所有者は `tools::process::command_policy` とする。チャットと予約実行は同じ `check` を呼び、引数制限と物理削除禁止を承認前後でも適用する。スキル側へ許可リストや検査の写しを作らない。ripgrepの欠損・実行失敗時の内蔵検索は撤去し、`doc_search` の正常な0一致時のファイル名検索だけを維持する。
+
 | ファイル | 役割 |
 |---|---|
 | `src-tauri/src/main.rs` / `lib.rs` | エントリ・Builder（state・command・menu イベント・setup） |
-| `src-tauri/src/commands.rs` | Tauri command（`pet_*` / `settings_*`）と共有状態 `AppState` |
+| `src-tauri/src/commands.rs` | Tauri command（`pet_*` / `settings_*`）と共有状態 `AppState`。会話入口はターン所有後に文脈を読み、後処理と履歴保存まで直列化する。雑談は混雑なら生成せず、目覚ましは取得後の生成だけ20秒を上限とする |
+| `src-tauri/src/conversation_turn.rs` | 会話ターンの直列化と現在ターンの停止旗・RAII解放。会話状態と世代照合の書き戻し確定は状態所有者の `commands.rs` が担当 |
 | `src-tauri/src/menu.rs` | 右クリックネイティブメニューと選択イベント処理 |
 | `src-tauri/src/config.rs` | 設定の正本（`app_config_dir/config.json`）。`get()` でシークレットを透過復号 |
 | `crates/picoagent-core/` | **非公開の内部共通コア**。正規形メッセージとUTF-8安全処理など、Tauri・OS・製品設定に依存しない処理を置く。外部公開は行わず `publish = false` を保つ |
@@ -338,16 +359,18 @@ NSIS アンインストーラは、インストール先またはPicoAgent管理
 | `src-tauri/src/hotkey.rs` | グローバルホットキー（`tauri-plugin-global-shortcut`）。起動時と設定保存時に `apply()` が全解除→設定どおり再登録し、終了時は `release()` で OS へ返す。呼び出しキーが無いまま隠れて操作不能にならないよう、登録できなければ非表示のウィンドウを表示へ戻す |
 | `src-tauri/src/secret.rs` | シークレット（`password` 型設定）をOSの資格情報保護へ預ける（Windows は DPAPI、macOS はログインキーチェーン）。Linux は平文 |
 | `src-tauri/src/history.rs` | 会話履歴の永続化（キャラ別 `app_data_dir/history-<キャラID>.json`。起動時・キャラ切替時に直近を文脈へ復元） |
+| `src-tauri/src/notice.rs` | 画面通知の形式・送信・失敗と復旧の間引き。購読前の待機列と新着を直列化し、画面の再読込時は未復旧の失敗を再表示 |
 | `src-tauri/src/alarm.rs` | 目覚まし時計の保存（config `PICOAGENT_ALARMS`）と曜日・時刻の正規化。発火はフロント時刻監視 → `pet_alarm_wake` |
 | `src-tauri/src/engine.rs` | 同梱 llama-server とモデル GGUF のライフサイクル（DL・spawn・状態通知） |
 | `src-tauri/src/agent.rs` / `agent/{prompt,feedback}.rs` | エージェント実行ループ／systemルールと文脈の合成／任意の計画・自己評価。スキルとメモリは既存の各正本を使い、実体のないhooks層は作らない |
 | `src-tauri/src/api_server.rs` | Ollama 風ローカル HTTP API（既定無効・127.0.0.1 のみ・`PICOAGENT_API_KEY` で Bearer 認証。`/api/chat` `/api/generate` `/v1/chat/completions` `/mcp` ほか） |
-| `src-tauri/src/mcp/{mod,client,server}.rs` | MCP 層（agent / skills / mcp の3層構成の相互運用部）。client: `PICOAGENT_MCP_SERVERS` の stdio サーバを起動し `mcp__<サーバ>__<ツール>` として動的登録（tools::dispatch / schemas_for_text からフォールバック参照）。server: `/mcp` でスキルを MCP ツールとして公開 |
+| `src-tauri/src/mcp/{mod,client,server}.rs` | MCP 層（agent / skills / mcp の3層構成の相互運用部）。client: `PICOAGENT_MCP_SERVERS` の stdio サーバを起動し `mcp__<サーバ>__<ツール>` として動的登録（tools::dispatch / schemas_for_conversation から候補として参照）。server: `/mcp` でスキルを MCP ツールとして公開 |
 | `src-tauri/src/permissions.rs` | **全スキル共通のファイル許可の正本**。`resolve()` が許可判定を通した `SafePath` を返し（生成経路は resolve / join / sibling のみ）、`permissions::fs` が `SafePath` 専用のファイル操作を提供する。`permissions::guard` のテストがスキルの自前実装・`resolve` 漏れを検出 |
 | `src-tauri/src/text.rs` | **文字列を安全に扱う共通層**。`preview()`（文字数＋`…`）、`truncate_bytes()`（バイト上限だが文字の途中で切らない）、`Utf8Stream`（ストリーミング受信の逐次 UTF-8 デコード）。`text::guard` のテストが固定長バイト添字での切り出しと、ストリーミングでの直接 lossy 変換を検出 |
 | `src-tauri/src/doc_sync.rs` | **ドキュメントと実装のズレを検出する設計ガード**（テスト専用）。実装が参照する `PICOAGENT_*` がすべて `docs/SETTINGS.md` に載っているか、逆に一覧だけに残った削除漏れが無いかを双方向で照合する。`skills/` と SPEC の**スキル分類表**（役割と副作用の一覧）も同じく双方向で照合し、載せ忘れ・消し忘れを検出する |
 | `src-tauri/src/character_pack.rs` | **キャラクターパック検証規則の正本**。アプリ（設定画面からの導入）と `cargo xtask character-pack` の両方が使う。CLI 側は `#[path]` でこのファイルを取り込むため、`std` / `serde_json` / `anyhow` 以外に依存しないこと（`crate::` のアプリ内部モジュールを参照しない）。Live2D は `model3.json` の参照ファイルの実在まで確かめる。**キャラクターIDの判定 `is_valid_id()` もここが唯一の定義元**（IDはフォルダ名と設定キーの一部になるため、判定を写さない） |
 | `src-tauri/src/components.rs` | **初回追加機能の公式取得元・検証・導入境界**。Aivis／Whisperは各公式配布元からPicoAgent管理領域へ直接取得し、LibreOffice／文書ツールは公式ページと手動設定を案内する。第三者ソフトをPicoAgentのReleaseへ再配布しない |
+| `src-tauri/src/installer/` | 取得用HTTP・固定検証・ZIP/tar展開・複製と探索・空き容量・単独/組配置と復旧の唯一の所有者。用途は上限と管理先を渡す |
 | `src-tauri/src/user_characters.rs` | 自分で追加したキャラクターの導入・一覧・削除（`app_data_dir/characters/<id>/`）。zip は zip slip と件数・容量を検査しながら展開し、検証を通ってから `rename` で確定する。削除は OS のゴミ箱へ移動。`user_characters::guard` が、検証規則のコピーが CLI 側へ復活していないか、キャラクターID判定の写しが増えていないか、`character_pack.rs` が `crate::` のアプリ内部へ依存していないか（xtask のビルドが壊れる）を検出する |
 | `src-tauri/src/project_rules.rs` | **作業フォルダの`AGENTS.md`を案件の作法としてsystem文へ載せる**（許可ルート直下1枚。`project`スキルがルートを切り替えると作法も入れ替わる）。本文は利用者の指示ではなく「フォルダに置かれていた文章」として扱い、上位ルール・確認・許可・外部送信制限を上書きできないことを毎回明示する。読み書きは`project`の`rules_show` / `rules_save`。`PICOAGENT_PROJECT_RULES_AUTO_CAPTURE=true`のとき、強く言い渡された作法を専用見出しへ自動追記し、通知から取り消せる（既定は無効。利用者のフォルダを書き換えるため） |
 | `src-tauri/src/user_skills.rs` / `skills/user_skill/mod.rs` | 利用者追加の`SKILL.md`を検証・原子的保存し、チャットから作成・更新・適用する。Markdownは指示だけを持ち、実操作は既存Toolの許可・確認境界を通す |
@@ -368,8 +391,8 @@ NSIS アンインストーラは、インストール先またはPicoAgent管理
 | `xtask/src/util.rs` | **同梱物取得と差分同期の共通処理**。`download_to()` が応答をストリームで一時ファイル（`<出力先>.part`）へ書き、完了してから rename で確定する（巨大モデルを全部メモリに載せない／中断で壊れたファイルを残さない）。`sync_dir()`はサイズと更新日時が同じファイルを飛ばし、同期元にない生成先だけを削除する。展開は OS 標準の tar / unzip / PowerShell へ委譲 |
 | `xtask`（`bundled::fetch_engine`） | 同梱エンジン取得（`cargo xtask setup engine`） |
 | `xtask`（`bundled::fetch_whisper`） | 同梱Whisper CLIとモデル取得（`cargo xtask setup whisper`） |
-| `xtask/src/office.rs` | OfficeCLI（LibreOffice）と AivisSpeech Engine の取得（`cargo xtask setup office` / `setup aivis`。`src-tauri/resources/bundled/` 配下、Git 管理外。どちらもベストエフォート） |
-| `xtask`（`tools::fetch_all`） | 精度向上用 OSS CLI 取得（`cargo xtask setup tools`。Pandoc/ripgrep/ffmpeg/qpdf/poppler/ImageMagick を `src-tauri/resources/bundled/tools/<ツール名>/` へ、Git 管理外。配布が無い OS 分は警告のみで PATH へフォールバック） |
+| `xtask/src/office.rs` | OfficeCLI（LibreOffice）と AivisSpeech Engine の取得（`cargo xtask setup office` / `setup aivis`。`src-tauri/resources/bundled/` 配下、Git 管理外。両方とも失敗時は理由付きで停止） |
+| `xtask`（`tools::fetch_all`） | 精度向上用 OSS CLI 取得（`cargo xtask setup tools`。Pandoc/ripgrep/ffmpeg/qpdf/poppler/ImageMagick を `src-tauri/resources/bundled/tools/<ツール名>/` へ、Git 管理外。OS・CPUの取得対象は `xtask/src/tools.rs` の単一同梱表。対象外は取得せず手動導入後に設定の検出ボタンでパスを保存。取得対象の失敗は停止） |
 | `xtask`（`cli`） | ローカル API を叩く最小 CLI（`cargo xtask cli status/models/chat/ask/repl`。接続先は `PICOAGENT_API_PORT` / `PICOAGENT_API_KEY`） |
 | `xtask`（`bundled::fetch_live2d_runtime`） | Live2D ランタイムを `ui/vendor/live2d/` へ取得（`cargo xtask setup live2d`）。公式サンプルは自動取得せず、開発者が条件確認後に `cargo xtask setup live2d-samples` を明示実行する。いずれも git 管理外 |
 | `xtask/src/assets.rs` | ルート `characters/`（正本）を検証後に `ui/assets/characters/` へ差分同期、`ui/` を `ui-dist/` へ差分ビルド、残存プロセス停止（いずれも dev/build 前に自動実行）。停止は名前一致の `picoagent` / `llama-server` / `whisper-cli`、PicoAgent管理下のAivis、`tools/screenshots/` を起動経路に持つ `node` に限る。全再構築は直接コマンドの`--force`だけ |
@@ -395,6 +418,7 @@ NSIS アンインストーラは、インストール先またはPicoAgent管理
 | `src-tauri/build.rs` | コネクタの `#[path] pub mod` 自動生成（`src/providers` と `skills`）＋ tauri ビルド |
 | `ui/picoagent.js` | 旧 `window.picoagent` を Tauri 上で再現する互換シム |
 | `ui/index.html` / `ui/app/main.js` | メイン画面の入口。シーン・描画器・会話・ソースの実装は各フォルダに分ける |
+| `ui/app/ui-store.js` / `ui/app/toast.js` | 画面の保存操作と安全な診断の唯一の入口、操作・原因別の失敗通知と復旧。スタイル読取は `ui/character/manifest.js`、入力と診断のDOMは `ui/chat/panel.js` が所有する |
 | `ui/settings.html` / `ui/settings.js` / `ui/settings.css` / `ui/settings-shell.css` | 設定ウィンドウ。`settings.js` が設定値と保存、`settings.css` が入力部品、`settings-shell.css` が分類・検索・ページ見出し・保存帯の配置を持つ |
 
 ## 📁 フォルダ構成
@@ -453,3 +477,13 @@ scripts/setup-character-learning-runtime.pyは共有Python3.12から専用venv�
 学習workerと管理導入のPython回帰検査はtools/tests/character-learning-python.mjsから通常のcargo xtask verifyに含める。Python 3.10以上をPATHに置くか、LEARNING_TEST_PYTHONに実行ファイルを明示する。-Sで外部パッケージを無効にし、モデル取得なしで状態・入力保護・実OSロック・導入再開を検査する。管理学習ランタイムのPythonは3.12で固定する。
 
 管理学習環境は取得前にnvidia-smiのcompute_cap/driver_versionを照合し、CUDA12.8/Torch2.10の対応世代とWindowsドライバー570.65以上に限定する（基準: [CUDA12.8公式release notes](https://docs.nvidia.com/cuda/archive/12.8.0/cuda-toolkit-release-notes/index.html)・[PyTorch2.10 release](https://github.com/pytorch/pytorch/releases/tag/v2.10.0)）。混在GPU構成では対応GPUをCUDA_VISIBLE_DEVICESで選ぶ。明示選択した既存ランタイムへこの固定wheel制限を掛けない。文字起こしはUIでGPU/CUDA float16既定、CPU/int8を明示選択可能。GPU選択の失敗ではCPUへ切り替えずasr.jsonとstatus.jsonへ理由を保存する。ASR前にCUDA/CTranslate2 float16対応と空き6.0GBを検査する。この値は[公式faster-whisper benchmark](https://github.com/SYSTRAN/faster-whisper#benchmark)のlarge-v2 float16（約4.525GB）へ余裕を加えた保守的運用値であり、large-v3の保証値ではない。旧asrDeviceなしはCPUとして正規化し、再開来歴を維持する。
+
+### 整数設定の宣言と画面への供給
+
+整数の既定値・範囲・単位・`auto`許可は`config::ints`の`IntSetting`だけに宣言する。コネクタの`Field::int`と`settings_load.numberSettings`、`pet_init`・`pet:ui`の`numberSettings`はこの宣言を共有する。範囲の両端は精度を失わない十進文字列、既定値も文字列とし、設定画面側へ別の範囲表を作らない。仕様上の量の一覧は[SETTINGS.md](SETTINGS.md)に置き、宣言と一致することをガードする。
+
+`ui/settings-number.js`は整数入力の正規化・範囲判定だけを所有する。編集時は全角入力を失わない`text`、有効な整数の編集終了後は`number`へ戻す。不正な草稿をブラウザーの空欄化で捨てずに保持する。保存APIの`invalid`は変更全体の不保存を示し、正本と未保存状態を更新してはならない。
+
+実行画面の数量は正常時の整数と、不正時の`null`・`invalidNumbers`を`readIntegerSetting`で検査する。停止や診断の所有者は音声・会話欄・ambientの各部品であり、既定値への置換はしない。関連するVM検査と`settings-display.mjs`の全角入力・不正保存・復旧検査を変更時に実行する。
+
+本体の取得・展開・複製・ファイル探索・空き容量・配置復元の正本は`src-tauri/src/installer/`です。用途側は上限と保存先を渡し、共通部品の手順を複製しません。プロセスの生存確認は`tools::process`がOSのAPIで行い、外部コマンドへ無期限に待ちません。音声学習のPython導入・状態保存の原子的移動は、既存の配布共通モジュール`voice_training_common.py`へ集め、Windowsの一時的な共有拒否だけ同じ操作を有限回再試行します。中核crateの最小RustはSHA-256共通化に必要な1.85、本体・xtaskの最小Rustは従来どおり1.88です。Whisperの`WHISPER_RELEASE`は正本マニフェストの`binaryRelease`と一致する指定だけを受け付けます。Macは固定ソースからCMakeでビルドし、他OSのバイナリやSDKを代用取得しません。

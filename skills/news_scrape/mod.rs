@@ -12,7 +12,7 @@ use crate::config::Config;
 use crate::message::Field;
 
 const MAX_HTML_BYTES: usize = 1024 * 1024;
-const MAX_ITEMS_LIMIT: usize = 12;
+const MAX_ITEMS_LIMIT: usize = crate::config::ints::NEWS_SCRAPE_MAX_ITEMS.max as usize;
 
 struct NewsSource {
     name: &'static str,
@@ -74,15 +74,6 @@ fn is_summary_query(text: &str) -> bool {
         || normalized.contains("教えて")
         || normalized.contains("知りたい");
     asks_current_or_summary || text.chars().count() <= 16
-}
-
-fn parse_setting_value(raw: &str, fallback: &str, min: usize, max: usize) -> usize {
-    // フォールバック許可: ニュース取得の補助設定が壊れていても既定値で続行する。
-    let fallback_value = fallback.parse::<usize>().unwrap_or(min).clamp(min, max);
-    raw.parse::<usize>()
-        .ok()
-        .filter(|value| (min..=max).contains(value))
-        .unwrap_or(fallback_value)
 }
 
 fn normalize_text(text: &str) -> String {
@@ -208,54 +199,36 @@ impl Tool for NewsScrapeTool {
 
     fn config_schema(&self) -> Vec<Field> {
         vec![
-            Field::new(
-                "PICOAGENT_NEWS_SCRAPE_MAX_ITEMS",
-                "ニュース取得件数（1〜12）",
-                "text",
-                "8",
-            ),
-            Field::new(
-                "PICOAGENT_NEWS_SCRAPE_TIMEOUT_SECS",
-                "ニュース取得待ち時間（秒、3〜60）",
-                "text",
-                "15",
-            ),
+            Field::int(&crate::config::ints::NEWS_SCRAPE_MAX_ITEMS),
+            Field::int(&crate::config::ints::NEWS_SCRAPE_TIMEOUT_SECS),
         ]
     }
 
     async fn run(&self, cfg: &Config, args: Value) -> String {
-        let configured_items = parse_setting_value(
-            &cfg.get("PICOAGENT_NEWS_SCRAPE_MAX_ITEMS", "8"),
-            "8",
-            1,
-            MAX_ITEMS_LIMIT,
-        );
+        let configured_items =
+            crate::tool_try!(cfg.int(&crate::config::ints::NEWS_SCRAPE_MAX_ITEMS)) as usize;
         let max_items = args
             .get("max_items")
             .and_then(Value::as_u64)
             .and_then(|value| usize::try_from(value).ok())
             .filter(|value| (1..=MAX_ITEMS_LIMIT).contains(value))
             .unwrap_or(configured_items);
-        let timeout_secs = parse_setting_value(
-            &cfg.get("PICOAGENT_NEWS_SCRAPE_TIMEOUT_SECS", "15"),
-            "15",
-            3,
-            60,
-        );
-        let client = match reqwest::Client::builder()
-            .timeout(Duration::from_secs(timeout_secs as u64))
-            .user_agent("PicoAgent/1.0 (news scrape tool)")
-            .build()
-        {
-            Ok(client) => client,
-            Err(error) => return format!("エラー: ニュース取得の準備に失敗しました: {error}"),
-        };
+        let timeout_secs =
+            crate::tool_try!(cfg.int(&crate::config::ints::NEWS_SCRAPE_TIMEOUT_SECS)) as u64;
+        let request_timeout = Duration::from_secs(timeout_secs as u64);
 
         let mut output = String::from("ニュースHTML取得結果\n");
         let mut total = 0usize;
         for source in SOURCES {
             output.push_str(&format!("\n情報源: {}\n", source.name));
-            let response = match client.get(source.url).send().await {
+            let response = match crate::tool_try!(crate::tools::http::service(
+                reqwest::Method::GET,
+                source.url,
+                request_timeout
+            ))
+            .send()
+            .await
+            {
                 Ok(response) => response,
                 Err(error) => {
                     output.push_str(&format!("- エラー: 接続に失敗しました: {error}\n"));

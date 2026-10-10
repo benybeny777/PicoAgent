@@ -7,7 +7,357 @@ use url::Url;
 
 use crate::config::Config;
 
-static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+/// URL取得の許可方針。どちらも非公開IPへの接続を禁止する。
+#[derive(Clone)]
+pub enum UrlPolicy {
+    PublicWeb,
+    AllowedDomains(Vec<String>),
+}
+
+impl UrlPolicy {
+    pub fn domains(text: &str) -> Self {
+        Self::AllowedDomains(
+            text.split(',')
+                .map(|s| s.trim().to_ascii_lowercase())
+                .filter(|s| !s.is_empty())
+                .collect(),
+        )
+    }
+
+    fn check(&self, url: &Url) -> Result<(), String> {
+        validate_http_url(url)?;
+        if let Self::AllowedDomains(domains) = self {
+            let host = url.host_str().ok_or("URLにホスト名がありません")?;
+            if !domains.iter().any(|domain| {
+                host.eq_ignore_ascii_case(domain)
+                    || host.to_ascii_lowercase().ends_with(&format!(".{domain}"))
+            }) {
+                return Err("許可されていないドメインです".into());
+            }
+        }
+        Ok(())
+    }
+}
+
+pub struct GuardedRequest {
+    pub method: reqwest::Method,
+    pub url: Url,
+    pub headers: reqwest::header::HeaderMap,
+    /// 任意名のAPIキーヘッダも、接続元が変われば除去する。
+    pub secret_headers: Vec<reqwest::header::HeaderName>,
+    pub body: Option<Vec<u8>>,
+    pub policy: UrlPolicy,
+    pub timeout: Duration,
+    pub max_redirects: usize,
+    pub max_bytes: usize,
+    /// web_fetchの明示した先頭取得だけが有効にする。
+    pub allow_truncation: bool,
+    pub user_agent: &'static str,
+}
+
+impl GuardedRequest {
+    pub fn get(
+        url: Url,
+        policy: UrlPolicy,
+        timeout: Duration,
+        max_bytes: usize,
+        user_agent: &'static str,
+    ) -> Self {
+        Self {
+            method: reqwest::Method::GET,
+            url,
+            headers: Default::default(),
+            secret_headers: Vec::new(),
+            body: None,
+            policy,
+            timeout,
+            max_redirects: 5,
+            max_bytes,
+            allow_truncation: false,
+            user_agent,
+        }
+    }
+}
+
+pub struct GuardedResponse {
+    pub status: reqwest::StatusCode,
+    pub url: Url,
+    pub body: Vec<u8>,
+    pub truncated: bool,
+}
+
+/// 全ホップで許可・公開IPを検査し、検査したDNS応答だけへ接続する。
+pub async fn fetch_guarded(request: GuardedRequest) -> Result<GuardedResponse, String> {
+    fetch_with_resolver(
+        request,
+        |url| async move { public_http_addresses(&url).await },
+    )
+    .await
+}
+
+async fn fetch_with_resolver<F, Fut>(
+    request: GuardedRequest,
+    resolve: F,
+) -> Result<GuardedResponse, String>
+where
+    F: Fn(Url) -> Fut,
+    Fut: std::future::Future<Output = Result<Vec<SocketAddr>, String>>,
+{
+    let timeout = request.timeout;
+    tokio::time::timeout(timeout, async {
+        let mut request = request;
+        for redirects in 0..=request.max_redirects {
+            request.policy.check(&request.url)?;
+            let addresses = resolve(request.url.clone()).await?;
+            if addresses.is_empty() {
+                return Err("接続先のIPアドレスが見つかりません".into());
+            }
+            let host = request.url.host_str().ok_or("URLにホスト名がありません")?;
+            // プロキシが再名前解決する経路を使わず、検査済みの宛先へ直接接続する。
+            let client = reqwest::Client::builder()
+                .no_proxy()
+                .timeout(timeout)
+                .user_agent(request.user_agent)
+                .redirect(reqwest::redirect::Policy::none())
+                .resolve_to_addrs(host, &addresses)
+                .build()
+                .map_err(|_| "HTTP取得の準備に失敗しました".to_string())?;
+            let mut builder = client
+                .request(request.method.clone(), request.url.clone())
+                .headers(request.headers.clone());
+            if let Some(body) = &request.body {
+                builder = builder.body(body.clone());
+            }
+            let response = builder
+                .send()
+                .await
+                .map_err(|error| format!("HTTP取得に失敗しました: {}", error.without_url()))?;
+            let status = response.status();
+            if matches!(status.as_u16(), 301 | 302 | 303 | 307 | 308) {
+                if redirects == request.max_redirects {
+                    return Err(format!(
+                        "リダイレクトが{}回を超えました",
+                        request.max_redirects
+                    ));
+                }
+                let location = response
+                    .headers()
+                    .get(reqwest::header::LOCATION)
+                    .ok_or("リダイレクト先がありません")?
+                    .to_str()
+                    .map_err(|_| "リダイレクト先が不正です")?;
+                let next = request
+                    .url
+                    .join(location)
+                    .map_err(|_| "リダイレクト先を解析できません")?;
+                if request.url.scheme() == "https" && next.scheme() == "http" {
+                    return Err("HTTPSからHTTPへのリダイレクトは使えません".into());
+                }
+                if request.url.origin() != next.origin() {
+                    for name in [
+                        reqwest::header::AUTHORIZATION,
+                        reqwest::header::COOKIE,
+                        reqwest::header::PROXY_AUTHORIZATION,
+                    ] {
+                        request.headers.remove(name);
+                    }
+                    for name in &request.secret_headers {
+                        request.headers.remove(name);
+                    }
+                    request.headers.remove("x-api-key");
+                }
+                if (status.as_u16() == 303 && request.method != reqwest::Method::HEAD)
+                    || (matches!(status.as_u16(), 301 | 302)
+                        && request.method == reqwest::Method::POST)
+                {
+                    request.method = reqwest::Method::GET;
+                    request.body = None;
+                    request.headers.remove(reqwest::header::CONTENT_TYPE);
+                    request.headers.remove(reqwest::header::CONTENT_LENGTH);
+                }
+                request.url = next;
+                continue;
+            }
+            let (body, truncated) =
+                response_bytes(response, request.max_bytes, request.allow_truncation).await?;
+            return Ok(GuardedResponse {
+                status,
+                url: request.url,
+                body,
+                truncated,
+            });
+        }
+        Err("リダイレクトを完了できません".into())
+    })
+    .await
+    .map_err(|_| "HTTP取得の待ち時間を超えました".to_string())?
+}
+
+fn validate_http_url(url: &Url) -> Result<(), String> {
+    if !matches!(url.scheme(), "http" | "https") {
+        return Err("http または https のURLだけを指定できます".into());
+    }
+    if !url.username().is_empty() || url.password().is_some() {
+        return Err("ユーザー情報を埋め込んだURLは使えません".into());
+    }
+    let host = url.host_str().ok_or("URLにホスト名がありません")?;
+    if host.eq_ignore_ascii_case("localhost") || host.ends_with(".localhost") {
+        return Err("ローカルホストへは接続できません".into());
+    }
+    if host
+        .trim_matches(['[', ']'])
+        .parse::<IpAddr>()
+        .is_ok_and(|ip| !is_public_ip(ip))
+    {
+        return Err("非公開IPへは接続できません".into());
+    }
+    Ok(())
+}
+
+async fn response_bytes(
+    mut response: reqwest::Response,
+    max_bytes: usize,
+    allow_truncation: bool,
+) -> Result<(Vec<u8>, bool), String> {
+    let mut bytes = Vec::new();
+    while let Some(chunk) = response.chunk().await.map_err(|error| {
+        format!(
+            "外部サービスの応答本文を読み取れません: {}",
+            error.without_url()
+        )
+    })? {
+        if bytes.len().saturating_add(chunk.len()) > max_bytes {
+            if allow_truncation {
+                bytes.extend_from_slice(&chunk[..max_bytes.saturating_sub(bytes.len())]);
+                return Ok((bytes, true));
+            }
+            return Err(format!(
+                "外部サービスの応答本文が上限（{:.2} MB）を超えました",
+                max_bytes as f64 / 1_000_000.0
+            ));
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+    Ok((bytes, false))
+}
+
+/// 応答本文へ反映された設定秘密値も、切り詰める前に伏せる。
+pub fn configured_secret_values(cfg: &Config) -> Vec<String> {
+    let mut keys: Vec<String> = cfg.get_all().keys().cloned().collect();
+    keys.extend(std::env::vars_os().filter_map(|(key, _)| key.into_string().ok()));
+    keys.sort();
+    keys.dedup();
+    keys.into_iter()
+        .filter(|key| crate::secret::is_secret_key(key))
+        .map(|key| cfg.get(&key, ""))
+        .filter(|value| !value.is_empty())
+        .collect()
+}
+
+pub fn redact_secret_values(body: &str, secrets: &[&str]) -> String {
+    let mut safe = body.to_string();
+    let mut ordered: Vec<&str> = secrets.to_vec();
+    ordered.sort_by_key(|value| std::cmp::Reverse(value.len()));
+    ordered.dedup();
+    for value in ordered {
+        if value.is_empty() {
+            continue;
+        }
+        safe = safe.replace(value, "[秘密値を省略]");
+        if let Ok(encoded) = serde_json::to_string(&value) {
+            safe = safe.replace(&encoded[1..encoded.len() - 1], "[秘密値を省略]");
+        }
+        let encoded: String = url::form_urlencoded::byte_serialize(value.as_bytes()).collect();
+        safe = safe.replace(&encoded, "[秘密値を省略]");
+    }
+    safe
+}
+
+pub fn safe_service_error(
+    cfg: &Config,
+    label: &str,
+    status: reqwest::StatusCode,
+    body: &str,
+) -> String {
+    let secrets = configured_secret_values(cfg);
+    let values: Vec<&str> = secrets.iter().map(String::as_str).collect();
+    service_error(label, "API", status, &redact_secret_values(body, &values))
+}
+
+pub async fn service_reply(
+    cfg: &Config,
+    response: Result<reqwest::Response, reqwest::Error>,
+    label: &str,
+) -> String {
+    match service_body(cfg, label, response).await {
+        Ok(body) => body,
+        Err(error) => format!("エラー: {error}"),
+    }
+}
+
+/// 接続・状態・エラー本文の検証を、JSONと音声の応答で共通にする。
+pub async fn service_response(
+    cfg: &Config,
+    label: &str,
+    response: Result<reqwest::Response, reqwest::Error>,
+) -> Result<reqwest::Response, String> {
+    let response = response
+        .map_err(|error| format!("{label} への接続に失敗しました: {}", error.without_url()))?;
+    let status = response.status();
+    if status.is_success() {
+        Ok(response)
+    } else {
+        let body = response_text(response).await?;
+        Err(safe_service_error(cfg, label, status, &body))
+    }
+}
+
+pub async fn service_body(
+    cfg: &Config,
+    label: &str,
+    response: Result<reqwest::Response, reqwest::Error>,
+) -> Result<String, String> {
+    response_text(service_response(cfg, label, response).await?).await
+}
+
+type SharedClient = OnceLock<Result<reqwest::Client, String>>;
+static CLIENT: SharedClient = OnceLock::new();
+static SERVICE_CLIENT: SharedClient = OnceLock::new();
+static UPDATE_FEED_CLIENT: SharedClient = OnceLock::new();
+
+#[derive(Clone, Copy)]
+enum ClientProfile {
+    Standard,
+    Service,
+    UpdateFeed,
+}
+
+impl ClientProfile {
+    fn stall_limits(self) -> Option<(u64, u64)> {
+        match self {
+            Self::Standard => Some((CONNECT_TIMEOUT_SECS, READ_TIMEOUT_SECS)),
+            Self::UpdateFeed => Some((5, 10)),
+            // API・ローカル処理は要求全体の期限だけを従来どおり適用する。
+            Self::Service => None,
+        }
+    }
+}
+
+fn build_shared_client(profile: ClientProfile) -> Result<reqwest::Client, String> {
+    let mut builder =
+        reqwest::Client::builder().user_agent(concat!("PicoAgent/", env!("CARGO_PKG_VERSION")));
+    if let Some((connect, read)) = profile.stall_limits() {
+        builder = builder
+            .connect_timeout(Duration::from_secs(connect))
+            .read_timeout(Duration::from_secs(read));
+    }
+    builder.build().map_err(|error| {
+        format!(
+            "共有HTTPクライアントを初期化できません: {}",
+            error.without_url()
+        )
+    })
+}
 
 /// 接続確立の上限。応答本文には掛からないので、モデルDLや生成のストリーミングは妨げない。
 /// 到達しないホストでTCP接続がOS既定（分単位）まで滞留するのを防ぐ。
@@ -15,20 +365,75 @@ const CONNECT_TIMEOUT_SECS: u64 = 10;
 /// 接続後に1バイトも届かない状態の上限。長時間ストリーム全体の時間は制限しない。
 const READ_TIMEOUT_SECS: u64 = 120;
 const MAX_SERVICE_RESPONSE_BYTES: usize = 8 * 1024 * 1024;
-const MAX_SERVICE_RESPONSE_LABEL: &str = "8.39 MB";
 
 /// 専用のUser-Agent、DNS固定、リダイレクト制御等が不要な経路で接続プールを共有する標準クライアント。
 /// 個別の待ち時間はRequestBuilder::timeoutで指定する。
-pub fn client() -> &'static reqwest::Client {
-    CLIENT.get_or_init(|| {
-        reqwest::Client::builder()
-            .connect_timeout(Duration::from_secs(CONNECT_TIMEOUT_SECS))
-            .read_timeout(Duration::from_secs(READ_TIMEOUT_SECS))
-            .build()
-            // フォールバック許可: TLSバックエンド初期化の失敗でHTTPを一切使えなくしないため、
-            // 接続上限なしの既定クライアントで続行する。
-            .unwrap_or_else(|_| reqwest::Client::new())
-    })
+pub fn init() -> Result<(), String> {
+    for (state, profile) in [
+        (&CLIENT, ClientProfile::Standard),
+        (&SERVICE_CLIENT, ClientProfile::Service),
+        (&UPDATE_FEED_CLIENT, ClientProfile::UpdateFeed),
+    ] {
+        initialize_client(state, || build_shared_client(profile))?;
+    }
+    Ok(())
+}
+
+fn initialize_client(
+    state: &SharedClient,
+    build: impl FnOnce() -> Result<reqwest::Client, String>,
+) -> Result<(), String> {
+    state
+        .get_or_init(build)
+        .as_ref()
+        .map(|_| ())
+        .map_err(Clone::clone)
+}
+
+fn initialized_client(state: &SharedClient) -> Result<&reqwest::Client, String> {
+    state
+        .get()
+        .ok_or_else(|| "標準HTTPクライアントが未初期化です。起動時の初期化が必要です".to_string())?
+        .as_ref()
+        .map_err(Clone::clone)
+}
+
+/// 起動時に確定した接続プールだけを返す。初期化失敗後に別クライアントを作らない。
+pub fn client() -> Result<&'static reqwest::Client, String> {
+    // 単体検査はTauri setupを実行しないため、同じ起動時初期化を検査入口で呼ぶ。
+    // 未初期化・初期化失敗の境界は独立したSharedClientで同じ関数を検査する。
+    if cfg!(test) {
+        init()?;
+    }
+    initialized_client(&CLIENT)
+}
+
+/// 各APIが従来持っていた要求全体の期限を維持する接続プール。
+pub fn service_client() -> Result<&'static reqwest::Client, String> {
+    if cfg!(test) {
+        init()?;
+    }
+    initialized_client(&SERVICE_CLIENT)
+}
+
+/// 全体期限を必ず要求へ付ける。認証と専用UAは要求単位で指定する。
+pub fn service(
+    method: reqwest::Method,
+    url: impl reqwest::IntoUrl,
+    timeout: Duration,
+) -> Result<reqwest::RequestBuilder, String> {
+    if timeout.is_zero() {
+        return Err("HTTP要求の待ち時間は0より大きい値が必要です".into());
+    }
+    Ok(service_client()?.request(method, url).timeout(timeout))
+}
+
+/// 更新確認の接続5秒・無通信10秒をAPIの期限へ混ぜない。
+pub fn update_feed_client() -> Result<&'static reqwest::Client, String> {
+    if cfg!(test) {
+        init()?;
+    }
+    initialized_client(&UPDATE_FEED_CLIENT)
 }
 
 /// URL取得スキルがローカル端末や社内ネットワークをSSRFで読まないための宛先検査。
@@ -40,25 +445,19 @@ pub async fn require_public_http_url(url: &Url) -> Result<(), String> {
 /// 検査済みの接続先を返す。呼び出し側がHTTPクライアントへこの結果を固定すれば、
 /// 検査後の再名前解決でプライベートIPへ差し替わるDNS rebindingも防げる。
 pub async fn public_http_addresses(url: &Url) -> Result<Vec<SocketAddr>, String> {
-    if !matches!(url.scheme(), "http" | "https") {
-        return Err("http または https のURLだけを指定できます".to_string());
-    }
-    if !url.username().is_empty() || url.password().is_some() {
-        return Err("ユーザー情報を埋め込んだURLは使えません".to_string());
-    }
-    let host = url
-        .host_str()
-        .ok_or_else(|| "URLにホスト名がありません".to_string())?;
-    if host.eq_ignore_ascii_case("localhost") || host.ends_with(".localhost") {
-        return Err("ローカルホストへは接続できません".to_string());
-    }
+    validate_http_url(url)?;
+    let host = url.host_str().ok_or("URLにホスト名がありません")?;
     let port = url
         .port_or_known_default()
         .ok_or_else(|| "URLのポートを判定できません".to_string())?;
-    let addresses: Vec<SocketAddr> = tokio::net::lookup_host((host, port))
-        .await
-        .map_err(|error| format!("接続先を名前解決できません: {error}"))?
-        .collect();
+    let addresses: Vec<SocketAddr> = match url.host() {
+        Some(url::Host::Ipv4(ip)) => vec![SocketAddr::new(IpAddr::V4(ip), port)],
+        Some(url::Host::Ipv6(ip)) => vec![SocketAddr::new(IpAddr::V6(ip), port)],
+        _ => tokio::net::lookup_host((host, port))
+            .await
+            .map_err(|_| "接続先を名前解決できません".to_string())?
+            .collect(),
+    };
     if addresses.is_empty() {
         return Err("接続先のIPアドレスが見つかりません".to_string());
     }
@@ -71,14 +470,14 @@ pub async fn public_http_addresses(url: &Url) -> Result<Vec<SocketAddr>, String>
 fn is_public_ip(ip: IpAddr) -> bool {
     match ip {
         IpAddr::V4(ip) => {
-            let [a, b, c, _] = ip.octets();
+            let [a, b, c, d] = ip.octets();
             !(a == 0
                 || a == 10
                 || a == 127
                 || (a == 100 && (64..=127).contains(&b))
                 || (a == 169 && b == 254)
                 || (a == 172 && (16..=31).contains(&b))
-                || (a == 192 && b == 0 && c == 0)
+                || (a == 192 && b == 0 && c == 0 && d != 9 && d != 10)
                 || (a == 192 && b == 0 && c == 2)
                 || (a == 192 && b == 88 && c == 99)
                 || (a == 192 && b == 168)
@@ -91,55 +490,42 @@ fn is_public_ip(ip: IpAddr) -> bool {
             if let Some(mapped) = ip.to_ipv4_mapped() {
                 return is_public_ip(IpAddr::V4(mapped));
             }
-            let segments = ip.segments();
-            // 公開経路に載る通常の IPv6 Global Unicast（2000::/3）だけを許可し、
-            // 文書用 2001:db8::/32 と ORCHID 2001:10::/28, 2001:20::/28 は除く。
-            (0x2000..0x4000).contains(&segments[0])
-                && !(segments[0] == 0x2001 && segments[1] == 0x0db8)
-                && !(segments[0] == 0x2001
-                    && (segments[1] & 0xfff0 == 0x0010 || segments[1] & 0xfff0 == 0x0020))
+            let s = ip.segments();
+            // IANAの公開例外を保持し、文書・試験・未割当の特殊宛先を拒否する。
+            // https://www.iana.org/assignments/iana-ipv6-special-registry
+            if s.starts_with(&[0x64, 0xff9b, 0, 0, 0, 0]) {
+                return is_public_ip(IpAddr::V4(std::net::Ipv4Addr::from(
+                    (u32::from(s[6]) << 16) | u32::from(s[7]),
+                )));
+            }
+            if s[0] == 0x2002 {
+                return is_public_ip(IpAddr::V4(std::net::Ipv4Addr::from(
+                    (u32::from(s[1]) << 16) | u32::from(s[2]),
+                )));
+            }
+            if s[0] == 0x2001 && s[1] < 0x200 {
+                let anycast = s.starts_with(&[0x2001, 1, 0, 0, 0, 0, 0]) && (1..=3).contains(&s[7]);
+                return anycast
+                    || s[1] == 3
+                    || (s[1] == 4 && s[2] == 0x112)
+                    || (s[1] & 0xfff0 == 0x20)
+                    || (s[1] & 0xfff0 == 0x30);
+            }
+            (0x2000..0x4000).contains(&s[0])
+                && !(s[0] == 0x2001 && s[1] == 0xdb8)
+                && !(s[0] == 0x3fff && s[1] < 0x1000)
         }
     }
 }
 
 /// モデル一覧のような短い問い合わせの待ち時間。設定画面のプロバイダ選択が固まらないようにする。
-pub fn metadata_timeout(cfg: &Config) -> Duration {
-    timeout(cfg, "PICOAGENT_HTTP_METADATA_TIMEOUT_SECS", 15, 3, 60)
-}
-
-/// 秒単位の設定を共通の範囲へ丸めてDurationへ変換する。
-pub fn timeout(
-    cfg: &Config,
-    key: &str,
-    default_secs: u64,
-    min_secs: u64,
-    max_secs: u64,
-) -> Duration {
-    let default_value = default_secs.to_string();
-    let seconds = cfg
-        .get(key, &default_value)
-        .parse::<u64>()
-        .unwrap_or(default_secs)
-        .clamp(min_secs, max_secs);
-    Duration::from_secs(seconds)
+pub fn metadata_timeout(cfg: &Config) -> Result<Duration, String> {
+    cfg.duration_secs(&crate::config::ints::HTTP_METADATA_TIMEOUT_SECS)
 }
 
 /// 外部サービスの応答本文を、読取失敗を空本文へ落とさず取得する。
 pub async fn response_text(response: reqwest::Response) -> Result<String, String> {
-    let mut response = response;
-    let mut bytes = Vec::new();
-    while let Some(chunk) = response
-        .chunk()
-        .await
-        .map_err(|error| format!("外部サービスの応答本文を読み取れません: {error}"))?
-    {
-        if bytes.len().saturating_add(chunk.len()) > MAX_SERVICE_RESPONSE_BYTES {
-            return Err(format!(
-                "外部サービスの応答本文が上限（{MAX_SERVICE_RESPONSE_LABEL}）を超えました"
-            ));
-        }
-        bytes.extend_from_slice(&chunk);
-    }
+    let (bytes, _) = response_bytes(response, MAX_SERVICE_RESPONSE_BYTES, false).await?;
     String::from_utf8(bytes)
         .map_err(|error| format!("外部サービスの応答本文がUTF-8ではありません: {error}"))
 }
@@ -149,7 +535,7 @@ pub async fn response_text(response: reqwest::Response) -> Result<String, String
 /// この文字列は**キャラクターのフキダシにそのまま出る**。以前は各プロバイダが
 /// `"Ollama /api/chat failed: {status} {body}"` のように英語の定型文と応答本文を
 /// 無制限に連結しており、日本語の利用者に英語＋JSONの塊が見えていた。
-/// 本文は原因の手がかりとして残すが、長さを抑える（全文は診断ログへ残る）。
+/// 本文は原因の手がかりとして残すが、長さを抑える。
 pub fn service_error(
     service: &str,
     endpoint: &str,
@@ -193,21 +579,360 @@ macro_rules! tool_response_json {
 }
 
 #[cfg(test)]
+mod guarded_tests {
+    use super::*;
+
+    #[test]
+    fn api全体期限と標準および更新確認の無通信期限を混ぜない() {
+        assert_eq!(ClientProfile::Service.stall_limits(), None);
+        assert_eq!(ClientProfile::Standard.stall_limits(), Some((10, 120)));
+        assert_eq!(ClientProfile::UpdateFeed.stall_limits(), Some((5, 10)));
+        assert!(service(reqwest::Method::GET, "http://localhost", Duration::ZERO).is_err());
+        for seconds in [2, 20, 180, 300, 900] {
+            let request = service(
+                reqwest::Method::GET,
+                "http://localhost",
+                Duration::from_secs(seconds),
+            )
+            .unwrap()
+            .build()
+            .unwrap();
+            assert_eq!(request.timeout(), Some(&Duration::from_secs(seconds)));
+        }
+    }
+
+    #[test]
+    fn 未初期化と初期化失敗は通信を始めず再生成もしない() {
+        let state = SharedClient::new();
+        assert!(initialized_client(&state).unwrap_err().contains("未初期化"));
+        let calls = std::sync::atomic::AtomicUsize::new(0);
+        for _ in 0..2 {
+            let error = initialize_client(&state, || {
+                calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                Err("TLS初期化の試験失敗".into())
+            })
+            .unwrap_err();
+            assert_eq!(error, "TLS初期化の試験失敗");
+        }
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert_eq!(
+            initialized_client(&state).unwrap_err(),
+            "TLS初期化の試験失敗"
+        );
+    }
+
+    #[test]
+    fn 起動時に標準接続プールを一度だけ確定する() {
+        init().unwrap();
+        let first = client().unwrap();
+        init().unwrap();
+        assert!(std::ptr::eq(first, client().unwrap()));
+        let sources = crate::guard_scan::all_sources();
+        let source = sources
+            .iter()
+            .find(|source| {
+                source.path.to_string_lossy().replace('\\', "/") == "src-tauri/src/lib.rs"
+            })
+            .unwrap();
+        let setup = source.body().split(".setup(|app| {").nth(1).unwrap();
+        assert!(
+            setup.find("tools::http::init()").unwrap() < setup.find("components::init(").unwrap()
+        );
+    }
+    use std::sync::{Arc, Mutex};
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    async fn server(
+        reply: String,
+    ) -> (
+        SocketAddr,
+        Arc<Mutex<Vec<String>>>,
+        tokio::task::JoinHandle<()>,
+    ) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let output = seen.clone();
+        let task = tokio::spawn(async move {
+            loop {
+                let (mut stream, _) = listener.accept().await.unwrap();
+                let mut bytes = Vec::new();
+                loop {
+                    let mut buffer = [0; 4096];
+                    let size = stream.read(&mut buffer).await.unwrap();
+                    if size == 0 {
+                        break;
+                    }
+                    bytes.extend_from_slice(&buffer[..size]);
+                    if let Some(header_end) =
+                        bytes.windows(4).position(|bytes| bytes == b"\r\n\r\n")
+                    {
+                        let header = String::from_utf8_lossy(&bytes[..header_end]);
+                        let length = header
+                            .lines()
+                            .find_map(|line| {
+                                line.to_ascii_lowercase()
+                                    .strip_prefix("content-length: ")
+                                    .and_then(|s| s.parse::<usize>().ok())
+                            })
+                            .unwrap_or(0);
+                        if bytes.len() >= header_end + 4 + length {
+                            break;
+                        }
+                    }
+                }
+                output
+                    .lock()
+                    .unwrap()
+                    .push(String::from_utf8(bytes).unwrap());
+                stream.write_all(reply.as_bytes()).await.unwrap();
+            }
+        });
+        (address, seen, task)
+    }
+
+    fn request(address: SocketAddr) -> GuardedRequest {
+        GuardedRequest::get(
+            Url::parse(&format!("http://allowed.test:{}/", address.port())).unwrap(),
+            UrlPolicy::domains("allowed.test"),
+            Duration::from_secs(2),
+            128,
+            "PicoAgent test",
+        )
+    }
+
+    #[tokio::test]
+    async fn 禁止リダイレクト先には要求が一度も届かない() {
+        let (denied, hits, target_task) =
+            server("HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok".into())
+                .await;
+        for code in [302, 307, 308] {
+            for host in ["denied.test", "127.0.0.1"] {
+                let (allowed, source_hits, source_task) = server(format!("HTTP/1.1 {code} Redirect\r\nLocation: http://{host}:{}/\r\nContent-Length: 0\r\nConnection: close\r\n\r\n", denied.port())).await;
+                let mut req = request(allowed);
+                req.method = reqwest::Method::POST;
+                req.body = Some(b"private payload".to_vec());
+                let result = fetch_with_resolver(req, |url| async move {
+                    Ok(vec![SocketAddr::from((
+                        [127, 0, 0, 1],
+                        url.port().unwrap(),
+                    ))])
+                })
+                .await;
+                assert!(result.is_err());
+                assert_eq!(source_hits.lock().unwrap().len(), 1);
+                assert!(hits.lock().unwrap().is_empty());
+                source_task.abort();
+                let _ = source_task.await;
+            }
+        }
+        // 実スキルの入口も、明示許可ドメインだけではプライベートIPを許さない。
+        let cfg = Config::new();
+        cfg.set("PICOAGENT_HTTP_ALLOWED_DOMAINS", "127.0.0.1");
+        let output = crate::tools::http_api::HttpApiTool
+            .run(
+                &cfg,
+                serde_json::json!({"method":"GET","url":format!("http://{denied}/")}),
+            )
+            .await;
+        assert!(output.contains("非公開IP"));
+        assert!(hits.lock().unwrap().is_empty());
+        target_task.abort();
+        let _ = target_task.await;
+    }
+
+    #[tokio::test]
+    async fn dns固定と秘密ヘッダ除去と本文の規定を検査する() {
+        for (code, host) in [
+            (302, "other.test"),
+            (303, "other.test"),
+            (307, "other.test"),
+            (308, "other.test"),
+            (307, "allowed.test"),
+        ] {
+            let (target, hits, target_task) = server(
+                "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok".into(),
+            )
+            .await;
+            let (source, _, source_task) = server(format!("HTTP/1.1 {code} Redirect\r\nLocation: http://{host}:{}/\r\nContent-Length: 0\r\nConnection: close\r\n\r\n", target.port())).await;
+            let mut req = request(source);
+            req.policy = UrlPolicy::domains("allowed.test,other.test");
+            req.method = reqwest::Method::POST;
+            req.body = Some(b"payload".to_vec());
+            for name in ["authorization", "cookie", "x-custom-token"] {
+                req.headers.insert(
+                    reqwest::header::HeaderName::from_bytes(name.as_bytes()).unwrap(),
+                    "secret".parse().unwrap(),
+                );
+            }
+            req.secret_headers.push("x-custom-token".parse().unwrap());
+            let resolved = Arc::new(Mutex::new(Vec::new()));
+            let calls = resolved.clone();
+            let output = fetch_with_resolver(req, move |url| {
+                calls
+                    .lock()
+                    .unwrap()
+                    .push(url.host_str().unwrap().to_string());
+                async move {
+                    Ok(vec![SocketAddr::from((
+                        [127, 0, 0, 1],
+                        url.port().unwrap(),
+                    ))])
+                }
+            })
+            .await
+            .unwrap();
+            assert_eq!(output.body, b"ok");
+            assert_eq!(*resolved.lock().unwrap(), ["allowed.test", host]);
+            {
+                let hits = hits.lock().unwrap();
+                let sent = &hits[0];
+                assert!(!sent.to_ascii_lowercase().contains("secret"));
+                if code < 307 {
+                    assert!(sent.starts_with("GET "));
+                    assert!(!sent.ends_with("payload"));
+                } else {
+                    assert!(sent.starts_with("POST "));
+                    assert!(sent.ends_with("payload"));
+                }
+            }
+            source_task.abort();
+            target_task.abort();
+            let _ = source_task.await;
+            let _ = target_task.await;
+        }
+    }
+
+    #[tokio::test]
+    async fn 全体時間と容量とリダイレクト上限を守る() {
+        let (address, _, task) =
+            server("HTTP/1.1 200 OK\r\nContent-Length: 4\r\nConnection: close\r\n\r\nlong".into())
+                .await;
+        let mut req = request(address);
+        req.max_bytes = 2;
+        assert!(
+            fetch_with_resolver(req, |_| async move { Ok(vec![address]) })
+                .await
+                .err()
+                .unwrap()
+                .contains("上限")
+        );
+        let mut prefix = request(address);
+        prefix.max_bytes = 2;
+        prefix.allow_truncation = true;
+        let response = fetch_with_resolver(prefix, |_| async move { Ok(vec![address]) })
+            .await
+            .unwrap();
+        assert_eq!(response.body, b"lo");
+        assert!(response.truncated);
+        let mut req = request(address);
+        req.timeout = Duration::from_millis(20);
+        assert!(fetch_with_resolver(req, |_| async move {
+            tokio::time::sleep(Duration::from_secs(1)).await;
+            Ok(vec![address])
+        })
+        .await
+        .err()
+        .unwrap()
+        .contains("待ち時間"));
+        task.abort();
+        let _ = task.await;
+        let (address, hits, task) = server("HTTP/1.1 302 Redirect\r\nLocation: /again\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".into()).await;
+        let mut req = request(address);
+        req.max_redirects = 1;
+        assert!(
+            fetch_with_resolver(req, |_| async move { Ok(vec![address]) })
+                .await
+                .err()
+                .unwrap()
+                .contains("リダイレクト")
+        );
+        assert_eq!(hits.lock().unwrap().len(), 2);
+        task.abort();
+        let _ = task.await;
+    }
+
+    #[tokio::test]
+    async fn エラー本文を読み秘密値を切り詰める前に除去する() {
+        let cfg = Config::new();
+        cfg.set("PICOAGENT_HTTP_BEARER_TOKEN", "unique-secret-123");
+        let boundary = safe_service_error(
+            &cfg,
+            "API",
+            reqwest::StatusCode::UNAUTHORIZED,
+            &format!("{}unique-secret-123", "a".repeat(190)),
+        );
+        assert!(!boundary.contains("unique-"));
+        cfg.set("PICOAGENT_HTTP_API_KEY_VALUE", "quoted\"secret\n");
+        let secret = cfg.get("PICOAGENT_HTTP_API_KEY_VALUE", "");
+        let escaped = serde_json::to_string(&secret).unwrap();
+        let encoded: String = url::form_urlencoded::byte_serialize(secret.as_bytes()).collect();
+        let redacted = safe_service_error(
+            &cfg,
+            "API",
+            reqwest::StatusCode::BAD_REQUEST,
+            &format!("{escaped} {encoded}"),
+        );
+        assert!(!redacted.contains("quoted"));
+        let body = "権限不足 unique-secret-123";
+        let reply = format!(
+            "HTTP/1.1 401 Unauthorized\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        );
+        let (address, _, task) = server(reply).await;
+        let client = reqwest::Client::builder()
+            .no_proxy()
+            .timeout(Duration::from_secs(2))
+            .build()
+            .unwrap();
+        let text = service_reply(
+            &cfg,
+            client
+                .get(format!("http://{address}/?token=unique-secret-123"))
+                .send()
+                .await,
+            "API",
+        )
+        .await;
+        assert!(text.contains("権限不足"));
+        assert!(text.contains("401"));
+        assert!(!text.contains("unique-secret-123"));
+        task.abort();
+        let _ = task.await;
+        // 接続不能なURLのqueryにも秘密値を入れ、reqwestのURL表示が除去されることを確かめる。
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let unavailable = listener.local_addr().unwrap();
+        drop(listener);
+        let error = service_reply(
+            &cfg,
+            client
+                .get(format!("http://{unavailable}/?token=unique-secret-123"))
+                .send()
+                .await,
+            "API",
+        )
+        .await;
+        assert!(error.contains("エラー"));
+        assert!(!error.contains("unique-secret-123"));
+        assert!(!error.contains("?token="));
+    }
+    use crate::tools::Tool;
+}
+
+#[cfg(test)]
 mod tests {
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
     #[test]
-    fn 待ち時間設定を範囲内へ正規化する() {
+    fn 待ち時間の不正値を理由付きで返す() {
         let cfg = crate::config::Config::new();
-        cfg.set("TEST_TIMEOUT", "999");
-        assert_eq!(
-            super::timeout(&cfg, "TEST_TIMEOUT", 20, 3, 60).as_secs(),
-            60
-        );
-        cfg.set("TEST_TIMEOUT", "broken");
-        assert_eq!(
-            super::timeout(&cfg, "TEST_TIMEOUT", 20, 3, 60).as_secs(),
-            20
-        );
+        for value in ["999", "broken", "2", "-1", "3.5"] {
+            cfg.set("PICOAGENT_HTTP_METADATA_TIMEOUT_SECS", value);
+            let error = super::metadata_timeout(&cfg).unwrap_err();
+            assert!(error.contains("PICOAGENT_HTTP_METADATA_TIMEOUT_SECS"));
+        }
+        cfg.set("PICOAGENT_HTTP_METADATA_TIMEOUT_SECS", "3");
+        assert_eq!(super::metadata_timeout(&cfg).unwrap().as_secs(), 3);
+        assert!(cfg.duration_key("TEST_TIMEOUT").is_err());
     }
 
     #[test]
@@ -231,6 +956,34 @@ mod tests {
             Ipv4Addr::new(127, 0, 0, 1).to_ipv6_mapped()
         )));
         assert!(super::is_public_ip(IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8))));
+        for (address, public) in [
+            ("2001:2::1", false),
+            ("3fff:fff::1", false),
+            ("2001::1", false),
+            ("2002:7f00:1::1", false),
+            ("64:ff9b::7f00:1", false),
+            ("2002:808:808::1", true),
+            ("64:ff9b::808:808", true),
+            ("2001:1::1", true),
+            ("2001:3::1", true),
+            ("2001:4:112::1", true),
+            ("2001:20::1", true),
+            ("2001:30::1", true),
+            ("2606:4700::1111", true),
+        ] {
+            assert_eq!(
+                super::is_public_ip(address.parse().unwrap()),
+                public,
+                "{address}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn ipv6リテラルは角括弧を名前解決へ渡さない() {
+        let url = url::Url::parse("https://[2606:4700::1111]/").unwrap();
+        let addresses = super::public_http_addresses(&url).await.unwrap();
+        assert_eq!(addresses, vec!["[2606:4700::1111]:443".parse().unwrap()]);
     }
 }
 
@@ -238,6 +991,65 @@ mod tests {
 /// ガードを数えるときに見落とす。実際にこのガードだけ `tests` に紛れていた）。
 #[cfg(test)]
 mod guard {
+    fn dedicated_builder_allowed(path: &std::path::Path) -> bool {
+        // 検査済DNS固定と共有profileの所有者、およびHTTPS配布専用の所有者だけ。
+        [
+            "src-tauri/src/tools/http.rs",
+            "src-tauri/src/installer/http.rs",
+        ]
+        .iter()
+        .any(|owner| path == std::path::Path::new(owner))
+    }
+
+    #[test]
+    fn 個別http構築は専用の責務を持つ共有所有者だけに置く() {
+        let violations: Vec<_> = crate::guard_scan::all_sources()
+            .into_iter()
+            .filter(|source| {
+                source.body().contains("Client::builder()")
+                    && !dedicated_builder_allowed(&source.path)
+            })
+            .map(|source| source.path.clone())
+            .collect();
+        assert!(
+            violations.is_empty(),
+            "要求ごとのHTTP構築を撤去してください: {violations:?}"
+        );
+        for path in [
+            "skills/gmail/mod.rs",
+            "skills/browser_control/cdp.rs",
+            "src-tauri/src/aivis.rs",
+            "src-tauri/src/commands.rs",
+        ] {
+            assert!(
+                !dedicated_builder_allowed(std::path::Path::new(path)),
+                "{path}"
+            );
+        }
+    }
+
+    #[test]
+    fn 安全取得とapiエラー応答は共有層で管理する() {
+        for body in [
+            include_str!("../../../skills/web_fetch/mod.rs"),
+            include_str!("../../../skills/rss_feed/mod.rs"),
+            include_str!("../../../skills/http_api/mod.rs"),
+        ] {
+            assert!(body.contains("http::fetch_guarded("));
+            assert!(!body.contains(".send()"));
+            assert!(!body.contains("public_http_addresses("));
+        }
+        let duplicates: Vec<_> = crate::guard_scan::all_sources()
+            .into_iter()
+            .filter(|source| source.body().contains("fn handle_text_response("))
+            .map(|source| source.path.clone())
+            .collect();
+        assert!(
+            duplicates.is_empty(),
+            "API応答はservice_reply/service_bodyを使ってください: {duplicates:?}"
+        );
+    }
+
     fn client_builder_timeout_violations(text: &str) -> Vec<(usize, String)> {
         const BUILDER: &str = "Client::builder()";
         let mut violations = Vec::new();
@@ -295,11 +1107,7 @@ mod guard {
             .flat_map(|source| {
                 // このファイルのガード用fixture文字列は実装ではない。共有クライアント本体は
                 // 最初のcfg(test)より前にあるため、そこまでは他ファイルと同じ規則で検査する。
-                let implementation = if source.path.ends_with("tools/http.rs") {
-                    source.text.split("#[cfg(test)]").next().unwrap_or("")
-                } else {
-                    source.text.as_str()
-                };
+                let implementation = source.body();
                 client_builder_timeout_violations(implementation)
                     .into_iter()
                     .map(|(line, reason)| format!("{}:{line} ({reason})", source.path.display()))
@@ -341,6 +1149,7 @@ mod guard {
         ];
         let violations: Vec<String> = crate::guard_scan::all_sources()
             .into_iter()
+            .chain(crate::guard_scan::xtask_sources())
             .filter(|source| !source.path.ends_with("tools/http.rs"))
             .flat_map(|source| {
                 banned
@@ -357,3 +1166,7 @@ mod guard {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "http_service_tests.rs"]
+mod service_tests;

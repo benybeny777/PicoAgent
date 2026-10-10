@@ -5,6 +5,9 @@
 import * as bridge from "./bridge.js";
 import { isImeComposing, logApp } from "./util.js";
 
+import { read, readJson, write } from "./ui-store.js";
+import { createBackgroundFailureReporter } from "./toast.js";
+
 export function createGame({ voice, stage }) {
 
   const overlay = document.getElementById("gameOverlay");
@@ -285,20 +288,46 @@ export function createGame({ voice, stage }) {
     },
   ];
 
-  // webview の保存領域は読み書きとも失敗しうる。読めないだけで遊べなくなったり、
-  // 保存に失敗しただけで結末画面が出なくなったりしないよう、両方を包む。
-  const readStorage = key => {
-    try { return localStorage.getItem(key); }
-    catch { return null; }
-  };
-  const writeStorage = (key, value) => {
-    try { localStorage.setItem(key, value); }
-    catch (error) { logApp("warn", "ゲームの記録を保存できませんでした", error); }
-  };
-
+  const storageFailures = createBackgroundFailureReporter("game-storage");
+  const storageIssues = new Map();
+  const blocked = new Set();
+  function storageFailure(key, operation, reason) {
+    storageIssues.set(key, reason);
+    storageFailures.failure(operation, reason, `ゲームの保存を確認できません: ${reason}`);
+  }
+  function loadValue(key, validate) {
+    const result = readJson(key, validate);
+    if (!result.ok) {
+      blocked.add(key);
+      storageFailure(key, `read-${key}`, result.reason);
+      return null;
+    }
+    return result.value;
+  }
+  function saveValue(key, value) {
+    if (blocked.has(key)) return false;
+    const result = write(key, value);
+    if (!result.ok) {
+      storageFailure(key, `write-${key}`, result.reason);
+      return false;
+    }
+    storageIssues.delete(key);
+    storageFailures.recover(`write-${key}`);
+    return true;
+  }
+  const records = loadValue(RECORDS_KEY, value => value && typeof value === "object" && !Array.isArray(value)
+    && Object.entries(value).every(([key, record]) => Object.hasOwn(DIFFICULTIES, key) && record && typeof record === "object"
+      && [record.score, record.rounds].every(number => typeof number === "number" && Number.isFinite(number) && number >= 0)));
+  const ranks = loadValue(RANKS_KEY, value => Array.isArray(value) && value.every(key => RANKS.some(rank => rank[1] === key))
+    && new Set(value).size === value.length);
+  const sound = read(SOUND_KEY);
+  let soundEnabled = null;
+  if (!sound.ok || ![null, "on", "off"].includes(sound.value)) {
+    blocked.add(SOUND_KEY);
+    storageFailure(SOUND_KEY, "read-sound", sound.ok ? "音の保存設定の形式が不正です" : sound.reason);
+  } else soundEnabled = sound.value !== "off";
   let session = null;
   let timerId = null;
-  let soundEnabled = readStorage(SOUND_KEY) !== "off";
   let audioContext = null;
 
   const escapeHtml = value => String(value ?? "").replace(/[&<>"']/g, char => ({
@@ -316,41 +345,29 @@ export function createGame({ voice, stage }) {
   // 点数から称号を決める。閾値の高い順に並べてあるので、最初に届いたものを使う。
   const rankFor = score => RANKS.find(([threshold]) => score >= threshold);
 
-  const readJson = (key, fallback) => {
-    try {
-      const saved = JSON.parse(readStorage(key) || "null");
-      return saved && typeof saved === "object" ? saved : fallback;
-    } catch { return fallback; }
-  };
-
-  // 難易度ごとに、最高点と最長生存記録を持つ。制限時間も文字数も違うので混ぜない。
-  const readRecords = () => readJson(RECORDS_KEY, {});
-  const recordOf = difficulty => {
-    const saved = readRecords()[difficulty];
-    return { score: Number(saved?.score) || 0, rounds: Number(saved?.rounds) || 0 };
-  };
+  // 読込失敗の原本はセッション中保存しない。遊びの点数と保存済み記録は区別する。
+  const savedRecords = records ?? {};
+  const savedRanks = ranks ?? [];
+  const readRecords = () => savedRecords;
+  const recordOf = difficulty => readRecords()[difficulty] ?? { score: 0, rounds: 0 };
   const saveRecord = (difficulty, score, rounds) => {
+    if (blocked.has(RECORDS_KEY) || blocked.has(RANKS_KEY)) return false;
     const current = recordOf(difficulty);
     if (score <= current.score && rounds <= current.rounds) return false;
-    const next = {
-      score: Math.max(current.score, score),
-      rounds: Math.max(current.rounds, rounds),
-    };
-    writeStorage(RECORDS_KEY, JSON.stringify({ ...readRecords(), [difficulty]: next }));
+    const next = { score: Math.max(current.score, score), rounds: Math.max(current.rounds, rounds) };
+    if (!saveValue(RECORDS_KEY, JSON.stringify({ ...readRecords(), [difficulty]: next }))) return false;
+    savedRecords[difficulty] = next;
     return score > current.score;
   };
-
-  const readRanks = () => {
-    const saved = readJson(RANKS_KEY, []);
-    return Array.isArray(saved) ? saved : [];
-  };
+  const readRanks = () => savedRanks;
   const saveRank = key => {
-    const ranks = readRanks();
-    if (ranks.includes(key)) return false;
-    writeStorage(RANKS_KEY, JSON.stringify([...ranks, key]));
+    if (blocked.has(RECORDS_KEY) || blocked.has(RANKS_KEY) || readRanks().includes(key)) return false;
+    const next = [...readRanks(), key];
+    if (!saveValue(RANKS_KEY, JSON.stringify(next))) return false;
+    readRanks().push(key);
     return true;
   };
-  const rankProgress = () => `到達した称号 ${readRanks().length} / ${RANKS.length}`;
+  const rankProgress = () => blocked.has(RANKS_KEY) ? "称号の記録を確認できません" : `到達した称号 ${readRanks().length} / ${RANKS.length}`;
 
   // 効果音の音量。読み上げと同じ設定（PICOAGENT_TTS_VOLUME）に従う。
   // 固定値で鳴らしていた頃は、音量を下げても・0にしても効果音だけ同じ大きさで鳴っていた。
@@ -401,7 +418,7 @@ export function createGame({ voice, stage }) {
   }
 
   function syncSoundButton() {
-    soundButton.textContent = soundEnabled ? "音あり" : "消音";
+    soundButton.textContent = soundEnabled === null ? "音設定を確認できません" : soundEnabled ? "音あり" : "消音";
     soundButton.setAttribute("aria-pressed", String(soundEnabled));
   }
 
@@ -411,7 +428,7 @@ export function createGame({ voice, stage }) {
   }
 
   function setStatus(message = "", kind = "") {
-    status.textContent = message;
+    status.textContent = [message, ...storageIssues.values()].filter(Boolean).join(" / ");
     status.dataset.kind = kind;
   }
 
@@ -439,7 +456,7 @@ export function createGame({ voice, stage }) {
             return `<label><input type="radio" name="gameDifficulty" value="${key}" ${key === DEFAULT_DIFFICULTY ? "checked" : ""}><strong>${value.label}</strong><span>${value.seconds}秒・${value.maxLength}文字${value.hint ? "・ヒントと見本あり" : ""}<br>点数${value.scoreRate}倍${best}</span></label>`;
           }).join("")}
         </div>
-        <div class="game-setup-meta"><span>信用度${HP.max}から開始</span><span>0で監査終了</span><span>時間切れは大きく減る</span><span>${TWISTS.interrogationEvery}問ごとに追及タイム</span><span>強気宣言は${TWISTS.boldLimit}回まで</span><span>${TWISTS.healStreak}連続${TWISTS.healLine}点以上で回復</span><span>${rankProgress()}</span></div>
+        <div class="game-setup-meta"><span>信用度${HP.max}から開始</span><span>0で監査終了</span><span>時間切れは大きく減る</span><span>${TWISTS.interrogationEvery}問ごとに追及タイム</span><span>強気宣言は${TWISTS.boldLimit}回まで</span><span>${TWISTS.healStreak}連続${TWISTS.healLine}点以上で回復</span><span>${escapeHtml(rankProgress())}</span></div>
         <ul class="game-ranks">${RANKS.map(([, key, name]) => `<li data-found="${found.includes(key)}">${found.includes(key) ? escapeHtml(name) : "？？？"}</li>`).join("")}</ul>
         <h2>監査AIが出す試験</h2>
         <ul class="game-exams">${EXAMS.map(exam => `<li><span class="game-exams-icon" aria-hidden="true">${escapeHtml(exam.icon)}</span><strong>${escapeHtml(exam.title)}</strong><span>${escapeHtml(exam.short)}</span></li>`).join("")}</ul>
@@ -815,7 +832,8 @@ export function createGame({ voice, stage }) {
   closeButton.addEventListener("click", close);
   soundButton.addEventListener("click", () => {
     soundEnabled = !soundEnabled;
-    writeStorage(SOUND_KEY, soundEnabled ? "on" : "off");
+    saveValue(SOUND_KEY, soundEnabled ? "on" : "off");
+    setStatus();
     syncSoundButton();
     playTone("tap");
   });

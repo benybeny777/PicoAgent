@@ -8,26 +8,19 @@ import * as bridge from "../app/bridge.js";
 import { toast } from "../app/toast.js";
 import { el, errorDetail, errorMessage, logApp } from "../app/util.js";
 
-export const FONT_RANGES = Object.freeze({
-  bubble: { key: "PICOAGENT_BUBBLE_FONT_PX", min: 10, max: 28, step: 1, fallback: 13 },
-  column: { key: "PICOAGENT_STREAM_CHAT_FONT_PX", min: 18, max: 48, step: 2, fallback: 22 },
-});
+const FONT_OPTIONS = {
+  bubble: { key: "PICOAGENT_BUBBLE_FONT_PX", step: 1 },
+  column: { key: "PICOAGENT_STREAM_CHAT_FONT_PX", step: 2 },
+};
 const SAVE_DELAY_MS = 600;
-
-/** 範囲内の整数へ丸める。読めない値は既定値。 */
-export function clampFontPx(kind, value) {
-  const range = FONT_RANGES[kind];
-  const size = Math.round(Number(value));
-  if (!Number.isFinite(size) || size <= 0) return range.fallback;
-  return Math.min(range.max, Math.max(range.min, size));
-}
 
 /**
  * @param {{ panel: HTMLElement, variant: () => string, apply: (kind: string, px: number) => void }} options
  *   apply は見た目だけを変える（保存しない）。
  */
 export function createFontSizeControl({ panel, variant, apply }) {
-  const sizes = { bubble: FONT_RANGES.bubble.fallback, column: FONT_RANGES.column.fallback };
+  const sizes = { bubble: null, column: null };
+  const ranges = {};
   const timers = new Map();
   const kind = () => (variant() === "column" ? "column" : "bubble");
 
@@ -42,7 +35,9 @@ export function createFontSizeControl({ panel, variant, apply }) {
 
   function render() {
     const current = kind();
-    const range = FONT_RANGES[current];
+    const range = ranges[current];
+    if (!range || sizes[current] === null) { toggle.disabled = true; return; }
+    toggle.disabled = false;
     value.textContent = `${sizes[current]}px`;
     smaller.disabled = sizes[current] <= range.min;
     larger.disabled = sizes[current] >= range.max;
@@ -52,7 +47,7 @@ export function createFontSizeControl({ panel, variant, apply }) {
     clearTimeout(timers.get(current));
     timers.set(current, setTimeout(() => {
       timers.delete(current);
-      const { key } = FONT_RANGES[current];
+      const { key } = ranges[current];
       bridge.saveUiPref(key, String(sizes[current])).catch(error => {
         logApp("error", "会話の文字サイズを保存できませんでした", errorDetail(error));
         toast(`文字サイズを保存できませんでした: ${errorMessage(error)}`, "error");
@@ -62,14 +57,16 @@ export function createFontSizeControl({ panel, variant, apply }) {
 
   function change(next) {
     const current = kind();
-    const size = clampFontPx(current, next);
+    const range = ranges[current];
+    if (!range || sizes[current] === null) return;
+    const size = Math.min(range.max, Math.max(range.min, next));
     if (size === sizes[current]) return;
     sizes[current] = size;
     apply(current, size);
     render();
     save(current);
   }
-  const step = direction => change(sizes[kind()] + direction * FONT_RANGES[kind()].step);
+  const step = direction => change(sizes[kind()] + direction * ranges[kind()].step);
 
   function setOpen(open) {
     popover.hidden = !open;
@@ -83,7 +80,7 @@ export function createFontSizeControl({ panel, variant, apply }) {
   });
   smaller.addEventListener("click", event => { event.stopPropagation(); step(-1); });
   larger.addEventListener("click", event => { event.stopPropagation(); step(1); });
-  reset.addEventListener("click", event => { event.stopPropagation(); change(FONT_RANGES[kind()].fallback); });
+  reset.addEventListener("click", event => { event.stopPropagation(); change(ranges[kind()].default); });
   popover.addEventListener("click", event => event.stopPropagation());
   document.addEventListener("pointerdown", event => {
     if (!popover.hidden && !popover.contains(event.target) && event.target !== toggle) setOpen(false);
@@ -101,7 +98,7 @@ export function createFontSizeControl({ panel, variant, apply }) {
     if (!(event.ctrlKey || event.metaKey) || event.altKey) return;
     if (event.key === "+" || event.key === "=" || event.key === ";") step(1);
     else if (event.key === "-" || event.key === "_") step(-1);
-    else if (event.key === "0") change(FONT_RANGES[kind()].fallback);
+    else if (event.key === "0") change(ranges[kind()].default);
     else return;
     event.preventDefault();
   });
@@ -109,10 +106,19 @@ export function createFontSizeControl({ panel, variant, apply }) {
   return {
     toggle,
     popover,
-    /** 保存値・設定画面からの値を当てる（保存しない）。範囲外の旧値も見た目はそのまま当てる。 */
+    setNumberSettings(metadata) {
+      for (const [current, options] of Object.entries(FONT_OPTIONS)) {
+        const schema = metadata[options.key];
+        if (!schema) throw new Error(`${options.key}の整数宣言がありません`);
+        ranges[current] = { ...options, min: Number(schema.range[0]), max: Number(schema.range[1]), default: Number(schema.default) };
+      }
+      render();
+    },
+    /** 共通の検証を通った設定値を当てる（保存しない）。 */
     setSize(current, px) {
-      const size = Math.round(Number(px));
-      if (!Number.isFinite(size) || size <= 0) return;
+      const range = ranges[current];
+      if (!range || !Number.isInteger(px) || px < range.min || px > range.max) throw new Error("文字サイズは宣言範囲の整数で指定してください");
+      const size = px;
       sizes[current] = size;
       render();
     },

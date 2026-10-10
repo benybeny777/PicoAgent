@@ -4,10 +4,10 @@
 
 use std::time::Duration;
 
+use crate::tools::search_url::direct_url;
 use async_trait::async_trait;
 use scraper::{Html, Selector};
 use serde_json::{json, Value};
-use url::Url;
 
 use super::{Tool, ToolReg};
 use crate::config::Config;
@@ -15,7 +15,7 @@ use crate::message::Field;
 
 const SEARCH_URL: &str = "https://html.duckduckgo.com/html/";
 const MAX_QUERY_CHARS: usize = 500;
-const MAX_RESULTS_LIMIT: usize = 8;
+const MAX_RESULTS_LIMIT: usize = crate::config::ints::WEB_SEARCH_MAX_RESULTS.max as usize;
 const MAX_RESPONSE_BYTES: usize = 32 * 1024;
 
 pub struct WebSearchTool;
@@ -211,44 +211,6 @@ fn search_query_in_conversation(text: &str, earlier_user_texts: &[&str]) -> Stri
     combined.chars().take(MAX_QUERY_CHARS).collect()
 }
 
-fn parse_setting(cfg: &Config, key: &str, fallback: &str, min: usize, max: usize) -> usize {
-    let raw = cfg.get(key, fallback);
-    parse_setting_value(&raw, fallback, min, max)
-}
-
-fn parse_setting_value(raw: &str, fallback: &str, min: usize, max: usize) -> usize {
-    // フォールバック許可: Web検索の補助設定が壊れていても検索自体は既定値で続行する。
-    let fallback_value = fallback.parse::<usize>().unwrap_or(min).clamp(min, max);
-    // 設定画面でIMEのまま入力された全角数字（「３」）も同じ値として読む。
-    let normalized: String = raw
-        .trim()
-        .chars()
-        .map(|character| match character {
-            '０'..='９' => char::from(b'0' + (character as u32 - '０' as u32) as u8),
-            other => other,
-        })
-        .collect();
-    normalized
-        .parse::<usize>()
-        .ok()
-        .filter(|value| (min..=max).contains(value))
-        .unwrap_or(fallback_value)
-}
-
-fn direct_url(href: &str) -> String {
-    let absolute = if href.starts_with("//") {
-        format!("https:{}", href)
-    } else {
-        href.to_string()
-    };
-    if let Ok(parsed) = Url::parse(&absolute) {
-        if let Some((_, destination)) = parsed.query_pairs().find(|(key, _)| key == "uddg") {
-            return destination.into_owned();
-        }
-    }
-    absolute
-}
-
 fn trim_to_bytes(text: &mut String, max_bytes: usize) {
     if text.len() <= max_bytes {
         return;
@@ -372,18 +334,8 @@ impl Tool for WebSearchTool {
 
     fn config_schema(&self) -> Vec<Field> {
         vec![
-            Field::new(
-                "PICOAGENT_WEB_SEARCH_MAX_RESULTS",
-                "Web検索の結果件数（1〜8）",
-                "text",
-                "5",
-            ),
-            Field::new(
-                "PICOAGENT_WEB_SEARCH_TIMEOUT_SECS",
-                "Web検索の待ち時間（秒、3〜60）",
-                "text",
-                "15",
-            ),
+            Field::int(&crate::config::ints::WEB_SEARCH_MAX_RESULTS),
+            Field::int(&crate::config::ints::WEB_SEARCH_TIMEOUT_SECS),
         ]
     }
 
@@ -399,13 +351,8 @@ impl Tool for WebSearchTool {
             );
         }
 
-        let configured_results = parse_setting(
-            cfg,
-            "PICOAGENT_WEB_SEARCH_MAX_RESULTS",
-            "5",
-            1,
-            MAX_RESULTS_LIMIT,
-        );
+        let configured_results =
+            crate::tool_try!(cfg.int(&crate::config::ints::WEB_SEARCH_MAX_RESULTS)) as usize;
         let max_results = match args.get("max_results") {
             None => configured_results,
             Some(value) => match value
@@ -421,26 +368,30 @@ impl Tool for WebSearchTool {
                 }
             },
         };
-        let timeout_secs = parse_setting(cfg, "PICOAGENT_WEB_SEARCH_TIMEOUT_SECS", "15", 3, 60);
+        let timeout_secs =
+            crate::tool_try!(cfg.int(&crate::config::ints::WEB_SEARCH_TIMEOUT_SECS)) as u64;
 
-        let client = match reqwest::Client::builder()
-            .timeout(Duration::from_secs(timeout_secs as u64))
-            .user_agent("PicoAgent/1.0 (Web search tool)")
-            .build()
+        let request_timeout = Duration::from_secs(timeout_secs as u64);
+        let response = match crate::tool_try!(crate::tools::http::service(
+            reqwest::Method::GET,
+            SEARCH_URL,
+            request_timeout
+        ))
+        .query(&[("q", query)])
+        .send()
+        .await
         {
-            Ok(client) => client,
-            Err(error) => return format!("エラー: Web検索の準備に失敗しました: {}", error),
-        };
-        let response = match client.get(SEARCH_URL).query(&[("q", query)]).send().await {
             Ok(response) => response,
-            Err(error) => return format!("エラー: Web検索への接続に失敗しました: {}", error),
+            Err(error) => {
+                return format!(
+                    "エラー: Web検索への接続に失敗しました: {}",
+                    error.without_url()
+                )
+            }
         };
         let status = response.status();
         if !status.is_success() {
-            return format!(
-                "エラー: Web検索が HTTP {} を返しました。時間を置いて再試行してください。",
-                status
-            );
+            return crate::tools::http::service_reply(cfg, Ok(response), "Web検索").await;
         }
         let body = match response.text().await {
             Ok(body) => body,
@@ -458,8 +409,8 @@ inventory::submit! { ToolReg { make: || Box::new(WebSearchTool) } }
 #[cfg(test)]
 mod tests {
     use super::{
-        direct_url, extract_results, is_explicit_request, parse_setting_value,
-        search_query_in_conversation, WebSearchTool, MAX_RESULTS_LIMIT,
+        direct_url, extract_results, is_explicit_request, search_query_in_conversation,
+        WebSearchTool,
     };
     use crate::tools::Tool;
 
@@ -518,12 +469,5 @@ mod tests {
         assert!(output.contains("1. 例のページ"));
         assert!(output.contains("URL: https://example.com/"));
         assert!(output.contains("検索結果の概要です。"));
-    }
-
-    #[test]
-    fn 壊れた検索設定は既定値へ戻す() {
-        assert_eq!(parse_setting_value("abc", "5", 1, MAX_RESULTS_LIMIT), 5);
-        assert_eq!(parse_setting_value("999", "15", 3, 60), 15);
-        assert_eq!(parse_setting_value("３", "5", 1, MAX_RESULTS_LIMIT), 3);
     }
 }

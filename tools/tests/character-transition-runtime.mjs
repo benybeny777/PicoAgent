@@ -9,33 +9,36 @@ function deferred() {
   const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
   return { promise, resolve, reject };
 }
-const main = readFileSync(new URL("../../ui/app/main.js", import.meta.url), "utf8");
-const loadFunction = main.slice(main.indexOf("async function loadCharacter("), main.indexOf("\nfunction localStorageVariant("));
+const main = readFileSync(new URL("../../ui/app/main.js", import.meta.url), "utf8").replace(/\r\n/g, "\n");
+const loadFunction = main.slice(main.indexOf("async function loadCharacter("), main.indexOf("\n// ── 表示形式"));
 const hostSource = readFileSync(new URL("../../ui/character/index.js", import.meta.url), "utf8")
-  .replace(/^import[\s\S]*?;\r?\n/gm, "").replace(/export (function|const)/g, "$1");
+  .replace(/^import[\s\S]*?;\r?\n/gm, "").replace(/export (function|const|class)/g, "$1");
 
 function setup(initialSignature = "") {
-  const loads = [], profiles = [], greetings = [], appearances = [];
+  const loads = [], profiles = [], greetings = [], appearances = [], diagnostics = [];
+  let diagnostic = null;
   const element = { style: {}, dataset: {} };
   let statusText = "";
   const context = {
-    signatureOf: id => id, voice: { stop() {}, speak: text => greetings.push(text) },
+    signatureOf: id => id, voice: { stop() {}, setCharacter() {}, speak: text => greetings.push(text) },
     host: { setDisplayReady() {}, load: id => { const work = deferred(); loads.push({ id, ...work }); return work.promise; } },
     characterSource: { element }, stage: { setCharacter() {} }, chrome: { setCharacterName() {} },
     status: { set: text => { statusText = text; }, clear: () => { statusText = ""; } },
     renderCharacterOptions() {}, motion: { rest() {} }, personaText: () => "人格",
-    characterOverrides: {}, sdkOverrides: {}, errorMessage: String,
-    bridge: { setCharacterProfile: id => { const work = deferred(); profiles.push({ id, ...work }); return work.promise; } },
+    characterOverrides: {}, sdkOverrides: {}, rendererOverrides: {}, errorMessage: String,
+    characterDiagnostic: { show(id, error) { diagnostic = { id, error }; diagnostics.push(diagnostic); }, clear() { diagnostic = null; } },
+    bridge: { setCharacterProfile: (id, profile, greeting, voice) => { const work = deferred(); profiles.push({ id, voice, ...work }); return work.promise; } },
     applyStreamAppearance: value => appearances.push(value), chat: { renderReply() {} },
   };
   const api = runInNewContext(`let loadedSignature = ${JSON.stringify(initialSignature)};
-    let characterName = ""; let characterLoadGeneration = 0; let characterLoads = 0;
+    let characterName = ""; let requestedCharacterId = ""; let characterLoadGeneration = 0; let characterLoads = 0;
     ${loadFunction}
     ({ loadCharacter, get signature() { return loadedSignature; } })`, context);
   return { ...api, api, loads, profiles, greetings, appearances, element, get statusText() { return statusText; },
+    diagnostics, get diagnostic() { return diagnostic; },
     async finishLoad(index) {
       const id = loads[index].id;
-      loads[index].resolve({ pack: { id, name: id, manifest: {} }, greeting: `${id}の挨拶` });
+      loads[index].resolve({ pack: { id, name: id, manifest: { voice: { provider: "aivis", styleId: "123" } } }, greeting: `${id}の挨拶` });
       await Promise.resolve(); await Promise.resolve();
     },
   };
@@ -62,6 +65,7 @@ test("新キャラへ移った後の古い読込失敗は現在の表示を隠�
   assert.equal(await first, null);
   assert.equal(state.element.style.visibility, "");
   assert.equal(state.statusText, "");
+  assert.equal(state.diagnostics.length, 0);
 });
 
 test("切替待ち中に元キャラへ戻した場合は署名一致でも読込を省略しない", async () => {
@@ -81,10 +85,12 @@ test("人格登録失敗は未確定キャラを隠して診断を残し同じ�
   await assert.rejects(first, /人格登録失敗/);
   assert.equal(state.element.style.visibility, "hidden");
   assert.match(state.statusText, /人格登録失敗/);
+  assert.equal(state.diagnostic.id, "a");
   const second = state.loadCharacter("a"); await state.finishLoad(1);
   state.profiles[1].resolve("aの背景"); await second;
   assert.equal(state.element.style.visibility, "");
   assert.equal(state.statusText, "");
+  assert.equal(state.diagnostic, null);
 });
 
 test("読込途中の描画器は寸法と状態を確定するまで可視にしない", async () => {
@@ -125,6 +131,7 @@ test("読込途中の描画器は寸法と状態を確定するまで可視に�
 function expandedSetup() {
   const calls = [];
   const messages = [];
+  const logs = [];
   const stage = { expanded: false, setExpanded: on => { stage.expanded = on; } };
   const button = { textContent: "拡大" };
   const queueAt = main.indexOf("let fullscreenQueue =");
@@ -132,9 +139,10 @@ function expandedSetup() {
   const setExpanded = runInNewContext(`${body}\nsetExpanded`, {
     stage, buttons: { expandButton: button }, status: { flash: text => messages.push(text) },
     bridge: { setFullscreen: on => { const work = deferred(); calls.push({ on, ...work }); return work.promise; } },
+    logApp: (...args) => logs.push(args), errorDetail: error => error.message,
     errorMessage: String, ambient: { flushNotice() {} }, setTimeout: callback => callback(),
   });
-  return { setExpanded, stage, button, calls, messages };
+  return { setExpanded, stage, button, calls, messages, logs };
 }
 
 test("全画面連打はネイティブ操作を直列化し古い失敗で最新状態を戻さない", async () => {
@@ -145,6 +153,7 @@ test("全画面連打はネイティブ操作を直列化し古い失敗で最�
   state.calls[0].reject(new Error("最初の切替失敗")); await first; await new Promise(setImmediate);
   assert.deepEqual(state.calls.map(call => call.on), [true, false]);
   assert.equal(state.stage.expanded, false); assert.equal(state.messages.length, 0);
+  assert.deepEqual(state.logs, [["warn", "直前の全画面切替失敗後に次の操作を開始します", "最初の切替失敗"]]);
   state.calls[1].resolve(); await second;
   assert.equal(state.button.textContent, "拡大");
 });
@@ -169,6 +178,9 @@ test("全画面連打が両方失敗したら未実行の楽観表示ではな�
   assert.equal(state.stage.expanded, false);
   assert.equal(state.button.textContent, "拡大");
   assert.equal(state.messages.length, 1);
+  assert.match(state.messages[0], /復帰失敗/);
+  assert.deepEqual(state.calls.map(call => call.on), [true, false]);
+  assert.deepEqual(state.logs, [["warn", "直前の全画面切替失敗後に次の操作を開始します", "拡大失敗"]]);
 });
 
 test("ネイティブドロップ読込中は最後のファイルの失敗を含め送信抑止を保持して解除する", async () => {
@@ -200,4 +212,11 @@ test("拡大中に表示形式を切り替える時はシーンだけでなく�
   });
   applyLayout("stream");
   assert.deepEqual(calls, [["expanded", false], ["layout", "stream"]]);
+});
+
+ test("人格登録は読み込めたmanifestの声を第4引数へ渡す", async () => {
+  const state = setup();
+  const work = state.loadCharacter("a"); await state.finishLoad(0);
+  assert.equal(state.profiles[0].voice?.styleId, "123");
+  state.profiles[0].resolve({}); await work;
 });

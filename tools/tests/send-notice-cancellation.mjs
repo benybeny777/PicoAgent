@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import vm from "node:vm";
+import { installStorageRuntime } from "./lib/storage-runtime.mjs";
 import { uiFile } from "./lib/ui-source.mjs";
 
 const deferred = () => { let resolve; const promise = new Promise(done => { resolve = done; }); return { promise, resolve }; };
@@ -11,6 +12,7 @@ function element(_tag, attributes = {}, children = []) {
 }
 function load(file, factory, values) {
   const context = vm.createContext({ logApp() {}, notifyBackgroundFailure() {}, clearBackgroundFailure() {}, errorDetail: String, errorMessage: String, ...values });
+  if (file === "app/notice.js") installStorageRuntime(context);
   vm.runInContext(uiFile(file).replace(/^import .*;\r?$/gm, "").replace("export function", "function") + `\nthis.factory = ${factory};`, context);
   return context.factory;
 }
@@ -105,12 +107,14 @@ test("会話ジョブを繰り返してもアクションセンターは直近50
 
 test("起動で非表示になったキャラは有効なキャラの読込成功後に再表示する", async () => {
   const source = uiFile("app/main.js");
-  const body = source.slice(source.indexOf("async function loadCharacter("), source.indexOf("function localStorageVariant("));
+  const body = source.slice(source.indexOf("async function loadCharacter("), source.indexOf("function applyLayout("));
   const characterSource = { element: { dataset: {}, style: { visibility: "hidden" } } };
+  const diagnostics = [];
   const context = vm.createContext({
-    loadedSignature: "", signatureOf: id => id, characterOverrides: {}, sdkOverrides: {}, characterName: "",
+    loadedSignature: "", signatureOf: id => id, characterOverrides: {}, sdkOverrides: {}, rendererOverrides: {}, requestedCharacterId: "", characterName: "",
+    characterDiagnostic: { clear: () => diagnostics.push(["clear"]), show: (id, error) => diagnostics.push(["show", id, error]) },
     characterLoadGeneration: 0, characterLoads: 0, status: { set() {}, clear() {} }, errorMessage: String,
-    voice: { stop() {} }, host: { setDisplayReady() {}, load: async () => ({ pack: { id: "mugi", name: "むぎ", manifest: {} }, greeting: "" }) },
+    voice: { stop() {}, setCharacter() {} }, host: { setDisplayReady() {}, load: async () => ({ pack: { id: "mugi", name: "むぎ", manifest: {} }, greeting: "" }) },
     stage: { setCharacter() {} }, chrome: { setCharacterName() {} }, characterSource,
     renderCharacterOptions() {}, motion: { rest() {} }, personaText: () => "人格",
     bridge: { setCharacterProfile: async () => ({}) }, applyStreamAppearance() {},
@@ -119,11 +123,14 @@ test("起動で非表示になったキャラは有効なキャラの読込成�
   await context.load("mugi");
   assert.equal(characterSource.element.style.visibility, "");
   assert.equal(characterSource.element.dataset.characterId, "mugi");
+  assert.equal(diagnostics[0][0], "clear");
   characterSource.element.style.visibility = "hidden";
   context.host.load = async () => { throw new Error("読込失敗"); };
   await assert.rejects(context.load("missing"), /読込失敗/);
   assert.equal(characterSource.element.style.visibility, "hidden");
   assert.equal(characterSource.element.dataset.characterId, "mugi");
+  assert.equal(diagnostics.at(-1)[0], "show");
+  assert.equal(diagnostics.at(-1)[1], "missing");
 });
 
 for (const [label, capture] of [

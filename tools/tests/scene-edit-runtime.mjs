@@ -78,7 +78,7 @@ test("キャラ非表示中に描画器を読み替えても停止状態を保�
   }
   class Unsupported { static supports() { return false; } }
   const source = readFileSync(new URL("../../ui/character/index.js", import.meta.url), "utf8")
-    .replace(/^import[\s\S]*?;\r?\n/gm, "").replace(/export (function|const)/g, "$1");
+    .replace(/^import[\s\S]*?;\r?\n/gm, "").replace(/export (function|const|class)/g, "$1");
   const factory = runInNewContext(`${source}\ncreateCharacterHost`, {
     ImageRenderer: Renderer, MmdRenderer: Unsupported, MeshRenderer: Unsupported, Live2dRenderer: Unsupported,
     loadPack: async id => ({ id, manifest: {} }), personaText: () => "", bridge: {},

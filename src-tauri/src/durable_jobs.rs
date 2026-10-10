@@ -7,7 +7,7 @@ use std::sync::OnceLock;
 use chrono::Local;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Manager};
 
 const STORE_LOCK: &str = "durable-jobs";
 const MAX_JOBS: usize = 200;
@@ -89,8 +89,8 @@ fn load_from(path: &std::path::Path) -> Result<Vec<DurableJob>, String> {
 }
 
 #[rustfmt::skip]
-fn quarantine_job_store(path: &std::path::Path) -> Result<PathBuf, String> {
-    crate::store::quarantine_corrupt(path).ok_or_else(|| "破損した永続ジョブ一覧を退避できません。".to_string())
+fn quarantine_job_store(app: &AppHandle, path: &std::path::Path) -> Result<PathBuf, String> {
+    crate::store::quarantine_and_notify(app, path, crate::store::QuarantineArea::Jobs).ok_or_else(|| "破損した永続ジョブ一覧を退避できません。".to_string())
 }
 
 pub fn list() -> Result<Vec<DurableJob>, String> {
@@ -323,22 +323,18 @@ fn notify(job: &DurableJob) {
     let Some(app) = APP.get() else {
         return;
     };
-    let payload = json!({
-        "kind": "durable_job",
-        "jobId": job.id,
-        "title": job.label,
-        "body": job_body(job),
-        "ok": !matches!(job.state, JobState::Failed | JobState::WaitingAuth),
-        "state": job.state,
-        "progress": job.progress,
-        "at": job.updated_at,
-    });
-    if let Err(error) = app.emit("pet:notice", payload) {
-        crate::log_paths::append_app_log(
-            app,
-            &format!("永続ジョブの進捗を画面へ通知できません: {error}"),
-        );
-    }
+    crate::notice::emit(
+        app,
+        crate::notice::Notice::info(
+            "durable_job",
+            &job.label,
+            job_body(job),
+            !matches!(job.state, JobState::Failed | JobState::WaitingAuth),
+        )
+        .detail("jobId", json!(job.id))
+        .detail("state", json!(job.state))
+        .detail("progress", json!(job.progress)),
+    );
 }
 
 /// 通知へ出す1行。エラーや結果があればその先頭行、無ければ工程名。
@@ -367,8 +363,44 @@ pub(crate) fn app_handle() -> Option<&'static AppHandle> {
 /// スキルの実行中から現在地を知らせる。`percent` は 1〜99 に収める
 /// （0 は未着手、100 は完了の意味を持たせているため、途中経過で使わせない）。
 pub fn report_progress(job_id: &str, percent: u8, step: &str) {
+    static PROGRESS_SAVE: crate::notice::FailureLatch = crate::notice::FailureLatch::new();
+    report_progress_with(
+        job_id,
+        percent,
+        step,
+        |mutator| update(|jobs| mutator(jobs)),
+        |outcome| {
+            if let Some(app) = APP.get() {
+                PROGRESS_SAVE.report(
+                    app,
+                    "durable-progress-save",
+                    "永続ジョブの進捗保存",
+                    outcome,
+                    "永続ジョブの進捗保存が復旧しました",
+                );
+            }
+        },
+        notify,
+    );
+}
+
+/// 保存結果だけで通知を更新し、進捗保存の失敗を転送処理へ伝播させない。
+fn report_progress_with(
+    job_id: &str,
+    percent: u8,
+    step: &str,
+    update_store: impl FnOnce(
+        &mut dyn FnMut(&mut Vec<DurableJob>) -> Result<(), String>,
+    ) -> Result<(), String>,
+    report: impl FnOnce(Result<(), String>),
+    notify_job: impl FnOnce(&DurableJob),
+) {
+    // STORE_LOCK は update_store 内だけで取る。保存と通知の順序を別の排他で確定し、
+    // 転送・生成そのものはこの排他の外で進める。
+    static PROGRESS_REPORT_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _report_guard = PROGRESS_REPORT_LOCK.lock().unwrap();
     let mut updated = None;
-    let outcome = update(|jobs| {
+    let outcome = update_store(&mut |jobs| {
         if let Some(job) = jobs.iter_mut().find(|job| job.id == job_id) {
             if apply_progress(job, percent, step) {
                 updated = Some(job.clone());
@@ -376,21 +408,11 @@ pub fn report_progress(job_id: &str, percent: u8, step: &str) {
         }
         Ok(())
     });
-    match outcome {
-        Ok(()) => {
-            if let Some(job) = updated {
-                notify(&job);
-            }
-        }
-        // 進捗は補助情報。保存に失敗しても本処理は続ける（次の保存で書き直る）。
-        // フォールバック許可: 進捗の書き込み失敗で転送・生成そのものを止めない。
-        Err(error) => {
-            if let Some(app) = APP.get() {
-                crate::log_paths::append_app_log(
-                    app,
-                    &format!("永続ジョブの進捗を保存できません: {error}"),
-                );
-            }
+    report(outcome.as_ref().map(|_| ()).map_err(|error| format!(
+        "永続ジョブの進捗を保存できません。転送・生成は継続しますが、再起動時にこの進捗は戻りません: {error}")));
+    if outcome.is_ok() {
+        if let Some(job) = updated {
+            notify_job(&job);
         }
     }
 }
@@ -536,9 +558,9 @@ pub fn start(app: AppHandle) {
         Local::now().timestamp_nanos_opt().unwrap_or_default()
     );
     let _ = WORKER_TOKEN.set(token);
-    // フォールバック許可: ジョブ履歴の破損でアプリ全体を止めない。退避できた場合だけ空で継続する。
+    // フォールバック許可: PR #463 採用案3。退避済みの原本を保持して新規状態で続ける。（根拠: PR #463 採用案。退避・通知と原本保護）
     if let Err(error) = load_from(&path) {
-        let saved = match quarantine_job_store(&path) {
+        let saved = match quarantine_job_store(&app, &path) {
             Ok(saved) => saved,
             Err(quarantine_error) => {
                 crate::log_paths::append_app_log(
@@ -653,27 +675,169 @@ async fn run_job(app: &AppHandle, id: &str) {
 /// 読み直しても古い状態しか返らない。受け側は `jobId` で上書きするため、
 /// 同じIDで失敗として送れば待機表示が残らない。
 fn notify_store_failure(app: &AppHandle, id: &str, title: &str, message: &str) {
-    let payload = json!({
-        "kind": "durable_job",
-        "jobId": id,
-        "title": title,
-        "body": message,
-        "ok": false,
-        "state": JobState::Failed,
-        "progress": 0,
-        "at": now(),
-    });
-    if let Err(error) = app.emit("pet:notice", payload) {
-        crate::log_paths::append_app_log(
-            app,
-            &format!("永続ジョブの失敗を画面へ通知できません: {error}"),
-        );
-    }
+    crate::notice::emit(
+        app,
+        crate::notice::Notice::info("durable_job", title, message, false)
+            .detail("jobId", json!(id))
+            .detail("state", json!(JobState::Failed))
+            .detail("progress", json!(0)),
+    );
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn 進捗保存失敗は一度通知し転送を止めず実保存で復旧する() {
+        use std::cell::RefCell;
+        let directory = crate::guard_scan::repo_root().join("temp").join(format!(
+            "durable-progress-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&directory).unwrap();
+        let blocked = directory.join("保存を妨げるファイル");
+        std::fs::write(&blocked, "原本").unwrap();
+        let failure = crate::store::write_json_atomic(
+            &blocked.join("jobs.json"),
+            &vec![見本(JobState::Running, 1)],
+        )
+        .unwrap_err()
+        .to_string();
+        let latch = crate::notice::FailureLatch::new();
+        let notices = RefCell::new(Vec::new());
+        let published = RefCell::new(Vec::new());
+        let mut transferred = 0;
+        for fails in [true, true, false, true, false] {
+            report_progress_with(
+                "x",
+                55,
+                "転送中",
+                |mutator| {
+                    let mut jobs = vec![見本(JobState::Running, 1)];
+                    mutator(&mut jobs)?;
+                    if fails {
+                        return Err(failure.clone());
+                    }
+                    crate::store::write_json_atomic(&directory.join("jobs.json"), &jobs)
+                        .map_err(|error| error.to_string())
+                },
+                |result| {
+                    latch.report_with(
+                        "durable-progress-save",
+                        "進捗保存",
+                        result,
+                        "復旧しました",
+                        |notice| notices.borrow_mut().push(notice),
+                    )
+                },
+                |job| published.borrow_mut().push(job.progress),
+            );
+            // 呼び出しは失敗を返さず、転送の次の工程へ進む。
+            transferred += 1;
+        }
+        assert_eq!(transferred, 5);
+        assert_eq!(*published.borrow(), [55, 55]);
+        let notices = notices.borrow();
+        assert_eq!(
+            notices.iter().map(|notice| notice.ok).collect::<Vec<_>>(),
+            [false, true, false, true]
+        );
+        assert!(notices[0].body.contains(&failure));
+        assert!(notices[0].body.contains("転送・生成は継続"));
+        assert!(!latch.is_failed());
+        assert_eq!(std::fs::read_to_string(&blocked).unwrap(), "原本");
+        let saved = load_from(&directory.join("jobs.json")).unwrap();
+        assert_eq!(saved[0].progress, 55);
+        std::fs::remove_dir_all(&directory).unwrap();
+    }
+
+    #[test]
+    fn 並行した進捗保存も失敗復旧進捗の順で通知する() {
+        use std::sync::{mpsc, Arc, Mutex};
+        use std::time::Duration;
+        let latch = Arc::new(crate::notice::FailureLatch::new());
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let (attempted_tx, attempted_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let mut release_rx = Some(release_rx);
+        let mut workers = Vec::new();
+        for first in [true, false] {
+            let latch = latch.clone();
+            let events = events.clone();
+            let entered_tx = entered_tx.clone();
+            let attempted_tx = attempted_tx.clone();
+            let release_rx = if first { release_rx.take() } else { None };
+            workers.push(std::thread::spawn(move || {
+                if !first {
+                    attempted_tx.send(()).unwrap();
+                }
+                report_progress_with(
+                    "x",
+                    55,
+                    "転送中",
+                    |mutator| {
+                        entered_tx.send(first).unwrap();
+                        let mut jobs = vec![見本(JobState::Running, 1)];
+                        mutator(&mut jobs)?;
+                        events.lock().unwrap().push(if first {
+                            "先の保存"
+                        } else {
+                            "後の保存"
+                        });
+                        if let Some(release_rx) = release_rx {
+                            release_rx.recv().unwrap();
+                            Err("保存できません".into())
+                        } else {
+                            Ok(())
+                        }
+                    },
+                    |result| {
+                        latch.report_with(
+                            "durable-progress-save",
+                            "進捗保存",
+                            result,
+                            "復旧しました",
+                            |notice| {
+                                events.lock().unwrap().push(if notice.ok {
+                                    "復旧"
+                                } else {
+                                    "失敗"
+                                })
+                            },
+                        )
+                    },
+                    |_| events.lock().unwrap().push("進捗"),
+                );
+                // 保存・通知を終えたら、各転送は排他を持たず次の工程へ戻れる。
+                1
+            }));
+            if first {
+                assert!(entered_rx.recv_timeout(Duration::from_secs(5)).unwrap());
+            }
+        }
+        attempted_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        // 先の保存を意図的に止める。排他がなければ後の保存と通知が先行する。
+        let premature = entered_rx.recv_timeout(Duration::from_millis(100));
+        // 検査に失敗しても、自分の検査スレッドを待機したまま残さない。
+        release_tx.send(()).unwrap();
+        let completed: i32 = workers
+            .into_iter()
+            .map(|worker| worker.join().unwrap())
+            .sum();
+        assert!(matches!(premature, Err(mpsc::RecvTimeoutError::Timeout)));
+        assert_eq!(completed, 2);
+        assert_eq!(
+            *events.lock().unwrap(),
+            ["先の保存", "失敗", "後の保存", "復旧", "進捗"]
+        );
+        assert!(!latch.is_failed());
+    }
 
     #[test]
     fn 実行中ジョブを再起動待ちへ戻す() {

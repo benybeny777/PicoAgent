@@ -132,7 +132,7 @@ function composerHarness() {
   globalThis.FileReader = class { readAsDataURL() { readers.push(this); } };
   const node = tag => document.createElement(tag);
   const input = node("textarea"), form = node("form"), sendButton = node("button");
-  const composer = createComposer({ form, input, sendButton, preview: node("div"), suggestions: node("div"), quickActions: node("div"),
+  const composer = createComposer({ form, input, sendButton, preview: node("div"), suggestions: node("div"), quickActions: node("div"), diagnostics: node("div"),
     status: { set() {}, clear() {}, flash() {} } });
   let submitted = 0;
   composer.onSubmit(() => { submitted += 1; });

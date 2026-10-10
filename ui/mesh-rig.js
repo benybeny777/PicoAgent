@@ -839,7 +839,7 @@
         this.hairPosition = next.value;
         this.hairVelocity = next.velocity;
       } else {
-        // フォールバック許可: 物理定義を持たない既存リグは従来の髪追従を保つ。
+        // 物理定義を持たない既存リグは従来の髪追従を保つ。
         this.hairVelocity += (-this.hairPosition * 17 - this.hairVelocity * 5.4
           - (this.angleX - this.previousAngleX) * 7.5) * dt;
         this.hairPosition += this.hairVelocity * dt;

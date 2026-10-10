@@ -8,6 +8,7 @@ use serde_json::{json, Value};
 use super::{Tool, ToolReg};
 use crate::config::Config;
 use crate::message::Field;
+use crate::tools::social_post::text_arg;
 
 const LINKEDIN_BASE: &str = "https://api.linkedin.com";
 const MAX_TEXT_CHARS: usize = 3000;
@@ -59,12 +60,7 @@ impl Tool for LinkedInTool {
                 "text",
                 "urn:li:person:...",
             ),
-            Field::new(
-                "PICOAGENT_LINKEDIN_TIMEOUT_SECS",
-                "LinkedIn API 待ち時間（秒、3〜60）",
-                "text",
-                "20",
-            ),
+            Field::int(&crate::config::ints::LINKEDIN_TIMEOUT_SECS),
         ]
     }
 
@@ -77,28 +73,20 @@ impl Tool for LinkedInTool {
                 "LinkedIn API の access token が必要です。",
             );
         }
-        let timeout = cfg
-            .get("PICOAGENT_LINKEDIN_TIMEOUT_SECS", "20")
-            .parse::<u64>()
-            .ok()
-            .filter(|value| (3..=60).contains(value))
-            .unwrap_or(20);
-        let client = match reqwest::Client::builder()
-            .timeout(Duration::from_secs(timeout))
-            .user_agent("PicoAgent/1.0 (LinkedIn tool)")
-            .build()
-        {
-            Ok(client) => client,
-            Err(error) => return format!("エラー: LinkedIn API の準備に失敗しました: {}", error),
-        };
+        let timeout = crate::tool_try!(cfg.int(&crate::config::ints::LINKEDIN_TIMEOUT_SECS)) as u64;
+        let request_timeout = Duration::from_secs(timeout);
         match args.get("action").and_then(Value::as_str).unwrap_or("") {
             "userinfo" => {
-                handle_text_response(
-                    client
-                        .get(format!("{}/v2/userinfo", LINKEDIN_BASE))
-                        .bearer_auth(token)
-                        .send()
-                        .await,
+                crate::tools::http::service_reply(
+                    cfg,
+                    crate::tool_try!(crate::tools::http::service(
+                        reqwest::Method::GET,
+                        format!("{}/v2/userinfo", LINKEDIN_BASE),
+                        request_timeout
+                    ))
+                    .bearer_auth(token)
+                    .send()
+                    .await,
                     "LinkedIn API",
                 )
                 .await
@@ -135,53 +123,24 @@ impl Tool for LinkedInTool {
                         "com.linkedin.ugc.MemberNetworkVisibility": visibility
                     }
                 });
-                handle_text_response(
-                    client
-                        .post(format!("{}/v2/ugcPosts", LINKEDIN_BASE))
-                        .bearer_auth(token)
-                        .header("X-Restli-Protocol-Version", "2.0.0")
-                        .json(&payload)
-                        .send()
-                        .await,
+                crate::tools::http::service_reply(
+                    cfg,
+                    crate::tool_try!(crate::tools::http::service(
+                        reqwest::Method::POST,
+                        format!("{}/v2/ugcPosts", LINKEDIN_BASE),
+                        request_timeout
+                    ))
+                    .bearer_auth(token)
+                    .header("X-Restli-Protocol-Version", "2.0.0")
+                    .json(&payload)
+                    .send()
+                    .await,
                     "LinkedIn API",
                 )
                 .await
             }
             _ => "エラー: action は post/userinfo のいずれかを指定してください。".to_string(),
         }
-    }
-}
-
-fn text_arg<'a>(args: &'a Value, key: &str, max_chars: usize) -> Result<&'a str, String> {
-    let text = args
-        .get(key)
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| format!("{} が指定されていません。", key))?;
-    if text.chars().count() > max_chars {
-        return Err(format!(
-            "{} は {} 文字以内で指定してください。",
-            key, max_chars
-        ));
-    }
-    Ok(text)
-}
-
-async fn handle_text_response(
-    response: Result<reqwest::Response, reqwest::Error>,
-    label: &str,
-) -> String {
-    let response = match response {
-        Ok(response) => response,
-        Err(error) => return format!("エラー: {} への接続に失敗しました: {}", label, error),
-    };
-    let status = response.status();
-    let body = crate::tool_response_text!(response);
-    if status.is_success() {
-        body
-    } else {
-        format!("エラー: {} が HTTP {} を返しました。", label, status)
     }
 }
 

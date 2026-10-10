@@ -103,20 +103,17 @@ impl Tool for ImageGenerateTool {
             "response_format": "url"
         });
 
-        let client = match reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(90))
-            .build()
-        {
-            Ok(c) => c,
-            Err(e) => return format!("エラー: HTTPクライアントの初期化に失敗しました: {e}"),
-        };
+        let request_timeout = std::time::Duration::from_secs(90);
 
-        let res = match client
-            .post(&url)
-            .bearer_auth(&api_key)
-            .json(&body)
-            .send()
-            .await
+        let res = match crate::tool_try!(crate::tools::http::service(
+            reqwest::Method::POST,
+            &url,
+            request_timeout
+        ))
+        .bearer_auth(&api_key)
+        .json(&body)
+        .send()
+        .await
         {
             Ok(r) => r,
             Err(e) => return format!("エラー: 画像生成 API への接続に失敗しました: {e}"),

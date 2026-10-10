@@ -17,7 +17,6 @@ use crate::permissions;
 use crate::tools::run_command::trim_output;
 
 const MAX_CODE_CHARS: usize = 100_000;
-const DEFAULT_TIMEOUT_SECS: u64 = 60;
 
 pub struct CodeRunnerTool;
 
@@ -157,12 +156,7 @@ impl Tool for CodeRunnerTool {
                 "text",
                 "python",
             ),
-            Field::new(
-                "PICOAGENT_CODE_RUNNER_TIMEOUT_SECS",
-                "自力実行の既定タイムアウト秒（1〜300）",
-                "text",
-                "60",
-            ),
+            Field::int(&crate::config::ints::CODE_RUNNER_TIMEOUT_SECS),
         ]
     }
 
@@ -196,12 +190,8 @@ impl Tool for CodeRunnerTool {
             Err(error) => return format!("エラー: {error}"),
         };
 
-        let default_timeout = cfg
-            .get("PICOAGENT_CODE_RUNNER_TIMEOUT_SECS", "60")
-            .parse::<u64>()
-            .ok()
-            .filter(|value| (1..=300).contains(value))
-            .unwrap_or(DEFAULT_TIMEOUT_SECS);
+        let default_timeout =
+            crate::tool_try!(cfg.int(&crate::config::ints::CODE_RUNNER_TIMEOUT_SECS)) as u64;
         let timeout_secs = args
             .get("timeout_secs")
             .and_then(Value::as_u64)

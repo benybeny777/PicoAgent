@@ -223,30 +223,14 @@ impl Tool for WeatherTool {
                 "checkbox",
                 "",
             ),
-            Field::new(
-                "PICOAGENT_WEATHER_TIMEOUT_SECS",
-                "天気API待ち時間（秒、3〜60）",
-                "text",
-                "15",
-            ),
+            Field::int(&crate::config::ints::WEATHER_TIMEOUT_SECS),
         ]
     }
 
     async fn run(&self, cfg: &Config, args: Value) -> String {
-        let timeout = cfg
-            .get("PICOAGENT_WEATHER_TIMEOUT_SECS", "15")
-            .parse::<u64>()
-            .ok()
-            .filter(|value| (3..=60).contains(value))
-            .unwrap_or(15);
-        let client = match reqwest::Client::builder()
-            .timeout(Duration::from_secs(timeout))
-            .user_agent("PicoAgent/1.0 (Weather tool)")
-            .build()
-        {
-            Ok(client) => client,
-            Err(error) => return format!("エラー: 天気APIの準備に失敗しました: {}", error),
-        };
+        let timeout = crate::tool_try!(cfg.int(&crate::config::ints::WEATHER_TIMEOUT_SECS)) as u64;
+        let request_timeout = Duration::from_secs(timeout);
+        let client = crate::tool_try!(crate::tools::http::service_client());
         let days = args
             .get("days")
             .and_then(Value::as_u64)
@@ -266,7 +250,7 @@ impl Tool for WeatherTool {
             (lat, lon, format!("{},{}", lat, lon))
         } else if let Some(location) = &explicit_location {
             // 利用者が明示した地点を別地点へ黙って置き換えない。
-            match geocode(&client, location).await {
+            match geocode(cfg, request_timeout, location).await {
                 Ok(found) => {
                     // 会話で言われた地点は既定として覚え、次から地名を聞き直さない。
                     // 「読んで比べてから書き戻す」ので、同時に複数の問い合わせが走っても
@@ -295,12 +279,12 @@ impl Tool for WeatherTool {
             // 新版では未設定として一度だけ現在地推定へ戻す。東京を固定したい場合は
             // 日本語の「東京都」等を保存すれば正本として扱われる。
             if let Some(saved_location) = configured_location(&saved_location) {
-                match geocode(&client, saved_location).await {
+                match geocode(cfg, request_timeout, saved_location).await {
                     Ok(found) => found,
                     Err(error) => return format!("エラー: {}", error),
                 }
             } else if !cfg.get_bool("PICOAGENT_WEATHER_DISABLE_AUTO_LOCATION", false) {
-                match ip_geolocate(&client).await {
+                match ip_geolocate(client, request_timeout).await {
                     Some(found) => found,
                     None => return "エラー: 現在地を取得できませんでした。設定で天気の地点を入力してください。".to_string(),
                 }
@@ -310,13 +294,11 @@ impl Tool for WeatherTool {
                 return "エラー: 天気の地点が未設定で、現在地の自動取得も設定で無効になっています。設定で市区町村を入力するか、現在地の自動取得を有効にしてください。".to_string();
             }
         };
-        let response = match client
-            .get(FORECAST_URL)
+        let response = match crate::tool_try!(crate::tools::http::service(reqwest::Method::GET, FORECAST_URL, request_timeout))
             .query(&[
                 ("latitude", lat.to_string()),
                 ("longitude", lon.to_string()),
                 ("current", "temperature_2m,relative_humidity_2m,apparent_temperature,precipitation,weather_code,wind_speed_10m".to_string()),
-                ("hourly", "temperature_2m".to_string()),
                 ("daily", "weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max".to_string()),
                 ("forecast_days", days),
                 ("timezone", "auto".to_string()),
@@ -325,12 +307,15 @@ impl Tool for WeatherTool {
             .await
         {
             Ok(response) => response,
-            Err(error) => return format!("エラー: 天気APIへの接続に失敗しました: {}", error),
+            Err(error) => return format!("エラー: 天気APIへの接続に失敗しました: {}", error.without_url()),
         };
         let status = response.status();
         let body = crate::tool_response_text!(response);
         if !status.is_success() {
-            return format!("エラー: 天気APIが HTTP {} を返しました。", status);
+            return format!(
+                "エラー: {}",
+                crate::tools::http::safe_service_error(cfg, "天気API", status, &body)
+            );
         }
         let parsed: Value = crate::tool_response_json!(&body);
         summarize_weather(&name, &parsed)
@@ -382,9 +367,12 @@ fn pick_location(query: &str, candidates: &[Value]) -> Option<(f64, f64, String)
     Some((lat, lon, label))
 }
 
-async fn fetch_candidates(client: &reqwest::Client, name: &str) -> Result<Vec<Value>, String> {
-    let response = client
-        .get(GEOCODE_URL)
+async fn fetch_candidates(
+    cfg: &Config,
+    request_timeout: std::time::Duration,
+    name: &str,
+) -> Result<Vec<Value>, String> {
+    let response = crate::tools::http::service(reqwest::Method::GET, GEOCODE_URL, request_timeout)?
         .query(&[
             ("name", name),
             ("count", "10"),
@@ -393,11 +381,16 @@ async fn fetch_candidates(client: &reqwest::Client, name: &str) -> Result<Vec<Va
         ])
         .send()
         .await
-        .map_err(|error| format!("地名検索に失敗しました: {}", error))?;
+        .map_err(|error| format!("地名検索に失敗しました: {}", error.without_url()))?;
     let status = response.status();
     let body = crate::tools::http::response_text(response).await?;
     if !status.is_success() {
-        return Err(format!("地名検索APIが HTTP {} を返しました。", status));
+        return Err(crate::tools::http::safe_service_error(
+            cfg,
+            "地名検索API",
+            status,
+            &body,
+        ));
     }
     let parsed: Value = serde_json::from_str(&body)
         .map_err(|error| format!("地名検索結果を解析できません: {}", error))?;
@@ -408,14 +401,18 @@ async fn fetch_candidates(client: &reqwest::Client, name: &str) -> Result<Vec<Va
         .unwrap_or_default())
 }
 
-async fn geocode(client: &reqwest::Client, location: &str) -> Result<(f64, f64, String), String> {
+async fn geocode(
+    cfg: &Config,
+    request_timeout: std::time::Duration,
+    location: &str,
+) -> Result<(f64, f64, String), String> {
     // 都道府県名は候補が返らないので県庁所在地へ読み替える。
     let location = resolvable_location(location);
-    let mut candidates = fetch_candidates(client, location).await?;
+    let mut candidates = fetch_candidates(cfg, request_timeout, location).await?;
     // 「横浜」のように自治体の種別を省いた言い方では、小さな同名の町が先に来る。
     // 「市」を補った候補も集めてから人口で選ぶ。
     if !location.ends_with(['市', '区', '町', '村']) {
-        if let Ok(extra) = fetch_candidates(client, &format!("{location}市")).await {
+        if let Ok(extra) = fetch_candidates(cfg, request_timeout, &format!("{location}市")).await {
             candidates.extend(extra);
         }
     }
@@ -424,8 +421,16 @@ async fn geocode(client: &reqwest::Client, location: &str) -> Result<(f64, f64, 
 }
 
 // IP から現在地（緯度経度・市名）をHTTPSで推定する。失敗時は None。
-async fn ip_geolocate(client: &reqwest::Client) -> Option<(f64, f64, String)> {
-    let response = client.get("https://ipconfig.io/json").send().await.ok()?;
+async fn ip_geolocate(
+    client: &reqwest::Client,
+    request_timeout: std::time::Duration,
+) -> Option<(f64, f64, String)> {
+    let response = client
+        .get("https://ipconfig.io/json")
+        .timeout(request_timeout)
+        .send()
+        .await
+        .ok()?;
     if !response.status().is_success() {
         return None;
     }
@@ -469,121 +474,127 @@ fn weather_icon(code: i64) -> (&'static str, &'static str) {
     }
 }
 
-// 数値列を Unicode ブロックのスパークラインにする。
-fn sparkline(values: &[f64]) -> String {
-    const BARS: [char; 8] = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
-    let min = values.iter().cloned().fold(f64::INFINITY, f64::min);
-    let max = values.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-    if max.partial_cmp(&min) != Some(std::cmp::Ordering::Greater) {
-        return BARS[3].to_string().repeat(values.len());
+/// 日付（YYYY-MM-DD）を「10/12（日）」の形にする。読めない値は元の文字列のまま出す。
+fn day_label(date: &str) -> String {
+    use chrono::Datelike;
+    match chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d") {
+        Ok(day) => format!(
+            "{}/{}（{}）",
+            day.month(),
+            day.day(),
+            crate::text::weekday_ja(day.weekday())
+        ),
+        Err(_) => date.to_string(),
     }
-    values
-        .iter()
-        .map(|&v| {
-            let idx = (((v - min) / (max - min)) * 7.0).round() as usize;
-            BARS[idx.min(7)]
-        })
-        .collect()
 }
 
+/// 天気の回答を、チャット欄の Markdown で読みやすい形に組み立てる。
+///
+/// 1行に数値を詰め込み、日付を `2026-10-12` のまま並べ、ブロック文字のグラフを添えていた
+/// 旧形式は「見づらい」と指摘された。見出し → いまの様子 → 今日の幅 → 日別の表、の順に
+/// 分け、表は読み上げと字幕から外れる（`speech_text` / `sanitizeSpeechText`）ので、
+/// 声で伝わるのは見出しと上の2行だけになる。
 fn summarize_weather(name: &str, parsed: &Value) -> String {
     let current = parsed.get("current").unwrap_or(&Value::Null);
-    let code = current
-        .get("weather_code")
-        .and_then(Value::as_i64)
-        .unwrap_or(-1);
-    let (icon, label) = weather_icon(code);
-    let num = |v: Option<f64>| {
-        v.map(|x| format!("{x:.0}"))
-            .unwrap_or_else(|| "-".to_string())
+    let daily = parsed.get("daily").unwrap_or(&Value::Null);
+    let num = |v: Option<&Value>| v.and_then(Value::as_f64).map(|x| format!("{x:.0}"));
+    let shown = |v: Option<&Value>| num(v).unwrap_or_else(|| "-".to_string());
+    let series = |key: &str| {
+        daily
+            .get(key)
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default()
     };
-    let mut out = format!("天気: {name} {icon} {label}\n");
-    out.push_str(&format!(
-        "現在 {}°C（体感{}°C）湿度{}% 風{}km/h 降水{}mm\n",
-        num(current.get("temperature_2m").and_then(Value::as_f64)),
-        num(current.get("apparent_temperature").and_then(Value::as_f64)),
+    let (icon, label) = weather_icon(
         current
-            .get("relative_humidity_2m")
-            .and_then(Value::as_u64)
-            .map(|v| v.to_string())
-            .unwrap_or_else(|| "-".to_string()),
-        num(current.get("wind_speed_10m").and_then(Value::as_f64)),
-        num(current.get("precipitation").and_then(Value::as_f64)),
-    ));
-
-    // 今日の気温推移（時間別の先頭24時間）をスパークラインで。
-    if let Some(temps) = parsed
-        .get("hourly")
-        .and_then(|h| h.get("temperature_2m"))
-        .and_then(Value::as_array)
-    {
-        let today: Vec<f64> = temps.iter().take(24).filter_map(Value::as_f64).collect();
-        if today.len() >= 2 {
-            let lo = today.iter().cloned().fold(f64::INFINITY, f64::min);
-            let hi = today.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-            out.push_str(&format!(
-                "今日の気温 {:.0}〜{:.0}°C  {}\n",
-                lo,
-                hi,
-                sparkline(&today)
-            ));
+            .get("weather_code")
+            .and_then(Value::as_i64)
+            .unwrap_or(-1),
+    );
+    let mut out = format!("**{icon} {name}の天気：{label}**\n");
+    // API が返さなかった項目は「-°C」と並べず、行から外す。
+    let mut now = num(current.get("temperature_2m"))
+        .map(|temp| format!("いまは {temp}°C"))
+        .unwrap_or_else(|| "いまは".to_string());
+    if let Some(feel) = num(current.get("apparent_temperature")) {
+        now.push_str(&format!("（体感 {feel}°C）"));
+    }
+    for (key, label, unit) in [
+        ("relative_humidity_2m", "湿度", "%"),
+        ("wind_speed_10m", "風", "km/h"),
+        ("precipitation", "降水", "mm"),
+    ] {
+        if let Some(value) = num(current.get(key)) {
+            now.push_str(&format!("、{label} {value}{unit}"));
         }
     }
+    out.push_str(&now);
+    out.push('\n');
 
-    if let Some(daily) = parsed.get("daily") {
-        let times = daily
-            .get("time")
-            .and_then(Value::as_array)
-            .cloned()
-            .unwrap_or_default();
-        let codes = daily
-            .get("weather_code")
-            .and_then(Value::as_array)
-            .cloned()
-            .unwrap_or_default();
-        let maxes = daily
-            .get("temperature_2m_max")
-            .and_then(Value::as_array)
-            .cloned()
-            .unwrap_or_default();
-        let mins = daily
-            .get("temperature_2m_min")
-            .and_then(Value::as_array)
-            .cloned()
-            .unwrap_or_default();
-        let pops = daily
-            .get("precipitation_probability_max")
-            .and_then(Value::as_array)
-            .cloned()
-            .unwrap_or_default();
-        out.push_str("予報:\n");
-        for index in 0..times.len().min(7) {
-            let (day_icon, day_label) =
+    let times = series("time");
+    let codes = series("weather_code");
+    let maxes = series("temperature_2m_max");
+    let mins = series("temperature_2m_min");
+    let pops = series("precipitation_probability_max");
+    if !times.is_empty() {
+        out.push_str(&format!(
+            "今日は 最高 {}°C / 最低 {}°C、降水確率 {}%\n",
+            shown(maxes.first()),
+            shown(mins.first()),
+            shown(pops.first()),
+        ));
+        out.push_str("\n| 日付 | 天気 | 最高 / 最低 | 降水確率 |\n| --- | --- | --- | --- |\n");
+        for (index, time) in times.iter().take(7).enumerate() {
+            let (day_icon, day_weather) =
                 weather_icon(codes.get(index).and_then(Value::as_i64).unwrap_or(-1));
             out.push_str(&format!(
-                "- {} {day_icon} {day_label} {}/{}°C ☔{}%\n",
-                times.get(index).and_then(Value::as_str).unwrap_or("-"),
-                num(maxes.get(index).and_then(Value::as_f64)),
-                num(mins.get(index).and_then(Value::as_f64)),
-                pops.get(index)
-                    .and_then(Value::as_u64)
-                    .map(|v| v.to_string())
-                    .unwrap_or_else(|| "-".to_string())
+                "| {} | {day_icon} {day_weather} | {}° / {}° | {}% |\n",
+                time.as_str()
+                    .map(day_label)
+                    .unwrap_or_else(|| "-".to_string()),
+                shown(maxes.get(index)),
+                shown(mins.get(index)),
+                shown(pops.get(index)),
             ));
         }
-        // 日別の最高気温の推移をスパークラインで添える。
-        let highs: Vec<f64> = maxes.iter().take(7).filter_map(Value::as_f64).collect();
-        if highs.len() >= 2 {
-            out.push_str(&format!("最高気温の推移 {}\n", sparkline(&highs)));
-        }
     }
-    out
+    out.trim_end().to_string()
 }
 
 inventory::submit! { ToolReg { make: || Box::new(WeatherTool) } }
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn 天気は見出しと今日の幅と日別の表に分けて見せる() {
+        let parsed = serde_json::json!({
+            "current": {"temperature_2m": 21.4, "apparent_temperature": 20.2, "relative_humidity_2m": 60,
+                "precipitation": 0.0, "weather_code": 0, "wind_speed_10m": 9.6},
+            "daily": {"time": ["2026-10-10", "2026-10-11"], "weather_code": [0, 61],
+                "temperature_2m_max": [23.1, 19.8], "temperature_2m_min": [14.2, 15.0],
+                "precipitation_probability_max": [10, 80]}
+        });
+        assert_eq!(
+            super::summarize_weather("横浜市（神奈川県）", &parsed),
+            "**☀️ 横浜市（神奈川県）の天気：快晴**\n\
+             いまは 21°C（体感 20°C）、湿度 60%、風 10km/h、降水 0mm\n\
+             今日は 最高 23°C / 最低 14°C、降水確率 10%\n\
+             \n\
+             | 日付 | 天気 | 最高 / 最低 | 降水確率 |\n\
+             | --- | --- | --- | --- |\n\
+             | 10/10（土） | ☀️ 快晴 | 23° / 14° | 10% |\n\
+             | 10/11（日） | 🌧️ 雨 | 20° / 15° | 80% |"
+        );
+    }
+
+    #[test]
+    fn 予報が無くても現在の天気だけ返す() {
+        let parsed = serde_json::json!({"current": {"weather_code": 3, "temperature_2m": 18.0, "relative_humidity_2m": 60}});
+        let out = super::summarize_weather("札幌市", &parsed);
+        assert_eq!(out, "**☁️ 札幌市の天気：曇り**\nいまは 18°C、湿度 60%");
+    }
+
     #[test]
     fn 都道府県名は県庁所在地へ読み替える() {
         // Open-Meteo の地名検索は都道府県名では候補を1件も返さない。
