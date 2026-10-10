@@ -7,7 +7,7 @@ use std::sync::OnceLock;
 use chrono::Local;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Manager};
 
 const STORE_LOCK: &str = "durable-jobs";
 const MAX_JOBS: usize = 200;
@@ -89,8 +89,8 @@ fn load_from(path: &std::path::Path) -> Result<Vec<DurableJob>, String> {
 }
 
 #[rustfmt::skip]
-fn quarantine_job_store(path: &std::path::Path) -> Result<PathBuf, String> {
-    crate::store::quarantine_corrupt(path).ok_or_else(|| "破損した永続ジョブ一覧を退避できません。".to_string())
+fn quarantine_job_store(app: &AppHandle, path: &std::path::Path) -> Result<PathBuf, String> {
+    crate::store::quarantine_and_notify(app, path, crate::store::QuarantineArea::Jobs).ok_or_else(|| "破損した永続ジョブ一覧を退避できません。".to_string())
 }
 
 pub fn list() -> Result<Vec<DurableJob>, String> {
@@ -323,22 +323,18 @@ fn notify(job: &DurableJob) {
     let Some(app) = APP.get() else {
         return;
     };
-    let payload = json!({
-        "kind": "durable_job",
-        "jobId": job.id,
-        "title": job.label,
-        "body": job_body(job),
-        "ok": !matches!(job.state, JobState::Failed | JobState::WaitingAuth),
-        "state": job.state,
-        "progress": job.progress,
-        "at": job.updated_at,
-    });
-    if let Err(error) = app.emit("pet:notice", payload) {
-        crate::log_paths::append_app_log(
-            app,
-            &format!("永続ジョブの進捗を画面へ通知できません: {error}"),
-        );
-    }
+    crate::notice::emit(
+        app,
+        crate::notice::Notice::info(
+            "durable_job",
+            &job.label,
+            job_body(job),
+            !matches!(job.state, JobState::Failed | JobState::WaitingAuth),
+        )
+        .detail("jobId", json!(job.id))
+        .detail("state", json!(job.state))
+        .detail("progress", json!(job.progress)),
+    );
 }
 
 /// 通知へ出す1行。エラーや結果があればその先頭行、無ければ工程名。
@@ -536,9 +532,9 @@ pub fn start(app: AppHandle) {
         Local::now().timestamp_nanos_opt().unwrap_or_default()
     );
     let _ = WORKER_TOKEN.set(token);
-    // フォールバック許可: ジョブ履歴の破損でアプリ全体を止めない。退避できた場合だけ空で継続する。
+    // フォールバック許可: PR #463 採用案3。退避済みの原本を保持して新規状態で続ける。
     if let Err(error) = load_from(&path) {
-        let saved = match quarantine_job_store(&path) {
+        let saved = match quarantine_job_store(&app, &path) {
             Ok(saved) => saved,
             Err(quarantine_error) => {
                 crate::log_paths::append_app_log(
@@ -653,22 +649,13 @@ async fn run_job(app: &AppHandle, id: &str) {
 /// 読み直しても古い状態しか返らない。受け側は `jobId` で上書きするため、
 /// 同じIDで失敗として送れば待機表示が残らない。
 fn notify_store_failure(app: &AppHandle, id: &str, title: &str, message: &str) {
-    let payload = json!({
-        "kind": "durable_job",
-        "jobId": id,
-        "title": title,
-        "body": message,
-        "ok": false,
-        "state": JobState::Failed,
-        "progress": 0,
-        "at": now(),
-    });
-    if let Err(error) = app.emit("pet:notice", payload) {
-        crate::log_paths::append_app_log(
-            app,
-            &format!("永続ジョブの失敗を画面へ通知できません: {error}"),
-        );
-    }
+    crate::notice::emit(
+        app,
+        crate::notice::Notice::info("durable_job", title, message, false)
+            .detail("jobId", json!(id))
+            .detail("state", json!(JobState::Failed))
+            .detail("progress", json!(0)),
+    );
 }
 
 #[cfg(test)]

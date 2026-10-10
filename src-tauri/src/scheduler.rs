@@ -10,7 +10,7 @@ use std::time::Duration;
 use chrono::{DateTime, Datelike, Local, NaiveDateTime, TimeZone, Timelike};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Manager};
 
 use crate::config::Config;
 
@@ -260,10 +260,15 @@ fn load_run_history_unlocked(app: &AppHandle) -> anyhow::Result<Vec<ScheduledRun
     };
     match serde_json::from_str(&text) {
         Ok(records) => Ok(records),
-        // フォールバック許可: 実行履歴の破損でアプリ本体やスケジューラを止めない。
+        // フォールバック許可: PR #463 採用案3。退避と通知に成功した領域だけ新規状態で続ける。
         // 次の保存で上書きして履歴を失わないよう、破損ファイルは退避してから続ける。
         Err(error) => {
-            let saved = crate::store::quarantine_corrupt(&path).ok_or_else(|| {
+            let saved = crate::store::quarantine_and_notify(
+                app,
+                &path,
+                crate::store::QuarantineArea::SchedulerHistory,
+            )
+            .ok_or_else(|| {
                 anyhow::anyhow!(
                     "壊れたスケジュール実行履歴を退避できません。上書きを中止しました: {error}"
                 )
@@ -359,23 +364,12 @@ fn append_run_history(
 }
 
 fn emit_run_notice(app: &AppHandle, record: &ScheduledRunRecord) {
-    if let Err(error) = app.emit(
-        "pet:notice",
-        json!({
-            "kind": "schedule",
-            "title": record.title,
-            "body": record.body,
-            "ok": record.ok,
-            "taskId": record.task_id,
-            "runId": record.id,
-            "at": record.at,
-        }),
-    ) {
-        crate::log_paths::append_app_log(
-            app,
-            &format!("スケジュール実行結果を画面へ通知できません: {error}"),
-        );
-    }
+    crate::notice::emit(
+        app,
+        crate::notice::Notice::info("schedule", &record.title, &record.body, record.ok)
+            .detail("taskId", json!(record.task_id))
+            .detail("runId", json!(record.id)),
+    );
 }
 
 fn bounded_cwd(cfg: &Config, cwd: &str) -> Result<PathBuf, String> {
@@ -754,14 +748,12 @@ fn enqueue_due_tasks(
 }
 
 fn notify_scheduler_state(app: &AppHandle, error: Option<&str>) {
-    use std::sync::atomic::AtomicBool;
-    static FAILED: AtomicBool = AtomicBool::new(false);
+    static FAILED: crate::notice::FailureLatch = crate::notice::FailureLatch::new();
     notify_scheduler_background_state(app, "scheduler-state", error, &FAILED);
 }
 
 fn notify_scheduler_history_state(app: &AppHandle, error: Option<&str>) {
-    use std::sync::atomic::AtomicBool;
-    static FAILED: AtomicBool = AtomicBool::new(false);
+    static FAILED: crate::notice::FailureLatch = crate::notice::FailureLatch::new();
     notify_scheduler_background_state(app, "scheduler-history", error, &FAILED);
 }
 
@@ -769,30 +761,15 @@ fn notify_scheduler_background_state(
     app: &AppHandle,
     key: &str,
     error: Option<&str>,
-    previous: &std::sync::atomic::AtomicBool,
+    previous: &crate::notice::FailureLatch,
 ) {
-    use std::sync::atomic::Ordering;
-    let failed = error.is_some();
-    if let Some(body) = error {
-        crate::log_paths::append_app_log(app, body);
-    }
-    if previous.swap(failed, Ordering::Relaxed) == failed {
-        return;
-    }
-    let body = error.unwrap_or("スケジュールの状態保存が復旧しました");
-    if let Err(error) = app.emit(
-        "pet:notice",
-        json!({
-        "kind": "background_failure", "key": key,
-        "title": "スケジュール実行", "body": body, "ok": !failed,
-            "at": Local::now().to_rfc3339(),
-        }),
-    ) {
-        crate::log_paths::append_app_log(
-            app,
-            &format!("スケジュールの状態を通知できません: {error}"),
-        );
-    }
+    previous.report(
+        app,
+        key,
+        "スケジュール実行",
+        error.map_or(Ok(()), |error| Err(error.to_string())),
+        "スケジュールの状態保存が復旧しました",
+    );
 }
 
 fn take_due_tasks_at(cfg: &Config, now: DateTime<Local>) -> anyhow::Result<Vec<ScheduledTask>> {
