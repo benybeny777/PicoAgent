@@ -29,7 +29,7 @@ export const idleChatter = () => api.idleChatter();
 export const dailyGreeting = () => api.dailyGreeting();
 export const dailyEvents = () => api.dailyEvents();
 export const alarms = () => api.alarms();
-export const alarmWake = id => api.alarmWake(id);
+export const alarmWake = (id, consumed = false) => api.alarmWake(id, consumed);
 
 export const setCharacterProfile = (characterId, profile, greeting, voice) =>
   api.setCharacterProfile(characterId, profile, greeting, voice);

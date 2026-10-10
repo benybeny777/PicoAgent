@@ -16,6 +16,7 @@ mod character_voice;
 mod commands;
 mod components;
 mod config;
+mod conversation_turn;
 mod daily;
 mod diagnostics;
 #[cfg(test)]

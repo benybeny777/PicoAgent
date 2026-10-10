@@ -118,7 +118,7 @@ window.picoagent = {
   openGeneratedMedia: (path) => call("pet_open_generated_media", { path }),
   quit: () => call("pet_quit"),
   alarms: () => call("pet_alarms"),
-  alarmWake: (id) => call("pet_alarm_wake", { id }),
+  alarmWake: (id, consumed = false) => call("pet_alarm_wake", { id, consumed }),
   speak: (text) => call("pet_speak", { text }),
   prepareVoiceModel: () => call("pet_prepare_voice_model"),
   log: (level, message, detail) => invoke("pet_log", { level, message, detail }),

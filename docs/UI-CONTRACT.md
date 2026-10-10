@@ -21,9 +21,9 @@
 | `pet_init` | なし | 起動時の状態一式。`layout`・`scenes`（`PICOAGENT_SCENES` を正規化したもの）・`characterId`・`characterOverrides`・`live2dSdkOverrides`・`rendererOverrides`（IDごとの `image` 指定）・`history`・`historySaveBlocked`・`providerId`・`up`・`theme`・`uiTheme`・`fontPx`・`voiceVolume`・`ttsEnabled`・`gazeTrackingEnabled`・`quickActions`・`napMinutes`・`stream*`（背景・ディスプレイ・字幕色）・`chatter*`・`onboardingDone`・`relationship`・`bondLabel`・`relationshipMemoryEnabled`・`relationshipError`（読込失敗理由、成功時null）・`bootProgressIntervalMs`・`betaBuild` |
 | `pet_finish_boot` | なし | なし。保存したウィンドウ寸法・位置を戻す（起動画面から通常画面へ移る直前） |
 | `pet_reveal_main` | なし | なし。窓を表示する唯一の入口 |
-| `pet_send` | `text` | 返答 `{ reply, error?, choices?, quitApp? }`。生成中は `pet:stream_chunk` などのイベントが届く |
-| `pet_send_image` | `text`, `images`（data URL 配列） | `pet_send` と同じ |
-| `pet_cancel` | なし | なし。実行中の会話を次の区切りで止める |
+| `pet_send` | `text` | 返答 `{ reply, error?, choices?, quitApp?, stale? }`。受付後の世代違いや既存の書き戻し拒否は `{ stale: true, reply: "" }`。生成中は `pet:stream_chunk` などのイベントが届く |
+| `pet_send_image` | `text`, `images`（data URL 配列） | `pet_send` と同じ。受付後・実行後の古い画像応答は `{ stale: true, reply: "" }` |
+| `pet_cancel` | なし | なし。要求時点の実行中ターンだけを止める。待機中・後続ターンへ停止を持ち越さない |
 | `pet_capture_screen` | なし | `{ dataUrl }` |
 | `pet_read_file_content` | `name`, `dataB64` | 抽出した本文（文字列） |
 | `pet_read_dropped_path` | `path` | `{ kind: "image" \| "file", name, dataUrl, path }` |
@@ -32,11 +32,11 @@
 | `aivis_status` | なし | `{ enabled, ... }` |
 | `pet_prepare_voice_model` | なし | 選択中キャラの声を準備 |
 | `pet_export_history` | `markdown` | `{ path }` |
-| `pet_idle_chatter` | なし | `{ enabled, reply? }` |
+| `pet_idle_chatter` | なし | 通常は `{ enabled, reply? }`。ターンが埋まっていれば `{ busy: true }` を返し、生成・表示せず次の雑談を再予約する。受付後・生成後の世代違いは `{ enabled: true, stale: true, reply: "" }` |
 | `pet_daily_greeting` | なし | `{ reply? }` |
 | `pet_daily_events` | なし | `{ events: [{ text }], broken: [{ text?, label?, due_at? }] }` |
 | `pet_alarms` | なし | `{ alarms: [...] }` |
-| `pet_alarm_wake` | `id` | `{ reply? }` |
+| `pet_alarm_wake` | `id`, `consumed`（省略false） | 成功 `{ reply, consumed: true }`。会話ターンの完了を上限なく待ち、取得後の生成だけ20秒を上限とする。生成失敗・上限超過・空返答は理由つきのErr。世代違いは `{ stale: true, reply: "" }`、手動OFF・削除・定義変更は `{ cancelled: true, reply: "" }`。取消は無通知で解除し、固定文へ切り替えない。成功の消費済みフラグだけを再取得・スヌーズへ渡す。フロントは待機を打ち切らない。会話文脈・保存履歴へ起こし文を追加しない |
 | `pet_set_character_profile` | `characterId`, `profile`, `greeting`, `voice` | 確定したキャラの配信表示 `{ streamBackground, streamBackgroundImage, streamDisplay, streamDisplayImage, streamCaptionColor }` |
 | `pet_user_characters` | なし | `{ characters: [{ id, name, description, path }] }`（利用者が追加したキャラ）。メイン・設定画面の共通取得元。取得失敗・不正な形はエラーとして扱い、空一覧へ変えない |
 | `pet_set_character_renderer` | `characterId`, `renderer`（`"image"` または `null`） | `{ rendererOverrides: { "<ID>": "image" }, notificationError? }`。指定IDだけの明示描画選択を保存する。`null` はID削除で通常描画へ戻す。他キャラの指定を保持し、不正値・保存失敗はエラー。保存後の画面通知だけが失敗した場合は保存済みmapと警告を返す |
@@ -72,6 +72,8 @@
 | `pet_quit` | なし | なし |
 | `pet_log` | `level`, `message`, `detail` | なし。`app.log` へ書く |
 | `engine_status` | なし | 同梱推論エンジンの状態 `{ phase, percent?, receivedBytes?, totalBytes?, message? }` |
+
+通常送信・画像送信・自発雑談の `stale: true` は、受付時のキャラID・会話世代が現在と一致しなくなった旧処理の結果を示す。空の返信や失敗の代替返信として扱わず、画面の返答・履歴・音声へ反映せず破棄する。固定文へも切り替えない。目覚ましはターン取得後のキャラを使い、生成中の世代違いによる旧返答は破棄して同じ発火ジョブを現在のキャラで再取得する。画面のrevisionだけが変わった成功でも `consumed=true` は保持する。再取得は1秒から20秒まで待ちを増やす。初回OFFは中止し、自動消費後の一度きりジョブは削除・明示解除で止める。繰り返しの無効化も中止する。
 
 ### 設定画面・キャラ確認画面
 
