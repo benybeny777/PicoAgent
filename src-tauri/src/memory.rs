@@ -51,10 +51,15 @@ pub fn load(app: &AppHandle) -> anyhow::Result<MemoryStore> {
     };
     match serde_json::from_str(&text) {
         Ok(store) => Ok(store),
-        // フォールバック許可: 破損時も会話継続を優先し、空メモリで起動する。ただし
+        // フォールバック許可: PR #463 採用案3。退避と通知に成功した領域だけ新規状態で続ける。
         // そのまま次の保存で上書きすると記憶が恒久的に消えるので、退避してから続ける。
         Err(error) => {
-            let saved = crate::store::quarantine_corrupt(&target).ok_or_else(|| {
+            let saved = crate::store::quarantine_and_notify(
+                app,
+                &target,
+                crate::store::QuarantineArea::Memory,
+            )
+            .ok_or_else(|| {
                 anyhow::anyhow!("壊れた長期メモリを退避できません。上書きを中止しました: {error}")
             })?;
             crate::log_paths::append_app_log(
@@ -69,21 +74,13 @@ pub fn load(app: &AppHandle) -> anyhow::Result<MemoryStore> {
     }
 }
 
-fn save_checked(app: &AppHandle, store: &MemoryStore) -> anyhow::Result<()> {
+pub fn save_checked(app: &AppHandle, store: &MemoryStore) -> anyhow::Result<()> {
     let target = path(app)?;
     if let Some(dir) = target.parent() {
         std::fs::create_dir_all(dir)?;
     }
     crate::store::write_json_atomic(&target, store)?;
     Ok(())
-}
-
-pub fn save(app: &AppHandle, store: &MemoryStore) {
-    let result = save_checked(app, store);
-    // フォールバック許可: メモリ保存失敗は会話を止めず、ログのみに留める。
-    if let Err(error) = result {
-        crate::log_paths::append_app_log(app, &format!("長期メモリの保存に失敗しました: {error}"));
-    }
 }
 
 /// 設定画面で選ばれた長期メモリを1件だけ削除する。
@@ -207,35 +204,43 @@ pub async fn context_for_query(
     ))
 }
 
-pub fn update_from_turn(app: &AppHandle, cfg: &Config, user_text: &str) -> Option<String> {
+pub fn update_from_turn(
+    app: &AppHandle,
+    cfg: &Config,
+    user_text: &str,
+) -> Result<Option<String>, String> {
+    update_with(
+        cfg,
+        user_text,
+        || load(app),
+        |store| save_checked(app, store),
+    )
+}
+
+fn update_with(
+    cfg: &Config,
+    user_text: &str,
+    read: impl FnOnce() -> anyhow::Result<MemoryStore>,
+    write: impl FnOnce(&MemoryStore) -> anyhow::Result<()>,
+) -> Result<Option<String>, String> {
     if !cfg.get_bool("PICOAGENT_MEMORY_ENABLED", true) {
-        return None;
+        return Ok(None);
     }
     let candidates = extract_candidates(user_text);
     if candidates.is_empty() {
-        return None;
+        return Ok(None);
     }
     // 読む→直す→書き戻すの間に別の会話と競合すると、片方が覚えた内容が消える。
     let _guard = crate::store::lock_state("memory.json");
-    let mut store = match load(app) {
-        Ok(store) => store,
-        Err(error) => {
-            crate::log_paths::append_app_log(app, &error.to_string());
-            return None;
-        }
-    };
-    let before = serde_json::to_string(&store);
+    let mut store = read().map_err(|error| error.to_string())?;
+    let before = serde_json::to_string(&store).map_err(|error| error.to_string())?;
     merge_candidates(&mut store, candidates, max_items(cfg));
-    let after = serde_json::to_string(&store);
-    // 直列化できなかったときは「変わっていない」と誤判定しない。両方 `unwrap_or_default()`
-    // にすると失敗時に空文字どうしが一致し、いま覚えた内容を黙って捨ててしまう。
-    if let (Ok(before), Ok(after)) = (&before, &after) {
-        if before == after {
-            return None;
-        }
+    let after = serde_json::to_string(&store).map_err(|error| error.to_string())?;
+    if before == after {
+        return Ok(None);
     }
-    save(app, &store);
-    Some(context_from_store(&store))
+    write(&store).map_err(|error| error.to_string())?;
+    Ok(Some(context_from_store(&store)))
 }
 
 fn max_items(cfg: &Config) -> usize {
@@ -367,6 +372,51 @@ fn normalize(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{context_from_store, extract_candidates, remove_item, MemoryItem, MemoryStore};
+
+    #[test]
+    fn 読込失敗では保存せず保存失敗では覚えた文脈を返さない() {
+        let cfg = crate::config::Config::new();
+        let result = super::update_with(
+            &cfg,
+            "私はRustが好きです",
+            || anyhow::bail!("読込不可"),
+            |_| panic!("保存してはいけない"),
+        );
+        assert!(result.unwrap_err().contains("読込不可"));
+        let directory = tempfile::tempdir().unwrap();
+        // 書込先と同名のディレクトリは全OSで保存不能となり、権限変更より確実に再現できる。
+        let target = directory.path().join("memory.json");
+        std::fs::create_dir(&target).unwrap();
+        let result = super::update_with(
+            &cfg,
+            "私はRustが好きです",
+            || Ok(MemoryStore::default()),
+            |store| crate::store::write_json_atomic(&target, store),
+        );
+        assert!(
+            result.is_err(),
+            "保存できない記憶の文脈を公開してはいけない"
+        );
+        let result = super::update_with(
+            &cfg,
+            "私はRustが好きです",
+            || Ok(MemoryStore::default()),
+            |_| Ok(()),
+        );
+        assert!(result.unwrap().unwrap().contains("私はRustが好きです"));
+    }
+
+    #[test]
+    fn 候補なしの発話では読込も保存も試さない() {
+        let cfg = crate::config::Config::new();
+        let result = super::update_with(
+            &cfg,
+            "こんにちは",
+            || panic!("読込を試してはいけない"),
+            |_| panic!("保存を試してはいけない"),
+        );
+        assert!(matches!(result, Ok(None)));
+    }
 
     #[test]
     fn 自己情報と継続指示だけを抽出する() {

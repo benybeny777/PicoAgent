@@ -872,9 +872,10 @@ fn selected_character_greeting(app: Option<&tauri::AppHandle>) -> String {
         return String::new();
     };
     app.state::<crate::commands::AppState>()
-        .character_greeting
+        .character
         .lock()
         .unwrap()
+        .greeting
         .clone()
 }
 

@@ -433,14 +433,16 @@ impl Tool for WebSearchTool {
         };
         let response = match client.get(SEARCH_URL).query(&[("q", query)]).send().await {
             Ok(response) => response,
-            Err(error) => return format!("エラー: Web検索への接続に失敗しました: {}", error),
+            Err(error) => {
+                return format!(
+                    "エラー: Web検索への接続に失敗しました: {}",
+                    error.without_url()
+                )
+            }
         };
         let status = response.status();
         if !status.is_success() {
-            return format!(
-                "エラー: Web検索が HTTP {} を返しました。時間を置いて再試行してください。",
-                status
-            );
+            return crate::tools::http::service_reply(cfg, Ok(response), "Web検索").await;
         }
         let body = match response.text().await {
             Ok(body) => body,

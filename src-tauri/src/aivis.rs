@@ -249,14 +249,18 @@ async fn fetch_speakers(endpoint: &str) -> anyhow::Result<Vec<Value>> {
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(20))
         .build()?;
-    let response = client.get(format!("{endpoint}/speakers")).send().await?;
+    let response = client
+        .get(format!("{endpoint}/speakers"))
+        .send()
+        .await
+        .map_err(reqwest::Error::without_url)?;
     if !response.status().is_success() {
         anyhow::bail!(
             "読み上げエンジン（AivisSpeech）が音声一覧を返しませんでした（HTTP {}）。設定の「追加機能」から再導入を試してください。",
             response.status()
         );
     }
-    let speakers: Value = response.json().await?;
+    let speakers: Value = response.json().await.map_err(reqwest::Error::without_url)?;
     speakers
         .as_array()
         .cloned()
@@ -271,13 +275,21 @@ async fn speaker_uuid_available(endpoint: &str, speaker_uuid: &str) -> anyhow::R
 }
 
 /// speaker_uuid（＋任意でスタイル名）から、合成に使う実 style ID を `/speakers` から解決する。
-/// スタイル名が一致しなければ先頭スタイルを使う。
+/// 指定スタイルが無ければ失敗する。未指定のときだけ先頭を使う。
 pub async fn resolve_style_id(
     endpoint: &str,
     speaker_uuid: &str,
     style_name: Option<&str>,
 ) -> anyhow::Result<String> {
     let speakers = fetch_speakers(endpoint).await?;
+    resolve_style_id_in(&speakers, speaker_uuid, style_name)
+}
+
+fn resolve_style_id_in(
+    speakers: &[Value],
+    speaker_uuid: &str,
+    style_name: Option<&str>,
+) -> anyhow::Result<String> {
     let speaker = speakers
         .iter()
         .find(|speaker| speaker.get("speaker_uuid").and_then(Value::as_str) == Some(speaker_uuid))
@@ -288,16 +300,12 @@ pub async fn resolve_style_id(
         .get("styles")
         .and_then(Value::as_array)
         .ok_or_else(|| anyhow::anyhow!("speaker_uuid={speaker_uuid} に styles がありません。"))?;
-    let style = style_name
-        .and_then(|name| {
-            styles
-                .iter()
-                .find(|style| style.get("name").and_then(Value::as_str) == Some(name))
-        })
-        .or_else(|| styles.first())
-        .ok_or_else(|| {
-            anyhow::anyhow!("speaker_uuid={speaker_uuid} に利用可能な style がありません。")
-        })?;
+    let style = match style_name {
+        Some(name) => styles.iter().find(|style| style.get("name").and_then(Value::as_str) == Some(name))
+            .ok_or_else(|| anyhow::anyhow!("speaker_uuid={speaker_uuid} に指定スタイル「{name}」がありません。利用可能: {}",
+                styles.iter().filter_map(|style| style.get("name").and_then(Value::as_str)).collect::<Vec<_>>().join("、")))?,
+        None => styles.first().ok_or_else(|| anyhow::anyhow!("speaker_uuid={speaker_uuid} に利用可能なstyleがありません。"))?,
+    };
     let id = style
         .get("id")
         .and_then(Value::as_i64)
@@ -1468,6 +1476,26 @@ fn terminate_managed_child(app: &tauri::AppHandle) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn 話者の指定スタイルが無いときだけエラーで未指定は先頭を使う() {
+        let speakers = serde_json::json!([{"speaker_uuid":"speaker", "styles":[{"name":"ノーマル","id":123},{"name":"おちつき","id":456}]}]);
+        for (name, expected) in [
+            (None, Some("123")),
+            (Some("おちつき"), Some("456")),
+            (Some("無いスタイル"), None),
+            (Some(""), None),
+        ] {
+            let result = super::resolve_style_id_in(speakers.as_array().unwrap(), "speaker", name);
+            if let Some(expected) = expected {
+                assert_eq!(result.unwrap(), expected);
+            } else {
+                let error = result.unwrap_err().to_string();
+                assert!(error.contains("ノーマル") && error.contains("おちつき"));
+            }
+        }
+        assert!(super::resolve_style_id_in(&[], "speaker", None).is_err());
+    }
+
     use super::{
         interrupted_install_actions, replace_install_tree, validate_external_endpoint,
         InterruptedAction,

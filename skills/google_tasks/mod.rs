@@ -103,7 +103,7 @@ impl Tool for GoogleTasksTool {
             .unwrap_or_else(|| cfg.get("PICOAGENT_GOOGLE_TASKS_LIST_ID", "@default"));
         match args.get("action").and_then(Value::as_str).unwrap_or("") {
             "list_tasklists" => {
-                handle_text_response(
+                crate::tools::http::service_reply(cfg,
                     client
                         .get(format!("{}/users/@me/lists", TASKS_BASE))
                         .bearer_auth(token)
@@ -114,7 +114,7 @@ impl Tool for GoogleTasksTool {
                 .await
             }
             "list" => {
-                handle_text_response(
+                crate::tools::http::service_reply(cfg,
                     client
                         .get(format!("{}/lists/{}/tasks", TASKS_BASE, tasklist_id))
                         .bearer_auth(token)
@@ -136,7 +136,7 @@ impl Tool for GoogleTasksTool {
                 if let Some(due) = args.get("due").and_then(Value::as_str) {
                     payload["due"] = json!(due);
                 }
-                handle_text_response(
+                crate::tools::http::service_reply(cfg,
                     client
                         .post(format!("{}/lists/{}/tasks", TASKS_BASE, tasklist_id))
                         .bearer_auth(token)
@@ -152,7 +152,7 @@ impl Tool for GoogleTasksTool {
                     Some(task_id) if !task_id.is_empty() => task_id,
                     _ => return "エラー: task_id が指定されていません。".to_string(),
                 };
-                handle_text_response(
+                crate::tools::http::service_reply(cfg,
                     client
                         .patch(format!("{}/lists/{}/tasks/{}", TASKS_BASE, tasklist_id, task_id))
                         .bearer_auth(token)
@@ -165,23 +165,6 @@ impl Tool for GoogleTasksTool {
             }
             _ => "エラー: action は list_tasklists/list/create/complete のいずれかを指定してください。".to_string(),
         }
-    }
-}
-
-async fn handle_text_response(
-    response: Result<reqwest::Response, reqwest::Error>,
-    label: &str,
-) -> String {
-    let response = match response {
-        Ok(response) => response,
-        Err(error) => return format!("エラー: {} への接続に失敗しました: {}", label, error),
-    };
-    let status = response.status();
-    let body = crate::tool_response_text!(response);
-    if status.is_success() {
-        body
-    } else {
-        format!("エラー: {} が HTTP {} を返しました。", label, status)
     }
 }
 

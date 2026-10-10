@@ -19,13 +19,13 @@ function setup(initialSignature = "") {
   const element = { style: {}, dataset: {} };
   let statusText = "";
   const context = {
-    signatureOf: id => id, voice: { stop() {}, speak: text => greetings.push(text) },
+    signatureOf: id => id, voice: { stop() {}, setCharacter() {}, speak: text => greetings.push(text) },
     host: { setDisplayReady() {}, load: id => { const work = deferred(); loads.push({ id, ...work }); return work.promise; } },
     characterSource: { element }, stage: { setCharacter() {} }, chrome: { setCharacterName() {} },
     status: { set: text => { statusText = text; }, clear: () => { statusText = ""; } },
     renderCharacterOptions() {}, motion: { rest() {} }, personaText: () => "人格",
     characterOverrides: {}, sdkOverrides: {}, errorMessage: String,
-    bridge: { setCharacterProfile: id => { const work = deferred(); profiles.push({ id, ...work }); return work.promise; } },
+    bridge: { setCharacterProfile: (id, profile, greeting, voice) => { const work = deferred(); profiles.push({ id, voice, ...work }); return work.promise; } },
     applyStreamAppearance: value => appearances.push(value), chat: { renderReply() {} },
   };
   const api = runInNewContext(`let loadedSignature = ${JSON.stringify(initialSignature)};
@@ -35,7 +35,7 @@ function setup(initialSignature = "") {
   return { ...api, api, loads, profiles, greetings, appearances, element, get statusText() { return statusText; },
     async finishLoad(index) {
       const id = loads[index].id;
-      loads[index].resolve({ pack: { id, name: id, manifest: {} }, greeting: `${id}の挨拶` });
+      loads[index].resolve({ pack: { id, name: id, manifest: { voice: { provider: "aivis", styleId: "123" } } }, greeting: `${id}の挨拶` });
       await Promise.resolve(); await Promise.resolve();
     },
   };
@@ -200,4 +200,11 @@ test("拡大中に表示形式を切り替える時はシーンだけでなく�
   });
   applyLayout("stream");
   assert.deepEqual(calls, [["expanded", false], ["layout", "stream"]]);
+});
+
+ test("人格登録は読み込めたmanifestの声を第4引数へ渡す", async () => {
+  const state = setup();
+  const work = state.loadCharacter("a"); await state.finishLoad(0);
+  assert.equal(state.profiles[0].voice?.styleId, "123");
+  state.profiles[0].resolve({}); await work;
 });

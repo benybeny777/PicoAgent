@@ -370,9 +370,10 @@ async function loadCharacter(characterId, { speakGreeting = true } = {}) {
     renderCharacterOptions(pack);
     motion.rest();
     // 挨拶も渡す（短い挨拶へモデルを呼ばず返すとき、全キャラ共通の定型文にしないため）。
-    const appearance = await bridge.setCharacterProfile(pack.id, personaText(pack.manifest, characterOverrides[pack.id]), greeting);
+    const appearance = await bridge.setCharacterProfile(pack.id, personaText(pack.manifest, characterOverrides[pack.id]), greeting, pack.manifest.voice ?? null);
     if (generation !== characterLoadGeneration) return null;
     // 人格登録まで確定したキャラの背景へ切り替え、直前のキャラ用背景を残さない。
+    voice.setCharacter(pack);
     if (appearance) applyStreamAppearance(appearance);
     loadedSignature = signature;
     host.setDisplayReady(true);
@@ -445,7 +446,7 @@ bridge.on("pet:layout-reset", payload => {
   editor.render();
 });
 bridge.on("pet:layout-edit", target => editor.start(target === "character" ? "character" : "all"));
-bridge.on("pet:notice", notice => notices.push(notice));
+const noticeSubscription = bridge.listen("pet:notice", notice => notices.push(notice));
 bridge.on("pet:model", model => status.flash(String(model), 1800));
 bridge.on("pet:emotion", emotion => {
   if (!emotion?.mood) return;
@@ -502,6 +503,7 @@ async function loadSceneDefinitions() {
   // 起動画面のDOMを組み立ててから窓を表示する。以後の終了通知との順序も固定する。
   await bridge.frontendReady();
   status.set("設定と履歴を読み込み中…", "boot");
+  await noticeSubscription;
   const [info, definitions] = await Promise.all([bridge.init(), loadSceneDefinitions()]);
   document.querySelector(".beta-badge")?.toggleAttribute("hidden", info.betaBuild !== true);
   applyTheme(info.theme, info.uiTheme);
@@ -513,6 +515,9 @@ async function loadSceneDefinitions() {
   host.setGazeTracking(info.gazeTrackingEnabled === true);
   relationship.setMemoryEnabled(info.relationshipMemoryEnabled, characterSource.heart);
   relationship.render({ relationship: info.relationship, bondLabel: info.bondLabel });
+  if (info.relationshipError) {
+    notifyBackgroundFailure("relationship-load", `関係性データを読み込めません: ${info.relationshipError}`, info.relationshipError);
+  }
   boot.setProgressInterval(info.bootProgressIntervalMs);
   engine.init(info, up => characterSource.setOnline(up));
   applyStreamAppearance(info);
@@ -560,7 +565,7 @@ async function loadSceneDefinitions() {
       if (voice.enabled) {
         status.set("声を準備中…", "boot");
         try {
-          await bridge.prepareVoiceModel();
+          await voice.prepareModel();
           if (startupGreeting) preparedGreeting = await voice.prepare(startupGreeting);
         } catch (error) {
           logApp("error", "音声モデルの準備に失敗しました", errorDetail(error));

@@ -131,7 +131,8 @@ AIモデルなど数GBの取得は `setup` を明示したときだけ行いま�
 - 再取得は `TOOLS_FORCE=1` などの環境変数、対象を絞るなら `PICOAGENT_SETUP_TOOLS=pandoc,ripgrep`
 - `cargo xtask build` も追加機能を取得しない軽量構成です。Aivis・Whisper・Office・外部CLIまで含めるときだけ `cargo xtask build-full`
 - Ubuntu の配布確認は `cargo xtask setup engine` のあと `cargo xtask build --bundles deb,appimage`
-- 公式のポータブル配布が無いツールは警告だけ出し、`apt` / `brew` で入れた PATH 上のツールを使います
+- 公式のポータブル配布が無いツールは手動で導入し、対応する設定に実行パスを入れます。設定にコマンド名だけ（例 `ffmpeg`）を明示した場合は共通探索で解決します（macOSではPATHの後に既存Homebrew配置も確認）。未設定時はPicoAgent管理下の同梱物だけを使い、欠損は導入・修復を案内します
+- 文字起こしの既定モデルは固定の `ggml-small.bin` です。別名のWhisperモデルは `PICOAGENT_TRANSCRIBE_MODEL` にパスを指定してください
 
 ### 叩く AI を選ぶ
 
@@ -329,6 +330,7 @@ Markdownスキルは手順をモデルへ渡すだけで、任意コードや新
 | ライス | Live2D | ◎ | ◎ | 無効 | ◎ | モデル動作 | モデル物理 |
 
 - 口パクは実際の音声再生に合わせて動き、ミュート中と音量0では口を閉じます（ライスはモデル設定により口パク無効）
+- 声は同梱・追加キャラともパックの `character.json` にある指定を使います。変更は設定「キャラの音声」でキャラ別に上書きし、空欄にするとパック既定へ戻ります。声指定のないキャラだけ全体設定の声を使い、指定した声を準備できないときは発声せず理由を通知します
 - 低頭身は上半身、長身・実写と構図調整済み Live2D は胸上が初期構図。チャット／バーの小型アイコンは首上を表示します。利用者が追加した Live2D は顔を切らないよう全身から始めます
 - OS の省モーション設定では呼吸・揺れ・待機動作を止め、口・表情・まばたきだけを動かします。WebGL を使えない環境では利用可能な差分絵で表示します
 - 生成由来の素材の品質はキャラごとに異なり、ひより相当の Live2D 品質を保証するものではありません
@@ -540,6 +542,8 @@ flowchart LR
 - スリープや再起動を挟んだ場合は、直近24時間の未処理分だけを実行します。時計を戻しても二重実行しません
 - cron の「日」と「曜日」を両方指定すると標準 cron と同じ OR 条件です（`0 9 1 * 1` は毎月1日または毎週月曜の9時）
 - コマンド実行は `PICOAGENT_COMMAND_ENABLED=true` が前提で、許可ルートと allowlist で守ります。足りない許可はその場で「今回だけ」「永続許可」「キャンセル」から選べます
+- チャットと予約実行は同じコマンド許可判定を使います。物理削除コマンドは承認しても実行できません
+- Web本文・RSS・汎用HTTP APIの取得は、リダイレクト先も公開IPと許可範囲を検査して直接接続します。この経路は環境プロキシを使わず、プロキシ必須環境では利用できません。外部APIの失敗はHTTP状態コードと短い理由を表示し、既知の設定秘密値を伏せます
 
 ### ブラウザ操作
 
@@ -740,7 +744,7 @@ API の会話はリクエスト内で完結し、デスクトップのキャラ�
 | 症状 | 対処 |
 |---|---|
 | Office ファイルの変換・PDF 出力ができない | `cargo xtask setup office` で OfficeCLI を取得。docx/xlsx/pptx の文字列置換は OfficeCLI 不要です |
-| 変換・検索の精度を上げたい | `cargo xtask setup tools` で Pandoc / ripgrep / ffmpeg / qpdf / poppler / ImageMagick を取得（解決順は「明示設定 → 同梱 → PATH」） |
+| 変換・検索のツールが見つからない | `cargo xtask setup tools` で対応する同梱ツールを取得するか、各 `*_PATH` 設定に実行パスを指定します。共通探索を使う場合もコマンド名を明示します。ripgrep欠損時は内蔵検索へ切り替えません |
 | PSD / XCF / HEIC / TIFF / WebP を扱いたい | `image_tools` スキルが ImageMagick で PNG / JPG 等へ変換します（PSD はレイヤー統合ビュー） |
 | Office / PDF 操作に失敗する | 「安全・許可」の許可ルートと、Office / LibreOffice（`soffice`）/ qpdf の実行パスを確認。Google Docs / Sheets は専用スキルを使ってください |
 | macOS で Aivis の取得だけ失敗する | `.7z.001` 展開用の `7z` がありません。`brew install p7zip` 後に `AIVIS_FORCE=1 cargo xtask setup aivis` |

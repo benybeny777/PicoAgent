@@ -1,7 +1,5 @@
 // skills/document_convert/mod.rs - LibreOffice による Office/PDF 変換スキル。
 
-use std::path::{Path, PathBuf};
-
 use async_trait::async_trait;
 use serde_json::{json, Value};
 
@@ -11,11 +9,6 @@ use crate::message::Field;
 use crate::text;
 
 pub struct DocumentConvertTool;
-
-/// 同梱 OfficeCLI（LibreOffice）の探索先ディレクトリ候補。
-fn bundled_office_dirs() -> Vec<PathBuf> {
-    crate::components::runtime_dirs("office")
-}
 
 /// LibreOfficeの設定・ロック・キャッシュをPicoAgent管理下へ固定する起動引数。
 pub(crate) fn isolated_office_profile_arg() -> Result<String, String> {
@@ -51,55 +44,21 @@ fn office_profile_base() -> Result<std::path::PathBuf, String> {
         }))
 }
 
-fn soffice_name() -> &'static str {
-    if cfg!(windows) {
-        "soffice.exe"
-    } else {
-        "soffice"
-    }
-}
-
-/// ディレクトリ配下から soffice を再帰探索する（MSI 展開・.app などレイアウト差異に強くする）。
-fn find_soffice(dir: &Path, depth: usize) -> Option<PathBuf> {
-    if depth > 7 {
-        return None;
-    }
-    let entries = std::fs::read_dir(dir).ok()?;
-    let mut subdirs = Vec::new();
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.is_file() && path.file_name().and_then(|n| n.to_str()) == Some(soffice_name()) {
-            return Some(path);
-        }
-        if path.is_dir() {
-            subdirs.push(path);
-        }
-    }
-    subdirs
-        .into_iter()
-        .find_map(|sub| find_soffice(&sub, depth + 1))
-}
-
-/// OfficeCLI の実行パスを解決する。
-/// 優先順: 明示設定（PICOAGENT_LIBREOFFICE_PATH）→ 同梱（setup office）→ PATH の soffice。
-pub fn office_cli_path(cfg: &Config) -> String {
-    let configured = cfg.get("PICOAGENT_LIBREOFFICE_PATH", "");
-    if !configured.trim().is_empty() && configured != "soffice" {
-        return configured;
-    }
-    for dir in bundled_office_dirs() {
-        if let Some(found) = find_soffice(&dir, 0) {
-            return found.to_string_lossy().to_string();
-        }
-    }
-    "soffice".to_string()
+/// 明示設定または管理導入したOfficeCLIを解決する。
+pub fn office_cli_path(cfg: &Config) -> Result<std::path::PathBuf, String> {
+    super::resolve_cli_in(
+        &cfg.get("PICOAGENT_LIBREOFFICE_PATH", ""),
+        &crate::components::runtime_dirs("office"),
+        "PICOAGENT_LIBREOFFICE_PATH",
+        "soffice",
+    )
 }
 
 // Pandoc の方が高精度に扱える形式（LibreOffice では崩れやすい・開けない）。
 const PANDOC_FORMATS: [&str; 7] = ["md", "markdown", "rst", "epub", "org", "tex", "latex"];
 
-/// Pandoc の実行パスを解決する。優先順: 明示設定 → 同梱（setup tools）→ PATH。
-fn pandoc_path(cfg: &Config) -> String {
+/// Pandoc の実行パスを解決する。優先順: 明示設定 → 同梱（setup tools）。
+fn pandoc_path(cfg: &Config) -> Result<std::path::PathBuf, String> {
     super::resolve_cli_path(cfg, "PICOAGENT_PANDOC_PATH", "pandoc", "pandoc")
 }
 
@@ -151,13 +110,13 @@ impl Tool for DocumentConvertTool {
         vec![
             Field::new(
                 "PICOAGENT_LIBREOFFICE_PATH",
-                "OfficeCLI 実行ファイルパス（空ならPicoAgent内→PATHの soffice）",
+                "OfficeCLI 実行ファイルパス（空ならPicoAgent管理下の soffice）",
                 "text",
                 "",
             ),
             Field::new(
                 "PICOAGENT_PANDOC_PATH",
-                "Pandoc 実行ファイルパス（空ならPicoAgent内→PATH）",
+                "Pandoc 実行ファイルパス（空ならPicoAgent管理下）",
                 "text",
                 "pandoc",
             ),
@@ -232,7 +191,7 @@ impl Tool for DocumentConvertTool {
         };
         let mut command;
         if use_pandoc {
-            command = crate::tools::process::command(pandoc_path(cfg));
+            command = crate::tools::process::command(crate::tool_try!(pandoc_path(cfg)));
             // --standalone で単体で開ける完結した文書（html のヘッダ等）を出力する。
             command
                 .arg(&input)
@@ -240,7 +199,7 @@ impl Tool for DocumentConvertTool {
                 .arg("-o")
                 .arg(&pandoc_output);
         } else {
-            command = crate::tools::process::command(office_cli_path(cfg));
+            command = crate::tools::process::command(crate::tool_try!(office_cli_path(cfg)));
             let profile = match isolated_office_profile_arg() {
                 Ok(value) => value,
                 Err(error) => return format!("エラー: {error}"),

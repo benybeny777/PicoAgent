@@ -115,15 +115,13 @@ impl Tool for GoogleDriveTool {
                     Err(error) => {
                         return format!(
                             "エラー: Google Drive API への接続に失敗しました: {}",
-                            error
+                            error.without_url()
                         )
                     }
                 };
-                let status = response.status();
-                let body = crate::tool_response_text!(response);
-                if !status.is_success() {
-                    return format!("エラー: Google Drive API が HTTP {} を返しました。", status);
-                }
+                let body = crate::tool_try!(
+                    crate::tools::http::service_body(cfg, "Google Drive API", Ok(response)).await
+                );
                 let parsed: Value = crate::tool_response_json!(&body);
                 let mut out = String::from("Drive検索結果:\n");
                 for file in parsed
@@ -165,17 +163,11 @@ impl Tool for GoogleDriveTool {
                     Err(error) => {
                         return format!(
                             "エラー: Google Drive API への接続に失敗しました: {}",
-                            error
+                            error.without_url()
                         )
                     }
                 };
-                let status = response.status();
-                let body = crate::tool_response_text!(response);
-                if status.is_success() {
-                    body
-                } else {
-                    format!("エラー: Google Drive API が HTTP {} を返しました。", status)
-                }
+                crate::tools::http::service_reply(cfg, Ok(response), "Google Drive API").await
             }
             "create_text" => {
                 let Some(name) = args
@@ -232,15 +224,13 @@ impl Tool for GoogleDriveTool {
                     Err(error) => {
                         return format!(
                             "エラー: Google Drive API への接続に失敗しました: {}",
-                            error
+                            error.without_url()
                         )
                     }
                 };
-                let status = response.status();
-                let text = crate::tool_response_text!(response);
-                if !status.is_success() {
-                    return format!("エラー: Google Drive API が HTTP {} を返しました。", status);
-                }
+                let text = crate::tool_try!(
+                    crate::tools::http::service_body(cfg, "Google Drive API", Ok(response)).await
+                );
                 let parsed: Value = crate::tool_response_json!(&text);
                 format!(
                     "OK: Drive ファイルを作成しました。id={}",

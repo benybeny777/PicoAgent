@@ -18,7 +18,7 @@
 |---|---|---|
 | `pet_frontend_ready` | なし | なし。フロントを読み込めた合図。届かないと起動監視が診断ページへ切り替える |
 | `pet_boot_progress` | なし | なし。起動中の生存通知（`pet_init` の `bootProgressIntervalMs` 間隔） |
-| `pet_init` | なし | 起動時の状態一式。`layout`・`scenes`（`PICOAGENT_SCENES` を正規化したもの）・`characterId`・`characterOverrides`・`live2dSdkOverrides`・`history`・`historySaveBlocked`・`providerId`・`up`・`theme`・`uiTheme`・`fontPx`・`voiceVolume`・`ttsEnabled`・`gazeTrackingEnabled`・`quickActions`・`napMinutes`・`stream*`（背景・ディスプレイ・字幕色）・`chatter*`・`onboardingDone`・`relationship`・`bondLabel`・`relationshipMemoryEnabled`・`bootProgressIntervalMs`・`betaBuild` |
+| `pet_init` | なし | 起動時の状態一式。`layout`・`scenes`（`PICOAGENT_SCENES` を正規化したもの）・`characterId`・`characterOverrides`・`live2dSdkOverrides`・`history`・`historySaveBlocked`・`providerId`・`up`・`theme`・`uiTheme`・`fontPx`・`voiceVolume`・`ttsEnabled`・`gazeTrackingEnabled`・`quickActions`・`napMinutes`・`stream*`（背景・ディスプレイ・字幕色）・`chatter*`・`onboardingDone`・`relationship`・`bondLabel`・`relationshipMemoryEnabled`・`relationshipError`（読込失敗理由、成功時null）・`bootProgressIntervalMs`・`betaBuild` |
 | `pet_finish_boot` | なし | なし。保存したウィンドウ寸法・位置を戻す（起動画面から通常画面へ移る直前） |
 | `pet_reveal_main` | なし | なし。窓を表示する唯一の入口 |
 | `pet_send` | `text` | 返答 `{ reply, error?, choices?, quitApp? }`。生成中は `pet:stream_chunk` などのイベントが届く |
@@ -37,7 +37,7 @@
 | `pet_daily_events` | なし | `{ events: [{ text }], broken: [{ text?, label?, due_at? }] }` |
 | `pet_alarms` | なし | `{ alarms: [...] }` |
 | `pet_alarm_wake` | `id` | `{ reply? }` |
-| `pet_set_character_profile` | `characterId`, `profile`, `greeting` | 確定したキャラの配信表示 `{ streamBackground, streamBackgroundImage, streamDisplay, streamDisplayImage, streamCaptionColor }` |
+| `pet_set_character_profile` | `characterId`, `profile`, `greeting`, `voice` | 確定したキャラの配信表示 `{ streamBackground, streamBackgroundImage, streamDisplay, streamDisplayImage, streamCaptionColor }` |
 | `pet_user_characters` | なし | `{ characters: [{ id, name, description, path }] }`（利用者が追加したキャラ） |
 | `pet_save_scene` | `scenes` | なし。`PICOAGENT_SCENES` を正規化して保存する。壊れた入力は保存せずエラー |
 | `pet_save_ui_pref` | `key`, `value` | なし。メイン画面で変えた見た目だけを保存する。対象は `PICOAGENT_BUBBLE_FONT_PX`（10〜28の整数文字列）、`PICOAGENT_STREAM_CHAT_FONT_PX`（18〜48）、`PICOAGENT_TITLE_BAR_PINNED`（真偽値）。それ以外のキー・範囲外は保存せずエラー |
@@ -129,7 +129,7 @@
 | `pet:context-action` | `{ action, framing? }`。`action` は `copy` / `cut` / `paste` / `select-all` / `open-link` / `copy-link` / `edit-character` / `set-framing` / `reset-character` | 右クリックした時点に控えた選択・要素に対して実行する |
 | `pet:reset` | なし | 会話の表示と控えを捨てる |
 | `pet:reload` | なし | 画面を読み込み直す（設定反映後の再初期化） |
-| `pet:notice` | `{ kind, title, body, ok, taskId?, runId?, jobId?, state?, progress?, rule?, key?, at? }` | 通知センターへ積む。`kind=durable_job` は `jobId` で上書き、`kind=background_failure` は原因ごとに1度だけトースト |
+| `pet:notice` | `{ kind, title, body, ok, taskId?, runId?, jobId?, state?, progress?, rule?, key?, at? }` | 通知センターへ積む。`kind=durable_job` は `jobId` で上書き、`kind=background_failure` は原因ごとに1度だけトースト。`ok=true`で復旧を解除し次の失敗を知らせる |
 | `pet:model` | 表示用のモデル名 | 状態行に短く出す |
 | `pet:emotion` | `{ mood, energy }` | キャラの感情表示 |
 | `pet:hotkey` | `"summon"` | 入力欄を開く |
@@ -146,3 +146,7 @@
 | `tauri://drag-enter` / `tauri://drag-leave` / `tauri://drag-drop` | `{ paths }` | ファイルのドロップ添付 |
 
 学習input.asrDeviceはcuda/cpu。新規画面はcudaを既定に送信し、旧保存ジョブの省略だけcpuとして解釈する。URL・音声ファイルは同じ選択を使い、GPU失敗時の自動CPU切替は行わない。
+
+通知の組み立てと送信は `notice.rs` が所有し、`at` はローカル時刻のRFC 3339。種類固有のキーは維持する。起動中の通知は待機し、メイン画面が `pet:notice` の購読完了を待ってから `pet_init` の末尾で待機通知を `pet:notice` へ順番に送る。待機列と新着通知は同じロック内で直列化し、失敗と復旧の順序を守る。画面の再読込時は未復旧の失敗も再送する。復旧の無い一度きりの出来事（状態ファイルの破損退避 `kind=state_quarantined`、起動時の更新確認の失敗 `kind=update` の `ok=false`）は `background_failure` にせず、通知一覧へ1件残す。会話履歴の保存停止はキャラごとに管理し、止めているキャラが1体も無くなったときだけ解除（`ok=true`）を送る。`relationshipError` は `relationship-load` の原因キーで画面へ知らせる。
+
+`pet_set_character_profile` の `voice` は読み込めた `character.json` の `voice` オブジェクトまたは `null`。ID・人格・挨拶・声を同じスナップショットとして登録し、声の検証・関係性・履歴の読込に失敗した場合は旧組を温存する。Aivisの `speakerUuid` と `modelUuid` はUUID形式、`styleId` は数値文字列を保持する。声の解決に失敗した `pet_prepare_voice_model` と `pet_speak` は理由付きエラーを返し、別の声で合成しない。

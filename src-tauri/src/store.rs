@@ -118,6 +118,54 @@ pub fn lock_state(key: &str) -> std::sync::MutexGuard<'static, ()> {
 ///
 /// 破損したファイルをその場に残すと、次の保存（＝空の状態の書き戻し）で上書きされて
 /// 原因調査もユーザーによる復旧もできなくなる。拡張子を変えて隣に残す。
+/// 破損退避の領域名と原因キーを同じ表で管理する。
+pub enum QuarantineArea {
+    Memory,
+    Usage,
+    History,
+    SchedulerHistory,
+    Jobs,
+    Relationship,
+}
+
+impl QuarantineArea {
+    fn notice_fields(&self) -> (&'static str, &'static str) {
+        match self {
+            Self::Memory => ("memory-quarantined", "長期メモリ"),
+            Self::Usage => ("usage-quarantined", "トークン使用量"),
+            Self::History => ("history-quarantined", "会話履歴"),
+            Self::SchedulerHistory => ("scheduler-history-quarantined", "スケジュール実行履歴"),
+            Self::Jobs => ("jobs-quarantined", "永続ジョブ"),
+            Self::Relationship => ("relationship-quarantined", "関係性データ"),
+        }
+    }
+}
+
+pub fn quarantine_and_notify(
+    app: &tauri::AppHandle,
+    path: &Path,
+    area: QuarantineArea,
+) -> Option<PathBuf> {
+    let backup = quarantine_corrupt(path)?;
+    let (key, title) = area.notice_fields();
+    // 退避は一度きりの出来事で「復旧」が無い。`background_failure` にすると未復旧として
+    // 画面の再読込のたびに再送されるため、通知一覧へ1件残す種類で送る。
+    crate::notice::emit(
+        app,
+        crate::notice::Notice::info(
+            "state_quarantined",
+            title,
+            format!(
+                "壊れていたため退避して新しく始めました。退避先: {}",
+                backup.display()
+            ),
+            false,
+        )
+        .detail("area", serde_json::json!(key)),
+    );
+    Some(backup)
+}
+
 pub fn quarantine_corrupt(path: &Path) -> Option<PathBuf> {
     if !path.exists() {
         return None;
@@ -207,7 +255,9 @@ mod guard {
             if !silently_empty {
                 continue;
             }
-            if body.contains("quarantine_corrupt") || body.contains("store::load_list") {
+            if (body.contains("quarantine_corrupt") || body.contains("quarantine_and_notify"))
+                || body.contains("store::load_list")
+            {
                 continue;
             }
             offenders.push(source.path.display().to_string());
@@ -234,10 +284,17 @@ mod guard {
                 continue; // 退避の定義元
             }
             for (index, line) in source.body().lines().enumerate() {
-                if !line.contains("quarantine_corrupt(") {
+                if !line.contains("quarantine_corrupt(") && !line.contains("quarantine_and_notify(")
+                {
                     continue;
                 }
-                let chained = line.contains("ok_or_else(");
+                let chained = source
+                    .body()
+                    .lines()
+                    .skip(index)
+                    .take(14)
+                    .take_while(|line| !line.contains(';'))
+                    .any(|line| line.contains("ok_or_else("));
                 let branched = line.contains("if let Some(")
                     && source
                         .body()
