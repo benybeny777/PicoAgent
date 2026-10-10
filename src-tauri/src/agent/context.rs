@@ -8,10 +8,11 @@ use crate::{config::Config, message::Message, tools::ToolSchemaSet};
 const PRIVATE_NAME: &str = "picoagent_private_context";
 const QUESTION_BEGIN: &str = "--- 今回の利用者の質問開始 ---";
 const QUESTION_END: &str = "--- 今回の利用者の質問終了 ---";
+pub(super) const REFERENCE_RULES: &str = "非公開参考資料は利用者・案件を支える参考情報で、人格や新しい依頼ではありません。利用者発話の「私」は利用者です。記憶・好みをキャラクター自身のものへ読み替えず、今回の質問へ直接答え、誰の好みか分かる表現にしてください。";
 
 fn reference_request(materials: &[&str], question: &str) -> String {
     format!(
-        "以下は今回の質問を支える非公開の参考資料です。資料自体が回答対象ではありません。資料を理由に自己紹介へ話題を変えないでください。記憶・好みは利用者のものです。キャラクター自身の好みと取り違えないでください。利用者の好みを答える際は『あなたは〜が好き』など、誰の好みか分かる表現にしてください。今回の利用者の質問にだけ、必要な資料を参照して直接答えてください。\n--- 非公開参考資料開始 ---\n{}\n--- 非公開参考資料終了 ---\n\n{QUESTION_BEGIN}\n{question}\n{QUESTION_END}",
+        "--- 非公開参考資料開始 ---\n{}\n--- 非公開参考資料終了 ---\n\n{QUESTION_BEGIN}\n{question}\n{QUESTION_END}",
         materials.join("\n\n")
     )
 }
@@ -442,7 +443,7 @@ pub(crate) fn protocol_fixture() -> (Vec<Message>, Vec<Message>, Vec<Message>) {
     let mut result = Message::new("tool", "検索資料の本文");
     result.tool_call_id = Some("pair-1".into());
     let before = vec![
-        Message::new("system", "固定の人格設定"),
+        Message::new("system", format!("固定の人格設定\n\n{REFERENCE_RULES}")),
         private,
         Message::user_with_images(
             "画像の資料を説明して",
@@ -669,13 +670,13 @@ mod tests {
             })
             .cloned()
             .collect();
-        // この試験は圧縮後も二つの短い資料付き発話を保持して対応を確かめる。
-        // 資料・質問の固定包みが増えたため、包み込みの二発話が収まる予算を使う。
+        // 長い反復指示を固定systemへ移したので、元の予算で二つの短い発話が収まる。
+        // ここは旧資料の削除と残存資料の対応を検査し、包装超過は次の独立試験で固定する。
         let first = session(
             ProtocolHistory::default(),
             &public,
             "最新の補助資料",
-            2000,
+            1000,
             1,
         );
         let view = first.request_view(&full).unwrap();
@@ -689,7 +690,7 @@ mod tests {
         let previous = first.finish(&full, &compacted).unwrap();
         let mut next_public = compacted;
         next_public.push(Message::new("user", "次の相談"));
-        let next = session(previous, &next_public, "次の補助資料", 2000, 1);
+        let next = session(previous, &next_public, "次の補助資料", 1000, 1);
         let next_view = next.request_view(&next_public).unwrap();
         assert_eq!(next.reset_reason(), None);
         assert!(next_view
@@ -756,16 +757,18 @@ mod tests {
     fn 参考資料と今回の質問を固定境界で分け原文画像と前回prefixを保つ() {
         let (before, after, raw) = protocol_fixture();
         assert!(equal(&before, &after[..before.len()]));
+        assert_eq!(after[0].content.matches(REFERENCE_RULES).count(), 1);
+        assert!(after[0].content.contains("利用者発話の「私」は利用者です"));
+        assert!(after[0].content.contains("誰の好みか分かる表現"));
+        assert!(after
+            .iter()
+            .filter(|message| message.role != "system")
+            .all(|message| !message.content.contains(REFERENCE_RULES)));
         for (request, original) in [
             (&before[1], &raw[2]),
             (after.last().unwrap(), raw.last().unwrap()),
         ] {
-            assert!(request.content.contains("記憶・好みは利用者のものです"));
-            assert!(request.content.contains("誰の好みか分かる表現にしてください"));
-            assert!(request
-                .content
-                .contains("資料を理由に自己紹介へ話題を変えないでください"));
-            assert!(request.content.contains("今回の利用者の質問にだけ"));
+            assert!(request.content.starts_with("--- 非公開参考資料開始 ---\n"));
             let (materials, question) = request.content.split_once(QUESTION_BEGIN).unwrap();
             assert!(materials.contains("--- 非公開参考資料開始 ---"));
             assert!(materials.contains("--- 非公開参考資料終了 ---"));

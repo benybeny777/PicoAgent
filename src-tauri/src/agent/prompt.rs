@@ -54,6 +54,9 @@ pub fn base(config: &Config) -> String {
     prompt.push_str("\n\nまだ実行していない作業について「今から調べる」「確認してみる」「ちょっと待ってて」のように後で行う約束をしないでください。調べる・作るなどが必要なら、その応答の中でスキルを実行して結果を伝え、実行できないときはできない理由を正直に伝えてください。");
     // 作業フォルダの AGENTS.md（この案件の作法）。許可ルートを切り替えると内容も入れ替わる。
     crate::project_rules::append_prompt_context(&mut prompt, config);
+    // 資料の帰属と質問との境界は固定規則。変動資料の包みへ毎回複写しない。
+    prompt.push_str("\n\n");
+    prompt.push_str(super::context::REFERENCE_RULES);
     prompt
 }
 
@@ -110,6 +113,18 @@ mod tests {
         assert!(prompt.contains("ユーザーの妹として接する"));
         assert!(!prompt.contains("長期メモリ"));
         assert!(!prompt.contains("関係性メモリ"));
+        assert_eq!(
+            prompt
+                .matches(super::super::context::REFERENCE_RULES)
+                .count(),
+            1
+        );
+        assert_eq!(
+            super::base(&config)
+                .matches(super::super::context::REFERENCE_RULES)
+                .count(),
+            1
+        );
         // 組み立てた人格がそのまま公開検査の照合元になる（登録漏れの経路を作らない）。
         assert!(super::super::guard_public_answer("名前: むぎ".to_string(), "").is_err());
         super::super::remember_private_context("");
