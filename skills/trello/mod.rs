@@ -108,7 +108,8 @@ impl Tool for TrelloTool {
         };
         match args.get("action").and_then(Value::as_str).unwrap_or("") {
             "list_cards" => {
-                handle_text_response(
+                crate::tools::http::service_reply(
+                    cfg,
                     client
                         .get(format!("{}/lists/{}/cards", TRELLO_BASE, list_id))
                         .query(&[("key", key), ("token", token)])
@@ -128,7 +129,8 @@ impl Tool for TrelloTool {
                     return "エラー: name が指定されていません。".to_string();
                 };
                 let desc = args.get("desc").and_then(Value::as_str).unwrap_or("");
-                handle_text_response(
+                crate::tools::http::service_reply(
+                    cfg,
                     client
                         .post(format!("{}/cards", TRELLO_BASE))
                         .query(&[
@@ -146,23 +148,6 @@ impl Tool for TrelloTool {
             }
             _ => "エラー: action は list_cards または create_card を指定してください。".to_string(),
         }
-    }
-}
-
-async fn handle_text_response(
-    response: Result<reqwest::Response, reqwest::Error>,
-    label: &str,
-) -> String {
-    let response = match response {
-        Ok(response) => response,
-        Err(error) => return format!("エラー: {} への接続に失敗しました: {}", label, error),
-    };
-    let status = response.status();
-    let body = crate::tool_response_text!(response);
-    if status.is_success() {
-        body
-    } else {
-        format!("エラー: {} が HTTP {} を返しました。", label, status)
     }
 }
 

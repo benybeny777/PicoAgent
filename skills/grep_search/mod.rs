@@ -4,11 +4,9 @@
 // 語のスコアで抜粋を返す `doc_search` が調べもの向けなのに対し、こちらはコード作業向けに
 // 行番号付きの一致行をそのまま返す（出力形式も content / files / count から選べる）。
 //
-// 検索本体は同梱 ripgrep（`cargo xtask setup tools`）→ PATH の順に解決して使う。
-// ripgrep が無い環境では内蔵走査へ落ちるが、その場合は正規表現ではなく固定文字列一致に
-// なるため、結果の先頭にその旨を明記する（黙って別物の検索をしない）。
+// 検索本体は明示設定または同梱ripgrepを使い、欠損・失敗は理由を返す。
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use async_trait::async_trait;
 use serde_json::{json, Value};
@@ -19,15 +17,13 @@ use crate::message::Field;
 use crate::permissions;
 use crate::text;
 
+pub struct GrepSearchTool;
+
 const DEFAULT_LIMIT: usize = 60;
 const MAX_LIMIT: usize = 300;
 const MAX_CONTEXT_LINES: u64 = 5;
 const MAX_LINE_CHARS: usize = 400;
 const TIMEOUT_SECS: u64 = 30;
-/// 内蔵走査（ripgrep が無いとき）の安全弁。
-const MAX_SCAN_FILES: usize = 5_000;
-const MAX_SCAN_DEPTH: usize = 12;
-const MAX_SCAN_FILE_BYTES: u64 = 2 * 1024 * 1024;
 const SKIP_DIRS: [&str; 8] = [
     "node_modules",
     "target",
@@ -39,8 +35,8 @@ const SKIP_DIRS: [&str; 8] = [
     "venv",
 ];
 
-/// ripgrep の実行パスを解決する。優先順: 明示設定 → 同梱（setup tools）→ PATH。
-fn ripgrep_path(cfg: &Config) -> String {
+/// ripgrep の実行パスを解決する。優先順: 明示設定 → 同梱（setup tools）。
+fn ripgrep_path(cfg: &Config) -> Result<std::path::PathBuf, String> {
     crate::tools::resolve_cli_path(cfg, "PICOAGENT_RIPGREP_PATH", "ripgrep", "rg")
 }
 
@@ -74,9 +70,12 @@ struct Query {
     limit: usize,
 }
 
-/// ripgrep で検索する。実行できない・rg 自体が失敗した場合は None を返し、内蔵走査へ落とす。
-async fn search_with_ripgrep(cfg: &Config, root: &Path, query: &Query) -> Option<Vec<String>> {
-    let mut command = crate::tools::process::command(ripgrep_path(cfg));
+async fn search_with_ripgrep(
+    cfg: &Config,
+    root: &Path,
+    query: &Query,
+) -> Result<Vec<String>, String> {
+    let mut command = crate::tools::process::command(ripgrep_path(cfg)?);
     command.args([
         "--line-number",
         "--with-filename",
@@ -115,114 +114,18 @@ async fn search_with_ripgrep(cfg: &Config, root: &Path, query: &Query) -> Option
     }
     command.arg("--").arg(&query.pattern).arg(root);
 
-    // フォールバック許可: ripgrep が無い・起動できない環境では内蔵走査へ落とす
-    // （落ちたことは呼び出し側が結果へ明記する）。
-    let output = crate::tools::process::output(command, TIMEOUT_SECS, "ファイル内容検索")
-        .await
-        .ok()?;
-    // rg の終了コード: 0=一致あり / 1=一致なし / 2=エラー（エラー時は内蔵走査へ）。
-    if output.status.code() == Some(2) {
-        return None;
+    let output = crate::tools::process::output(command, TIMEOUT_SECS, "ファイル内容検索").await?;
+    if !matches!(output.status.code(), Some(0 | 1)) {
+        return Err(format!(
+            "ripgrepで検索できません: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
     }
-    Some(
-        String::from_utf8_lossy(&output.stdout)
-            .lines()
-            .map(|line| text::preview(line, MAX_LINE_CHARS))
-            .collect(),
-    )
+    Ok(String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .map(|line| text::preview(line, MAX_LINE_CHARS))
+        .collect())
 }
-
-/// 内蔵走査（ripgrep が無い環境向け）。固定文字列一致だけを行う。
-fn search_builtin(root: &Path, query: &Query) -> Vec<String> {
-    let needle = if query.ignore_case {
-        query.pattern.to_lowercase()
-    } else {
-        query.pattern.clone()
-    };
-    let mut files = Vec::new();
-    collect_files(root, &mut files, 0);
-    let mut out = Vec::new();
-    for path in files {
-        if !query.glob.is_empty() {
-            let name = path
-                .file_name()
-                .map(|name| name.to_string_lossy().to_string())
-                .unwrap_or_default();
-            if !super::glob_files::match_name(query.glob.trim_start_matches("**/"), &name) {
-                continue;
-            }
-        }
-        let Ok(content) = std::fs::read_to_string(&path) else {
-            // フォールバック許可: バイナリや権限なしのファイルは検索対象から外すだけ。
-            continue;
-        };
-        let mut count = 0usize;
-        let mut lines = Vec::new();
-        for (number, line) in content.lines().enumerate() {
-            let haystack = if query.ignore_case {
-                line.to_lowercase()
-            } else {
-                line.to_string()
-            };
-            if haystack.contains(&needle) {
-                count += 1;
-                lines.push(format!(
-                    "{}:{}:{}",
-                    path.display(),
-                    number + 1,
-                    text::preview(line, MAX_LINE_CHARS)
-                ));
-            }
-        }
-        if count == 0 {
-            continue;
-        }
-        match query.mode {
-            OutputMode::Content => out.extend(lines),
-            OutputMode::Files => out.push(path.display().to_string()),
-            OutputMode::Count => out.push(format!("{}:{}", path.display(), count)),
-        }
-        if out.len() >= MAX_LIMIT {
-            break;
-        }
-    }
-    out
-}
-
-fn collect_files(dir: &Path, files: &mut Vec<PathBuf>, depth: usize) {
-    if depth > MAX_SCAN_DEPTH || files.len() >= MAX_SCAN_FILES {
-        return;
-    }
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        // フォールバック許可: 読めないフォルダは走査対象から外すだけ。
-        return;
-    };
-    for entry in entries.flatten() {
-        if files.len() >= MAX_SCAN_FILES {
-            return;
-        }
-        let path = entry.path();
-        let Ok(meta) = std::fs::symlink_metadata(&path) else {
-            continue;
-        };
-        // シンボリックリンク／ジャンクションは辿らない（許可ルート外へ出るのを防ぐ）。
-        if meta.file_type().is_symlink() {
-            continue;
-        }
-        if meta.is_dir() {
-            let name = entry.file_name().to_string_lossy().to_string();
-            if name.starts_with('.') || SKIP_DIRS.contains(&name.as_str()) {
-                continue;
-            }
-            collect_files(&path, files, depth + 1);
-        } else if meta.len() <= MAX_SCAN_FILE_BYTES {
-            files.push(path);
-        }
-    }
-}
-
-pub struct GrepSearchTool;
-
 #[async_trait]
 impl Tool for GrepSearchTool {
     fn name(&self) -> &'static str {
@@ -294,7 +197,7 @@ impl Tool for GrepSearchTool {
     fn config_schema(&self) -> Vec<Field> {
         vec![Field::new(
             "PICOAGENT_RIPGREP_PATH",
-            "ripgrep 実行ファイルパス（空なら同梱→PATH、無ければ内蔵走査）",
+            "ripgrep 実行ファイルパス（空なら明示設定または同梱）",
             "text",
             "rg",
         )]
@@ -354,25 +257,16 @@ impl Tool for GrepSearchTool {
                 .unwrap_or(DEFAULT_LIMIT),
         };
 
-        let mut note = String::new();
-        let lines = match search_with_ripgrep(cfg, root.as_path(), &query).await {
-            Some(lines) => lines,
-            None => {
-                // 黙って別物の検索に差し替えない。正規表現でなくなったことを結果に明示する。
-                note = "注意: ripgrep が見つからないため内蔵走査で検索しました（pattern は正規表現ではなく固定文字列として扱っています）。\n".to_string();
-                search_builtin(root.as_path(), &query)
-            }
-        };
-
+        let lines = crate::tool_try!(search_with_ripgrep(cfg, root.as_path(), &query).await);
         if lines.is_empty() {
             return format!(
-                "{note}一致はありませんでした（{} 配下 / {}）。",
+                "一致はありませんでした（{} 配下 / {}）。",
                 root.display(),
                 query.pattern
             );
         }
         let total = lines.len();
-        let mut out = format!("{note}{} 配下の一致: {total} 行", root.display());
+        let mut out = format!("{} 配下の一致: {total} 行", root.display());
         for line in lines.iter().take(query.limit) {
             out.push('\n');
             out.push_str(line);
@@ -391,18 +285,63 @@ inventory::submit! { ToolReg { make: || Box::new(GrepSearchTool) } }
 
 #[cfg(test)]
 mod tests {
-    use super::{search_builtin, OutputMode, Query};
+    use super::OutputMode;
 
-    fn query(pattern: &str, mode: OutputMode) -> Query {
-        Query {
-            pattern: pattern.to_string(),
+    #[tokio::test]
+    async fn 正規表現と出力形式を維持し欠損や検索失敗で別検索へ進まない() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a.txt"), "hello\nピコエージェント\nhello\n").unwrap();
+        let cfg = crate::config::Config::new();
+        cfg.set(
+            "PICOAGENT_RIPGREP_PATH",
+            &dir.path().join("missing-rg").to_string_lossy(),
+        );
+        let mut query = super::Query {
+            pattern: "hello".into(),
             glob: String::new(),
             ignore_case: false,
             fixed: true,
             context: 0,
-            mode,
+            mode: OutputMode::Content,
             limit: 60,
+        };
+        assert!(super::search_with_ripgrep(&cfg, dir.path(), &query)
+            .await
+            .unwrap_err()
+            .contains("PICOAGENT_RIPGREP_PATH"));
+        let Some(rg) = crate::tools::process::resolve_executable("rg") else {
+            return;
+        };
+        // 実機のCLIを使う場合も、テストでは明示パスとして指定する。
+        cfg.set("PICOAGENT_RIPGREP_PATH", &rg.to_string_lossy());
+        for (mode, count) in [
+            (OutputMode::Content, 2),
+            (OutputMode::Files, 1),
+            (OutputMode::Count, 1),
+        ] {
+            query.mode = mode;
+            assert_eq!(
+                super::search_with_ripgrep(&cfg, dir.path(), &query)
+                    .await
+                    .unwrap()
+                    .len(),
+                count
+            );
         }
+        query.fixed = false;
+        query.mode = OutputMode::Content;
+        query.pattern = "^ピコ".into();
+        assert_eq!(
+            super::search_with_ripgrep(&cfg, dir.path(), &query)
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
+        query.pattern = "[".into();
+        assert!(super::search_with_ripgrep(&cfg, dir.path(), &query)
+            .await
+            .is_err());
     }
 
     #[test]
@@ -410,34 +349,5 @@ mod tests {
         assert!(OutputMode::parse("").is_ok());
         assert!(OutputMode::parse("files_with_matches").is_ok());
         assert!(OutputMode::parse("なにか").is_err());
-    }
-
-    /// ripgrep が無い環境でも内蔵走査で一致行・ファイル・件数を返せること。
-    #[test]
-    fn 内蔵走査で一致行を返す() {
-        let nanos = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_nanos())
-            .unwrap_or(0);
-        let dir = std::env::temp_dir().join(format!("picoagent-grep-{nanos}"));
-        std::fs::create_dir_all(dir.join("sub")).unwrap();
-        std::fs::write(dir.join("a.txt"), "hello\nピコエージェント\nhello\n").unwrap();
-        std::fs::write(dir.join("sub/b.txt"), "なし\n").unwrap();
-
-        let lines = search_builtin(&dir, &query("hello", OutputMode::Content));
-        assert_eq!(lines.len(), 2, "lines: {lines:?}");
-        assert!(lines[0].ends_with(":1:hello"), "lines: {lines:?}");
-
-        let files = search_builtin(&dir, &query("hello", OutputMode::Files));
-        assert_eq!(files.len(), 1);
-
-        let counts = search_builtin(&dir, &query("hello", OutputMode::Count));
-        assert!(counts[0].ends_with(":2"), "counts: {counts:?}");
-
-        // 日本語（マルチバイト）でも行の切り出しで panic しない。
-        let japanese = search_builtin(&dir, &query("ピコ", OutputMode::Content));
-        assert_eq!(japanese.len(), 1);
-
-        std::fs::remove_dir_all(&dir).ok();
     }
 }

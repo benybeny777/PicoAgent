@@ -4,6 +4,8 @@
 
 設定キーを追加・変更・削除したときは、この一覧を同じPRで更新します。`doc_sync::guard` が実装との追加漏れ・削除漏れを双方向で検出します。
 
+実行パス設定でいう「共通探索」は、利用者がコマンド名を明示した場合だけ `tools::process::resolve_executable()` を使うことです。環境PATHを確認し、macOSでは続けて既存Homebrew配置 `/opt/homebrew/bin`・`/usr/local/bin` を確認します。未設定時はPicoAgent管理下の同梱物だけを使います。
+
 ## 設定キー一覧
 
 | キー | 既定 | 区分 | 用途 |
@@ -136,8 +138,8 @@
 | `PICOAGENT_SCHEDULED_TOOL_ALLOWLIST` | `time,weather,web_fetch` | task_scheduler | 無人スケジュール実行を明示的に許可するスキル名（カンマ区切り） |
 | `PICOAGENT_CLIPBOARD_MAX_CHARS` | `3000` | clipboard_text | クリップボード取得の最大文字数（500〜8000） |
 | `PICOAGENT_MEETING_ROOT` | （旧キー） | meeting_recorder | 旧キー。設定画面からは廃止。設定済みなら既存利用者向けに追加許可ルートとしてだけ引き継ぐ |
-| `PICOAGENT_TRANSCRIBE_PROGRAM` | 空 | meeting_recorder / whisper_transcribe | ローカル文字起こし実行ファイル。手動設定が最優先、空なら同梱 `whisper-cli`。同梱CLIはポートを開かない |
-| `PICOAGENT_TRANSCRIBE_MODEL` | 空 | meeting_recorder / whisper_transcribe | ローカルWhisperモデルのパス。手動設定が最優先、空なら同梱モデル |
+| `PICOAGENT_TRANSCRIBE_PROGRAM` | 空 | meeting_recorder / whisper_transcribe | ローカル文字起こし実行ファイル。手動設定が最優先、空なら同梱 `whisper-cli`。コマンド名だけの明示指定時は共通探索から解決。未導入・欠損は導入／修復エラー。同梱CLIはポートを開かない |
+| `PICOAGENT_TRANSCRIBE_MODEL` | 空 | meeting_recorder / whisper_transcribe | ローカルWhisperモデルのパス。手動設定が最優先、空なら共通配置正本の固定 `models/ggml-small.bin`。別名のモデルを自動探索しない。`WHISPER_MODEL` を変えて導入したモデルもここへ明示する |
 | `PICOAGENT_TRANSCRIBE_ARGS` | `-m {model} -f {audio} -otxt -of {output_stem}` | meeting_recorder / whisper_transcribe | 文字起こし実行時の引数テンプレート |
 | `PICOAGENT_TRANSCRIBE_DIARIZE_ARGS` | `-tdrz` | meeting_recorder / whisper_transcribe | `diarize=true` 時に追加するローカル話者分類引数 |
 | `PICOAGENT_TRANSCRIBE_TIMEOUT_SECS` | `1800` | meeting_recorder / whisper_transcribe | ローカル文字起こしタイムアウト秒（10〜7200） |
@@ -227,7 +229,7 @@
 | `PICOAGENT_TODOIST_TOKEN` | （なし） | todoist | Todoist API token |
 | `PICOAGENT_TODOIST_PROJECT_ID` | （なし） | todoist | Todoist 既定 project ID |
 | `PICOAGENT_TODOIST_TIMEOUT_SECS` | `15` | todoist | Todoist API の待ち時間（秒、3〜60） |
-| `PICOAGENT_HTTP_ALLOWED_DOMAINS` | （なし） | http_api | 汎用HTTPで呼べるドメイン（必須、カンマ区切り） |
+| `PICOAGENT_HTTP_ALLOWED_DOMAINS` | （なし） | http_api | 汎用HTTPで呼べるドメイン（必須、カンマ区切り）。全リダイレクト先でも照合し、公開IPだけを許可。DNS解決先へ直接接続を固定するため環境プロキシは使わず、プロキシ必須環境では取得できない |
 | `PICOAGENT_HTTP_BEARER_TOKEN` | （なし） | http_api | 汎用HTTPに付与する Bearer token |
 | `PICOAGENT_HTTP_API_KEY_HEADER` | `X-API-Key` | http_api | 汎用HTTPに付与する API key ヘッダー名 |
 | `PICOAGENT_HTTP_API_KEY_VALUE` | （なし） | http_api | 汎用HTTPに付与する API key 値 |
@@ -251,15 +253,15 @@
 | `PICOAGENT_TOOL_OUTPUT_MAX_CHARS` | `auto` | 基本 | ツール出力の最大文字数。`auto` は使用中モデルのコンテキスト長から算出（local は `PICOAGENT_LOCAL_CTX` の45%、下限1,000／上限60,000。クラウドは24,000） |
 | `PICOAGENT_DOCUMENT_ROOT` | （旧キー） | ms_office / document_convert / pdf_tools | 旧キー。`PICOAGENT_ALLOWED_ROOT` へ統合。設定済みなら許可ルートとして引き継ぐ |
 | `PICOAGENT_MS_OFFICE_TIMEOUT_SECS` | `120` | ms_office | Microsoft Office 操作タイムアウト秒（5〜300） |
-| `PICOAGENT_LIBREOFFICE_PATH` | `soffice` | document_convert | LibreOffice 実行ファイルパス |
+| `PICOAGENT_LIBREOFFICE_PATH` | 空 | document_convert | LibreOffice実行ファイルの明示指定。空ならPicoAgent管理下の同梱物のみ。コマンド名 `soffice` を明示したときだけ共通探索から解決 |
 | `PICOAGENT_DOCUMENT_CONVERT_TIMEOUT_SECS` | `120` | document_convert | 文書変換タイムアウト秒（5〜300） |
-| `PICOAGENT_QPDF_PATH` | `qpdf` | pdf_tools | qpdf 実行ファイルパス |
-| `PICOAGENT_PDFTOTEXT_PATH` | `pdftotext` | pdf_tools | Poppler pdftotext 実行ファイルパス（空なら同梱→PATH） |
-| `PICOAGENT_PANDOC_PATH` | `pandoc` | document_convert | Pandoc 実行ファイルパス（空ならPicoAgent内→PATH） |
-| `PICOAGENT_MAGICK_PATH` | 空 | image_tools | ImageMagick 実行ファイルパス（空ならPicoAgent内→PATH。v7 `magick` が無ければ v6 `convert`/`identify`） |
+| `PICOAGENT_QPDF_PATH` | 空 | pdf_tools | qpdf実行ファイルの明示指定。空なら同梱のみ。コマンド名の明示指定時だけ共通探索から解決 |
+| `PICOAGENT_PDFTOTEXT_PATH` | 空 | pdf_tools | Poppler pdftotext実行ファイルの明示指定。空なら同梱のみ。コマンド名の明示指定時だけ共通探索から解決 |
+| `PICOAGENT_PANDOC_PATH` | 空 | document_convert | Pandoc実行ファイルの明示指定。空なら同梱のみ。コマンド名の明示指定時だけ共通探索から解決 |
+| `PICOAGENT_MAGICK_PATH` | 空 | image_tools | ImageMagick実行ファイルの明示指定。空なら同梱 `magick` のみ。コマンド名の明示指定時だけ共通探索から解決。v6 `convert` / `identify` は明示指定時だけ使う |
 | `PICOAGENT_IMAGE_TOOLS_TIMEOUT_SECS` | `120` | image_tools | 画像操作タイムアウト秒（5〜300） |
-| `PICOAGENT_FFMPEG_PATH` | 空 | whisper_transcribe | ffmpeg 実行ファイルパス（非wav音声の16kHz WAV前処理用。空ならPicoAgent内→PATH） |
-| `PICOAGENT_RIPGREP_PATH` | 空 | doc_search / grep_search | ripgrep 実行ファイルパス（空ならPicoAgent内→PATH。無ければ内蔵走査） |
+| `PICOAGENT_FFMPEG_PATH` | 空 | whisper_transcribe | ffmpeg実行ファイルの明示指定（非wav音声の16kHz WAV前処理用）。空なら同梱のみ。コマンド名の明示指定時だけ共通探索から解決 |
+| `PICOAGENT_RIPGREP_PATH` | 空 | doc_search / grep_search | ripgrep実行ファイルの明示指定。空なら同梱のみ。コマンド名 `rg` の明示指定時だけ共通探索から解決。欠損・実行失敗はエラーとし、内蔵検索へ切り替えない |
 | `PICOAGENT_SETUP_TOOLS` | （空） | xtask | `cargo xtask setup tools` で取得対象を絞る開発用環境変数（カンマ区切り） |
 | `PICOAGENT_API_ENABLED` | `false` | ローカルAPI | ローカル HTTP API を有効化（127.0.0.1 のみ。変更は再起動後に反映） |
 | `PICOAGENT_API_PORT` | `11500` | ローカルAPI | ローカル API のポート |
