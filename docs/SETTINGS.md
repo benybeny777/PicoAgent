@@ -4,6 +4,8 @@
 
 設定キーを追加・変更・削除したときは、この一覧を同じPRで更新します。`doc_sync::guard` が実装との追加漏れ・削除漏れを双方向で検出します。
 
+実行パス設定でいう「共通探索」は、利用者がコマンド名を明示した場合だけ `tools::process::resolve_executable()` を使うことです。環境PATHを確認し、macOSでは続けて既存Homebrew配置 `/opt/homebrew/bin`・`/usr/local/bin` を確認します。未設定時はPicoAgent管理下の同梱物だけを使います。
+
 ## 設定キー一覧
 
 | キー | 既定 | 区分 | 用途 |
@@ -45,7 +47,7 @@
 | `PICOAGENT_PLANNING_ENABLED` | `false` | 基本 | 複雑な質問（120文字超・疑問符2個以上・手順系語）をサブタスクへ自動分解するプランニングステップを有効化する |
 | `PICOAGENT_SELF_EVAL_ENABLED` | `false` | 基本 | 回答が短すぎる・拒否パターンを含む場合に1回再生成する自己評価ステップを有効化する |
 | `PICOAGENT_SUPER_AGENT` | `false` | AIモデル | スーパーエージェントモード。計画ステップ・自己評価を一括有効化し、ループ上限を引き上げ、進捗を `pet:agent_status` で可視化する |
-| `PICOAGENT_SUPER_AGENT_MAX_STEPS` | `12` | AIモデル | スーパーエージェントモードのトップレベル最大ループ数（呼び出し値〜30 にクランプ） |
+| `PICOAGENT_SUPER_AGENT_MAX_STEPS` | `12` | AIモデル | スーパーエージェントモードのトップレベル最大ループ数。宣言した整数範囲を満たさない値は理由つきで拒否し、範囲内へ丸めない |
 | `PICOAGENT_TOOL_CONTEXT_TURNS` | `5` | AIモデル | モデルへ渡すスキル定義の並び順を決めるときに見る、過去の利用者発話の件数。`0` ですべての発話を見る。候補から外す判断には使わず、コンテキストに収まる分はすべて渡す |
 | `PICOAGENT_MULTI_AI_MODE` | `single` | 複数AI | `single` / `consensus` / `collaborate` / `divide`。既定は従来どおり単発。単発以外は Pro 対象の `subagent` を通るため、Pro でなければ保存を拒否し、実行時にライセンスが切れていれば理由を画面へ返す。参加AI設定が壊れていても`single`へ戻す保存は受け付ける |
 | `PICOAGENT_MULTI_AI_AGENTS` | `[]` | 複数AI | 参加AI（name / provider / model / focus）のJSON配列。複数モードでは2〜8件 |
@@ -60,6 +62,7 @@
 | `PICOAGENT_CHARACTER` | `mugi` | 基本 | 選択中キャラクターのID |
 | `PICOAGENT_CHARACTER_OVERRIDES` | `{}` | 基本 | キャラクターIDごとの人格設定上書き |
 | `PICOAGENT_LIVE2D_SDK_OVERRIDES` | `{}` | 基本 | 複数世代のモデルを持つLive2Dキャラクターについて、キャラクターIDごとに `"4"` / `"5"` を固定する。未指定は `auto` |
+| `PICOAGENT_RENDERER_OVERRIDES` | `{}` | 基本 | キャラIDごとの明示2D指定（`{ "<ID>": "image" }`）。画像構造に対応するキャラだけ選べる。未指定は登録表の最優先対応方式、通常描画へ戻すときはそのIDを削除する。設定「キャラ選択」で通常／2Dを選び保存する。読込失敗時の自動切替には使わない |
 | `PICOAGENT_COMPANION_MODE` | `both` | 基本 | 相棒の用途（`life` / `work` / `both`）。初回案内では質問せず`both`を保存し、設定画面で変更する |
 | `PICOAGENT_RELATIONSHIP_MEMORY_ENABLED` | `true` | 基本 | キャラクター別の関係性と共有作業記録を保存する。OFFでは既存データを消さず、更新とAI文脈への差し込みを止める |
 | `PICOAGENT_ONBOARDING_DONE` | `false` | 基本 | 初回3択案内の完了状態 |
@@ -67,14 +70,14 @@
 | `PICOAGENT_TTS_DEVICE` | `auto` | 音声 | 同梱 Aivis の推論デバイス（内部設定。通常UIでは非表示） |
 | `PICOAGENT_TTS_PORT` | `11436` | 音声 | 同梱 Aivis のポート（内部設定。通常UIでは非表示。旧既定 `10102` は起動時に `11436` へ移行） |
 | `PICOAGENT_TTS_ENDPOINT` | （空） | 音声 | 外部VOICEVOX互換APIのURL。空ならPicoAgent専用Aivisを使う。指定時はこのPC上のHTTP URLだけを許可し、外部APIの起動・モデル導入・データ管理は行わない |
-| `PICOAGENT_TTS_SPEAKER` | `888753760` | 音声 | Aivis の speaker/style ID（内部設定。通常UIでは非表示） |
+| `PICOAGENT_TTS_SPEAKER` | `888753760` | 音声 | `character.json` に `voice` の指定がなく、キャラ別上書きもないキャラに使う全体のAivis speaker/style ID（内部設定。通常UIでは非表示）。声の解決失敗時の代替には使わない |
 | `PICOAGENT_TTS_VOLUME` | `35` | 音声 | キャラボイスとゲーム効果音の共通音量（0〜100）。人が感じる音量に合わせた共通カーブでフロントへ即反映し、1%は実効ゲイン0.0001とする。ゲーム画面の「消音」は効果音だけを追加で止める。ミュートまたは0では全キャラの口パクも停止 |
-| `PICOAGENT_TTS_CHARACTER_OVERRIDES` | `{}` | 音声 | キャラクターIDごとの Aivis speaker/style ID 上書き（「キャラの音声」で編集。任意で `modelUuid` / `modelName` / `speakerUuid` / `styleName` / `sourceUrl` も保持） |
+| `PICOAGENT_TTS_CHARACTER_OVERRIDES` | `{}` | 音声 | キャラクターIDごとのAivis speaker/style ID上書き（「キャラの音声」で編集。任意で `modelUuid` / `modelName` / `speakerUuid` / `styleName` / `sourceUrl` も保持）。manifestの既定声より優先し、空欄へ戻すとパック既定声を使う。UUID・スタイルの解決失敗は無音で理由を通知し、別の声へ切り替えない |
 | `PICOAGENT_LOCAL_MODEL_PRESET` | `auto`（初回に `lfm25_2_6b` を保存） | local | ローカルモデルプリセット（`lfm25_2_6b`: LFM2.5 2.6B QAD/約1.59GB、`small`: Gemma 4 E2B/約3.1GB、`balanced`: Gemma 4 E4B/約5.0GB、`large`: Gemma 4 12B/約7.1GB、`qwen35_4b`: Qwen3.5 4B/約2.7GB、`qwen35_9b`: Qwen3.5 9B/約5.7GB、`gpt_oss_20b`: OpenAI gpt-oss-20b/約12.1GB、`phi4mini`: Phi-4 mini/約2.5GB、互換用`lfm25_1_2b_jp`／`llmjp4_8b`、`custom`）。既存の明示選択は変更せず、旧プリセットIDは現行候補へ自動移行する |
 | `PICOAGENT_MODEL_URL` | LFM2.5 2.6B QAD Q4_0 GGUF | local | 同梱エンジンが取得するモデル URL |
 | `PICOAGENT_LOCAL_PORT` | `11435` | local | 同梱エンジンのポート |
 | `PICOAGENT_LOCAL_VISION_ENABLED` | `false` | local | Gemma 4 E2B（small）の共通画像入力。通常チャットの画像添付とスキルで共有し、ゲーム設定には依存しない。`setup local-vision`で追加資産を明示導入する。保存時にエンジンを再起動して反映し、通常起動で追加取得しない |
-| `PICOAGENT_LOCAL_CTX` | `32768` | local | コンテキスト長。保存値と環境変数が未設定の場合だけ選択プリセットの値を保存する。**下限は 32,768 で、これより小さい保存値（旧既定の 8,192 など）は読み取り時に引き上げる**。全スキル定義だけで約16,000トークンあり、狭いコンテキストではモデルへ渡せるスキルが数件まで削られるため |
+| `PICOAGENT_LOCAL_CTX` | `32768` | local | コンテキスト長。保存値と環境変数が未設定の場合だけ選択プリセットの値を保存する。下限32,768を満たさない保存値や環境値は理由つきで拒否し、自動で引き上げない。旧既定8,192などを保存している場合は設定を32,768以上へ修正する。全スキル定義だけで約16,000トークンあるため狭い値は使わない |
 | `PICOAGENT_LOCAL_NGL` | `999` | local | GPU へオフロードするレイヤ数（`999`=全レイヤ優先 / `0`=CPU 固定） |
 | `PICOAGENT_LOCAL_GPU_DEVICE` | （空=既定先頭） | local | 使用 GPU の指定（複数 GPU 環境向け、例 `Vulkan1`）。保存名は同じバックエンド候補だけへ渡し、CUDA等の別候補は各方式の既定先頭デバイスで起動する |
 | `OLLAMA_HOST` | `http://127.0.0.1:11434` | ollama | Ollama 接続先 |
@@ -136,11 +139,11 @@
 | `PICOAGENT_SCHEDULED_TOOL_ALLOWLIST` | `time,weather,web_fetch` | task_scheduler | 無人スケジュール実行を明示的に許可するスキル名（カンマ区切り） |
 | `PICOAGENT_CLIPBOARD_MAX_CHARS` | `3000` | clipboard_text | クリップボード取得の最大文字数（500〜8000） |
 | `PICOAGENT_MEETING_ROOT` | （旧キー） | meeting_recorder | 旧キー。設定画面からは廃止。設定済みなら既存利用者向けに追加許可ルートとしてだけ引き継ぐ |
-| `PICOAGENT_TRANSCRIBE_PROGRAM` | 空 | meeting_recorder / whisper_transcribe | ローカル文字起こし実行ファイル。手動設定が最優先、空なら同梱 `whisper-cli`。同梱CLIはポートを開かない |
-| `PICOAGENT_TRANSCRIBE_MODEL` | 空 | meeting_recorder / whisper_transcribe | ローカルWhisperモデルのパス。手動設定が最優先、空なら同梱モデル |
+| `PICOAGENT_TRANSCRIBE_PROGRAM` | 空 | meeting_recorder / whisper_transcribe | ローカル文字起こし実行ファイル。手動設定が最優先、空なら同梱 `whisper-cli`。コマンド名だけの明示指定時は共通探索から解決。未導入・欠損は導入／修復エラー。同梱CLIはポートを開かない |
+| `PICOAGENT_TRANSCRIBE_MODEL` | 空 | meeting_recorder / whisper_transcribe | ローカルWhisperモデルのパス。手動設定が最優先、空なら共通配置正本の固定 `models/ggml-small.bin`。別名のモデルを自動探索しない。`WHISPER_MODEL` を変えて導入したモデルもここへ明示する |
 | `PICOAGENT_TRANSCRIBE_ARGS` | `-m {model} -f {audio} -otxt -of {output_stem}` | meeting_recorder / whisper_transcribe | 文字起こし実行時の引数テンプレート |
 | `PICOAGENT_TRANSCRIBE_DIARIZE_ARGS` | `-tdrz` | meeting_recorder / whisper_transcribe | `diarize=true` 時に追加するローカル話者分類引数 |
-| `PICOAGENT_TRANSCRIBE_TIMEOUT_SECS` | `1800` | meeting_recorder / whisper_transcribe | ローカル文字起こしタイムアウト秒（10〜7200） |
+| `PICOAGENT_TRANSCRIBE_TIMEOUT_SECS` | `1800` | meeting_recorder / whisper_transcribe | ローカル文字起こしタイムアウト秒（10〜7200）。ファイル指定は設定秒、音声入力はその範囲内で最大120秒。不正値は両経路で拒否 |
 | `PICOAGENT_WEATHER_DEFAULT_LOCATION` | （なし） | weather | 天気の地点。保存済み地点を正本とし、空欄の場合だけHTTPSのIP位置情報から現在地を概算する。旧版が自動保存した `Tokyo` は未設定へ移行し、東京を固定する場合は「東京都」等を保存する |
 | `PICOAGENT_WEATHER_DISABLE_AUTO_LOCATION` | `false` | weather | 地名未指定時の現在地IP自動取得を無効化 |
 | `PICOAGENT_WEATHER_TIMEOUT_SECS` | `15` | weather | 天気API待ち時間（秒、3〜60） |
@@ -227,7 +230,7 @@
 | `PICOAGENT_TODOIST_TOKEN` | （なし） | todoist | Todoist API token |
 | `PICOAGENT_TODOIST_PROJECT_ID` | （なし） | todoist | Todoist 既定 project ID |
 | `PICOAGENT_TODOIST_TIMEOUT_SECS` | `15` | todoist | Todoist API の待ち時間（秒、3〜60） |
-| `PICOAGENT_HTTP_ALLOWED_DOMAINS` | （なし） | http_api | 汎用HTTPで呼べるドメイン（必須、カンマ区切り） |
+| `PICOAGENT_HTTP_ALLOWED_DOMAINS` | （なし） | http_api | 汎用HTTPで呼べるドメイン（必須、カンマ区切り）。全リダイレクト先でも照合し、公開IPだけを許可。DNS解決先へ直接接続を固定するため環境プロキシは使わず、プロキシ必須環境では取得できない |
 | `PICOAGENT_HTTP_BEARER_TOKEN` | （なし） | http_api | 汎用HTTPに付与する Bearer token |
 | `PICOAGENT_HTTP_API_KEY_HEADER` | `X-API-Key` | http_api | 汎用HTTPに付与する API key ヘッダー名 |
 | `PICOAGENT_HTTP_API_KEY_VALUE` | （なし） | http_api | 汎用HTTPに付与する API key 値 |
@@ -251,15 +254,15 @@
 | `PICOAGENT_TOOL_OUTPUT_MAX_CHARS` | `auto` | 基本 | ツール出力の最大文字数。`auto` は使用中モデルのコンテキスト長から算出（local は `PICOAGENT_LOCAL_CTX` の45%、下限1,000／上限60,000。クラウドは24,000） |
 | `PICOAGENT_DOCUMENT_ROOT` | （旧キー） | ms_office / document_convert / pdf_tools | 旧キー。`PICOAGENT_ALLOWED_ROOT` へ統合。設定済みなら許可ルートとして引き継ぐ |
 | `PICOAGENT_MS_OFFICE_TIMEOUT_SECS` | `120` | ms_office | Microsoft Office 操作タイムアウト秒（5〜300） |
-| `PICOAGENT_LIBREOFFICE_PATH` | `soffice` | document_convert | LibreOffice 実行ファイルパス |
+| `PICOAGENT_LIBREOFFICE_PATH` | 空 | document_convert | LibreOffice実行ファイルの明示指定。空ならPicoAgent管理下の同梱物のみ。コマンド名 `soffice` を明示したときだけ共通探索から解決 |
 | `PICOAGENT_DOCUMENT_CONVERT_TIMEOUT_SECS` | `120` | document_convert | 文書変換タイムアウト秒（5〜300） |
-| `PICOAGENT_QPDF_PATH` | `qpdf` | pdf_tools | qpdf 実行ファイルパス |
-| `PICOAGENT_PDFTOTEXT_PATH` | `pdftotext` | pdf_tools | Poppler pdftotext 実行ファイルパス（空なら同梱→PATH） |
-| `PICOAGENT_PANDOC_PATH` | `pandoc` | document_convert | Pandoc 実行ファイルパス（空ならPicoAgent内→PATH） |
-| `PICOAGENT_MAGICK_PATH` | 空 | image_tools | ImageMagick 実行ファイルパス（空ならPicoAgent内→PATH。v7 `magick` が無ければ v6 `convert`/`identify`） |
+| `PICOAGENT_QPDF_PATH` | 空 | pdf_tools | qpdf実行ファイルの明示指定。空なら同梱のみ。コマンド名の明示指定時だけ共通探索から解決 |
+| `PICOAGENT_PDFTOTEXT_PATH` | 空 | pdf_tools | Poppler pdftotext実行ファイルの明示指定。空なら同梱のみ。コマンド名の明示指定時だけ共通探索から解決 |
+| `PICOAGENT_PANDOC_PATH` | 空 | document_convert | Pandoc実行ファイルの明示指定。空なら同梱のみ。コマンド名の明示指定時だけ共通探索から解決 |
+| `PICOAGENT_MAGICK_PATH` | 空 | image_tools | ImageMagick実行ファイルの明示指定。空なら同梱 `magick` のみ。コマンド名の明示指定時だけ共通探索から解決。v6 `convert` / `identify` は明示指定時だけ使う |
 | `PICOAGENT_IMAGE_TOOLS_TIMEOUT_SECS` | `120` | image_tools | 画像操作タイムアウト秒（5〜300） |
-| `PICOAGENT_FFMPEG_PATH` | 空 | whisper_transcribe | ffmpeg 実行ファイルパス（非wav音声の16kHz WAV前処理用。空ならPicoAgent内→PATH） |
-| `PICOAGENT_RIPGREP_PATH` | 空 | doc_search / grep_search | ripgrep 実行ファイルパス（空ならPicoAgent内→PATH。無ければ内蔵走査） |
+| `PICOAGENT_FFMPEG_PATH` | 空 | whisper_transcribe | ffmpeg実行ファイルの明示指定（非wav音声の16kHz WAV前処理用）。空なら同梱のみ。コマンド名の明示指定時だけ共通探索から解決 |
+| `PICOAGENT_RIPGREP_PATH` | 空 | doc_search / grep_search | ripgrep実行ファイルの明示指定。空なら同梱のみ。コマンド名 `rg` の明示指定時だけ共通探索から解決。欠損・実行失敗はエラーとし、内蔵検索へ切り替えない |
 | `PICOAGENT_SETUP_TOOLS` | （空） | xtask | `cargo xtask setup tools` で取得対象を絞る開発用環境変数（カンマ区切り） |
 | `PICOAGENT_API_ENABLED` | `false` | ローカルAPI | ローカル HTTP API を有効化（127.0.0.1 のみ。変更は再起動後に反映） |
 | `PICOAGENT_API_PORT` | `11500` | ローカルAPI | ローカル API のポート |
@@ -272,3 +275,77 @@
 各キーは環境変数としても渡せる（既定値としての参照のみ。保存先は常に `config.json`）。
 
 ---
+
+## 整数数量設定の範囲正本
+
+整数数量だけを扱う表です。ID・座標・倍率は対象外です。空欄は宣言の既定値、`auto`は可とした項目だけで指定できます。上限の大きい値も精度を落とさず検証し、実行画面で安全な整数範囲を超える居眠り時間は十進文字列から正確に比較します。
+
+| キー | 既定 | 最小 | 最大 | 単位 | auto |
+|---|---|---|---|---|---|
+| `PICOAGENT_AGENT_CLI_TIMEOUT_SECS` | `180` | `10` | `600` | 秒 | 不可 |
+| `PICOAGENT_API_PORT` | `11500` | `1` | `65535` | — | 不可 |
+| `PICOAGENT_BLUESKY_TIMEOUT_SECS` | `20` | `3` | `60` | 秒 | 不可 |
+| `PICOAGENT_BOOT_TIMEOUT_MS` | `120000` | `3000` | `120000` | ms | 不可 |
+| `PICOAGENT_BROWSER_MAX_CHARS` | `auto` | `0` | `9223372036854775807` | 文字 | 可 |
+| `PICOAGENT_BROWSER_PORT` | `11437` | `1` | `65535` | — | 不可 |
+| `PICOAGENT_BROWSER_TIMEOUT_SECS` | `30` | `5` | `180` | 秒 | 不可 |
+| `PICOAGENT_BUBBLE_FONT_PX` | `13` | `10` | `28` | px | 不可 |
+| `PICOAGENT_CHATTER_MAX_SECS` | `240` | `30` | `3600` | 秒 | 不可 |
+| `PICOAGENT_CHATTER_MIN_SECS` | `90` | `30` | `3600` | 秒 | 不可 |
+| `PICOAGENT_CHATTER_TOPIC_TIMEOUT_SECS` | `8` | `3` | `30` | 秒 | 不可 |
+| `PICOAGENT_CLIPBOARD_MAX_CHARS` | `3000` | `500` | `8000` | 文字 | 不可 |
+| `PICOAGENT_CODE_RUNNER_TIMEOUT_SECS` | `60` | `1` | `300` | 秒 | 不可 |
+| `PICOAGENT_COMMAND_TIMEOUT_SECS` | `30` | `1` | `120` | 秒 | 不可 |
+| `PICOAGENT_CURRENCY_TIMEOUT_SECS` | `15` | `3` | `60` | 秒 | 不可 |
+| `PICOAGENT_DESKTOP_MAX_OPS_PER_MIN` | `60` | `1` | `600` | 回 | 不可 |
+| `PICOAGENT_DISCORD_TIMEOUT_SECS` | `15` | `3` | `60` | 秒 | 不可 |
+| `PICOAGENT_DOCUMENT_CONVERT_TIMEOUT_SECS` | `120` | `5` | `300` | 秒 | 不可 |
+| `PICOAGENT_GAME_MAX_OPS` | `1` | `1` | `100` | 回 | 不可 |
+| `PICOAGENT_GITHUB_TIMEOUT_SECS` | `20` | `3` | `60` | 秒 | 不可 |
+| `PICOAGENT_GMAIL_CLEANUP_MAX_RESULTS` | `50` | `0` | `9223372036854775807` | 件 | 不可 |
+| `PICOAGENT_GMAIL_TIMEOUT_SECS` | `20` | `3` | `60` | 秒 | 不可 |
+| `PICOAGENT_GOOGLE_CALENDAR_TIMEOUT_SECS` | `20` | `3` | `60` | 秒 | 不可 |
+| `PICOAGENT_GOOGLE_DOCS_TIMEOUT_SECS` | `20` | `3` | `60` | 秒 | 不可 |
+| `PICOAGENT_GOOGLE_DRIVE_TIMEOUT_SECS` | `20` | `3` | `60` | 秒 | 不可 |
+| `PICOAGENT_GOOGLE_SHEETS_TIMEOUT_SECS` | `20` | `3` | `60` | 秒 | 不可 |
+| `PICOAGENT_GOOGLE_TASKS_TIMEOUT_SECS` | `15` | `3` | `60` | 秒 | 不可 |
+| `PICOAGENT_HTTP_METADATA_TIMEOUT_SECS` | `15` | `3` | `60` | 秒 | 不可 |
+| `PICOAGENT_HTTP_TIMEOUT_SECS` | `20` | `3` | `60` | 秒 | 不可 |
+| `PICOAGENT_IMAGE_TOOLS_TIMEOUT_SECS` | `120` | `5` | `300` | 秒 | 不可 |
+| `PICOAGENT_JIRA_TIMEOUT_SECS` | `20` | `3` | `60` | 秒 | 不可 |
+| `PICOAGENT_LINEAR_TIMEOUT_SECS` | `20` | `3` | `60` | 秒 | 不可 |
+| `PICOAGENT_LINKEDIN_TIMEOUT_SECS` | `20` | `3` | `60` | 秒 | 不可 |
+| `PICOAGENT_LOCAL_CTX` | `32768` | `32768` | `9223372036854775807` | トークン | 不可 |
+| `PICOAGENT_LOCAL_NGL` | `999` | `0` | `9223372036854775807` | レイヤ | 不可 |
+| `PICOAGENT_LOCAL_PORT` | `11435` | `1` | `65535` | — | 不可 |
+| `PICOAGENT_MARKET_TIMEOUT_SECS` | `15` | `3` | `60` | 秒 | 不可 |
+| `PICOAGENT_MASTODON_TIMEOUT_SECS` | `20` | `3` | `60` | 秒 | 不可 |
+| `PICOAGENT_MEMORY_MAX_ITEMS` | `80` | `10` | `200` | 件 | 不可 |
+| `PICOAGENT_MISSKEY_TIMEOUT_SECS` | `20` | `3` | `60` | 秒 | 不可 |
+| `PICOAGENT_MS_GRAPH_TIMEOUT_SECS` | `20` | `3` | `60` | 秒 | 不可 |
+| `PICOAGENT_MS_OFFICE_TIMEOUT_SECS` | `120` | `5` | `300` | 秒 | 不可 |
+| `PICOAGENT_MULTI_AGENT_MAX_CONCURRENCY` | `3` | `1` | `8` | 候補 | 不可 |
+| `PICOAGENT_NAP_MINUTES` | `15` | `0` | `9223372036854775807` | 分 | 不可 |
+| `PICOAGENT_NEWS_SCRAPE_MAX_ITEMS` | `8` | `1` | `12` | 件 | 不可 |
+| `PICOAGENT_NEWS_SCRAPE_TIMEOUT_SECS` | `15` | `3` | `60` | 秒 | 不可 |
+| `PICOAGENT_NOTION_TIMEOUT_SECS` | `20` | `3` | `60` | 秒 | 不可 |
+| `PICOAGENT_PDF_TIMEOUT_SECS` | `120` | `5` | `300` | 秒 | 不可 |
+| `PICOAGENT_REDDIT_TIMEOUT_SECS` | `20` | `3` | `60` | 秒 | 不可 |
+| `PICOAGENT_RESEARCH_TIMEOUT_SECS` | `15` | `3` | `60` | 秒 | 不可 |
+| `PICOAGENT_RSS_TIMEOUT_SECS` | `15` | `3` | `60` | 秒 | 不可 |
+| `PICOAGENT_SLACK_TIMEOUT_SECS` | `15` | `3` | `60` | 秒 | 不可 |
+| `PICOAGENT_STREAM_CHAT_FONT_PX` | `22` | `18` | `48` | px | 不可 |
+| `PICOAGENT_SUBAGENT_MAX_DEPTH` | `2` | `1` | `9223372036854775807` | 段 | 不可 |
+| `PICOAGENT_SUPER_AGENT_MAX_STEPS` | `12` | `1` | `30` | 回 | 不可 |
+| `PICOAGENT_TODOIST_TIMEOUT_SECS` | `15` | `3` | `60` | 秒 | 不可 |
+| `PICOAGENT_TOOL_CONTEXT_TURNS` | `5` | `0` | `9223372036854775807` | 件 | 不可 |
+| `PICOAGENT_TOOL_OUTPUT_MAX_CHARS` | `auto` | `1000` | `60000` | 文字 | 可 |
+| `PICOAGENT_TRANSCRIBE_TIMEOUT_SECS` | `1800` | `10` | `7200` | 秒 | 不可 |
+| `PICOAGENT_TRELLO_TIMEOUT_SECS` | `15` | `3` | `60` | 秒 | 不可 |
+| `PICOAGENT_TTS_PORT` | `11436` | `1` | `65535` | — | 不可 |
+| `PICOAGENT_TTS_VOLUME` | `35` | `0` | `100` | % | 不可 |
+| `PICOAGENT_WEATHER_TIMEOUT_SECS` | `15` | `3` | `60` | 秒 | 不可 |
+| `PICOAGENT_WEB_FETCH_TIMEOUT_SECS` | `20` | `3` | `60` | 秒 | 不可 |
+| `PICOAGENT_WEB_SEARCH_MAX_RESULTS` | `5` | `1` | `8` | 件 | 不可 |
+| `PICOAGENT_WEB_SEARCH_TIMEOUT_SECS` | `15` | `3` | `60` | 秒 | 不可 |
+| `PICOAGENT_X_TIMEOUT_SECS` | `20` | `3` | `60` | 秒 | 不可 |

@@ -65,6 +65,7 @@ async fn send_chunks(
     job_id: &str,
 ) -> Result<(), String> {
     let client = crate::tools::http::client();
+    let timeout = timeout(cfg, provider)?;
     let chunks = total.div_ceil(CHUNK_BYTES as u64);
     let mut offset = 0u64;
     let mut sent = 0u64;
@@ -86,7 +87,7 @@ async fn send_chunks(
         let end = offset + length as u64;
         let response = client
             .put(session)
-            .timeout(timeout(cfg, provider))
+            .timeout(timeout)
             .header(header::CONTENT_LENGTH, length)
             .header(
                 header::CONTENT_RANGE,
@@ -103,10 +104,9 @@ async fn send_chunks(
         }
         // 308 は Google の「続きを送れ」。OneDrive の途中応答 202 は is_success() に含まれる。
         if !(response.status().is_success() || response.status().as_u16() == 308) {
-            let status = response.status();
-            return Err(format!(
-                "エラー: {service}がアップロード中にHTTP {status}を返しました。"
-            ));
+            return crate::tools::http::service_body(cfg, service, Ok(response))
+                .await
+                .map(|_| ());
         }
         offset = end;
     }
@@ -232,13 +232,13 @@ async fn icloud_download(cfg: &Config, cloud_relative: &str, local_relative: &st
         .unwrap_or_else(|error| format!("エラー: AI Driveへ保存できません: {error}"))
 }
 
-fn timeout(cfg: &Config, provider: &str) -> Duration {
+fn timeout(cfg: &Config, provider: &str) -> Result<Duration, String> {
     let key = if provider == "google" {
         "PICOAGENT_GOOGLE_DRIVE_TIMEOUT_SECS"
     } else {
         "PICOAGENT_MS_GRAPH_TIMEOUT_SECS"
     };
-    crate::tools::http::timeout(cfg, key, 20, 3, 60)
+    cfg.duration_key(key)
 }
 
 fn token(cfg: &Config, provider: &str) -> Result<String, String> {
@@ -274,12 +274,6 @@ fn auth_error(provider: &str) -> String {
     format!("エラー: {provider} の認証更新が必要です（HTTP 401）。設定画面でアクセストークンを更新してからジョブを再試行してください。")
 }
 
-async fn response_text(response: reqwest::Response) -> String {
-    crate::tools::http::response_text(response)
-        .await
-        .unwrap_or_default()
-}
-
 async fn google_upload(
     cfg: &Config,
     path: &SafePath,
@@ -311,7 +305,7 @@ async fn google_upload(
     );
     let existing = match client
         .get(format!("{GOOGLE_API}/files"))
-        .timeout(timeout(cfg, "google"))
+        .timeout(crate::tool_try!(timeout(cfg, "google")))
         .bearer_auth(&token)
         .query(&[
             ("q", query.as_str()),
@@ -328,9 +322,17 @@ async fn google_upload(
         return auth_error("Google Drive");
     }
     let existing_status = existing.status();
-    let existing_body = response_text(existing).await;
+    let existing_body = crate::tool_try!(crate::tools::http::response_text(existing).await);
     if !existing_status.is_success() {
-        return format!("エラー: Google Driveが重複確認時にHTTP {existing_status}を返しました。");
+        return format!(
+            "エラー: {}",
+            crate::tools::http::safe_service_error(
+                cfg,
+                "Google Drive重複確認",
+                existing_status,
+                &existing_body
+            )
+        );
     }
     if serde_json::from_str::<Value>(&existing_body)
         .ok()
@@ -358,7 +360,7 @@ async fn google_upload(
     }
     let response = match client
         .post(format!("{GOOGLE_UPLOAD}/files?uploadType=resumable"))
-        .timeout(timeout(cfg, "google"))
+        .timeout(crate::tool_try!(timeout(cfg, "google")))
         .bearer_auth(&token)
         .header("X-Upload-Content-Length", total)
         .json(&metadata)
@@ -372,8 +374,7 @@ async fn google_upload(
         return auth_error("Google Drive");
     }
     if !response.status().is_success() {
-        let status = response.status();
-        return format!("エラー: Google Driveがアップロード開始時にHTTP {status}を返しました。");
+        return crate::tools::http::service_reply(cfg, Ok(response), "Google Drive").await;
     }
     // セッションURLは資格情報相当なので、ジョブ状態・ログ・結果へ保存しない。
     let Some(session) = response
@@ -430,7 +431,7 @@ async fn onedrive_upload(
     let client = crate::tools::http::client();
     let response = match client
         .post(endpoint)
-        .timeout(timeout(cfg, "onedrive"))
+        .timeout(crate::tool_try!(timeout(cfg, "onedrive")))
         .bearer_auth(&token)
         .json(&json!({"item":{"@microsoft.graph.conflictBehavior":"fail","name":display_name}}))
         .send()
@@ -443,9 +444,12 @@ async fn onedrive_upload(
         return auth_error("OneDrive");
     }
     let status = response.status();
-    let body = response_text(response).await;
+    let body = crate::tool_try!(crate::tools::http::response_text(response).await);
     if !status.is_success() {
-        return format!("エラー: OneDriveがアップロード開始時にHTTP {status}を返しました。");
+        return format!(
+            "エラー: {}",
+            crate::tools::http::safe_service_error(cfg, "OneDriveアップロード開始", status, &body)
+        );
     }
     // uploadUrlは事前認証済みURLなので、永続化もログ出力もしない。
     let Some(session) = serde_json::from_str::<Value>(&body).ok().and_then(|value| {
@@ -492,7 +496,7 @@ async fn download(cfg: &Config, provider: &str, file_id: &str, relative: &str) -
     };
     let response = match crate::tools::http::client()
         .get(url)
-        .timeout(timeout(cfg, provider))
+        .timeout(crate::tool_try!(timeout(cfg, provider)))
         .bearer_auth(token)
         .send()
         .await
@@ -508,8 +512,7 @@ async fn download(cfg: &Config, provider: &str, file_id: &str, relative: &str) -
         });
     }
     if !response.status().is_success() {
-        let status = response.status();
-        return format!("エラー: クラウドストレージがHTTP {status}を返しました。");
+        return crate::tools::http::service_reply(cfg, Ok(response), "クラウドストレージ").await;
     }
     if response
         .content_length()

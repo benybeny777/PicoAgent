@@ -15,7 +15,10 @@ use tokio::io::AsyncWriteExt;
 
 use crate::commands::AppState;
 
-const DEFAULT_PORT: u16 = 11436;
+const DEFAULT_PORT: u16 = match crate::config::ints::TTS_PORT.default {
+    Some(value) => value as u16,
+    None => panic!("音声ポートには整数の既定が必要です"),
+};
 const LEGACY_DEFAULT_PORT: u16 = 10102;
 const DEFAULT_DEVICE: &str = "auto";
 const STARTUP_CHECKS: usize = 360;
@@ -66,48 +69,39 @@ impl Default for AivisState {
     }
 }
 
-pub fn port(app: &tauri::AppHandle, state: &AppState) -> u16 {
-    let raw = state
-        .config
-        .get("PICOAGENT_TTS_PORT", &DEFAULT_PORT.to_string());
-    let port = match raw.parse::<u16>() {
-        Ok(port) => port,
-        Err(error) => {
-            append_log_best_effort(
-                app,
-                &format!(
-                    "Aivis ポート設定が不正なため既定値 {DEFAULT_PORT} を使います: {raw} ({error})"
-                ),
-            );
-            DEFAULT_PORT
-        }
-    };
+fn configured_port(
+    config: &crate::config::Config,
+    migrate: impl FnOnce(String) -> Result<(), String>,
+) -> Result<u16, String> {
+    let port = config.int(&crate::config::ints::TTS_PORT)? as u16;
     if port == LEGACY_DEFAULT_PORT {
-        let next = DEFAULT_PORT.to_string();
-        if let Err(error) = state.config.set_string("PICOAGENT_TTS_PORT", next.clone()) {
-            append_log_best_effort(
-                app,
-                &format!("Aivis ポートの旧既定値移行に失敗しました: {error}"),
-            );
-        } else {
-            append_log_best_effort(
-                app,
-                &format!(
-                    "Aivis ポートを旧既定値 {LEGACY_DEFAULT_PORT} から {next} へ移行しました。"
-                ),
-            );
-        }
-        return DEFAULT_PORT;
+        // docs/SETTINGS.md「PICOAGENT_TTS_PORT」の既存移行。保存成功後だけ新ポートを使う。
+        migrate(DEFAULT_PORT.to_string())?;
+        return Ok(DEFAULT_PORT);
     }
-    port
+    Ok(port)
 }
 
-pub fn endpoint(app: &tauri::AppHandle, state: &AppState) -> String {
+pub fn port(app: &tauri::AppHandle, state: &AppState) -> Result<u16, String> {
+    configured_port(&state.config, |next| {
+        state
+            .config
+            .set_string("PICOAGENT_TTS_PORT", next.clone())
+            .map_err(|error| format!("Aivis ポートの旧既定値移行に失敗しました: {error}"))?;
+        append_log_best_effort(
+            app,
+            &format!("Aivis ポートを旧既定値 {LEGACY_DEFAULT_PORT} から {next} へ移行しました。"),
+        );
+        Ok(())
+    })
+}
+
+pub fn endpoint(app: &tauri::AppHandle, state: &AppState) -> Result<String, String> {
     let external = state.config.get("PICOAGENT_TTS_ENDPOINT", "");
     if !external.trim().is_empty() {
-        return external.trim().trim_end_matches('/').to_string();
+        return Ok(external.trim().trim_end_matches('/').to_string());
     }
-    format!("http://127.0.0.1:{}", port(app, state))
+    Ok(format!("http://127.0.0.1:{}", port(app, state)?))
 }
 
 pub fn uses_external_endpoint(state: &AppState) -> bool {
@@ -249,14 +243,18 @@ async fn fetch_speakers(endpoint: &str) -> anyhow::Result<Vec<Value>> {
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(20))
         .build()?;
-    let response = client.get(format!("{endpoint}/speakers")).send().await?;
+    let response = client
+        .get(format!("{endpoint}/speakers"))
+        .send()
+        .await
+        .map_err(reqwest::Error::without_url)?;
     if !response.status().is_success() {
         anyhow::bail!(
             "読み上げエンジン（AivisSpeech）が音声一覧を返しませんでした（HTTP {}）。設定の「追加機能」から再導入を試してください。",
             response.status()
         );
     }
-    let speakers: Value = response.json().await?;
+    let speakers: Value = response.json().await.map_err(reqwest::Error::without_url)?;
     speakers
         .as_array()
         .cloned()
@@ -271,13 +269,21 @@ async fn speaker_uuid_available(endpoint: &str, speaker_uuid: &str) -> anyhow::R
 }
 
 /// speaker_uuid（＋任意でスタイル名）から、合成に使う実 style ID を `/speakers` から解決する。
-/// スタイル名が一致しなければ先頭スタイルを使う。
+/// 指定スタイルが無ければ失敗する。未指定のときだけ先頭を使う。
 pub async fn resolve_style_id(
     endpoint: &str,
     speaker_uuid: &str,
     style_name: Option<&str>,
 ) -> anyhow::Result<String> {
     let speakers = fetch_speakers(endpoint).await?;
+    resolve_style_id_in(&speakers, speaker_uuid, style_name)
+}
+
+fn resolve_style_id_in(
+    speakers: &[Value],
+    speaker_uuid: &str,
+    style_name: Option<&str>,
+) -> anyhow::Result<String> {
     let speaker = speakers
         .iter()
         .find(|speaker| speaker.get("speaker_uuid").and_then(Value::as_str) == Some(speaker_uuid))
@@ -288,16 +294,12 @@ pub async fn resolve_style_id(
         .get("styles")
         .and_then(Value::as_array)
         .ok_or_else(|| anyhow::anyhow!("speaker_uuid={speaker_uuid} に styles がありません。"))?;
-    let style = style_name
-        .and_then(|name| {
-            styles
-                .iter()
-                .find(|style| style.get("name").and_then(Value::as_str) == Some(name))
-        })
-        .or_else(|| styles.first())
-        .ok_or_else(|| {
-            anyhow::anyhow!("speaker_uuid={speaker_uuid} に利用可能な style がありません。")
-        })?;
+    let style = match style_name {
+        Some(name) => styles.iter().find(|style| style.get("name").and_then(Value::as_str) == Some(name))
+            .ok_or_else(|| anyhow::anyhow!("speaker_uuid={speaker_uuid} に指定スタイル「{name}」がありません。利用可能: {}",
+                styles.iter().filter_map(|style| style.get("name").and_then(Value::as_str)).collect::<Vec<_>>().join("、")))?,
+        None => styles.first().ok_or_else(|| anyhow::anyhow!("speaker_uuid={speaker_uuid} に利用可能なstyleがありません。"))?,
+    };
     let id = style
         .get("id")
         .and_then(Value::as_i64)
@@ -1177,7 +1179,7 @@ fn spawn_engine(
     let Some(state) = app.try_state::<AppState>() else {
         anyhow::bail!("AppState を取得できません。");
     };
-    let port = port(app, &state);
+    let port = port(app, &state).map_err(anyhow::Error::msg)?;
     command.args(["--host", "127.0.0.1", "--port"]);
     command.arg(port.to_string());
     if device.use_gpu() {
@@ -1241,9 +1243,10 @@ pub fn start_background(app: &tauri::AppHandle) -> anyhow::Result<()> {
         anyhow::bail!("AppState を取得できません。");
     };
     if uses_external_endpoint(&state) {
-        validate_external_endpoint(&endpoint(app, &state))?;
+        validate_external_endpoint(&endpoint(app, &state).map_err(anyhow::Error::msg)?)?;
         return Ok(());
     }
+    port(app, &state).map_err(anyhow::Error::msg)?;
     if has_running_child(app) {
         return Ok(());
     }
@@ -1285,8 +1288,8 @@ pub fn start_background(app: &tauri::AppHandle) -> anyhow::Result<()> {
 }
 
 // 同梱 Aivis が応答可能（/version が 200）かを返す。接続不可は false に正規化する。
-pub async fn is_ready(app: &tauri::AppHandle, state: &AppState) -> bool {
-    is_up(&endpoint(app, state)).await
+pub async fn is_ready(app: &tauri::AppHandle, state: &AppState) -> Result<bool, String> {
+    Ok(is_up(&endpoint(app, state)?).await)
 }
 
 pub async fn ensure_started(app: &tauri::AppHandle) -> anyhow::Result<()> {
@@ -1299,7 +1302,7 @@ pub async fn ensure_started(app: &tauri::AppHandle) -> anyhow::Result<()> {
         return Ok(());
     }
     let app_state = app.state::<AppState>();
-    let endpoint = endpoint(app, &app_state);
+    let endpoint = endpoint(app, &app_state).map_err(anyhow::Error::msg)?;
     if uses_external_endpoint(&app_state) {
         validate_external_endpoint(&endpoint)?;
         anyhow::ensure!(
@@ -1468,6 +1471,69 @@ fn terminate_managed_child(app: &tauri::AppHandle) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn 音声ポート不正値は移行や既定ポート接続へ進めない() {
+        let cfg = crate::config::Config::new();
+        for value in ["65536", "bad", "1.5", "-1"] {
+            cfg.set("PICOAGENT_TTS_PORT", value);
+            let error =
+                super::configured_port(&cfg, |_| panic!("不正値を移行してはいけない")).unwrap_err();
+            assert!(error.contains("PICOAGENT_TTS_PORT"));
+        }
+        cfg.set("PICOAGENT_TTS_PORT", "12400");
+        assert_eq!(
+            super::configured_port(&cfg, |_| panic!("利用者のポートを移行してはいけない")).unwrap(),
+            12400
+        );
+    }
+
+    #[test]
+    fn 旧音声ポートは保存に成功した場合だけ移行する() {
+        let cfg = crate::config::Config::new();
+        cfg.set("PICOAGENT_TTS_PORT", "10102");
+        let mut saves = 0;
+        let port = super::configured_port(&cfg, |next| {
+            saves += 1;
+            assert_eq!(next, "11436");
+            cfg.set("PICOAGENT_TTS_PORT", &next);
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(port, 11436);
+        assert_eq!(saves, 1);
+        assert_eq!(
+            super::configured_port(&cfg, |_| panic!("移行済みは再保存しない")).unwrap(),
+            11436
+        );
+        cfg.set("PICOAGENT_TTS_PORT", "10102");
+        assert_eq!(
+            super::configured_port(&cfg, |_| Err("保存先へ書き込めません".to_string()))
+                .unwrap_err(),
+            "保存先へ書き込めません"
+        );
+        assert_eq!(cfg.int(&crate::config::ints::TTS_PORT).unwrap(), 10102);
+    }
+
+    #[test]
+    fn 話者の指定スタイルが無いときだけエラーで未指定は先頭を使う() {
+        let speakers = serde_json::json!([{"speaker_uuid":"speaker", "styles":[{"name":"ノーマル","id":123},{"name":"おちつき","id":456}]}]);
+        for (name, expected) in [
+            (None, Some("123")),
+            (Some("おちつき"), Some("456")),
+            (Some("無いスタイル"), None),
+            (Some(""), None),
+        ] {
+            let result = super::resolve_style_id_in(speakers.as_array().unwrap(), "speaker", name);
+            if let Some(expected) = expected {
+                assert_eq!(result.unwrap(), expected);
+            } else {
+                let error = result.unwrap_err().to_string();
+                assert!(error.contains("ノーマル") && error.contains("おちつき"));
+            }
+        }
+        assert!(super::resolve_style_id_in(&[], "speaker", None).is_err());
+    }
+
     use super::{
         interrupted_install_actions, replace_install_tree, validate_external_endpoint,
         InterruptedAction,

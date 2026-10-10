@@ -1,7 +1,6 @@
 // skills/rss_feed/mod.rs - RSS/Atom フィードの最新記事取得スキル。
 
 use std::io::Cursor;
-use std::time::Duration;
 
 use async_trait::async_trait;
 use feed_rs::parser;
@@ -13,7 +12,6 @@ use crate::config::Config;
 use crate::message::Field;
 
 const MAX_FEED_BYTES: usize = 1024 * 1024;
-const MAX_REDIRECTS: usize = 5;
 
 pub struct RssFeedTool;
 
@@ -49,12 +47,7 @@ impl Tool for RssFeedTool {
     fn config_schema(&self) -> Vec<Field> {
         vec![
             Field::new("PICOAGENT_RSS_DEFAULT_URL", "RSS既定URL", "text", ""),
-            Field::new(
-                "PICOAGENT_RSS_TIMEOUT_SECS",
-                "RSS取得待ち時間（秒、3〜60）",
-                "text",
-                "15",
-            ),
+            Field::int(&crate::config::ints::RSS_TIMEOUT_SECS),
         ]
     }
 
@@ -78,76 +71,33 @@ impl Tool for RssFeedTool {
             .and_then(Value::as_u64)
             .filter(|value| (1..=20).contains(value))
             .unwrap_or(5) as usize;
-        let timeout = cfg
-            .get("PICOAGENT_RSS_TIMEOUT_SECS", "15")
-            .parse::<u64>()
-            .ok()
-            .filter(|value| (3..=60).contains(value))
-            .unwrap_or(15);
-        let mut current = match Url::parse(&url) {
+        let url = match Url::parse(&url) {
             Ok(url) => url,
-            Err(error) => return format!("エラー: RSS URLを解析できません: {error}"),
+            Err(_) => return "エラー: RSS URLを解析できません".into(),
         };
-        let mut redirects = 0usize;
-        let response = loop {
-            let addresses = match crate::tools::http::public_http_addresses(&current).await {
-                Ok(addresses) => addresses,
-                Err(error) => return format!("エラー: RSS取得先を拒否しました: {error}"),
-            };
-            let host = current.host_str().unwrap_or_default();
-            let client = match reqwest::Client::builder()
-                .timeout(Duration::from_secs(timeout))
-                .user_agent("PicoAgent/1.0 (RSS tool)")
-                .redirect(reqwest::redirect::Policy::none())
-                .resolve_to_addrs(host, &addresses)
-                .build()
-            {
-                Ok(client) => client,
-                Err(error) => return format!("エラー: RSS取得の準備に失敗しました: {error}"),
-            };
-            let response = match client.get(current.clone()).send().await {
-                Ok(response) => response,
-                Err(error) => return format!("エラー: RSS取得に失敗しました: {error}"),
-            };
-            if !response.status().is_redirection() {
-                break response;
-            }
-            let Some(location) = response.headers().get(reqwest::header::LOCATION) else {
-                return "エラー: RSSのリダイレクト先がありません。".to_string();
-            };
-            let location = match location.to_str() {
-                Ok(location) => location,
-                Err(_) => return "エラー: RSSのリダイレクト先が不正です。".to_string(),
-            };
-            current = match current.join(location) {
-                Ok(next) => next,
-                Err(error) => {
-                    return format!("エラー: RSSのリダイレクト先を解析できません: {error}")
-                }
-            };
-            redirects += 1;
-            if redirects > MAX_REDIRECTS {
-                return format!("エラー: RSSのリダイレクトが{MAX_REDIRECTS}回を超えました。");
-            }
+        let request = crate::tools::http::GuardedRequest::get(
+            url.clone(),
+            crate::tools::http::UrlPolicy::PublicWeb,
+            crate::tool_try!(cfg.duration_secs(&crate::config::ints::RSS_TIMEOUT_SECS)),
+            MAX_FEED_BYTES,
+            "PicoAgent/1.0 (RSS tool)",
+        );
+        let response = match crate::tools::http::fetch_guarded(request).await {
+            Ok(response) => response,
+            Err(error) => return format!("エラー: {error}"),
         };
-        let status = response.status();
-        if !status.is_success() {
-            return format!("エラー: RSS URL が HTTP {} を返しました。", status);
+        if !response.status.is_success() {
+            return format!(
+                "エラー: {}",
+                crate::tools::http::safe_service_error(
+                    cfg,
+                    "RSS",
+                    response.status,
+                    &String::from_utf8_lossy(&response.body)
+                )
+            );
         }
-        let mut response = response;
-        let mut bytes = Vec::new();
-        loop {
-            match response.chunk().await {
-                Ok(Some(chunk)) if bytes.len().saturating_add(chunk.len()) > MAX_FEED_BYTES => {
-                    return format!(
-                        "エラー: RSS本文が大きすぎます（上限 {MAX_FEED_BYTES} バイト）。"
-                    );
-                }
-                Ok(Some(chunk)) => bytes.extend_from_slice(&chunk),
-                Ok(None) => break,
-                Err(error) => return format!("エラー: RSS本文の読み取りに失敗しました: {error}"),
-            }
-        }
+        let bytes = response.body;
         let feed = match parser::parse(Cursor::new(bytes)) {
             Ok(feed) => feed,
             Err(error) => return format!("エラー: RSS/Atom の解析に失敗しました: {}", error),
@@ -155,7 +105,7 @@ impl Tool for RssFeedTool {
         let title = feed
             .title
             .map(|text| text.content)
-            .unwrap_or_else(|| url.clone());
+            .unwrap_or_else(|| url.to_string());
         let mut out = format!("フィード: {}\n", title);
         for entry in feed.entries.iter().take(max_items) {
             let entry_title = entry
@@ -194,15 +144,14 @@ mod tests {
                 serde_json::json!({"url": "http://127.0.0.1/feed.xml"}),
             )
             .await;
-        assert!(result.contains("取得先を拒否"), "result: {result}");
+        assert!(result.contains("非公開IP"), "result: {result}");
     }
 
     #[test]
     fn リダイレクトごとにssrf検査する構造である() {
         let source = include_str!("mod.rs");
-        assert!(source.contains("redirect(reqwest::redirect::Policy::none())"));
-        assert!(source.contains("public_http_addresses(&current).await"));
-        assert!(source.contains("current.join(location)"));
-        assert!(source.contains("resolve_to_addrs(host, &addresses)"));
+        assert!(source.contains("crate::tools::http::fetch_guarded(request)"));
+        assert!(source.contains("UrlPolicy::PublicWeb"));
+        assert!(source.contains("MAX_FEED_BYTES"));
     }
 }

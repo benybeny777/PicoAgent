@@ -8,7 +8,7 @@ use async_trait::async_trait;
 use chrono::Local;
 use serde_json::{json, Value};
 
-use super::{config_guide, Tool, ToolReg};
+use super::{Tool, ToolReg};
 use crate::config::Config;
 use crate::message::Field;
 use crate::permissions::SafePath;
@@ -65,56 +65,6 @@ fn latest_file(cfg: &Config, root: &Path) -> Option<SafePath> {
     }
     // 走査で得たパスも許可判定を通してから返す。
     best.and_then(|(path, _)| crate::permissions::resolve(cfg, &path.to_string_lossy()).ok())
-}
-
-fn bundled_whisper_dirs() -> Vec<PathBuf> {
-    crate::components::runtime_dirs("whisper")
-}
-
-fn whisper_exe_name() -> &'static str {
-    if cfg!(windows) {
-        "whisper-cli.exe"
-    } else {
-        "whisper-cli"
-    }
-}
-
-fn bundled_whisper_dir() -> Option<PathBuf> {
-    bundled_whisper_dirs()
-        .into_iter()
-        .find(|path| path.join(whisper_exe_name()).exists())
-}
-
-fn first_bundled_model(dir: &Path) -> Option<PathBuf> {
-    let entries = std::fs::read_dir(dir.join("models")).ok()?;
-    let mut models: Vec<PathBuf> = entries
-        .flatten()
-        .map(|entry| entry.path())
-        .filter(|path| path.extension().and_then(|ext| ext.to_str()) == Some("bin"))
-        .collect();
-    models.sort();
-    models.into_iter().next()
-}
-
-fn transcribe_program(cfg: &Config) -> String {
-    let configured = cfg.get("PICOAGENT_TRANSCRIBE_PROGRAM", "");
-    if !configured.trim().is_empty() {
-        return configured;
-    }
-    bundled_whisper_dir()
-        .map(|dir| dir.join(whisper_exe_name()).to_string_lossy().to_string())
-        .unwrap_or_else(|| "whisper-cli".to_string())
-}
-
-fn transcribe_model(cfg: &Config) -> String {
-    let configured = cfg.get("PICOAGENT_TRANSCRIBE_MODEL", "");
-    if !configured.trim().is_empty() {
-        return configured;
-    }
-    bundled_whisper_dir()
-        .and_then(|dir| first_bundled_model(&dir))
-        .map(|path| path.to_string_lossy().to_string())
-        .unwrap_or_default()
 }
 
 fn output_stem(cfg: &Config, audio: &SafePath) -> Result<SafePath, String> {
@@ -182,14 +132,13 @@ async fn run_command(program: &str, args_list: &[String], timeout: u64) -> Resul
         .map_err(|error| format!("エラー: {error}"))
 }
 
-/// ffmpeg の実行パスを解決する。優先順: 明示設定 → 同梱（setup tools）→ PATH。
-fn ffmpeg_path(cfg: &Config) -> String {
+/// ffmpeg の実行パスを解決する。優先順: 明示設定 → 同梱（setup tools）。
+fn ffmpeg_path(cfg: &Config) -> Result<std::path::PathBuf, String> {
     crate::tools::resolve_cli_path(cfg, "PICOAGENT_FFMPEG_PATH", "ffmpeg", "ffmpeg")
 }
 
 /// 非 WAV 音声を ffmpeg で 16kHz モノラル WAV（whisper.cpp の推奨入力）へ前処理する。
-/// 変換した一時ファイルのパスを返す。WAV のままで良い場合や ffmpeg が使えない場合は
-/// None を返し、呼び出し側は元ファイルのまま続行する（グレースフルフォールバック）。
+/// WAVは変換不要としてNoneを返す。必要な変換が失敗したら理由を返して停止する。
 async fn convert_to_wav(cfg: &Config, audio: &SafePath) -> Result<Option<SafePath>, String> {
     let is_wav = audio.extension_lossy() == "wav";
     if is_wav {
@@ -219,12 +168,22 @@ async fn convert_to_wav(cfg: &Config, audio: &SafePath) -> Result<Option<SafePat
     .iter()
     .map(ToString::to_string)
     .collect();
-    match run_command(&ffmpeg_path(cfg), &args_list, 300).await {
+    match run_command(&ffmpeg_path(cfg)?.to_string_lossy(), &args_list, 300).await {
         Ok(output) if output.status.success() && out.exists() => Ok(Some(SafePath::app_owned(out))),
-        _ => {
-            // フォールバック許可: 変換できなければ元ファイルを直接 Whisper へ渡す。
-            remove_internal_file(&out)?;
-            Ok(None)
+        result => {
+            let error = match result {
+                Err(error) => error,
+                Ok(output) => format!(
+                    "音声をWAVへ変換できません: {}",
+                    String::from_utf8_lossy(&output.stderr)
+                ),
+            };
+            match remove_internal_file(&out) {
+                Ok(()) => Err(error),
+                Err(cleanup) => Err(format!(
+                    "{error}。一時ファイルの後始末にも失敗しました: {cleanup}"
+                )),
+            }
         }
     }
 }
@@ -240,16 +199,17 @@ fn remove_internal_file(path: &std::path::Path) -> Result<(), String> {
     }
 }
 
+/// 音声会話は120秒の応答期限を保つ。合法な設定待機時間の範囲内で短い方を使う。
+fn voice_input_timeout(cfg: &Config) -> Result<u64, String> {
+    Ok((cfg.int(&crate::config::ints::TRANSCRIBE_TIMEOUT_SECS)? as u64).min(120))
+}
+
 /// 音声ファイルを文字起こしして本文を返す（マイク入力コマンドなど内部利用向け）。
-/// スキル本体と同じ同梱 Whisper / 設定を使う。失敗はエラーメッセージ文字列で返す。
+/// 同じ設定を検査し、会話用の応答期限内で実行する。
 pub async fn transcribe_file(cfg: &Config, audio: &SafePath) -> Result<String, String> {
-    let model = transcribe_model(cfg);
-    if model.trim().is_empty() {
-        return Err(
-            "Whisper モデルが未設定です。cargo xtask setup whisper で同梱Whisperを取得するか、PICOAGENT_TRANSCRIBE_MODEL を設定してください。".to_string(),
-        );
-    }
-    let program = transcribe_program(cfg);
+    let timeout = voice_input_timeout(cfg)?;
+    let model = crate::tools::whisper::model(cfg)?;
+    let program = crate::tools::whisper::program(cfg)?;
     let converted = convert_to_wav(cfg, audio).await?;
     let source: &SafePath = converted.as_ref().unwrap_or(audio);
     let output_stem = output_stem(cfg, audio)?;
@@ -258,7 +218,7 @@ pub async fn transcribe_file(cfg: &Config, audio: &SafePath) -> Result<String, S
         "-m {model} -f {audio} -otxt -of {output_stem}",
     );
     let args_list = split_args_template(&template, source, &model, &output_stem);
-    let output = run_command(&program, &args_list, 120).await;
+    let output = run_command(&program, &args_list, timeout).await;
     if let Some(temp) = &converted {
         remove_internal_file(temp.as_path())?;
     }
@@ -316,7 +276,7 @@ impl Tool for WhisperTranscribeTool {
     }
 
     fn description(&self) -> String {
-        "PicoAgent管理下の同梱Whisper CLI、または明示設定したローカルWhisperで音声ファイルを文字起こしする。mp3/m4a 等は ffmpeg（同梱→PATH）で16kHz WAVへ自動前処理。常駐サーバやポートは使わない。".to_string()
+        "PicoAgent管理下の同梱Whisper CLI、または明示設定したローカルWhisperで音声ファイルを文字起こしする。mp3/m4a 等は ffmpeg（明示設定または同梱）で16kHz WAVへ自動前処理。常駐サーバやポートは使わない。".to_string()
     }
 
     fn examples(&self) -> Vec<&'static str> {
@@ -367,20 +327,17 @@ impl Tool for WhisperTranscribeTool {
             ),
             Field::new(
                 "PICOAGENT_FFMPEG_PATH",
-                "ffmpeg 実行ファイルパス（mp3/m4a等の前処理用。空ならPicoAgent内→PATH）",
+                "ffmpeg 実行ファイルパス（mp3/m4a等の前処理用。空ならPicoAgent管理下）",
                 "text",
                 "",
             ),
-            Field::new(
-                "PICOAGENT_TRANSCRIBE_TIMEOUT_SECS",
-                "Whisper文字起こしタイムアウト秒",
-                "text",
-                "1800",
-            ),
+            Field::int(&crate::config::ints::TRANSCRIBE_TIMEOUT_SECS),
         ]
     }
 
     async fn run(&self, cfg: &Config, args: Value) -> String {
+        let timeout =
+            crate::tool_try!(cfg.int(&crate::config::ints::TRANSCRIBE_TIMEOUT_SECS)) as u64;
         let base = meeting_root(cfg);
         let audio = if let Some(path_text) = args
             .get("audio_path")
@@ -407,15 +364,8 @@ impl Tool for WhisperTranscribeTool {
         if !audio.exists() {
             return format!("エラー: 音声ファイルが見つかりません: {}", audio.display());
         }
-        let model = transcribe_model(cfg);
-        if model.trim().is_empty() {
-            return config_guide(
-                "音声文字起こし",
-                &["PICOAGENT_TRANSCRIBE_MODEL"],
-                "cargo xtask setup whisper で同梱Whisperとモデルを取得するか、ローカルWhisperモデルのパスを指定してください。外部APIは使いません。",
-            );
-        }
-        let program = transcribe_program(cfg);
+        let model = crate::tool_try!(crate::tools::whisper::model(cfg));
+        let program = crate::tool_try!(crate::tools::whisper::program(cfg));
         // mp3/m4a 等は ffmpeg で 16kHz WAV へ前処理してから渡す（精度・互換性の向上）。
         let converted = match convert_to_wav(cfg, &audio).await {
             Ok(converted) => converted,
@@ -438,12 +388,6 @@ impl Tool for WhisperTranscribeTool {
                 .and_then(Value::as_bool)
                 .unwrap_or(false),
         );
-        let timeout = cfg
-            .get("PICOAGENT_TRANSCRIBE_TIMEOUT_SECS", "1800")
-            .parse::<u64>()
-            .ok()
-            .filter(|value| (10..=7200).contains(value))
-            .unwrap_or(1800);
         let output = run_command(&program, &args_list, timeout).await;
         if let Some(temp) = &converted {
             if let Err(error) = remove_internal_file(temp.as_path()) {
@@ -515,6 +459,20 @@ mod tests {
     use crate::permissions::SafePath;
     use crate::tools::Tool;
 
+    #[tokio::test]
+    async fn 必要な前処理が欠損したら元音声で続行しない() {
+        let dir = tempfile::tempdir().unwrap();
+        let audio = dir.path().join("input.mp3");
+        std::fs::write(&audio, b"audio").unwrap();
+        let cfg = crate::config::Config::new();
+        cfg.set(
+            "PICOAGENT_FFMPEG_PATH",
+            &dir.path().join("missing-ffmpeg").to_string_lossy(),
+        );
+        let result = convert_to_wav(&cfg, &SafePath::app_owned(audio)).await;
+        assert!(result.unwrap_err().contains("PICOAGENT_FFMPEG_PATH"));
+    }
+
     // ffmpeg がある環境だけで走る E2E（無ければ即成功で抜ける）。
     // sine 波の mp3 を生成し、16kHz WAV へ前処理できることを確認する。
     #[test]
@@ -538,6 +496,7 @@ mod tests {
         assert!(status.status.success());
 
         let cfg = crate::config::Config::new();
+        cfg.set("PICOAGENT_FFMPEG_PATH", "ffmpeg");
         let runtime = tokio::runtime::Runtime::new().unwrap();
         let converted = runtime.block_on(convert_to_wav(&cfg, &SafePath::app_owned(mp3.clone())));
         let wav = converted
@@ -593,6 +552,44 @@ mod tests {
             started.elapsed(),
             transcript.len()
         );
+    }
+    #[tokio::test]
+    async fn 不正な文字起こし待ち時間は前処理や出力先作成より前に返す() {
+        use crate::tools::meeting_recorder::MeetingRecorderTool;
+        let cases: [(&dyn Tool, serde_json::Value); 2] = [
+            (&WhisperTranscribeTool, serde_json::json!({})),
+            (
+                &MeetingRecorderTool,
+                serde_json::json!({"action":"transcribe"}),
+            ),
+        ];
+        for (tool, args) in cases {
+            let cfg = crate::config::Config::new();
+            cfg.set("PICOAGENT_TRANSCRIBE_TIMEOUT_SECS", "abc");
+            let result = tool.run(&cfg, args).await;
+            assert!(
+                result.contains("PICOAGENT_TRANSCRIBE_TIMEOUT_SECS"),
+                "{}: {result}",
+                tool.name()
+            );
+        }
+    }
+    #[tokio::test]
+    async fn 音声入力は有効設定と応答期限の短い方を使い不正なら前処理しない() {
+        let cfg = crate::config::Config::new();
+        for (configured, expected) in [("1800", 120), ("7200", 120), ("10", 10)] {
+            cfg.set("PICOAGENT_TRANSCRIBE_TIMEOUT_SECS", configured);
+            assert_eq!(super::voice_input_timeout(&cfg).unwrap(), expected);
+        }
+        cfg.set("PICOAGENT_TRANSCRIBE_TIMEOUT_SECS", "abc");
+        let result = super::transcribe_file(
+            &cfg,
+            &SafePath::app_owned(std::path::PathBuf::from("未使用の入力.mp3")),
+        )
+        .await;
+        assert!(result
+            .unwrap_err()
+            .contains("PICOAGENT_TRANSCRIBE_TIMEOUT_SECS"));
     }
 }
 

@@ -12,9 +12,11 @@ mod bundle_scope;
 mod character_learning;
 mod character_maker;
 mod character_pack;
+mod character_voice;
 mod commands;
 mod components;
 mod config;
+mod conversation_turn;
 mod daily;
 mod diagnostics;
 #[cfg(test)]
@@ -41,11 +43,13 @@ mod memory_embedding_install;
 mod menu;
 mod message;
 mod migration;
+mod notice;
 mod permissions;
 mod project_rules;
 mod providers;
 mod relationship;
 mod relationship_preset;
+mod renderer_setting;
 mod scene;
 mod scheduler;
 mod secret;
@@ -209,6 +213,7 @@ pub fn run() {
             commands::pet_reset_layout,
             commands::pet_save_scene,
             commands::pet_save_ui_pref,
+            commands::pet_set_character_renderer,
             menu::pet_menu,
             menu::pet_layout_menu,
             menu::pet_character_menu,
@@ -272,6 +277,13 @@ pub fn run() {
                         "設定の保存先を取得できないため、設定を保存しない読み取り専用状態で起動します: {error}"
                     )),
                 ),
+            }
+            for invalid in state.config.invalid_int_settings() {
+                if let (Some(key), Some(message)) = (invalid["key"].as_str(), invalid["message"].as_str()) {
+                    notice::emit(app.handle(), notice::Notice::background_failure(
+                        &format!("numeric-setting:{key}"), "数値設定を確認してください", message,
+                    ));
+                }
             }
             // 削除した失敗版を選択したままの旧設定は、2Dむぎへ一度だけ移す。
             // 保存に失敗しても起動は続ける（読み取り専用起動・空き容量不足でも画面は出す）。
@@ -343,7 +355,7 @@ pub fn run() {
             *state.memory_context.lock().unwrap() = memory::context(app.handle(), &state.config);
             // 履歴はキャラクター別。選択中キャラを文脈の持ち主として記録しておく。
             let character_id = state.config.get("PICOAGENT_CHARACTER", "mugi");
-            *state.character_id.lock().unwrap() = character_id.clone();
+            state.character.lock().unwrap().id = character_id.clone();
             let relationship_mode = state.config.get("PICOAGENT_COMPANION_MODE", "both");
             match relationship::load(app.handle(), &character_id, &relationship_mode) {
                 Ok(relationship) => {

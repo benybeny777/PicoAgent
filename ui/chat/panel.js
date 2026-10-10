@@ -65,6 +65,21 @@ export function createChatSource(context) {
 
   const status = createStatus(statusElement, { onBootText: text => context.boot?.status(text) });
   let variant = "bubble";
+  const fontErrors = { bubble: null, column: null };
+  const fontDiagnostic = el("div", { className: "quantity-diagnostic", hidden: true }, [], { role: "alert" });
+  const fontReason = el("p", {});
+  const fontSettings = el("button", { type: "button", textContent: "文字サイズの設定を開く" });
+  fontSettings.addEventListener("click", () => context.openSettings?.("display"));
+  fontDiagnostic.append(fontReason, fontSettings);
+  element.append(fontDiagnostic);
+  function refreshFontDiagnostic() {
+    const reason = fontErrors[variant];
+    fontReason.textContent = reason || "";
+    fontDiagnostic.hidden = !reason;
+    element.classList.toggle("quantity-invalid", Boolean(reason));
+    for (const child of element.children) if (child !== fontDiagnostic) child.inert = Boolean(reason);
+    reply.classList.toggle("quantity-hidden", Boolean(reason));
+  }
   let lastAssistantText = "";
 
   // ── 文字サイズ（見た目の適用はここ、保存は font-size.js） ─────────
@@ -212,23 +227,26 @@ export function createChatSource(context) {
       replayButton.hidden = active;
       if (handOff) (active ? stopButton : replayButton).focus();
     },
+    setNumberSettings(metadata) { fontSize.setNumberSettings(metadata); },
     setFontPx(px) {
-      const size = parseFloat(px);
-      if (!Number.isFinite(size) || size <= 0) return;
+      if (!Number.isInteger(px)) throw new Error("文字サイズは検証済みの整数で指定してください");
+      const size = px;
       applyFontPx(size);
       fontSize.setSize("bubble", size);
     },
     setStreamFontPx(px) {
-      const requested = Number(px);
-      const size = Number.isInteger(requested) && requested >= 18 && requested <= 48 ? requested : 22;
+      if (!Number.isInteger(px)) throw new Error("配信文字サイズは検証済みの整数で指定してください");
+      const size = px;
       applyStreamFontPx(size);
       fontSize.setSize("column", size);
     },
+    setFontError(kind, error) { fontErrors[kind] = error; refreshFontDiagnostic(); },
     update({ options, expanded }) {
       const nextVariant = options.variant === "column" ? "column" : "bubble";
       if (nextVariant !== variant) pager.cancel();
       variant = nextVariant;
       element.dataset.variant = variant;
+      refreshFontDiagnostic();
       fontSize.refresh();
       element.dataset.compact = String(Boolean(options.compact));
       element.classList.toggle("expanded", Boolean(expanded));

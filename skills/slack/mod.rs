@@ -18,15 +18,6 @@ const MAX_TEXT_CHARS: usize = 4000;
 
 pub struct SlackTool;
 
-fn parse_timeout(cfg: &Config) -> u64 {
-    // フォールバック許可: Slack の補助 timeout 設定が壊れていても既定値で続行する。
-    cfg.get("PICOAGENT_SLACK_TIMEOUT_SECS", "15")
-        .parse::<u64>()
-        .ok()
-        .filter(|value| (3..=60).contains(value))
-        .unwrap_or(15)
-}
-
 fn text_arg(args: &Value) -> Result<&str, String> {
     let text = args
         .get("text")
@@ -106,12 +97,7 @@ impl Tool for SlackTool {
                 "password",
                 "https://hooks.slack.com/services/...",
             ),
-            Field::new(
-                "PICOAGENT_SLACK_TIMEOUT_SECS",
-                "Slack API 待ち時間（秒、3〜60）",
-                "text",
-                "15",
-            ),
+            Field::int(&crate::config::ints::SLACK_TIMEOUT_SECS),
         ]
     }
 
@@ -121,7 +107,8 @@ impl Tool for SlackTool {
             .and_then(Value::as_str)
             .unwrap_or("send")
             .trim();
-        let timeout_secs = parse_timeout(cfg);
+        let timeout_secs =
+            crate::tool_try!(cfg.int(&crate::config::ints::SLACK_TIMEOUT_SECS)) as u64;
         let client = match reqwest::Client::builder()
             .timeout(Duration::from_secs(timeout_secs))
             .user_agent("PicoAgent/1.0 (Slack tool)")
@@ -143,14 +130,15 @@ impl Tool for SlackTool {
                 {
                     Ok(response) => response,
                     Err(error) => {
-                        return format!("エラー: Slack API への接続に失敗しました: {}", error)
+                        return format!(
+                            "エラー: Slack API への接続に失敗しました: {}",
+                            error.without_url()
+                        )
                     }
                 };
-                let status = response.status();
-                let body = crate::tool_response_text!(response);
-                if !status.is_success() {
-                    return format!("エラー: Slack API が HTTP {} を返しました。", status);
-                }
+                let body = crate::tool_try!(
+                    crate::tools::http::service_body(cfg, "Slack API", Ok(response)).await
+                );
                 let parsed: Value = crate::tool_response_json!(&body);
                 if parsed.get("ok").and_then(Value::as_bool).unwrap_or(false) {
                     return format!(
@@ -216,14 +204,15 @@ impl Tool for SlackTool {
             {
                 Ok(response) => response,
                 Err(error) => {
-                    return format!("エラー: Slack API への接続に失敗しました: {}", error)
+                    return format!(
+                        "エラー: Slack API への接続に失敗しました: {}",
+                        error.without_url()
+                    )
                 }
             };
-            let status = response.status();
-            let body = crate::tool_response_text!(response);
-            if !status.is_success() {
-                return format!("エラー: Slack API が HTTP {} を返しました。", status);
-            }
+            let body = crate::tool_try!(
+                crate::tools::http::service_body(cfg, "Slack API", Ok(response)).await
+            );
             let parsed: Value = crate::tool_response_json!(&body);
             if !parsed.get("ok").and_then(Value::as_bool).unwrap_or(false) {
                 return format!(
@@ -271,11 +260,13 @@ impl Tool for SlackTool {
                 Ok(response) if response.status().is_success() => {
                     "OK: Slack Webhook へ送信しました。".to_string()
                 }
-                Ok(response) => format!(
-                    "エラー: Slack Webhook が HTTP {} を返しました。",
-                    response.status()
+                Ok(response) => {
+                    crate::tools::http::service_reply(cfg, Ok(response), "Slack Webhook").await
+                }
+                Err(error) => format!(
+                    "エラー: Slack Webhook への接続に失敗しました: {}",
+                    error.without_url()
                 ),
-                Err(error) => format!("エラー: Slack Webhook への接続に失敗しました: {}", error),
             };
         }
 
@@ -294,13 +285,16 @@ impl Tool for SlackTool {
             .await;
         let response = match response {
             Ok(response) => response,
-            Err(error) => return format!("エラー: Slack API への接続に失敗しました: {}", error),
+            Err(error) => {
+                return format!(
+                    "エラー: Slack API への接続に失敗しました: {}",
+                    error.without_url()
+                )
+            }
         };
-        let status = response.status();
-        let body = crate::tool_response_text!(response);
-        if !status.is_success() {
-            return format!("エラー: Slack API が HTTP {} を返しました。", status);
-        }
+        let body = crate::tool_try!(
+            crate::tools::http::service_body(cfg, "Slack API", Ok(response)).await
+        );
         let parsed: Value = crate::tool_response_json!(&body);
         if parsed.get("ok").and_then(Value::as_bool).unwrap_or(false) {
             "OK: Slack へ送信しました。".to_string()

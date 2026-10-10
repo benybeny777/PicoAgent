@@ -2,13 +2,11 @@
 
 import * as bridge from "./bridge.js";
 import { clearBackgroundFailure, notifyBackgroundFailure, toast } from "./toast.js";
-import { errorDetail, logApp, waitWithLimit } from "./util.js";
+import { errorDetail, errorMessage, logApp, waitWithLimit, readIntegerSetting } from "./util.js";
 
 const POLL_MS = 20000;
-// 目覚ましの起こし文の生成と音声合成は遅れることがある。「鳴らなかった」がいちばん困るので、待つ上限を決めて文字を先に出す。
-const ALARM_WAKE_TIMEOUT_MS = 20000;
+// 会話ターン待機と生成上限はバックエンドが管理する。音声は文字表示後に上限まで待つ。
 const ALARM_SPEECH_TIMEOUT_MS = 20000;
-const ALARM_FALLBACK_LINE = "おはよう…そろそろ起きる時間だよ。ゆっくりでいいからね。";
 
 function snoozeMinutes(alarm) {
   const value = Number(alarm?.snooze_minutes ?? alarm?.snoozeMinutes ?? 5);
@@ -24,11 +22,13 @@ export function createAmbient({ chat, voice, host, motion, isBusy, isExpanded })
   let dailyTimer = null;
   let alarmTimer = null;
   let napTimer = null;
-  let napMinutes = 15;
+  let napMinutes = null;
   let lastActivityAt = Date.now();
   let revision = 0;
   let snooze = null;
   let alarmCheckInFlight = false;
+  let alarmJob = null;
+  const isCurrent = (requestRevision, result = null) => requestRevision === revision && !result?.stale;
 
   const canShow = () => !isBusy() && !composer.isOpen && !voice.speaking && !isExpanded();
 
@@ -61,7 +61,7 @@ export function createAmbient({ chat, voice, host, motion, isBusy, isExpanded })
       return;
     }
     const prepared = await voice.prepare(text);
-    if (requestRevision !== revision) return;
+    if (!isCurrent(requestRevision)) return;
     if (!canShow()) {
       if (enqueue) { queue.push(text); if (queue.length > 6) queue.shift(); }
       return;
@@ -90,13 +90,14 @@ export function createAmbient({ chat, voice, host, motion, isBusy, isExpanded })
     if (!canShow() || host.sleeping) { scheduleChatter(); return; }
     try {
       const result = await bridge.idleChatter();
-      if (requestRevision !== revision) return;
+      if (!isCurrent(requestRevision, result)) return;
+      if (result?.busy) return;
       if (result?.enabled === false) { chatter.enabled = false; return; }
       await say(result?.reply || "");
     } catch (error) {
-      if (requestRevision === revision) logApp("warn", "自発雑談の取得に失敗しました", errorDetail(error));
+      if (isCurrent(requestRevision)) logApp("warn", "自発雑談の取得に失敗しました", errorDetail(error));
     } finally {
-      if (requestRevision === revision) scheduleChatter();
+      if (isCurrent(requestRevision)) scheduleChatter();
     }
   }
 
@@ -118,45 +119,140 @@ export function createAmbient({ chat, voice, host, motion, isBusy, isExpanded })
     if (events.length) await say(events.map(event => String(event?.text || "時間だよ。").trim()).join("\n"));
   }
 
+  function cancelAlarmJob() {
+    if (alarmJob) {
+      alarmJob.cancelled = true;
+      alarmJob.releaseRetry?.();
+    }
+  }
+
   function clearSnooze(stop) {
+    cancelAlarmJob();
     snooze = null;
     chat.clearAlarm();
     if (stop) voice.stop();
     status.clear("alarm");
   }
 
-  function armSnooze(alarm) {
+  function armSnooze(alarm, consumed) {
     const minutes = snoozeMinutes(alarm);
-    snooze = { alarm: { ...alarm, snooze_minutes: minutes }, dueAt: Date.now() + minutes * 60 * 1000 };
+    snooze = { alarm: { ...alarm, snooze_minutes: minutes }, consumed, dueAt: Date.now() + minutes * 60 * 1000 };
     status.set(`「おきたよ！」を押すまで${minutes}分おきに起こします`, "alarm");
   }
 
+  const isAlarmActive = job => alarmJob === job && !job.cancelled && (!job.snoozeState || snooze === job.snoozeState);
+
+  async function alarmStillRegistered(job) {
+    if (!isAlarmActive(job)) return false;
+    const result = await bridge.alarms();
+    if (!Array.isArray(result?.alarms)) throw new Error("目覚まし一覧の応答が不正です");
+    const current = result.alarms.find(alarm => alarm.id === job.alarm.id);
+    // 成功応答が消費を確定した一度きりだけ、自動無効化後も同じジョブを続ける。
+    if (!isAlarmActive(job)) return false;
+    if (!current || (current.enabled === false && (!job.consumed || current.repeat !== false))) {
+      clearSnooze(false);
+      return false;
+    }
+    return true;
+  }
+
+  function reportAlarmFailure(job, error) {
+    if (!isAlarmActive(job)) return;
+    if (job.snoozeState) clearSnooze(false);
+    notifyBackgroundFailure("alarm-wake", `目覚ましの声かけに失敗しました: ${errorMessage(error)}。AI設定を確認し、目覚ましを再設定してください`, error);
+  }
+
+  async function currentAlarmLine(job) {
+    let retryMs = 1000;
+    while (isAlarmActive(job)) {
+      const requestRevision = revision;
+      try {
+        const result = await bridge.alarmWake(job.alarm.id, job.consumed);
+        if (!isAlarmActive(job)) return null;
+        if (result?.cancelled) {
+          clearSnooze(false);
+          return null;
+        }
+        // 画面だけが古くなった成功も自動消費を失わない。backend staleは消費していない。
+        if (!result?.stale && result?.consumed === true) job.consumed = true;
+        if (!await alarmStillRegistered(job)) return null;
+        if (isCurrent(requestRevision, result)) {
+          const line = String(result?.reply ?? "").trim();
+          if (!line) throw new Error("目覚ましの起こし文が空です");
+          clearBackgroundFailure("alarm-wake");
+          return { line, requestRevision };
+        }
+      } catch (error) {
+        if (!isAlarmActive(job)) return null;
+        if (isCurrent(requestRevision)) {
+          try {
+            if (!await alarmStillRegistered(job)) return null;
+          } catch (readError) {
+            reportAlarmFailure(job, readError);
+            return null;
+          }
+          reportAlarmFailure(job, error);
+          return null;
+        }
+      }
+      // キャラ切替が続いても同じ発火を失わず、即時ループで推論や通信を増やさない。
+      await new Promise(resolve => {
+        const timer = setTimeout(resolve, retryMs);
+        job.releaseRetry = () => { clearTimeout(timer); resolve(); };
+      });
+      job.releaseRetry?.();
+      job.releaseRetry = null;
+      retryMs = Math.min(POLL_MS, retryMs * 2);
+      if (!isAlarmActive(job)) return null;
+      try {
+        if (!await alarmStillRegistered(job)) return null;
+      } catch (error) {
+        reportAlarmFailure(job, error);
+        return null;
+      }
+    }
+    return null;
+  }
+
   async function fireAlarm(alarm, snoozeState = null, due = null) {
-    const wakeRequest = bridge.alarmWake(alarm.id).catch(error => {
-      logApp("warn", "目覚まし起こし文の生成に失敗しました", errorDetail(error));
-      return null;
-    });
-    const wakeResult = await waitWithLimit(wakeRequest, ALARM_WAKE_TIMEOUT_MS);
-    if (wakeResult.timedOut) logApp("warn", "目覚ましの起こし文が時間内に届きませんでした", `${ALARM_WAKE_TIMEOUT_MS}ms`);
-    let line = (wakeResult.value?.reply || "").trim() || ALARM_FALLBACK_LINE;
-    // 遅れて鳴らす場合は予定時刻を添える（いまの時刻の目覚ましだと誤解させない）。
-    if (due && due.lateMinutes >= 1) line = `（${due.scheduledTime}の目覚ましだよ）${line}`;
-    markActivity(); // 居眠り中でも目覚ましでは起きる
-    // 声より先に文字を出す。操作ボタンをページ送りで消さない。
-    chat.showAlarm(line, () => clearSnooze(true));
-    history.add("assistant", line);
-    // 生成中に「おきたよ！」で解除された場合は、完了後にスヌーズを復活させない。
-    const shouldArm = !snoozeState || snooze === snoozeState;
-    if (shouldArm) armSnooze(alarm);
-    const armed = shouldArm ? snooze : null;
-    const speechRequest = voice.prepare(line).catch(error => {
-      logApp("warn", "目覚ましの音声合成に失敗しました", errorDetail(error));
-      return null;
-    });
-    const speech = await waitWithLimit(speechRequest, ALARM_SPEECH_TIMEOUT_MS);
-    // 数分後に突然鳴るほうが困るため、遅れて届いた音声は鳴らさない。
-    if (speech.timedOut) logApp("warn", "目覚ましの音声が時間内に用意できませんでした", `${ALARM_SPEECH_TIMEOUT_MS}ms`);
-    if (armed && !speech.timedOut && speech.value && snooze === armed) voice.playPrepared(speech.value);
+    const job = { alarm, snoozeState, consumed: snoozeState?.consumed === true, cancelled: false, releaseRetry: null };
+    alarmJob = job;
+    try {
+      let current;
+      do {
+        current = await currentAlarmLine(job);
+        if (!current || !isAlarmActive(job)) return;
+        // 待機の継続が次のmicrotaskへ移る間の切替も、本文の公開前に照合する。
+      } while (!isCurrent(current.requestRevision));
+      const { requestRevision } = current;
+      let { line } = current;
+      // 遅れて鳴らす場合は予定時刻を添える（いまの時刻の目覚ましだと誤解させない）。
+      if (due && due.lateMinutes >= 1) line = `（${due.scheduledTime}の目覚ましだよ）${line}`;
+      markActivity(); // 居眠り中でも目覚ましでは起きる
+      // 声より先に文字を出す。操作ボタンをページ送りで消さない。
+      chat.showAlarm(line, () => clearSnooze(true));
+      history.add("assistant", line);
+      // 生成中に「おきたよ！」で解除された場合は、完了後にスヌーズを復活させない。
+      const shouldArm = !snoozeState || snooze === snoozeState;
+      if (shouldArm) armSnooze(alarm, job.consumed);
+      const armed = shouldArm ? snooze : null;
+      job.snoozeState = armed;
+      const speechRequest = voice.prepare(line).catch(error => {
+        logApp("warn", "目覚ましの音声合成に失敗しました", errorDetail(error));
+        return null;
+      });
+      const speech = await waitWithLimit(speechRequest, ALARM_SPEECH_TIMEOUT_MS);
+      // 数分後に突然鳴るほうが困るため、遅れて届いた音声は鳴らさない。
+      if (speech.timedOut) logApp("warn", "目覚ましの音声が時間内に用意できませんでした", `${ALARM_SPEECH_TIMEOUT_MS}ms`);
+      if (isCurrent(requestRevision) && isAlarmActive(job) && armed && !speech.timedOut && speech.value && snooze === armed) {
+        try {
+          if (await alarmStillRegistered(job) && isCurrent(requestRevision)) voice.playPrepared(speech.value);
+        } catch (error) { reportAlarmFailure(job, error); }
+      }
+    } finally {
+      job.releaseRetry?.();
+      if (alarmJob === job) alarmJob = null;
+    }
   }
 
   async function checkAlarms() {
@@ -193,6 +289,7 @@ export function createAmbient({ chat, voice, host, motion, isBusy, isExpanded })
 
   ["pointerdown", "keydown"].forEach(type => document.addEventListener(type, markActivity));
   window.addEventListener("beforeunload", () => {
+    cancelAlarmJob();
     for (const timer of [chatterTimer]) if (timer) clearTimeout(timer);
     for (const timer of [dailyTimer, alarmTimer, napTimer]) if (timer) clearInterval(timer);
   });
@@ -210,25 +307,32 @@ export function createAmbient({ chat, voice, host, motion, isBusy, isExpanded })
       setTimeout(flushNotice, 0);
     },
     applyChatter(config) {
-      if (!config) return;
-      const seconds = (value, fallback) => {
-        const numeric = parseFloat(value);
-        return Number.isFinite(numeric) ? Math.min(3600, Math.max(30, numeric)) : fallback;
-      };
-      chatter.enabled = Boolean(config.chatterEnabled);
-      chatter.minSecs = seconds(config.chatterMinSecs, 90);
-      chatter.maxSecs = Math.max(chatter.minSecs, seconds(config.chatterMaxSecs, 240));
+      if (!config?.numberSettings) return;
+      if (Object.hasOwn(config, "chatterMinSecs") || Object.hasOwn(config, "chatterMaxSecs")) {
+        const minimum = readIntegerSetting(config, "PICOAGENT_CHATTER_MIN_SECS", "chatterMinSecs");
+        const maximum = readIntegerSetting(config, "PICOAGENT_CHATTER_MAX_SECS", "chatterMaxSecs");
+        const error = minimum.error || maximum.error || (minimum.value > maximum.value ? "雑談の最短間隔は最長間隔以下にしてください" : null);
+        chatter.enabled = Boolean(config.chatterEnabled) && !error;
+        if (error) notifyBackgroundFailure("integer-chatter", `自発会話を停止しました: ${error}`, error);
+        else { chatter.minSecs = minimum.value; chatter.maxSecs = maximum.value; clearBackgroundFailure("integer-chatter"); }
+      }
+      if (Object.hasOwn(config, "napMinutes")) {
+        const nap = readIntegerSetting(config, "PICOAGENT_NAP_MINUTES", "napMinutes");
+        napMinutes = nap.value;
+        if (nap.error) notifyBackgroundFailure("integer-nap", `居眠りを停止しました: ${nap.error}`, nap.error);
+        else clearBackgroundFailure("integer-nap");
+      }
       scheduleChatter();
     },
-    start({ napMinutes: nap }) {
-      napMinutes = Number(nap) > 0 ? Number(nap) : 0;
+    start(config) {
+      this.applyChatter(config);
       markActivity();
       dailyTimer = setInterval(checkDaily, POLL_MS);
       checkDaily();
       alarmTimer = setInterval(checkAlarms, POLL_MS);
       checkAlarms();
       napTimer = setInterval(() => {
-        if (napMinutes > 0 && !host.sleeping && Date.now() - lastActivityAt > napMinutes * 60 * 1000) fallAsleep();
+        if (napMinutes > 0 && !host.sleeping && BigInt(Date.now() - lastActivityAt) > BigInt(napMinutes) * 60000n) fallAsleep();
       }, 30 * 1000);
     },
     reset() {

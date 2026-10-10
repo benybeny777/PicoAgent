@@ -192,12 +192,7 @@ impl Tool for MarketIndicesTool {
     }
 
     fn config_schema(&self) -> Vec<Field> {
-        vec![Field::new(
-            "PICOAGENT_MARKET_TIMEOUT_SECS",
-            "市場指数API待ち時間（秒、3〜60）",
-            "text",
-            "15",
-        )]
+        vec![Field::int(&crate::config::ints::MARKET_TIMEOUT_SECS)]
     }
 
     async fn run(&self, cfg: &Config, args: Value) -> String {
@@ -224,12 +219,7 @@ impl Tool for MarketIndicesTool {
         } else {
             "1y".to_string()
         };
-        let timeout = cfg
-            .get("PICOAGENT_MARKET_TIMEOUT_SECS", "15")
-            .parse::<u64>()
-            .ok()
-            .filter(|value| (3..=60).contains(value))
-            .unwrap_or(15);
+        let timeout = crate::tool_try!(cfg.int(&crate::config::ints::MARKET_TIMEOUT_SECS)) as u64;
         let client = match reqwest::Client::builder()
             .timeout(Duration::from_secs(timeout))
             .user_agent("Mozilla/5.0 PicoAgent/1.0 (Market indices tool)")
@@ -250,7 +240,7 @@ impl Tool for MarketIndicesTool {
         };
         let status = response.status();
         if !status.is_success() {
-            return format!("エラー: 市場指数APIが HTTP {status} を返しました。");
+            return crate::tools::http::service_reply(cfg, Ok(response), "市場指数API").await;
         }
         let data: Value = match response.json().await {
             Ok(data) => data,
