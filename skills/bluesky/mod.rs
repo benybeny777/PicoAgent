@@ -89,18 +89,12 @@ impl Tool for BlueskyTool {
             );
         }
         let timeout = crate::tool_try!(cfg.int(&crate::config::ints::BLUESKY_TIMEOUT_SECS)) as u64;
-        let client = match reqwest::Client::builder()
-            .timeout(Duration::from_secs(timeout))
-            .user_agent("PicoAgent/1.0 (Bluesky tool)")
-            .build()
-        {
-            Ok(client) => client,
-            Err(error) => return format!("エラー: Bluesky API の準備に失敗しました: {}", error),
-        };
-        let session = match create_session(cfg, &client, &base, &identifier, &password).await {
-            Ok(session) => session,
-            Err(error) => return format!("エラー: {}", error),
-        };
+        let request_timeout = Duration::from_secs(timeout);
+        let session =
+            match create_session(cfg, request_timeout, &base, &identifier, &password).await {
+                Ok(session) => session,
+                Err(error) => return format!("エラー: {}", error),
+            };
         match args.get("action").and_then(Value::as_str).unwrap_or("") {
             "post" => {
                 let text = match text_arg(&args, "text", MAX_TEXT_CHARS) {
@@ -118,12 +112,15 @@ impl Tool for BlueskyTool {
                 });
                 crate::tools::http::service_reply(
                     cfg,
-                    client
-                        .post(format!("{}/xrpc/com.atproto.repo.createRecord", base))
-                        .bearer_auth(session.access_jwt)
-                        .json(&payload)
-                        .send()
-                        .await,
+                    crate::tool_try!(crate::tools::http::service(
+                        reqwest::Method::POST,
+                        format!("{}/xrpc/com.atproto.repo.createRecord", base),
+                        request_timeout
+                    ))
+                    .bearer_auth(session.access_jwt)
+                    .json(&payload)
+                    .send()
+                    .await,
                     "Bluesky API",
                 )
                 .await
@@ -141,12 +138,15 @@ impl Tool for BlueskyTool {
                     .to_string();
                 crate::tools::http::service_reply(
                     cfg,
-                    client
-                        .get(format!("{}/xrpc/app.bsky.feed.searchPosts", base))
-                        .bearer_auth(session.access_jwt)
-                        .query(&[("q", query), ("limit", limit.as_str())])
-                        .send()
-                        .await,
+                    crate::tool_try!(crate::tools::http::service(
+                        reqwest::Method::GET,
+                        format!("{}/xrpc/app.bsky.feed.searchPosts", base),
+                        request_timeout
+                    ))
+                    .bearer_auth(session.access_jwt)
+                    .query(&[("q", query), ("limit", limit.as_str())])
+                    .send()
+                    .await,
                     "Bluesky API",
                 )
                 .await
@@ -160,12 +160,15 @@ impl Tool for BlueskyTool {
                     .unwrap_or(&identifier);
                 crate::tools::http::service_reply(
                     cfg,
-                    client
-                        .get(format!("{}/xrpc/app.bsky.actor.getProfile", base))
-                        .bearer_auth(session.access_jwt)
-                        .query(&[("actor", actor)])
-                        .send()
-                        .await,
+                    crate::tool_try!(crate::tools::http::service(
+                        reqwest::Method::GET,
+                        format!("{}/xrpc/app.bsky.actor.getProfile", base),
+                        request_timeout
+                    ))
+                    .bearer_auth(session.access_jwt)
+                    .query(&[("actor", actor)])
+                    .send()
+                    .await,
                     "Bluesky API",
                 )
                 .await
@@ -183,17 +186,20 @@ struct BlueskySession {
 
 async fn create_session(
     cfg: &Config,
-    client: &reqwest::Client,
+    request_timeout: std::time::Duration,
     base: &str,
     identifier: &str,
     password: &str,
 ) -> Result<BlueskySession, String> {
-    let response = client
-        .post(format!("{}/xrpc/com.atproto.server.createSession", base))
-        .json(&json!({ "identifier": identifier, "password": password }))
-        .send()
-        .await
-        .map_err(|error| format!("Bluesky セッション作成に失敗しました: {}", error))?;
+    let response = crate::tools::http::service(
+        reqwest::Method::POST,
+        format!("{}/xrpc/com.atproto.server.createSession", base),
+        request_timeout,
+    )?
+    .json(&json!({ "identifier": identifier, "password": password }))
+    .send()
+    .await
+    .map_err(|error| format!("Bluesky セッション作成に失敗しました: {}", error))?;
     let status = response.status();
     let body = crate::tools::http::response_text(response).await?;
     if !status.is_success() {

@@ -99,23 +99,16 @@ impl Tool for GitHubTool {
         let timeout_secs =
             crate::tool_try!(cfg.int(&crate::config::ints::GITHUB_TIMEOUT_SECS)) as u64;
         let token = cfg.get("PICOAGENT_GITHUB_TOKEN", "");
-        let client = match reqwest::Client::builder()
-            .timeout(Duration::from_secs(timeout_secs))
-            .user_agent("PicoAgent/1.0")
-            .build()
-        {
-            Ok(client) => client,
-            Err(error) => return format!("エラー: GitHub API の準備に失敗しました: {}", error),
-        };
+        let request_timeout = Duration::from_secs(timeout_secs);
         match action {
             "list" => {
                 let state = args.get("state").and_then(Value::as_str).unwrap_or("open");
-                let mut request = client
-                    .get(format!(
-                        "{}/repos/{}/{}/issues",
-                        GITHUB_API_BASE, owner, repo
-                    ))
-                    .query(&[("state", state), ("per_page", "10")]);
+                let mut request = crate::tool_try!(crate::tools::http::service(
+                    reqwest::Method::GET,
+                    format!("{}/repos/{}/{}/issues", GITHUB_API_BASE, owner, repo),
+                    request_timeout
+                ))
+                .query(&[("state", state), ("per_page", "10")]);
                 if !token.is_empty() {
                     request = request.bearer_auth(token);
                 }
@@ -174,15 +167,15 @@ impl Tool for GitHubTool {
                         MAX_BODY_CHARS
                     );
                 }
-                let response = match client
-                    .post(format!(
-                        "{}/repos/{}/{}/issues",
-                        GITHUB_API_BASE, owner, repo
-                    ))
-                    .bearer_auth(token)
-                    .json(&json!({ "title": title, "body": body }))
-                    .send()
-                    .await
+                let response = match crate::tool_try!(crate::tools::http::service(
+                    reqwest::Method::POST,
+                    format!("{}/repos/{}/{}/issues", GITHUB_API_BASE, owner, repo),
+                    request_timeout
+                ))
+                .bearer_auth(token)
+                .json(&json!({ "title": title, "body": body }))
+                .send()
+                .await
                 {
                     Ok(response) => response,
                     Err(error) => {

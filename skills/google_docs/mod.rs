@@ -98,23 +98,12 @@ impl Tool for GoogleDocsTool {
                 "Google Docs API を使える OAuth access token が必要です。",
             );
         }
-        let client = match reqwest::Client::builder()
-            .timeout(crate::tool_try!(
-                cfg.duration_secs(&crate::config::ints::GOOGLE_DOCS_TIMEOUT_SECS)
-            ))
-            .user_agent("PicoAgent/1.0 (Google Docs tool)")
-            .build()
-        {
-            Ok(client) => client,
-            Err(error) => {
-                return format!("エラー: Google Docs API の準備に失敗しました: {}", error)
-            }
-        };
+        let request_timeout =
+            crate::tool_try!(cfg.duration_secs(&crate::config::ints::GOOGLE_DOCS_TIMEOUT_SECS));
         match args.get("action").and_then(Value::as_str).unwrap_or("") {
             "create" => {
                 let title = args.get("title").and_then(Value::as_str).unwrap_or("Untitled");
-                let response = client
-                    .post(DOCS_BASE)
+                let response = crate::tool_try!(crate::tools::http::service(reqwest::Method::POST, DOCS_BASE, request_timeout))
                     .bearer_auth(token)
                     .json(&json!({ "title": title }))
                     .send()
@@ -126,8 +115,7 @@ impl Tool for GoogleDocsTool {
                     Ok(document_id) => document_id,
                     Err(error) => return format!("エラー: {}", error),
                 };
-                let response = match client
-                    .get(format!("{}/{}", DOCS_BASE, document_id))
+                let response = match crate::tool_try!(crate::tools::http::service(reqwest::Method::GET, format!("{}/{}", DOCS_BASE, document_id), request_timeout))
                     .bearer_auth(token)
                     .send()
                     .await
@@ -155,7 +143,7 @@ impl Tool for GoogleDocsTool {
                     Err(error) => return format!("エラー: {}", error),
                 };
                 let text = args.get("text").and_then(Value::as_str).unwrap_or("");
-                let end_index = match fetch_end_index(cfg, &client, &token, document_id).await {
+                let end_index = match fetch_end_index(cfg, request_timeout, &token, document_id).await {
                     Ok(index) => index,
                     Err(error) => return format!("エラー: {}", error),
                 };
@@ -168,8 +156,7 @@ impl Tool for GoogleDocsTool {
                     }]
                 });
                 crate::tools::http::service_reply(cfg,
-                    client
-                        .post(format!("{}/{}:batchUpdate", DOCS_BASE, document_id))
+                    crate::tool_try!(crate::tools::http::service(reqwest::Method::POST, format!("{}/{}:batchUpdate", DOCS_BASE, document_id), request_timeout))
                         .bearer_auth(token)
                         .json(&payload)
                         .send()
@@ -200,8 +187,7 @@ impl Tool for GoogleDocsTool {
                     }]
                 });
                 crate::tools::http::service_reply(cfg,
-                    client
-                        .post(format!("{}/{}:batchUpdate", DOCS_BASE, document_id))
+                    crate::tool_try!(crate::tools::http::service(reqwest::Method::POST, format!("{}/{}:batchUpdate", DOCS_BASE, document_id), request_timeout))
                         .bearer_auth(token)
                         .json(&payload)
                         .send()
@@ -225,22 +211,25 @@ fn document_id(args: &Value) -> Result<&str, String> {
 
 async fn fetch_end_index(
     cfg: &Config,
-    client: &reqwest::Client,
+    request_timeout: std::time::Duration,
     token: &str,
     document_id: &str,
 ) -> Result<u64, String> {
-    let response = client
-        .get(format!("{}/{}", DOCS_BASE, document_id))
-        .bearer_auth(token)
-        .query(&[("fields", "body/content/endIndex")])
-        .send()
-        .await
-        .map_err(|error| {
-            format!(
-                "Google Docs API への接続に失敗しました: {}",
-                error.without_url()
-            )
-        })?;
+    let response = crate::tools::http::service(
+        reqwest::Method::GET,
+        format!("{}/{}", DOCS_BASE, document_id),
+        request_timeout,
+    )?
+    .bearer_auth(token)
+    .query(&[("fields", "body/content/endIndex")])
+    .send()
+    .await
+    .map_err(|error| {
+        format!(
+            "Google Docs API への接続に失敗しました: {}",
+            error.without_url()
+        )
+    })?;
     let status = response.status();
     let body = crate::tools::http::response_text(response).await?;
     if !status.is_success() {

@@ -139,12 +139,11 @@ fn question_list(topic: &str, args: &Value) -> Vec<String> {
 
 async fn search(
     cfg: &Config,
-    client: &reqwest::Client,
+    request_timeout: std::time::Duration,
     query: &str,
     max_results: usize,
 ) -> Result<Vec<SearchResult>, String> {
-    let response = client
-        .get(SEARCH_URL)
+    let response = crate::tools::http::service(reqwest::Method::GET, SEARCH_URL, request_timeout)?
         .query(&[("q", query)])
         .send()
         .await
@@ -852,19 +851,12 @@ impl Tool for ResearchReportTool {
             .unwrap_or(3);
         let timeout = crate::tool_try!(cfg.int(&crate::config::ints::RESEARCH_TIMEOUT_SECS)) as u64;
         let questions = question_list(topic, &args);
-        let client = match reqwest::Client::builder()
-            .timeout(Duration::from_secs(timeout))
-            .user_agent("PicoAgent/1.0 (Research report tool)")
-            .build()
-        {
-            Ok(client) => client,
-            Err(error) => return format!("エラー: 調査レポートの準備に失敗しました: {}", error),
-        };
+        let request_timeout = Duration::from_secs(timeout);
 
         let mut results = Vec::new();
         let mut failures = Vec::new();
         for question in &questions {
-            match search(cfg, &client, question, max_results).await {
+            match search(cfg, request_timeout, question, max_results).await {
                 Ok(mut items) => results.append(&mut items),
                 Err(error) => failures.push(format!("{question}: {error}")),
             }

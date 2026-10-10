@@ -80,14 +80,7 @@ impl Tool for MisskeyTool {
             .trim_end_matches('/')
             .to_string();
         let timeout = crate::tool_try!(cfg.int(&crate::config::ints::MISSKEY_TIMEOUT_SECS)) as u64;
-        let client = match reqwest::Client::builder()
-            .timeout(Duration::from_secs(timeout))
-            .user_agent("PicoAgent/1.0 (Misskey tool)")
-            .build()
-        {
-            Ok(client) => client,
-            Err(error) => return format!("エラー: Misskey API の準備に失敗しました: {}", error),
-        };
+        let request_timeout = Duration::from_secs(timeout);
         match args.get("action").and_then(Value::as_str).unwrap_or("") {
             "create_note" => {
                 let text = match text_arg(&args, "text", MAX_TEXT_CHARS) {
@@ -101,11 +94,14 @@ impl Tool for MisskeyTool {
                 ));
                 crate::tools::http::service_reply(
                     cfg,
-                    client
-                        .post(format!("{}/api/notes/create", base))
-                        .json(&json!({ "i": token, "text": text, "visibility": visibility }))
-                        .send()
-                        .await,
+                    crate::tool_try!(crate::tools::http::service(
+                        reqwest::Method::POST,
+                        format!("{}/api/notes/create", base),
+                        request_timeout
+                    ))
+                    .json(&json!({ "i": token, "text": text, "visibility": visibility }))
+                    .send()
+                    .await,
                     "Misskey API",
                 )
                 .await
@@ -118,11 +114,14 @@ impl Tool for MisskeyTool {
                     .unwrap_or(20);
                 crate::tools::http::service_reply(
                     cfg,
-                    client
-                        .post(format!("{}/api/notes/timeline", base))
-                        .json(&json!({ "i": token, "limit": limit }))
-                        .send()
-                        .await,
+                    crate::tool_try!(crate::tools::http::service(
+                        reqwest::Method::POST,
+                        format!("{}/api/notes/timeline", base),
+                        request_timeout
+                    ))
+                    .json(&json!({ "i": token, "limit": limit }))
+                    .send()
+                    .await,
                     "Misskey API",
                 )
                 .await
@@ -139,11 +138,14 @@ impl Tool for MisskeyTool {
                     .unwrap_or(20);
                 crate::tools::http::service_reply(
                     cfg,
-                    client
-                        .post(format!("{}/api/users/search", base))
-                        .json(&json!({ "i": token, "query": query, "limit": limit }))
-                        .send()
-                        .await,
+                    crate::tool_try!(crate::tools::http::service(
+                        reqwest::Method::POST,
+                        format!("{}/api/users/search", base),
+                        request_timeout
+                    ))
+                    .json(&json!({ "i": token, "query": query, "limit": limit }))
+                    .send()
+                    .await,
                     "Misskey API",
                 )
                 .await

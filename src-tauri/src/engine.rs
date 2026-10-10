@@ -176,15 +176,14 @@ async fn running_server_model_ids(app: &AppHandle) -> anyhow::Result<Vec<String>
     let state = app.state::<AppState>();
     let port = local::port(&state.config).map_err(anyhow::Error::msg)?;
     let url = format!("http://127.0.0.1:{port}/v1/models");
-    let data: Value = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(2))
-        .build()?
-        .get(url)
-        .send()
-        .await?
-        .error_for_status()?
-        .json()
-        .await?;
+    let data: Value =
+        crate::tools::http::service(reqwest::Method::GET, url, std::time::Duration::from_secs(2))
+            .map_err(anyhow::Error::msg)?
+            .send()
+            .await?
+            .error_for_status()?
+            .json()
+            .await?;
     Ok(data
         .get("data")
         .and_then(|value| value.as_array())

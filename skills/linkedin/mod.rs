@@ -74,23 +74,19 @@ impl Tool for LinkedInTool {
             );
         }
         let timeout = crate::tool_try!(cfg.int(&crate::config::ints::LINKEDIN_TIMEOUT_SECS)) as u64;
-        let client = match reqwest::Client::builder()
-            .timeout(Duration::from_secs(timeout))
-            .user_agent("PicoAgent/1.0 (LinkedIn tool)")
-            .build()
-        {
-            Ok(client) => client,
-            Err(error) => return format!("エラー: LinkedIn API の準備に失敗しました: {}", error),
-        };
+        let request_timeout = Duration::from_secs(timeout);
         match args.get("action").and_then(Value::as_str).unwrap_or("") {
             "userinfo" => {
                 crate::tools::http::service_reply(
                     cfg,
-                    client
-                        .get(format!("{}/v2/userinfo", LINKEDIN_BASE))
-                        .bearer_auth(token)
-                        .send()
-                        .await,
+                    crate::tool_try!(crate::tools::http::service(
+                        reqwest::Method::GET,
+                        format!("{}/v2/userinfo", LINKEDIN_BASE),
+                        request_timeout
+                    ))
+                    .bearer_auth(token)
+                    .send()
+                    .await,
                     "LinkedIn API",
                 )
                 .await
@@ -129,13 +125,16 @@ impl Tool for LinkedInTool {
                 });
                 crate::tools::http::service_reply(
                     cfg,
-                    client
-                        .post(format!("{}/v2/ugcPosts", LINKEDIN_BASE))
-                        .bearer_auth(token)
-                        .header("X-Restli-Protocol-Version", "2.0.0")
-                        .json(&payload)
-                        .send()
-                        .await,
+                    crate::tool_try!(crate::tools::http::service(
+                        reqwest::Method::POST,
+                        format!("{}/v2/ugcPosts", LINKEDIN_BASE),
+                        request_timeout
+                    ))
+                    .bearer_auth(token)
+                    .header("X-Restli-Protocol-Version", "2.0.0")
+                    .json(&payload)
+                    .send()
+                    .await,
                     "LinkedIn API",
                 )
                 .await

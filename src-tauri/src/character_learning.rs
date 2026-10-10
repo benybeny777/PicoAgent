@@ -795,20 +795,13 @@ pub async fn settings_character_learning_check_voice(
     let result = async {
         cancellable(crate::aivis::ensure_started(&app), &flag).await?;
         let endpoint = crate::aivis::endpoint(&app, &ai)?;
-        let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(300))
-            .build()
-            .map_err(|e| e.to_string())?;
+        let request = crate::tools::http::service(
+            reqwest::Method::GET,
+            format!("{endpoint}/speakers"),
+            Duration::from_secs(300),
+        )?;
         let speakers: Value = cancellable(
-            async {
-                client
-                    .get(format!("{endpoint}/speakers"))
-                    .send()
-                    .await?
-                    .error_for_status()?
-                    .json()
-                    .await
-            },
+            async { request.send().await?.error_for_status()?.json().await },
             &flag,
         )
         .await?;
@@ -839,10 +832,14 @@ pub async fn settings_character_learning_check_voice(
                 length,
             )
             .file_name("learning-candidate.aivmx");
+            let request = crate::tools::http::service(
+                reqwest::Method::POST,
+                format!("{endpoint}/aivm_models/install"),
+                Duration::from_secs(300),
+            )?;
             cancellable(
                 async {
-                    client
-                        .post(format!("{endpoint}/aivm_models/install"))
+                    request
                         .multipart(reqwest::multipart::Form::new().part("file", part))
                         .send()
                         .await?
@@ -855,16 +852,13 @@ pub async fn settings_character_learning_check_voice(
         if flag.load(Ordering::SeqCst) {
             return Err("音声検査を停止しました".into());
         }
+        let request = crate::tools::http::service(
+            reqwest::Method::GET,
+            format!("{endpoint}/speakers"),
+            Duration::from_secs(300),
+        )?;
         let speakers: Value = cancellable(
-            async {
-                client
-                    .get(format!("{endpoint}/speakers"))
-                    .send()
-                    .await?
-                    .error_for_status()?
-                    .json()
-                    .await
-            },
+            async { request.send().await?.error_for_status()?.json().await },
             &flag,
         )
         .await?;

@@ -100,14 +100,7 @@ impl Tool for JiraTool {
             );
         }
         let timeout = crate::tool_try!(cfg.int(&crate::config::ints::JIRA_TIMEOUT_SECS)) as u64;
-        let client = match reqwest::Client::builder()
-            .timeout(Duration::from_secs(timeout))
-            .user_agent("PicoAgent/1.0 (Jira tool)")
-            .build()
-        {
-            Ok(client) => client,
-            Err(error) => return format!("エラー: Jira API の準備に失敗しました: {}", error),
-        };
+        let request_timeout = Duration::from_secs(timeout);
         match args.get("action").and_then(Value::as_str).unwrap_or("") {
             "search" => {
                 let jql = args
@@ -116,12 +109,15 @@ impl Tool for JiraTool {
                     .unwrap_or("ORDER BY updated DESC");
                 crate::tools::http::service_reply(
                     cfg,
-                    client
-                        .get(format!("{}/rest/api/3/search", base))
-                        .header("Authorization", auth_header(&email, &token))
-                        .query(&[("jql", jql), ("maxResults", "10")])
-                        .send()
-                        .await,
+                    crate::tool_try!(crate::tools::http::service(
+                        reqwest::Method::GET,
+                        format!("{}/rest/api/3/search", base),
+                        request_timeout
+                    ))
+                    .header("Authorization", auth_header(&email, &token))
+                    .query(&[("jql", jql), ("maxResults", "10")])
+                    .send()
+                    .await,
                     "Jira API",
                 )
                 .await
@@ -174,12 +170,15 @@ impl Tool for JiraTool {
                 });
                 crate::tools::http::service_reply(
                     cfg,
-                    client
-                        .post(format!("{}/rest/api/3/issue", base))
-                        .header("Authorization", auth_header(&email, &token))
-                        .json(&payload)
-                        .send()
-                        .await,
+                    crate::tool_try!(crate::tools::http::service(
+                        reqwest::Method::POST,
+                        format!("{}/rest/api/3/issue", base),
+                        request_timeout
+                    ))
+                    .header("Authorization", auth_header(&email, &token))
+                    .json(&payload)
+                    .send()
+                    .await,
                     "Jira API",
                 )
                 .await

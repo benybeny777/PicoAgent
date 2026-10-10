@@ -181,12 +181,13 @@ fn configure_managed_user_profile(
 }
 
 async fn is_up(endpoint: &str) -> bool {
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(2))
-        .build();
-    match client {
-        Ok(client) => client
-            .get(format!("{endpoint}/version"))
+    let request = crate::tools::http::service(
+        reqwest::Method::GET,
+        format!("{endpoint}/version"),
+        Duration::from_secs(2),
+    );
+    match request {
+        Ok(request) => request
             .send()
             .await
             .map(|response| response.status().is_success())
@@ -214,15 +215,16 @@ pub async fn ensure_model_installed(
         app,
         &format!("Aivis モデルを導入します: model_uuid={model_uuid} speaker_uuid={speaker_uuid}"),
     )?;
-    let client = reqwest::Client::builder()
-        .timeout(MODEL_INSTALL_TIMEOUT)
-        .build()?;
     let form = reqwest::multipart::Form::new().text("url", download_url);
-    let response = client
-        .post(format!("{endpoint}/aivm_models/install"))
-        .multipart(form)
-        .send()
-        .await?;
+    let response = crate::tools::http::service(
+        reqwest::Method::POST,
+        format!("{endpoint}/aivm_models/install"),
+        MODEL_INSTALL_TIMEOUT,
+    )
+    .map_err(anyhow::Error::msg)?
+    .multipart(form)
+    .send()
+    .await?;
     if !response.status().is_success() {
         let status = response.status();
         let body = crate::tools::http::response_text(response)
@@ -258,14 +260,15 @@ pub async fn ensure_model_installed(
 
 /// `/speakers` を取得する。
 async fn fetch_speakers(endpoint: &str) -> anyhow::Result<Vec<Value>> {
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(20))
-        .build()?;
-    let response = client
-        .get(format!("{endpoint}/speakers"))
-        .send()
-        .await
-        .map_err(reqwest::Error::without_url)?;
+    let response = crate::tools::http::service(
+        reqwest::Method::GET,
+        format!("{endpoint}/speakers"),
+        Duration::from_secs(20),
+    )
+    .map_err(anyhow::Error::msg)?
+    .send()
+    .await
+    .map_err(reqwest::Error::without_url)?;
     if !response.status().is_success() {
         anyhow::bail!(
             "読み上げエンジン（AivisSpeech）が音声一覧を返しませんでした（HTTP {}）。設定の「追加機能」から再導入を試してください。",
@@ -1621,6 +1624,43 @@ fn terminate_managed_child(app: &tauri::AppHandle) {
 
 #[cfg(test)]
 mod tests {
+    #[tokio::test]
+    async fn 共有要求でも音声一覧のURLとHTTP失敗と不正schemaを保持する() {
+        use crate::providers::compatible::test_server::Server;
+        let cases = [
+            (
+                200,
+                serde_json::json!([{"speaker_uuid":"local-speaker","styles":[{"id":42}]}]),
+                None,
+            ),
+            (
+                503,
+                serde_json::json!({"secret":"secret-response-detail"}),
+                Some("HTTP 503"),
+            ),
+            (
+                200,
+                serde_json::json!({"secret":"secret-response-detail"}),
+                Some("配列ではありません"),
+            ),
+        ];
+        for (status, body, expected_error) in cases {
+            let server = Server::json(status, &body);
+            let result = super::fetch_speakers(&server.url).await;
+            match expected_error {
+                Some(expected) => {
+                    let reason = result.unwrap_err().to_string();
+                    assert!(reason.contains(expected), "{reason}");
+                    assert!(!reason.contains("secret-response-detail"));
+                }
+                None => assert_eq!(result.unwrap(), body.as_array().unwrap().clone()),
+            }
+            let requests = server.finish();
+            assert_eq!(requests.len(), 1);
+            assert!(requests[0].starts_with("GET /speakers HTTP/1.1\r\n"));
+        }
+    }
+
     #[test]
     fn 分割配布の全番号とサイズとハッシュを取得前に確定する() {
         let prefix = "AivisSpeech-Engine-Windows-x64-";

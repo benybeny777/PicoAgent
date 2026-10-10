@@ -322,6 +322,42 @@ pub async fn service_body(
 
 type SharedClient = OnceLock<Result<reqwest::Client, String>>;
 static CLIENT: SharedClient = OnceLock::new();
+static SERVICE_CLIENT: SharedClient = OnceLock::new();
+static UPDATE_FEED_CLIENT: SharedClient = OnceLock::new();
+
+#[derive(Clone, Copy)]
+enum ClientProfile {
+    Standard,
+    Service,
+    UpdateFeed,
+}
+
+impl ClientProfile {
+    fn stall_limits(self) -> Option<(u64, u64)> {
+        match self {
+            Self::Standard => Some((CONNECT_TIMEOUT_SECS, READ_TIMEOUT_SECS)),
+            Self::UpdateFeed => Some((5, 10)),
+            // API・ローカル処理は要求全体の期限だけを従来どおり適用する。
+            Self::Service => None,
+        }
+    }
+}
+
+fn build_shared_client(profile: ClientProfile) -> Result<reqwest::Client, String> {
+    let mut builder =
+        reqwest::Client::builder().user_agent(concat!("PicoAgent/", env!("CARGO_PKG_VERSION")));
+    if let Some((connect, read)) = profile.stall_limits() {
+        builder = builder
+            .connect_timeout(Duration::from_secs(connect))
+            .read_timeout(Duration::from_secs(read));
+    }
+    builder.build().map_err(|error| {
+        format!(
+            "共有HTTPクライアントを初期化できません: {}",
+            error.without_url()
+        )
+    })
+}
 
 /// 接続確立の上限。応答本文には掛からないので、モデルDLや生成のストリーミングは妨げない。
 /// 到達しないホストでTCP接続がOS既定（分単位）まで滞留するのを防ぐ。
@@ -333,18 +369,14 @@ const MAX_SERVICE_RESPONSE_BYTES: usize = 8 * 1024 * 1024;
 /// 専用のUser-Agent、DNS固定、リダイレクト制御等が不要な経路で接続プールを共有する標準クライアント。
 /// 個別の待ち時間はRequestBuilder::timeoutで指定する。
 pub fn init() -> Result<(), String> {
-    initialize_client(&CLIENT, || {
-        reqwest::Client::builder()
-            .connect_timeout(Duration::from_secs(CONNECT_TIMEOUT_SECS))
-            .read_timeout(Duration::from_secs(READ_TIMEOUT_SECS))
-            .build()
-            .map_err(|error| {
-                format!(
-                    "標準HTTPクライアントを初期化できません: {}",
-                    error.without_url()
-                )
-            })
-    })
+    for (state, profile) in [
+        (&CLIENT, ClientProfile::Standard),
+        (&SERVICE_CLIENT, ClientProfile::Service),
+        (&UPDATE_FEED_CLIENT, ClientProfile::UpdateFeed),
+    ] {
+        initialize_client(state, || build_shared_client(profile))?;
+    }
+    Ok(())
 }
 
 fn initialize_client(
@@ -374,6 +406,34 @@ pub fn client() -> Result<&'static reqwest::Client, String> {
         init()?;
     }
     initialized_client(&CLIENT)
+}
+
+/// 各APIが従来持っていた要求全体の期限を維持する接続プール。
+pub fn service_client() -> Result<&'static reqwest::Client, String> {
+    if cfg!(test) {
+        init()?;
+    }
+    initialized_client(&SERVICE_CLIENT)
+}
+
+/// 全体期限を必ず要求へ付ける。認証と専用UAは要求単位で指定する。
+pub fn service(
+    method: reqwest::Method,
+    url: impl reqwest::IntoUrl,
+    timeout: Duration,
+) -> Result<reqwest::RequestBuilder, String> {
+    if timeout.is_zero() {
+        return Err("HTTP要求の待ち時間は0より大きい値が必要です".into());
+    }
+    Ok(service_client()?.request(method, url).timeout(timeout))
+}
+
+/// 更新確認の接続5秒・無通信10秒をAPIの期限へ混ぜない。
+pub fn update_feed_client() -> Result<&'static reqwest::Client, String> {
+    if cfg!(test) {
+        init()?;
+    }
+    initialized_client(&UPDATE_FEED_CLIENT)
 }
 
 /// URL取得スキルがローカル端末や社内ネットワークをSSRFで読まないための宛先検査。
@@ -521,6 +581,25 @@ macro_rules! tool_response_json {
 #[cfg(test)]
 mod guarded_tests {
     use super::*;
+
+    #[test]
+    fn API全体期限と標準および更新確認の無通信期限を混ぜない() {
+        assert_eq!(ClientProfile::Service.stall_limits(), None);
+        assert_eq!(ClientProfile::Standard.stall_limits(), Some((10, 120)));
+        assert_eq!(ClientProfile::UpdateFeed.stall_limits(), Some((5, 10)));
+        assert!(service(reqwest::Method::GET, "http://localhost", Duration::ZERO).is_err());
+        for seconds in [2, 20, 180, 300, 900] {
+            let request = service(
+                reqwest::Method::GET,
+                "http://localhost",
+                Duration::from_secs(seconds),
+            )
+            .unwrap()
+            .build()
+            .unwrap();
+            assert_eq!(request.timeout(), Some(&Duration::from_secs(seconds)));
+        }
+    }
 
     #[test]
     fn 未初期化と初期化失敗は通信を始めず再生成もしない() {
@@ -912,6 +991,43 @@ mod tests {
 /// ガードを数えるときに見落とす。実際にこのガードだけ `tests` に紛れていた）。
 #[cfg(test)]
 mod guard {
+    fn dedicated_builder_allowed(path: &std::path::Path) -> bool {
+        // 検査済DNS固定と共有profileの所有者、およびHTTPS配布専用の所有者だけ。
+        [
+            "src-tauri/src/tools/http.rs",
+            "src-tauri/src/installer/http.rs",
+        ]
+        .iter()
+        .any(|owner| path == std::path::Path::new(owner))
+    }
+
+    #[test]
+    fn 個別HTTP構築は専用の責務を持つ共有所有者だけに置く() {
+        let violations: Vec<_> = crate::guard_scan::all_sources()
+            .into_iter()
+            .filter(|source| {
+                source.body().contains("Client::builder()")
+                    && !dedicated_builder_allowed(&source.path)
+            })
+            .map(|source| source.path.clone())
+            .collect();
+        assert!(
+            violations.is_empty(),
+            "要求ごとのHTTP構築を撤去してください: {violations:?}"
+        );
+        for path in [
+            "skills/gmail/mod.rs",
+            "skills/browser_control/cdp.rs",
+            "src-tauri/src/aivis.rs",
+            "src-tauri/src/commands.rs",
+        ] {
+            assert!(
+                !dedicated_builder_allowed(std::path::Path::new(path)),
+                "{path}"
+            );
+        }
+    }
+
     #[test]
     fn 安全取得とapiエラー応答は共有層で管理する() {
         for body in [
@@ -991,11 +1107,7 @@ mod guard {
             .flat_map(|source| {
                 // このファイルのガード用fixture文字列は実装ではない。共有クライアント本体は
                 // 最初のcfg(test)より前にあるため、そこまでは他ファイルと同じ規則で検査する。
-                let implementation = if source.path.ends_with("tools/http.rs") {
-                    source.text.split("#[cfg(test)]").next().unwrap_or("")
-                } else {
-                    source.text.as_str()
-                };
+                let implementation = source.body();
                 client_builder_timeout_violations(implementation)
                     .into_iter()
                     .map(|(line, reason)| format!("{}:{line} ({reason})", source.path.display()))
@@ -1054,3 +1166,7 @@ mod guard {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "http_service_tests.rs"]
+mod service_tests;

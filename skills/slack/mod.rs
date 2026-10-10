@@ -109,24 +109,20 @@ impl Tool for SlackTool {
             .trim();
         let timeout_secs =
             crate::tool_try!(cfg.int(&crate::config::ints::SLACK_TIMEOUT_SECS)) as u64;
-        let client = match reqwest::Client::builder()
-            .timeout(Duration::from_secs(timeout_secs))
-            .user_agent("PicoAgent/1.0 (Slack tool)")
-            .build()
-        {
-            Ok(client) => client,
-            Err(error) => return format!("エラー: Slack送信の準備に失敗しました: {}", error),
-        };
+        let request_timeout = Duration::from_secs(timeout_secs);
 
         let webhook_url = cfg.get("PICOAGENT_SLACK_WEBHOOK_URL", "");
         let token = cfg.get("PICOAGENT_SLACK_BOT_TOKEN", "");
         if action == "test" {
             if !token.is_empty() {
-                let response = match client
-                    .get(SLACK_AUTH_TEST_URL)
-                    .bearer_auth(&token)
-                    .send()
-                    .await
+                let response = match crate::tool_try!(crate::tools::http::service(
+                    reqwest::Method::GET,
+                    SLACK_AUTH_TEST_URL,
+                    request_timeout
+                ))
+                .bearer_auth(&token)
+                .send()
+                .await
                 {
                     Ok(response) => response,
                     Err(error) => {
@@ -195,12 +191,15 @@ impl Tool for SlackTool {
                 .filter(|value| (1..=20).contains(value))
                 .unwrap_or(10)
                 .to_string();
-            let response = match client
-                .get(SLACK_HISTORY_URL)
-                .bearer_auth(&token)
-                .query(&[("channel", channel.as_str()), ("limit", limit.as_str())])
-                .send()
-                .await
+            let response = match crate::tool_try!(crate::tools::http::service(
+                reqwest::Method::GET,
+                SLACK_HISTORY_URL,
+                request_timeout
+            ))
+            .bearer_auth(&token)
+            .query(&[("channel", channel.as_str()), ("limit", limit.as_str())])
+            .send()
+            .await
             {
                 Ok(response) => response,
                 Err(error) => {
@@ -251,11 +250,14 @@ impl Tool for SlackTool {
             Err(error) => return format!("エラー: {}", error),
         };
         if !webhook_url.is_empty() {
-            let response = client
-                .post(&webhook_url)
-                .json(&json!({ "text": text }))
-                .send()
-                .await;
+            let response = crate::tool_try!(crate::tools::http::service(
+                reqwest::Method::POST,
+                &webhook_url,
+                request_timeout
+            ))
+            .json(&json!({ "text": text }))
+            .send()
+            .await;
             return match response {
                 Ok(response) if response.status().is_success() => {
                     "OK: Slack Webhook へ送信しました。".to_string()
@@ -277,12 +279,15 @@ impl Tool for SlackTool {
             return super::config_guide("Slack送信", &["PICOAGENT_SLACK_CHANNEL"], "Bot token 利用時は依頼で channel を渡すか、既定の送信先チャンネルを設定してください。");
         }
 
-        let response = client
-            .post(SLACK_POST_MESSAGE_URL)
-            .bearer_auth(token)
-            .json(&json!({ "channel": channel, "text": text }))
-            .send()
-            .await;
+        let response = crate::tool_try!(crate::tools::http::service(
+            reqwest::Method::POST,
+            SLACK_POST_MESSAGE_URL,
+            request_timeout
+        ))
+        .bearer_auth(token)
+        .json(&json!({ "channel": channel, "text": text }))
+        .send()
+        .await;
         let response = match response {
             Ok(response) => response,
             Err(error) => {

@@ -80,14 +80,7 @@ impl Tool for MastodonTool {
             .trim_end_matches('/')
             .to_string();
         let timeout = crate::tool_try!(cfg.int(&crate::config::ints::MASTODON_TIMEOUT_SECS)) as u64;
-        let client = match reqwest::Client::builder()
-            .timeout(Duration::from_secs(timeout))
-            .user_agent("PicoAgent/1.0 (Mastodon tool)")
-            .build()
-        {
-            Ok(client) => client,
-            Err(error) => return format!("エラー: Mastodon API の準備に失敗しました: {}", error),
-        };
+        let request_timeout = Duration::from_secs(timeout);
         match args.get("action").and_then(Value::as_str).unwrap_or("") {
             "post" => {
                 let status = match text_arg(&args, "status", MAX_STATUS_CHARS) {
@@ -101,12 +94,15 @@ impl Tool for MastodonTool {
                 ));
                 crate::tools::http::service_reply(
                     cfg,
-                    client
-                        .post(format!("{}/api/v1/statuses", base))
-                        .bearer_auth(token)
-                        .form(&[("status", status), ("visibility", visibility)])
-                        .send()
-                        .await,
+                    crate::tool_try!(crate::tools::http::service(
+                        reqwest::Method::POST,
+                        format!("{}/api/v1/statuses", base),
+                        request_timeout
+                    ))
+                    .bearer_auth(token)
+                    .form(&[("status", status), ("visibility", visibility)])
+                    .send()
+                    .await,
                     "Mastodon API",
                 )
                 .await
@@ -115,12 +111,15 @@ impl Tool for MastodonTool {
                 let limit = limit_arg(&args, 20, 40).to_string();
                 crate::tools::http::service_reply(
                     cfg,
-                    client
-                        .get(format!("{}/api/v1/timelines/home", base))
-                        .bearer_auth(token)
-                        .query(&[("limit", limit.as_str())])
-                        .send()
-                        .await,
+                    crate::tool_try!(crate::tools::http::service(
+                        reqwest::Method::GET,
+                        format!("{}/api/v1/timelines/home", base),
+                        request_timeout
+                    ))
+                    .bearer_auth(token)
+                    .query(&[("limit", limit.as_str())])
+                    .send()
+                    .await,
                     "Mastodon API",
                 )
                 .await
@@ -133,12 +132,15 @@ impl Tool for MastodonTool {
                 let limit = limit_arg(&args, 20, 40).to_string();
                 crate::tools::http::service_reply(
                     cfg,
-                    client
-                        .get(format!("{}/api/v2/search", base))
-                        .bearer_auth(token)
-                        .query(&[("q", query), ("limit", limit.as_str())])
-                        .send()
-                        .await,
+                    crate::tool_try!(crate::tools::http::service(
+                        reqwest::Method::GET,
+                        format!("{}/api/v2/search", base),
+                        request_timeout
+                    ))
+                    .bearer_auth(token)
+                    .query(&[("q", query), ("limit", limit.as_str())])
+                    .send()
+                    .await,
                     "Mastodon API",
                 )
                 .await
