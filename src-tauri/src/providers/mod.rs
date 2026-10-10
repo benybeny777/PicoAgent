@@ -21,7 +21,7 @@ pub trait Provider: Send + Sync {
     }
     fn default_model(&self, cfg: &Config) -> String;
     async fn list_models(&self, cfg: &Config) -> anyhow::Result<Vec<String>>;
-    async fn is_up(&self, cfg: &Config) -> bool;
+    async fn is_up(&self, cfg: &Config) -> Result<bool, String>;
     async fn chat(
         &self,
         cfg: &Config,

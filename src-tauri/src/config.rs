@@ -10,6 +10,10 @@ use std::sync::Mutex;
 use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
 
+#[path = "numeric_settings.rs"]
+pub mod ints;
+pub use ints::{number_settings_schema, validate_int_patch, IntSetting};
+
 const MISSING_REVISION: &str = "missing";
 
 pub struct Config {
@@ -135,6 +139,65 @@ impl Config {
             }
         }
         fallback.to_string()
+    }
+
+    /// 数量設定は保存時と同じ宣言で読む。ファイル中の不正値も黙って続行させない。
+    pub fn int_or_auto(&self, setting: &IntSetting) -> Result<Option<i64>, String> {
+        let stored = self.values.lock().unwrap().get(setting.key).cloned();
+        setting.parse(&effective_int_text(stored.as_ref(), setting)?)
+    }
+
+    pub fn int(&self, setting: &IntSetting) -> Result<i64, String> {
+        self.int_or_auto(setting)?
+            .ok_or_else(|| format!("{} は整数が必要な処理では auto を使えません。", setting.key))
+    }
+
+    /// 保存候補も永続値・環境変数と同じ優先順で検証する。原本は変更しない。
+    pub fn int_or_auto_in_patch(
+        &self,
+        setting: &IntSetting,
+        patch: &Map<String, Value>,
+    ) -> Result<Option<i64>, String> {
+        let stored = patch
+            .get(setting.key)
+            .cloned()
+            .or_else(|| self.values.lock().unwrap().get(setting.key).cloned());
+        setting.parse(&effective_int_text(stored.as_ref(), setting)?)
+    }
+
+    pub fn int_in_patch(
+        &self,
+        setting: &IntSetting,
+        patch: &Map<String, Value>,
+    ) -> Result<i64, String> {
+        self.int_or_auto_in_patch(setting, patch)?
+            .ok_or_else(|| format!("{} は整数が必要です。", setting.key))
+    }
+
+    pub fn duration_secs(&self, setting: &IntSetting) -> Result<std::time::Duration, String> {
+        let value = self.int(setting)?;
+        let seconds = u64::try_from(value)
+            .map_err(|_| format!("{} は負の待ち時間を指定できません。", setting.key))?;
+        Ok(std::time::Duration::from_secs(seconds))
+    }
+
+    pub fn duration_key(&self, key: &str) -> Result<std::time::Duration, String> {
+        let setting =
+            ints::find(key).ok_or_else(|| format!("整数設定の宣言がありません: {key}"))?;
+        self.duration_secs(setting)
+    }
+
+    pub fn invalid_int_settings(&self) -> Vec<Value> {
+        let values = self.get_all();
+        ints::INT_SETTINGS
+            .iter()
+            .filter_map(|setting| {
+                effective_int_text(values.get(setting.key), setting)
+                    .and_then(|raw| setting.parse(&raw))
+                    .err()
+                    .map(|message| serde_json::json!({"key":setting.key, "message":message}))
+            })
+            .collect()
     }
 
     /// 真偽値設定を取得。
@@ -326,6 +389,26 @@ impl Config {
     }
 }
 
+/// 数量値は秘密設定の復号・未設定降格を経由せず、元の型も文字列として検査する。
+fn effective_int_text(stored: Option<&Value>, setting: &IntSetting) -> Result<String, String> {
+    if let Some(value) = stored {
+        match value {
+            Value::Null => {}
+            Value::String(raw) if raw.is_empty() => {}
+            Value::String(raw) => return Ok(raw.clone()),
+            value => return Ok(value.to_string()),
+        }
+    }
+    match std::env::var(setting.key) {
+        Ok(raw) if !raw.is_empty() => Ok(raw),
+        Ok(_) | Err(std::env::VarError::NotPresent) => Ok(setting.default_text()),
+        Err(std::env::VarError::NotUnicode(_)) => Err(format!(
+            "{} の環境変数が文字列として読めません。",
+            setting.key
+        )),
+    }
+}
+
 fn value_revision(value: Option<&Value>) -> String {
     let Some(value) = value else {
         return MISSING_REVISION.to_string();
@@ -357,6 +440,175 @@ mod tests {
     }
 
     use super::Config;
+
+    struct RestoreEnvironment {
+        key: &'static str,
+        original: Option<std::ffi::OsString>,
+    }
+
+    impl RestoreEnvironment {
+        fn new(key: &'static str) -> Self {
+            Self {
+                key,
+                original: std::env::var_os(key),
+            }
+        }
+    }
+
+    impl Drop for RestoreEnvironment {
+        fn drop(&mut self) {
+            match &self.original {
+                Some(value) => std::env::set_var(self.key, value),
+                None => std::env::remove_var(self.key),
+            }
+        }
+    }
+
+    #[test]
+    fn 数量の保存値と環境値と既定を順に検証する() {
+        // 既存の並行保存試験が使う0〜7とは異なる環境キーを専有する。
+        let setting = super::IntSetting {
+            key: "PICOAGENT_TEST_KEY_9001",
+            label: "数量検査",
+            default: Some(5),
+            min: 0,
+            max: 10,
+            unit: "件",
+        };
+        let _restore = RestoreEnvironment::new(setting.key);
+        std::env::remove_var(setting.key);
+        let cfg = Config::new();
+        assert_eq!(cfg.int(&setting).unwrap(), 5);
+        for raw in ["", " ", "　"] {
+            cfg.set(setting.key, raw);
+            assert_eq!(cfg.int(&setting).unwrap(), 5);
+        }
+        for (raw, expected) in [("0", 0), ("10", 10), ("７", 7), (" ８ ", 8)] {
+            cfg.set(setting.key, raw);
+            assert_eq!(cfg.int(&setting).unwrap(), expected);
+        }
+        for raw in [
+            "1.5",
+            "１．５",
+            "-1",
+            "11",
+            "bad",
+            "auto",
+            "9223372036854775808",
+        ] {
+            cfg.set(setting.key, raw);
+            assert!(cfg.int(&setting).unwrap_err().contains(setting.key));
+        }
+        std::env::set_var(setting.key, "９");
+        cfg.set(setting.key, "");
+        assert_eq!(cfg.int(&setting).unwrap(), 9);
+        cfg.values
+            .lock()
+            .unwrap()
+            .insert(setting.key.to_string(), serde_json::Value::Null);
+        assert_eq!(cfg.int(&setting).unwrap(), 9);
+        cfg.set(setting.key, "2");
+        assert_eq!(cfg.int(&setting).unwrap(), 2);
+        std::env::set_var(setting.key, "bad");
+        assert_eq!(cfg.int(&setting).unwrap(), 2);
+        for value in [serde_json::json!(""), serde_json::Value::Null] {
+            let patch = serde_json::Map::from_iter([(setting.key.to_string(), value)]);
+            assert!(cfg
+                .int_or_auto_in_patch(&setting, &patch)
+                .unwrap_err()
+                .contains(setting.key));
+            assert!(cfg
+                .int_in_patch(&setting, &patch)
+                .unwrap_err()
+                .contains(setting.key));
+            assert_eq!(
+                cfg.int(&setting).unwrap(),
+                2,
+                "検査だけで保存値を変更しない"
+            );
+        }
+        cfg.set(setting.key, "");
+        assert!(cfg.int(&setting).unwrap_err().contains(setting.key));
+        std::env::set_var(setting.key, "");
+        assert_eq!(cfg.int(&setting).unwrap(), 5);
+        for value in [serde_json::json!(""), serde_json::Value::Null] {
+            let patch = serde_json::Map::from_iter([(setting.key.to_string(), value)]);
+            assert_eq!(cfg.int_or_auto_in_patch(&setting, &patch).unwrap(), Some(5));
+            assert_eq!(cfg.int_in_patch(&setting, &patch).unwrap(), 5);
+        }
+        let automatic = super::IntSetting {
+            default: None,
+            ..setting
+        };
+        let patch =
+            serde_json::Map::from_iter([(setting.key.to_string(), serde_json::json!("auto"))]);
+        assert_eq!(cfg.int_or_auto_in_patch(&automatic, &patch).unwrap(), None);
+        assert!(cfg
+            .int_in_patch(&automatic, &patch)
+            .unwrap_err()
+            .contains(setting.key));
+        std::env::remove_var(setting.key);
+        let signed = super::IntSetting { min: -3, ..setting };
+        cfg.set(signed.key, "-3");
+        assert_eq!(cfg.int(&signed).unwrap(), -3);
+        assert!(cfg.duration_secs(&signed).unwrap_err().contains(signed.key));
+    }
+
+    #[test]
+    fn 数量が複数不正なら全理由を返し保存済み内容を変更しない() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("config.json");
+        let initial = serde_json::json!({"PICOAGENT_TEST_KEY":"保存前"});
+        crate::store::write_json_atomic(&path, &initial).unwrap();
+        let before = std::fs::read(&path).unwrap();
+        let modified = std::fs::metadata(&path).unwrap().modified().unwrap();
+        let cfg = Config::new();
+        cfg.load(path.clone()).unwrap();
+        let patch = serde_json::Map::from_iter([
+            (
+                "PICOAGENT_MEMORY_MAX_ITEMS".to_string(),
+                serde_json::json!("9"),
+            ),
+            (
+                "PICOAGENT_HTTP_METADATA_TIMEOUT_SECS".to_string(),
+                serde_json::json!("1.5"),
+            ),
+            ("PICOAGENT_LOCAL_CTX".to_string(), serde_json::json!("8192")),
+            (
+                "PICOAGENT_TEST_KEY".to_string(),
+                serde_json::json!("保存後"),
+            ),
+        ]);
+        let mut invalid_keys = Vec::new();
+        let result = cfg.set_all_checked_with(patch, &serde_json::Map::new(), |_, patch| {
+            let (normalized, invalid) = super::validate_int_patch(patch.clone());
+            invalid_keys = invalid
+                .iter()
+                .map(|item| item["key"].as_str().unwrap().to_string())
+                .collect();
+            if !invalid.is_empty() {
+                anyhow::bail!("{}", serde_json::Value::Array(invalid));
+            }
+            *patch = normalized;
+            Ok(())
+        });
+        assert!(result.is_err());
+        invalid_keys.sort();
+        assert_eq!(
+            invalid_keys,
+            [
+                "PICOAGENT_HTTP_METADATA_TIMEOUT_SECS",
+                "PICOAGENT_LOCAL_CTX",
+                "PICOAGENT_MEMORY_MAX_ITEMS"
+            ]
+        );
+        assert_eq!(std::fs::read(&path).unwrap(), before);
+        assert_eq!(
+            std::fs::metadata(&path).unwrap().modified().unwrap(),
+            modified
+        );
+        assert_eq!(cfg.get_all(), initial.as_object().unwrap().clone());
+    }
 
     fn temp_dir(label: &str) -> std::path::PathBuf {
         let nanos = std::time::SystemTime::now()
@@ -662,5 +914,46 @@ mod tests {
         );
         assert!(dir.is_dir(), "元の対象を上書きしていない");
         std::fs::remove_dir_all(&dir).ok();
+    }
+    #[test]
+    fn 数量読取は保存値を優先し不正型を既定値へ戻さない() {
+        use super::ints;
+        let cfg = Config::new();
+        cfg.set(ints::HTTP_TIMEOUT_SECS.key, "３０");
+        assert_eq!(cfg.int(&ints::HTTP_TIMEOUT_SECS).unwrap(), 30);
+        assert_eq!(
+            cfg.duration_key(ints::HTTP_TIMEOUT_SECS.key).unwrap(),
+            std::time::Duration::from_secs(30)
+        );
+        for bad in [
+            serde_json::json!(false),
+            serde_json::json!({}),
+            serde_json::json!(1.5),
+            serde_json::json!("enc:dpapi:v1:壊れた値"),
+        ] {
+            cfg.set_value(ints::HTTP_TIMEOUT_SECS.key, bad.clone());
+            assert!(cfg.int(&ints::HTTP_TIMEOUT_SECS).is_err());
+            assert_eq!(cfg.get_all()[ints::HTTP_TIMEOUT_SECS.key], bad);
+        }
+        cfg.set(ints::BROWSER_MAX_CHARS.key, "auto");
+        assert_eq!(cfg.int_or_auto(&ints::BROWSER_MAX_CHARS).unwrap(), None);
+        assert!(cfg.int(&ints::BROWSER_MAX_CHARS).is_err());
+        assert!(cfg.duration_key("未宣言のキー").is_err());
+    }
+
+    #[test]
+    fn 不正な保存済み数量は保持し正常項目だけ読める() {
+        use super::ints;
+        let cfg = Config::new();
+        cfg.set(ints::HTTP_TIMEOUT_SECS.key, "abc");
+        cfg.set(ints::RSS_TIMEOUT_SECS.key, "999");
+        cfg.set(ints::CLIPBOARD_MAX_CHARS.key, "3000");
+        let before = cfg.get_all();
+        let invalid = cfg.invalid_int_settings();
+        for key in [ints::HTTP_TIMEOUT_SECS.key, ints::RSS_TIMEOUT_SECS.key] {
+            assert!(invalid.iter().any(|entry| entry["key"] == key));
+        }
+        assert_eq!(cfg.int(&ints::CLIPBOARD_MAX_CHARS).unwrap(), 3000);
+        assert_eq!(cfg.get_all(), before);
     }
 }

@@ -76,16 +76,18 @@ fn collect_files(root: &Path, files: &mut Vec<PathBuf>, depth: usize) {
     }
 }
 
-/// ripgrep の実行パスを解決する。優先順: 明示設定 → 同梱（setup tools）→ PATH。
-fn ripgrep_path(cfg: &Config) -> String {
+/// ripgrep の実行パスを解決する。優先順: 明示設定 → 同梱（setup tools）。
+fn ripgrep_path(cfg: &Config) -> Result<std::path::PathBuf, String> {
     crate::tools::resolve_cli_path(cfg, "PICOAGENT_RIPGREP_PATH", "ripgrep", "rg")
 }
 
 /// ripgrep で語に一致する候補ファイルを高速収集する（内蔵走査と同じ拡張子・除外・上限）。
-/// rg が使えない、または実行に失敗した場合は None を返し、呼び出し側は内蔵走査へ
-/// フォールバックする（グレースフルフォールバック）。
-async fn rg_collect(cfg: &Config, roots: &[PathBuf], terms: &[String]) -> Option<Vec<PathBuf>> {
-    let program = ripgrep_path(cfg);
+async fn rg_collect(
+    cfg: &Config,
+    roots: &[PathBuf],
+    terms: &[String],
+) -> Result<Vec<PathBuf>, String> {
+    let program = ripgrep_path(cfg)?;
     let mut found: Vec<PathBuf> = Vec::new();
     let mut seen = std::collections::HashSet::new();
     for term in terms {
@@ -118,17 +120,17 @@ async fn rg_collect(cfg: &Config, roots: &[PathBuf], terms: &[String]) -> Option
             .stderr(Stdio::null())
             .kill_on_drop(true);
         // 打ち切り時に子プロセスをツリーごと回収させるため、共通層を通す。
-        // ripgrep が見つからない・失敗した場合は内蔵走査へ落ちるので None で返す。
-        let output = crate::tools::process::output(command, 20, "ファイル横断検索（ripgrep）")
-            .await
-            .ok()?;
-        // rg の終了コード: 0=一致あり / 1=一致なし / 2=エラー（エラー時は内蔵走査へ）。
-        if output.status.code() == Some(2) {
-            return None;
+        let output =
+            crate::tools::process::output(command, 20, "ファイル横断検索（ripgrep）").await?;
+        if !matches!(output.status.code(), Some(0 | 1)) {
+            return Err(format!(
+                "ripgrepで検索できません: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ));
         }
         for line in String::from_utf8_lossy(&output.stdout).lines() {
             if found.len() >= MAX_FILES {
-                return Some(found);
+                return Ok(found);
             }
             let path = PathBuf::from(line);
             if seen.insert(path.clone()) {
@@ -136,7 +138,7 @@ async fn rg_collect(cfg: &Config, roots: &[PathBuf], terms: &[String]) -> Option
             }
         }
     }
-    Some(found)
+    Ok(found)
 }
 
 /// クエリ語の一致数からスコアを計算し、最初の一致行の抜粋を返す。
@@ -195,7 +197,7 @@ impl Tool for DocSearchTool {
     }
     fn description(&self) -> String {
         "許可ルート配下のローカル文書（md/txt/csv/コード等）をキーワード検索し、\
-         一致したファイルと抜粋を返します。ripgrep（同梱→PATH）があれば高速検索、無ければ内蔵走査。\
+         一致したファイルと抜粋を返します。ripgrep（明示設定または同梱）があれば高速検索。\
          外部送信なし。パラメータ: query（必須）、max_results。"
             .to_string()
     }
@@ -219,7 +221,7 @@ impl Tool for DocSearchTool {
     fn config_schema(&self) -> Vec<Field> {
         vec![Field::new(
             "PICOAGENT_RIPGREP_PATH",
-            "ripgrep 実行ファイルパス（高速検索用。空なら同梱→PATH、無ければ内蔵走査）",
+            "ripgrep 実行ファイルパス（高速検索用。空なら明示設定または同梱）",
             "text",
             "",
         )]
@@ -245,13 +247,9 @@ impl Tool for DocSearchTool {
             .unwrap_or(5)
             .clamp(1, 10) as usize;
 
-        // まず ripgrep（同梱→PATH）で候補を高速収集し、使えなければ内蔵走査へフォールバック。
         // rg は本文一致のみ拾うため、一致ゼロのときも内蔵走査でファイル名一致を補う。
         let roots: Vec<PathBuf> = crate::permissions::allowed_roots(cfg);
-        let mut files = match rg_collect(cfg, &roots, &terms).await {
-            Some(found) if !found.is_empty() => found,
-            _ => Vec::new(),
-        };
+        let mut files = crate::tool_try!(rg_collect(cfg, &roots, &terms).await);
         if files.is_empty() {
             for root in &roots {
                 collect_files(root, &mut files, 0);
@@ -298,7 +296,7 @@ mod tests {
     // rg がある環境だけで走る E2E（無ければ即成功で抜ける）。
     #[test]
     fn ripgrepで候補ファイルを収集できる() {
-        if std::process::Command::new("rg")
+        if crate::tools::process::command_sync("rg")
             .arg("--version")
             .output()
             .is_err()
@@ -313,6 +311,7 @@ mod tests {
         std::fs::write(dir.join("skip.bin"), "予算").unwrap(); // 対象外拡張子は拾わない
 
         let cfg = crate::config::Config::new();
+        cfg.set("PICOAGENT_RIPGREP_PATH", "rg");
         let runtime = tokio::runtime::Runtime::new().unwrap();
         let roots = vec![dir.clone()];
         let terms = vec!["予算".to_string()];

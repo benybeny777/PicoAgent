@@ -76,18 +76,8 @@ impl Tool for ChitchatTool {
                 "checkbox",
                 "",
             ),
-            Field::new(
-                "PICOAGENT_CHATTER_MIN_SECS",
-                "自発雑談の最短間隔（秒、30〜3600）",
-                "text",
-                "90",
-            ),
-            Field::new(
-                "PICOAGENT_CHATTER_MAX_SECS",
-                "自発雑談の最長間隔（秒、30〜3600）",
-                "text",
-                "240",
-            ),
+            Field::int(&crate::config::ints::CHATTER_MIN_SECS),
+            Field::int(&crate::config::ints::CHATTER_MAX_SECS),
             Field::new(
                 "PICOAGENT_CHATTER_TOPIC_MODE",
                 "自発雑談の話題ソース（auto/x/trends/news/off）",
@@ -112,12 +102,7 @@ impl Tool for ChitchatTool {
                 "textarea",
                 "https://news.google.com/rss?hl=ja&gl=JP&ceid=JP:ja",
             ),
-            Field::new(
-                "PICOAGENT_CHATTER_TOPIC_TIMEOUT_SECS",
-                "自発雑談の話題取得待ち時間（秒、3〜30）",
-                "text",
-                "8",
-            ),
+            Field::int(&crate::config::ints::CHATTER_TOPIC_TIMEOUT_SECS),
         ]
     }
 

@@ -41,13 +41,16 @@ pub fn start(app: tauri::AppHandle) {
     if !state.config.get_bool("PICOAGENT_API_ENABLED", false) {
         return;
     }
-    let port_text = state.config.get("PICOAGENT_API_PORT", "11500");
-    let port: u16 = match port_text.trim().parse() {
-        Ok(port) if port > 0 => port,
-        _ => {
-            crate::log_paths::append_app_log(
+    let port = match state.config.int(&crate::config::ints::API_PORT) {
+        Ok(port) => port as u16,
+        Err(error) => {
+            crate::notice::emit(
                 &app,
-                &format!("ローカルAPIを開始できません: ポート番号が不正です: {port_text}"),
+                crate::notice::Notice::background_failure(
+                    "api-start",
+                    "ローカルAPIの起動に失敗しました",
+                    error,
+                ),
             );
             return;
         }

@@ -65,7 +65,10 @@ fn structured_body(model: &str, messages: &[Message], schema: &Value) -> Value {
 }
 
 async fn send_chat(cfg: &Config, body: &Value) -> anyhow::Result<Message> {
-    let url = format!("{}/chat/completions", base_url(cfg));
+    let url = format!(
+        "{}/chat/completions",
+        base_url(cfg).map_err(anyhow::Error::msg)?
+    );
     let res = crate::tools::http::client()
         .post(&url)
         .json(body)
@@ -128,19 +131,10 @@ pub struct LocalModelPreset {
     pub note: &'static str,
 }
 
-/// コンテキスト長の下限。全スキル定義だけで約16,000トークンあり、旧既定の 8,192 では
-/// 人格・履歴・生成の枠が残らず、モデルへ渡せるスキルが数件まで削られる
-/// （実機で「今日の天気は？」の次のターンに weather が候補から消えた）。
-pub const MIN_LOCAL_CTX: usize = 32_768;
-
-/// ローカルエンジンのコンテキスト長。保存値が下限未満でも下限まで引き上げる。
-/// 旧既定 8,192 が保存されたままの環境も対象にする。
-pub fn context_length(cfg: &Config) -> usize {
-    cfg.get("PICOAGENT_LOCAL_CTX", "32768")
-        .trim()
-        .parse::<usize>()
-        .unwrap_or(MIN_LOCAL_CTX)
-        .max(MIN_LOCAL_CTX)
+/// ローカルエンジンのコンテキスト長。明示された不正値は補正せず返す。
+pub fn context_length(cfg: &Config) -> Result<usize, String> {
+    cfg.int(&crate::config::ints::LOCAL_CTX)
+        .map(|value| value as usize)
 }
 
 pub const DEFAULT_LOCAL_MODEL_PRESET: &str = "lfm25_2_6b";
@@ -456,13 +450,12 @@ fn normalize_for_local(messages: &[Message]) -> Vec<Message> {
     out
 }
 
-pub fn port(cfg: &Config) -> u16 {
-    cfg.get("PICOAGENT_LOCAL_PORT", "11435")
-        .parse()
-        .unwrap_or(11435)
+pub fn port(cfg: &Config) -> Result<u16, String> {
+    cfg.int(&crate::config::ints::LOCAL_PORT)
+        .map(|value| value as u16)
 }
-fn base_url(cfg: &Config) -> String {
-    format!("http://127.0.0.1:{}/v1", port(cfg))
+fn base_url(cfg: &Config) -> Result<String, String> {
+    Ok(format!("http://127.0.0.1:{}/v1", port(cfg)?))
 }
 
 #[async_trait]
@@ -487,25 +480,15 @@ impl Provider for Local {
                 "text",
                 DEFAULT_LOCAL_MODEL_URL,
             ),
-            Field::new(
-                "PICOAGENT_LOCAL_PORT",
-                "ローカルエンジンのポート",
-                "text",
-                "11435",
-            ),
-            Field::new("PICOAGENT_LOCAL_CTX", "コンテキスト長", "text", "32768"),
+            Field::int(&crate::config::ints::LOCAL_PORT),
+            Field::int(&crate::config::ints::LOCAL_CTX),
             Field::new(
                 "PICOAGENT_LOCAL_VISION_ENABLED",
                 "ローカル画像入力（Gemma 4 E2B・追加資産の明示導入と再起動が必要）",
                 "checkbox",
                 "false",
             ),
-            Field::new(
-                "PICOAGENT_LOCAL_NGL",
-                "GPU へオフロードするレイヤ数（999=全レイヤ優先 / 0=CPU 固定）",
-                "text",
-                "999",
-            ),
+            Field::int(&crate::config::ints::LOCAL_NGL),
             Field::new(
                 "PICOAGENT_LOCAL_GPU_DEVICE",
                 "使用 GPU（空=既定先頭 / 複数 GPU は Vulkan1 等を指定）",
@@ -522,7 +505,7 @@ impl Provider for Local {
     }
 
     async fn list_models(&self, cfg: &Config) -> anyhow::Result<Vec<String>> {
-        let url = format!("{}/models", base_url(cfg));
+        let url = format!("{}/models", base_url(cfg).map_err(anyhow::Error::msg)?);
         let local_presets: Vec<String> = LOCAL_MODEL_PRESETS
             .iter()
             .map(|preset| preset.id.to_string())
@@ -558,21 +541,23 @@ impl Provider for Local {
         Ok(out)
     }
 
-    async fn is_up(&self, cfg: &Config) -> bool {
-        // llama-server はモデルロード完了で /health が 200 を返す（ロード中は 503）。
-        let url = format!("http://127.0.0.1:{}/health", port(cfg));
-        match reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(2))
-            .build()
-        {
-            Ok(c) => c
-                .get(&url)
-                .send()
-                .await
-                .map(|r| r.status().is_success())
-                .unwrap_or(false),
-            Err(_) => false,
-        }
+    async fn is_up(&self, cfg: &Config) -> Result<bool, String> {
+        Ok({
+            // llama-server はモデルロード完了で /health が 200 を返す（ロード中は 503）。
+            let url = format!("http://127.0.0.1:{}/health", port(cfg)?);
+            match reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(2))
+                .build()
+            {
+                Ok(c) => c
+                    .get(&url)
+                    .send()
+                    .await
+                    .map(|r| r.status().is_success())
+                    .unwrap_or(false),
+                Err(_) => false,
+            }
+        })
     }
 
     async fn chat(
@@ -605,7 +590,10 @@ impl Provider for Local {
         use std::sync::atomic::{AtomicBool, Ordering};
 
         validate_image_input(cfg, messages)?;
-        let url = format!("{}/chat/completions", base_url(cfg));
+        let url = format!(
+            "{}/chat/completions",
+            base_url(cfg).map_err(anyhow::Error::msg)?
+        );
         let normalized = normalize_for_local(messages);
         let wire = to_wire(&normalized);
         let make_body = |with_tools: bool| {
@@ -649,6 +637,26 @@ mod tests {
         RETIRED_MODEL_FILES,
     };
     use crate::message::Message;
+
+    #[tokio::test]
+    async fn 不正ポートは疎通失敗や既定ポートに置き換えない() {
+        use super::Provider;
+        let cfg = crate::config::Config::new();
+        for value in ["0", "65536", "bad", "1.5", "-1"] {
+            cfg.set("PICOAGENT_LOCAL_PORT", value);
+            assert!(super::Local
+                .is_up(&cfg)
+                .await
+                .unwrap_err()
+                .contains("PICOAGENT_LOCAL_PORT"));
+            assert!(super::Local
+                .list_models(&cfg)
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains("PICOAGENT_LOCAL_PORT"));
+        }
+    }
 
     #[test]
     fn 構造化応答は画像を保持しツールを付けず正しい階層へスキーマを渡す() {

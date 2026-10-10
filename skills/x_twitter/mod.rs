@@ -55,12 +55,7 @@ impl Tool for XTwitterTool {
                 "",
             ),
             Field::new("PICOAGENT_X_USER_ID", "X 既定 user ID", "text", ""),
-            Field::new(
-                "PICOAGENT_X_TIMEOUT_SECS",
-                "X API 待ち時間（秒、3〜60）",
-                "text",
-                "20",
-            ),
+            Field::int(&crate::config::ints::X_TIMEOUT_SECS),
         ]
     }
 
@@ -69,7 +64,7 @@ impl Tool for XTwitterTool {
         if token.is_empty() {
             return super::config_guide("X連携", &["PICOAGENT_X_BEARER_TOKEN"], "X API v2 の OAuth2 bearer token が必要です。検索/投稿に必要な権限とAPIプランも確認してください。");
         }
-        let timeout = timeout_secs(cfg, "PICOAGENT_X_TIMEOUT_SECS", 20);
+        let timeout = crate::tool_try!(cfg.int(&crate::config::ints::X_TIMEOUT_SECS)) as u64;
         let client = match reqwest::Client::builder()
             .timeout(Duration::from_secs(timeout))
             .user_agent("PicoAgent/1.0 (X tool)")
@@ -84,7 +79,8 @@ impl Tool for XTwitterTool {
                     Ok(text) => text,
                     Err(error) => return format!("エラー: {}", error),
                 };
-                handle_text_response(
+                crate::tools::http::service_reply(
+                    cfg,
                     client
                         .post(format!("{}/tweets", X_API_BASE))
                         .bearer_auth(token)
@@ -101,7 +97,8 @@ impl Tool for XTwitterTool {
                     Err(error) => return format!("エラー: {}", error),
                 };
                 let max_results = max_results(&args, 10, 100, 10).to_string();
-                handle_text_response(
+                crate::tools::http::service_reply(
+                    cfg,
                     client
                         .get(format!("{}/tweets/search/recent", X_API_BASE))
                         .bearer_auth(token)
@@ -128,7 +125,8 @@ impl Tool for XTwitterTool {
                     );
                 }
                 let max_results = max_results(&args, 5, 100, 10).to_string();
-                handle_text_response(
+                crate::tools::http::service_reply(
+                    cfg,
                     client
                         .get(format!("{}/users/{}/tweets", X_API_BASE, user_id))
                         .bearer_auth(token)
@@ -143,14 +141,6 @@ impl Tool for XTwitterTool {
                 .to_string(),
         }
     }
-}
-
-fn timeout_secs(cfg: &Config, key: &str, fallback: u64) -> u64 {
-    cfg.get(key, &fallback.to_string())
-        .parse::<u64>()
-        .ok()
-        .filter(|value| (3..=60).contains(value))
-        .unwrap_or(fallback)
 }
 
 fn text_arg<'a>(args: &'a Value, key: &str, max_chars: usize) -> Result<&'a str, String> {
@@ -174,23 +164,6 @@ fn max_results(args: &Value, min: u64, max: u64, fallback: u64) -> u64 {
         .and_then(Value::as_u64)
         .filter(|value| (min..=max).contains(value))
         .unwrap_or(fallback)
-}
-
-async fn handle_text_response(
-    response: Result<reqwest::Response, reqwest::Error>,
-    label: &str,
-) -> String {
-    let response = match response {
-        Ok(response) => response,
-        Err(error) => return format!("エラー: {} への接続に失敗しました: {}", label, error),
-    };
-    let status = response.status();
-    let body = crate::tool_response_text!(response);
-    if status.is_success() {
-        body
-    } else {
-        format!("エラー: {} が HTTP {} を返しました。", label, status)
-    }
 }
 
 inventory::submit! { ToolReg { make: || Box::new(XTwitterTool) } }

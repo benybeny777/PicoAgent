@@ -1,7 +1,5 @@
 // skills/google_calendar/mod.rs - Google Calendar の予定確認・作成スキル。
 
-use std::time::Duration;
-
 use async_trait::async_trait;
 use serde_json::{json, Value};
 
@@ -17,14 +15,6 @@ pub struct GoogleCalendarTool;
 
 fn encode_path(value: &str) -> String {
     url::form_urlencoded::byte_serialize(value.as_bytes()).collect()
-}
-
-fn timeout_secs(cfg: &Config) -> u64 {
-    cfg.get("PICOAGENT_GOOGLE_CALENDAR_TIMEOUT_SECS", "20")
-        .parse::<u64>()
-        .ok()
-        .filter(|value| (3..=60).contains(value))
-        .unwrap_or(20)
 }
 
 #[async_trait]
@@ -80,12 +70,7 @@ impl Tool for GoogleCalendarTool {
                 "text",
                 "primary",
             ),
-            Field::new(
-                "PICOAGENT_GOOGLE_CALENDAR_TIMEOUT_SECS",
-                "Google Calendar API 待ち時間（秒、3〜60）",
-                "text",
-                "20",
-            ),
+            Field::int(&crate::config::ints::GOOGLE_CALENDAR_TIMEOUT_SECS),
         ]
     }
 
@@ -107,7 +92,9 @@ impl Tool for GoogleCalendarTool {
             .map(ToString::to_string)
             .unwrap_or_else(|| cfg.get("PICOAGENT_GOOGLE_CALENDAR_ID", "primary"));
         let client = match reqwest::Client::builder()
-            .timeout(Duration::from_secs(timeout_secs(cfg)))
+            .timeout(crate::tool_try!(cfg.duration_secs(
+                &crate::config::ints::GOOGLE_CALENDAR_TIMEOUT_SECS
+            )))
             .user_agent("PicoAgent/1.0 (Google Calendar tool)")
             .build()
         {
@@ -151,7 +138,7 @@ impl Tool for GoogleCalendarTool {
                     Err(error) => {
                         return format!(
                             "エラー: Google Calendar API への接続に失敗しました: {}",
-                            error
+                            error.without_url()
                         )
                     }
                 };
@@ -159,8 +146,13 @@ impl Tool for GoogleCalendarTool {
                 let body = crate::tool_response_text!(response);
                 if !status.is_success() {
                     return format!(
-                        "エラー: Google Calendar API が HTTP {} を返しました。",
-                        status
+                        "エラー: {}",
+                        crate::tools::http::safe_service_error(
+                            cfg,
+                            "Google Calendar API",
+                            status,
+                            &body
+                        )
                     );
                 }
                 let parsed: Value = crate::tool_response_json!(&body);
@@ -239,7 +231,7 @@ impl Tool for GoogleCalendarTool {
                     Err(error) => {
                         return format!(
                             "エラー: Google Calendar API への接続に失敗しました: {}",
-                            error
+                            error.without_url()
                         )
                     }
                 };
@@ -247,8 +239,13 @@ impl Tool for GoogleCalendarTool {
                 let body = crate::tool_response_text!(response);
                 if !status.is_success() {
                     return format!(
-                        "エラー: Google Calendar API が HTTP {} を返しました。",
-                        status
+                        "エラー: {}",
+                        crate::tools::http::safe_service_error(
+                            cfg,
+                            "Google Calendar API",
+                            status,
+                            &body
+                        )
                     );
                 }
                 let parsed: Value = crate::tool_response_json!(&body);

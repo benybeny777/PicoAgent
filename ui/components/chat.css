@@ -396,3 +396,9 @@ body.is-editing-all .chat:hover .source-grip, body.is-editing-all .source-grip:f
 .source-grip[data-corner="bottom-right"] { bottom: 2px; right: 2px; cursor: se-resize; rotate: 90deg; }
 .source-grip[data-corner="bottom-left"] { bottom: 2px; left: 2px; cursor: sw-resize; rotate: 180deg; }
 .chat.expanded .source-grip { display: none; }
+
+/* 数量設定の診断は利用者の文字サイズと独立した確定表示にする。 */
+.chat.quantity-invalid > :not(.quantity-diagnostic), .quantity-hidden { visibility: hidden; pointer-events: none; }
+.quantity-diagnostic { position: absolute; inset: 8px; z-index: 20; background: var(--surface); color: var(--text); padding: 12px; font: 14px/1.6 sans-serif; overflow: auto; }
+
+.quantity-diagnostic:not([hidden]) { display: flex; flex-direction: column; justify-content: center; align-items: flex-start; }

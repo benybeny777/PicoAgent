@@ -59,12 +59,7 @@ impl Tool for GoogleSheetsTool {
                 "text",
                 "",
             ),
-            Field::new(
-                "PICOAGENT_GOOGLE_SHEETS_TIMEOUT_SECS",
-                "Google Sheets API 待ち時間（秒、3〜60）",
-                "text",
-                "20",
-            ),
+            Field::int(&crate::config::ints::GOOGLE_SHEETS_TIMEOUT_SECS),
         ]
     }
 
@@ -99,12 +94,8 @@ impl Tool for GoogleSheetsTool {
         else {
             return "エラー: range が指定されていません。".to_string();
         };
-        let timeout = cfg
-            .get("PICOAGENT_GOOGLE_SHEETS_TIMEOUT_SECS", "20")
-            .parse::<u64>()
-            .ok()
-            .filter(|value| (3..=60).contains(value))
-            .unwrap_or(20);
+        let timeout =
+            crate::tool_try!(cfg.int(&crate::config::ints::GOOGLE_SHEETS_TIMEOUT_SECS)) as u64;
         let client = match reqwest::Client::builder()
             .timeout(Duration::from_secs(timeout))
             .user_agent("PicoAgent/1.0 (Google Sheets tool)")
@@ -127,7 +118,7 @@ impl Tool for GoogleSheetsTool {
                     .bearer_auth(token)
                     .send()
                     .await;
-                handle_text_response(response, "Google Sheets API").await
+                crate::tools::http::service_reply(cfg, response, "Google Sheets API").await
             }
             "update" | "append" => {
                 let values = match args.get("values").and_then(Value::as_array) {
@@ -173,27 +164,10 @@ impl Tool for GoogleSheetsTool {
                         .send()
                         .await
                 };
-                handle_text_response(response, "Google Sheets API").await
+                crate::tools::http::service_reply(cfg, response, "Google Sheets API").await
             }
             _ => "エラー: action は read/update/append のいずれかを指定してください。".to_string(),
         }
-    }
-}
-
-async fn handle_text_response(
-    response: Result<reqwest::Response, reqwest::Error>,
-    label: &str,
-) -> String {
-    let response = match response {
-        Ok(response) => response,
-        Err(error) => return format!("エラー: {} への接続に失敗しました: {}", label, error),
-    };
-    let status = response.status();
-    let body = crate::tool_response_text!(response);
-    if status.is_success() {
-        body
-    } else {
-        format!("エラー: {} が HTTP {} を返しました。", label, status)
     }
 }
 
