@@ -75,16 +75,7 @@ impl Tool for GoogleTasksTool {
         }
         let timeout =
             crate::tool_try!(cfg.int(&crate::config::ints::GOOGLE_TASKS_TIMEOUT_SECS)) as u64;
-        let client = match reqwest::Client::builder()
-            .timeout(Duration::from_secs(timeout))
-            .user_agent("PicoAgent/1.0 (Google Tasks tool)")
-            .build()
-        {
-            Ok(client) => client,
-            Err(error) => {
-                return format!("エラー: Google Tasks API の準備に失敗しました: {}", error)
-            }
-        };
+        let request_timeout = Duration::from_secs(timeout);
         let tasklist_id = args
             .get("tasklist_id")
             .and_then(Value::as_str)
@@ -95,8 +86,7 @@ impl Tool for GoogleTasksTool {
         match args.get("action").and_then(Value::as_str).unwrap_or("") {
             "list_tasklists" => {
                 crate::tools::http::service_reply(cfg,
-                    client
-                        .get(format!("{}/users/@me/lists", TASKS_BASE))
+                    crate::tool_try!(crate::tools::http::service(reqwest::Method::GET, format!("{}/users/@me/lists", TASKS_BASE), request_timeout))
                         .bearer_auth(token)
                         .send()
                         .await,
@@ -106,8 +96,7 @@ impl Tool for GoogleTasksTool {
             }
             "list" => {
                 crate::tools::http::service_reply(cfg,
-                    client
-                        .get(format!("{}/lists/{}/tasks", TASKS_BASE, tasklist_id))
+                    crate::tool_try!(crate::tools::http::service(reqwest::Method::GET, format!("{}/lists/{}/tasks", TASKS_BASE, tasklist_id), request_timeout))
                         .bearer_auth(token)
                         .send()
                         .await,
@@ -128,8 +117,7 @@ impl Tool for GoogleTasksTool {
                     payload["due"] = json!(due);
                 }
                 crate::tools::http::service_reply(cfg,
-                    client
-                        .post(format!("{}/lists/{}/tasks", TASKS_BASE, tasklist_id))
+                    crate::tool_try!(crate::tools::http::service(reqwest::Method::POST, format!("{}/lists/{}/tasks", TASKS_BASE, tasklist_id), request_timeout))
                         .bearer_auth(token)
                         .json(&payload)
                         .send()
@@ -144,8 +132,7 @@ impl Tool for GoogleTasksTool {
                     _ => return "エラー: task_id が指定されていません。".to_string(),
                 };
                 crate::tools::http::service_reply(cfg,
-                    client
-                        .patch(format!("{}/lists/{}/tasks/{}", TASKS_BASE, tasklist_id, task_id))
+                    crate::tool_try!(crate::tools::http::service(reqwest::Method::PATCH, format!("{}/lists/{}/tasks/{}", TASKS_BASE, tasklist_id, task_id), request_timeout))
                         .bearer_auth(token)
                         .json(&json!({ "status": "completed" }))
                         .send()

@@ -229,14 +229,8 @@ impl Tool for WeatherTool {
 
     async fn run(&self, cfg: &Config, args: Value) -> String {
         let timeout = crate::tool_try!(cfg.int(&crate::config::ints::WEATHER_TIMEOUT_SECS)) as u64;
-        let client = match reqwest::Client::builder()
-            .timeout(Duration::from_secs(timeout))
-            .user_agent("PicoAgent/1.0 (Weather tool)")
-            .build()
-        {
-            Ok(client) => client,
-            Err(error) => return format!("エラー: 天気APIの準備に失敗しました: {}", error),
-        };
+        let request_timeout = Duration::from_secs(timeout);
+        let client = crate::tool_try!(crate::tools::http::service_client());
         let days = args
             .get("days")
             .and_then(Value::as_u64)
@@ -256,7 +250,7 @@ impl Tool for WeatherTool {
             (lat, lon, format!("{},{}", lat, lon))
         } else if let Some(location) = &explicit_location {
             // 利用者が明示した地点を別地点へ黙って置き換えない。
-            match geocode(cfg, &client, location).await {
+            match geocode(cfg, request_timeout, location).await {
                 Ok(found) => {
                     // 会話で言われた地点は既定として覚え、次から地名を聞き直さない。
                     // 「読んで比べてから書き戻す」ので、同時に複数の問い合わせが走っても
@@ -285,12 +279,12 @@ impl Tool for WeatherTool {
             // 新版では未設定として一度だけ現在地推定へ戻す。東京を固定したい場合は
             // 日本語の「東京都」等を保存すれば正本として扱われる。
             if let Some(saved_location) = configured_location(&saved_location) {
-                match geocode(cfg, &client, saved_location).await {
+                match geocode(cfg, request_timeout, saved_location).await {
                     Ok(found) => found,
                     Err(error) => return format!("エラー: {}", error),
                 }
             } else if !cfg.get_bool("PICOAGENT_WEATHER_DISABLE_AUTO_LOCATION", false) {
-                match ip_geolocate(&client).await {
+                match ip_geolocate(client, request_timeout).await {
                     Some(found) => found,
                     None => return "エラー: 現在地を取得できませんでした。設定で天気の地点を入力してください。".to_string(),
                 }
@@ -300,8 +294,7 @@ impl Tool for WeatherTool {
                 return "エラー: 天気の地点が未設定で、現在地の自動取得も設定で無効になっています。設定で市区町村を入力するか、現在地の自動取得を有効にしてください。".to_string();
             }
         };
-        let response = match client
-            .get(FORECAST_URL)
+        let response = match crate::tool_try!(crate::tools::http::service(reqwest::Method::GET, FORECAST_URL, request_timeout))
             .query(&[
                 ("latitude", lat.to_string()),
                 ("longitude", lon.to_string()),
@@ -376,11 +369,10 @@ fn pick_location(query: &str, candidates: &[Value]) -> Option<(f64, f64, String)
 
 async fn fetch_candidates(
     cfg: &Config,
-    client: &reqwest::Client,
+    request_timeout: std::time::Duration,
     name: &str,
 ) -> Result<Vec<Value>, String> {
-    let response = client
-        .get(GEOCODE_URL)
+    let response = crate::tools::http::service(reqwest::Method::GET, GEOCODE_URL, request_timeout)?
         .query(&[
             ("name", name),
             ("count", "10"),
@@ -411,16 +403,16 @@ async fn fetch_candidates(
 
 async fn geocode(
     cfg: &Config,
-    client: &reqwest::Client,
+    request_timeout: std::time::Duration,
     location: &str,
 ) -> Result<(f64, f64, String), String> {
     // 都道府県名は候補が返らないので県庁所在地へ読み替える。
     let location = resolvable_location(location);
-    let mut candidates = fetch_candidates(cfg, client, location).await?;
+    let mut candidates = fetch_candidates(cfg, request_timeout, location).await?;
     // 「横浜」のように自治体の種別を省いた言い方では、小さな同名の町が先に来る。
     // 「市」を補った候補も集めてから人口で選ぶ。
     if !location.ends_with(['市', '区', '町', '村']) {
-        if let Ok(extra) = fetch_candidates(cfg, client, &format!("{location}市")).await {
+        if let Ok(extra) = fetch_candidates(cfg, request_timeout, &format!("{location}市")).await {
             candidates.extend(extra);
         }
     }
@@ -429,8 +421,16 @@ async fn geocode(
 }
 
 // IP から現在地（緯度経度・市名）をHTTPSで推定する。失敗時は None。
-async fn ip_geolocate(client: &reqwest::Client) -> Option<(f64, f64, String)> {
-    let response = client.get("https://ipconfig.io/json").send().await.ok()?;
+async fn ip_geolocate(
+    client: &reqwest::Client,
+    request_timeout: std::time::Duration,
+) -> Option<(f64, f64, String)> {
+    let response = client
+        .get("https://ipconfig.io/json")
+        .timeout(request_timeout)
+        .send()
+        .await
+        .ok()?;
     if !response.status().is_success() {
         return None;
     }

@@ -371,15 +371,16 @@ impl Tool for WebSearchTool {
         let timeout_secs =
             crate::tool_try!(cfg.int(&crate::config::ints::WEB_SEARCH_TIMEOUT_SECS)) as u64;
 
-        let client = match reqwest::Client::builder()
-            .timeout(Duration::from_secs(timeout_secs as u64))
-            .user_agent("PicoAgent/1.0 (Web search tool)")
-            .build()
+        let request_timeout = Duration::from_secs(timeout_secs as u64);
+        let response = match crate::tool_try!(crate::tools::http::service(
+            reqwest::Method::GET,
+            SEARCH_URL,
+            request_timeout
+        ))
+        .query(&[("q", query)])
+        .send()
+        .await
         {
-            Ok(client) => client,
-            Err(error) => return format!("エラー: Web検索の準備に失敗しました: {}", error),
-        };
-        let response = match client.get(SEARCH_URL).query(&[("q", query)]).send().await {
             Ok(response) => response,
             Err(error) => {
                 return format!(

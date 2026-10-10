@@ -66,14 +66,7 @@ impl Tool for XTwitterTool {
             return super::config_guide("X連携", &["PICOAGENT_X_BEARER_TOKEN"], "X API v2 の OAuth2 bearer token が必要です。検索/投稿に必要な権限とAPIプランも確認してください。");
         }
         let timeout = crate::tool_try!(cfg.int(&crate::config::ints::X_TIMEOUT_SECS)) as u64;
-        let client = match reqwest::Client::builder()
-            .timeout(Duration::from_secs(timeout))
-            .user_agent("PicoAgent/1.0 (X tool)")
-            .build()
-        {
-            Ok(client) => client,
-            Err(error) => return format!("エラー: X API の準備に失敗しました: {}", error),
-        };
+        let request_timeout = Duration::from_secs(timeout);
         match args.get("action").and_then(Value::as_str).unwrap_or("") {
             "post" => {
                 let text = match text_arg(&args, "text", MAX_TEXT_CHARS) {
@@ -82,12 +75,15 @@ impl Tool for XTwitterTool {
                 };
                 crate::tools::http::service_reply(
                     cfg,
-                    client
-                        .post(format!("{}/tweets", X_API_BASE))
-                        .bearer_auth(token)
-                        .json(&json!({ "text": text }))
-                        .send()
-                        .await,
+                    crate::tool_try!(crate::tools::http::service(
+                        reqwest::Method::POST,
+                        format!("{}/tweets", X_API_BASE),
+                        request_timeout
+                    ))
+                    .bearer_auth(token)
+                    .json(&json!({ "text": text }))
+                    .send()
+                    .await,
                     "X API",
                 )
                 .await
@@ -100,12 +96,15 @@ impl Tool for XTwitterTool {
                 let max_results = max_results(&args, 10, 100, 10).to_string();
                 crate::tools::http::service_reply(
                     cfg,
-                    client
-                        .get(format!("{}/tweets/search/recent", X_API_BASE))
-                        .bearer_auth(token)
-                        .query(&[("query", query), ("max_results", max_results.as_str())])
-                        .send()
-                        .await,
+                    crate::tool_try!(crate::tools::http::service(
+                        reqwest::Method::GET,
+                        format!("{}/tweets/search/recent", X_API_BASE),
+                        request_timeout
+                    ))
+                    .bearer_auth(token)
+                    .query(&[("query", query), ("max_results", max_results.as_str())])
+                    .send()
+                    .await,
                     "X API",
                 )
                 .await
@@ -128,12 +127,15 @@ impl Tool for XTwitterTool {
                 let max_results = max_results(&args, 5, 100, 10).to_string();
                 crate::tools::http::service_reply(
                     cfg,
-                    client
-                        .get(format!("{}/users/{}/tweets", X_API_BASE, user_id))
-                        .bearer_auth(token)
-                        .query(&[("max_results", max_results.as_str())])
-                        .send()
-                        .await,
+                    crate::tool_try!(crate::tools::http::service(
+                        reqwest::Method::GET,
+                        format!("{}/users/{}/tweets", X_API_BASE, user_id),
+                        request_timeout
+                    ))
+                    .bearer_auth(token)
+                    .query(&[("max_results", max_results.as_str())])
+                    .send()
+                    .await,
                     "X API",
                 )
                 .await

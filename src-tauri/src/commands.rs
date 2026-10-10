@@ -2890,25 +2890,18 @@ pub async fn pet_speak(
         // speaker_uuid があれば実 style ID を `/speakers` から解決する（取り違え防止）。
         // UUID指定の解決失敗では合成へ進まない。
         let speaker = resolve_tts_speaker(&endpoint, &voice).await?;
-        let client = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(180))
-            .build()
-            .map_err(|error| {
-                log_command_error(
-                    &app,
-                    "Aivis HTTP クライアント作成に失敗しました",
-                    error.without_url(),
-                )
-            })?;
         let query_url = format!("{endpoint}/audio_query");
         let query = crate::tools::http::service_response(
             &state.config,
             "Aivis の音声クエリ作成",
-            client
-                .post(&query_url)
-                .query(&[("text", text.as_str()), ("speaker", speaker.as_str())])
-                .send()
-                .await,
+            crate::tools::http::service(
+                reqwest::Method::POST,
+                query_url,
+                std::time::Duration::from_secs(180),
+            )?
+            .query(&[("text", text.as_str()), ("speaker", speaker.as_str())])
+            .send()
+            .await,
         )
         .await
         .map_err(|error| log_command_error(&app, "Aivis の音声クエリ作成に失敗しました", error))?;
@@ -2924,12 +2917,15 @@ pub async fn pet_speak(
         let wav = crate::tools::http::service_response(
             &state.config,
             "Aivis の音声合成",
-            client
-                .post(&synthesis_url)
-                .query(&[("speaker", speaker.as_str())])
-                .json(&audio_query)
-                .send()
-                .await,
+            crate::tools::http::service(
+                reqwest::Method::POST,
+                synthesis_url,
+                std::time::Duration::from_secs(180),
+            )?
+            .query(&[("speaker", speaker.as_str())])
+            .json(&audio_query)
+            .send()
+            .await,
         )
         .await
         .map_err(|error| log_command_error(&app, "Aivis の音声合成に失敗しました", error))?;
@@ -4488,13 +4484,12 @@ impl Drop for UpdateDownloadCleanup {
 }
 
 async fn fetch_update_feed() -> Result<Option<Value>, String> {
-    let client = reqwest::Client::builder()
-        .connect_timeout(std::time::Duration::from_secs(5))
-        .read_timeout(std::time::Duration::from_secs(10))
-        .user_agent("PicoAgent-UpdateCheck")
-        .build()
-        .map_err(|error| error.to_string())?;
-    let mut response = match client.get(UPDATE_FEED_URL).send().await {
+    let mut response = match crate::tools::http::update_feed_client()?
+        .get(UPDATE_FEED_URL)
+        .header(reqwest::header::USER_AGENT, "PicoAgent-UpdateCheck")
+        .send()
+        .await
+    {
         Ok(response) => response,
         Err(error) if error.is_connect() || error.is_timeout() => return Ok(None),
         Err(error) => return Err(format!("更新情報を取得できません: {error}")),
@@ -4666,13 +4661,12 @@ pub async fn settings_install_update(app: AppHandle) -> Result<Value, String> {
         partial: partial.clone(),
         armed: true,
     };
-    let client = reqwest::Client::builder()
-        .connect_timeout(std::time::Duration::from_secs(10))
-        .read_timeout(std::time::Duration::from_secs(120))
-        .user_agent("PicoAgent-Updater")
-        .build()
-        .map_err(|error| error.to_string())?;
-    let mut response = match client.get(url).send().await {
+    let mut response = match crate::tools::http::client()?
+        .get(url)
+        .header(reqwest::header::USER_AGENT, "PicoAgent-Updater")
+        .send()
+        .await
+    {
         Ok(response) => response
             .error_for_status()
             .map_err(|error| format!("更新の取得を開始できません: {error}"))?,

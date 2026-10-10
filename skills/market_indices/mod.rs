@@ -185,20 +185,20 @@ impl Tool for MarketIndicesTool {
             "1y".to_string()
         };
         let timeout = crate::tool_try!(cfg.int(&crate::config::ints::MARKET_TIMEOUT_SECS)) as u64;
-        let client = match reqwest::Client::builder()
-            .timeout(Duration::from_secs(timeout))
-            .user_agent("Mozilla/5.0 PicoAgent/1.0 (Market indices tool)")
-            .build()
-        {
-            Ok(client) => client,
-            Err(error) => return format!("エラー: 市場指数APIの準備に失敗しました: {error}"),
-        };
+        let request_timeout = Duration::from_secs(timeout);
         let url = format!("{YAHOO_CHART_BASE}/{}", encoded_symbol(symbol));
-        let response = match client
-            .get(url)
-            .query(&[("range", range.as_str()), ("interval", "1d")])
-            .send()
-            .await
+        let response = match crate::tool_try!(crate::tools::http::service(
+            reqwest::Method::GET,
+            url,
+            request_timeout
+        ))
+        .header(
+            reqwest::header::USER_AGENT,
+            "Mozilla/5.0 PicoAgent/1.0 (Market indices tool)",
+        )
+        .query(&[("range", range.as_str()), ("interval", "1d")])
+        .send()
+        .await
         {
             Ok(response) => response,
             Err(error) => return format!("エラー: 市場指数APIへの接続に失敗しました: {error}"),

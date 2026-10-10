@@ -96,28 +96,22 @@ impl Tool for GoogleSheetsTool {
         };
         let timeout =
             crate::tool_try!(cfg.int(&crate::config::ints::GOOGLE_SHEETS_TIMEOUT_SECS)) as u64;
-        let client = match reqwest::Client::builder()
-            .timeout(Duration::from_secs(timeout))
-            .user_agent("PicoAgent/1.0 (Google Sheets tool)")
-            .build()
-        {
-            Ok(client) => client,
-            Err(error) => {
-                return format!("エラー: Google Sheets API の準備に失敗しました: {}", error)
-            }
-        };
+        let request_timeout = Duration::from_secs(timeout);
         let encoded_range: String =
             url::form_urlencoded::byte_serialize(range.as_bytes()).collect();
         match args.get("action").and_then(Value::as_str).unwrap_or("") {
             "read" => {
-                let response = client
-                    .get(format!(
+                let response = crate::tool_try!(crate::tools::http::service(
+                    reqwest::Method::GET,
+                    format!(
                         "{}/{}/values/{}",
                         SHEETS_BASE, spreadsheet_id, encoded_range
-                    ))
-                    .bearer_auth(token)
-                    .send()
-                    .await;
+                    ),
+                    request_timeout
+                ))
+                .bearer_auth(token)
+                .send()
+                .await;
                 crate::tools::http::service_reply(cfg, response, "Google Sheets API").await
             }
             "update" | "append" => {
@@ -148,21 +142,27 @@ impl Tool for GoogleSheetsTool {
                     )
                 };
                 let response = if action == "append" {
-                    client
-                        .post(url)
-                        .bearer_auth(token)
-                        .query(&[("valueInputOption", "USER_ENTERED")])
-                        .json(&payload)
-                        .send()
-                        .await
+                    crate::tool_try!(crate::tools::http::service(
+                        reqwest::Method::POST,
+                        url,
+                        request_timeout
+                    ))
+                    .bearer_auth(token)
+                    .query(&[("valueInputOption", "USER_ENTERED")])
+                    .json(&payload)
+                    .send()
+                    .await
                 } else {
-                    client
-                        .put(url)
-                        .bearer_auth(token)
-                        .query(&[("valueInputOption", "USER_ENTERED")])
-                        .json(&payload)
-                        .send()
-                        .await
+                    crate::tool_try!(crate::tools::http::service(
+                        reqwest::Method::PUT,
+                        url,
+                        request_timeout
+                    ))
+                    .bearer_auth(token)
+                    .query(&[("valueInputOption", "USER_ENTERED")])
+                    .json(&payload)
+                    .send()
+                    .await
                 };
                 crate::tools::http::service_reply(cfg, response, "Google Sheets API").await
             }

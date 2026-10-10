@@ -151,14 +151,7 @@ impl Tool for CurrencyRatesTool {
             });
         let amount = args.get("amount").and_then(Value::as_f64).unwrap_or(1.0);
         let timeout = crate::tool_try!(cfg.int(&crate::config::ints::CURRENCY_TIMEOUT_SECS)) as u64;
-        let client = match reqwest::Client::builder()
-            .timeout(Duration::from_secs(timeout))
-            .user_agent("PicoAgent/1.0 (Currency tool)")
-            .build()
-        {
-            Ok(client) => client,
-            Err(error) => return format!("エラー: 為替APIの準備に失敗しました: {}", error),
-        };
+        let request_timeout = Duration::from_secs(timeout);
 
         // チャート（推移）要求なら時系列を取得してスパークラインで返す。
         let want_chart = args.get("chart").and_then(Value::as_bool).unwrap_or(false)
@@ -175,18 +168,21 @@ impl Tool for CurrencyRatesTool {
                 .find(|s| !s.is_empty())
                 .unwrap_or("JPY")
                 .to_string();
-            return currency_chart(cfg, &client, &base, &symbol, days).await;
+            return currency_chart(cfg, request_timeout, &base, &symbol, days).await;
         }
 
-        let response = match client
-            .get(format!("{}/latest", FRANKFURTER_BASE))
-            .query(&[
-                ("from", base.as_str()),
-                ("to", symbols.as_str()),
-                ("amount", &amount.to_string()),
-            ])
-            .send()
-            .await
+        let response = match crate::tool_try!(crate::tools::http::service(
+            reqwest::Method::GET,
+            format!("{}/latest", FRANKFURTER_BASE),
+            request_timeout
+        ))
+        .query(&[
+            ("from", base.as_str()),
+            ("to", symbols.as_str()),
+            ("amount", &amount.to_string()),
+        ])
+        .send()
+        .await
         {
             Ok(response) => response,
             Err(error) => {
@@ -225,7 +221,7 @@ impl Tool for CurrencyRatesTool {
 // Frankfurter の時系列を取得し、推移をスパークラインで返す。
 async fn currency_chart(
     cfg: &Config,
-    client: &reqwest::Client,
+    request_timeout: std::time::Duration,
     base: &str,
     symbol: &str,
     days: i64,
@@ -234,11 +230,14 @@ async fn currency_chart(
     let end = Local::now().date_naive();
     let start = end - ChronoDuration::days(days);
     let url = format!("{FRANKFURTER_BASE}/{start}..{end}");
-    let response = match client
-        .get(&url)
-        .query(&[("from", base), ("to", symbol)])
-        .send()
-        .await
+    let response = match crate::tool_try!(crate::tools::http::service(
+        reqwest::Method::GET,
+        &url,
+        request_timeout
+    ))
+    .query(&[("from", base), ("to", symbol)])
+    .send()
+    .await
     {
         Ok(response) => response,
         Err(error) => {

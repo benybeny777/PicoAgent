@@ -83,14 +83,8 @@ impl Tool for RedditTool {
             );
         }
         let timeout = crate::tool_try!(cfg.int(&crate::config::ints::REDDIT_TIMEOUT_SECS)) as u64;
-        let client = match reqwest::Client::builder()
-            .timeout(Duration::from_secs(timeout))
-            .user_agent(cfg.get("PICOAGENT_REDDIT_USER_AGENT", "PicoAgent/1.0"))
-            .build()
-        {
-            Ok(client) => client,
-            Err(error) => return format!("エラー: Reddit API の準備に失敗しました: {}", error),
-        };
+        let request_timeout = Duration::from_secs(timeout);
+        let user_agent = cfg.get("PICOAGENT_REDDIT_USER_AGENT", "PicoAgent/1.0");
         match args.get("action").and_then(Value::as_str).unwrap_or("") {
             "submit_text" => {
                 let subreddit = subreddit(cfg, &args);
@@ -111,18 +105,22 @@ impl Tool for RedditTool {
                 };
                 crate::tools::http::service_reply(
                     cfg,
-                    client
-                        .post(format!("{}/api/submit", REDDIT_BASE))
-                        .bearer_auth(token)
-                        .form(&[
-                            ("api_type", "json"),
-                            ("kind", "self"),
-                            ("sr", subreddit.as_str()),
-                            ("title", title),
-                            ("text", text),
-                        ])
-                        .send()
-                        .await,
+                    crate::tool_try!(crate::tools::http::service(
+                        reqwest::Method::POST,
+                        format!("{}/api/submit", REDDIT_BASE),
+                        request_timeout
+                    ))
+                    .header(reqwest::header::USER_AGENT, user_agent.as_str())
+                    .bearer_auth(token)
+                    .form(&[
+                        ("api_type", "json"),
+                        ("kind", "self"),
+                        ("sr", subreddit.as_str()),
+                        ("title", title),
+                        ("text", text),
+                    ])
+                    .send()
+                    .await,
                     "Reddit API",
                 )
                 .await
@@ -144,12 +142,16 @@ impl Tool for RedditTool {
                     .to_string();
                 crate::tools::http::service_reply(
                     cfg,
-                    client
-                        .get(format!("{}/r/{}/hot", REDDIT_BASE, subreddit))
-                        .bearer_auth(token)
-                        .query(&[("limit", limit.as_str())])
-                        .send()
-                        .await,
+                    crate::tool_try!(crate::tools::http::service(
+                        reqwest::Method::GET,
+                        format!("{}/r/{}/hot", REDDIT_BASE, subreddit),
+                        request_timeout
+                    ))
+                    .header(reqwest::header::USER_AGENT, user_agent.as_str())
+                    .bearer_auth(token)
+                    .query(&[("limit", limit.as_str())])
+                    .send()
+                    .await,
                     "Reddit API",
                 )
                 .await
@@ -165,12 +167,16 @@ impl Tool for RedditTool {
                 };
                 crate::tools::http::service_reply(
                     cfg,
-                    client
-                        .post(format!("{}/api/comment", REDDIT_BASE))
-                        .bearer_auth(token)
-                        .form(&[("api_type", "json"), ("thing_id", thing_id), ("text", text)])
-                        .send()
-                        .await,
+                    crate::tool_try!(crate::tools::http::service(
+                        reqwest::Method::POST,
+                        format!("{}/api/comment", REDDIT_BASE),
+                        request_timeout
+                    ))
+                    .header(reqwest::header::USER_AGENT, user_agent.as_str())
+                    .bearer_auth(token)
+                    .form(&[("api_type", "json"), ("thing_id", thing_id), ("text", text)])
+                    .send()
+                    .await,
                     "Reddit API",
                 )
                 .await
