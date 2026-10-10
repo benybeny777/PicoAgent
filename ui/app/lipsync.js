@@ -25,7 +25,7 @@ export function createLipSync({ onMouth }) {
   function detach() {
     if (timer) { clearInterval(timer); timer = 0; }
     if (frame) { cancelAnimationFrame(frame); frame = 0; }
-    // フォールバック許可: 解放処理なので、切断済みで例外になっても残りの参照を捨てる。
+    // 解放処理なので、切断済みで例外になっても残りの参照を捨てる。
     try { source?.disconnect(); analyser?.disconnect(); }
     catch (error) { logApp("warn", "リップシンクの音声解析を切断できませんでした", errorDetail(error)); }
     source = null;

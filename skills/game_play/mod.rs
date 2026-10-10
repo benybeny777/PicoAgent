@@ -9,7 +9,6 @@ use async_trait::async_trait;
 use base64::{engine::general_purpose::STANDARD, Engine};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use tauri::Emitter;
 
 use super::{Tool, ToolReg};
 use crate::config::Config;
@@ -69,17 +68,15 @@ impl Drop for Operation {
                 let body = format!("ゲーム停止記録の保存に失敗: {error}");
                 crate::log_paths::log_detached(&body);
                 if let Some(app) = crate::durable_jobs::app_handle() {
-                    if let Err(error) = app.emit(
-                        "pet:notice",
-                        json!({
-                            "kind":"game_play", "title":"ゲーム操作の記録失敗",
-                            "body":body, "ok":false, "at":chrono::Utc::now().to_rfc3339()
-                        }),
-                    ) {
-                        crate::log_paths::log_detached(&format!(
-                            "ゲーム停止記録の失敗を画面へ通知できません: {error}"
-                        ));
-                    }
+                    crate::notice::emit(
+                        app,
+                        crate::notice::Notice::info(
+                            "game_play",
+                            "ゲーム操作の記録失敗",
+                            body,
+                            false,
+                        ),
+                    );
                 }
             }
         }
@@ -124,13 +121,7 @@ impl Settings {
         if controls.trim().is_empty() || controls.len() > 2000 {
             return Err("確認済みのキーと操作の対応を設定してください（例: w=上移動,a=左移動,s=下移動,d=右移動,f=攻撃）。".into());
         }
-        let limit = cfg
-            .get("PICOAGENT_GAME_MAX_OPS", "1")
-            .parse::<usize>()
-            .map_err(|_| "最大操作数は1〜100の整数で設定してください。".to_string())?;
-        if !(1..=100).contains(&limit) {
-            return Err("最大操作数は1〜100で設定してください。".into());
-        }
+        let limit = cfg.int(&crate::config::ints::GAME_MAX_OPS)? as usize;
         Ok(Self {
             title,
             keys,
@@ -472,12 +463,7 @@ impl Tool for GamePlayTool {
                 "textarea",
                 "w=上移動,a=左移動,s=下移動,d=右移動,f=攻撃",
             ),
-            Field::new(
-                "PICOAGENT_GAME_MAX_OPS",
-                "1回の依頼の最大操作数（1〜100）",
-                "number",
-                "1",
-            ),
+            Field::int(&crate::config::ints::GAME_MAX_OPS),
         ]
     }
     async fn run(&self, cfg: &Config, args: Value) -> String {

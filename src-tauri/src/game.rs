@@ -375,7 +375,7 @@ fn selected_provider(
 #[tauri::command(async)]
 pub async fn pet_game_ready(state: State<'_, AppState>) -> Result<Value, String> {
     let (provider, _) = selected_provider(&state)?;
-    let ready = provider.is_up(&state.config).await;
+    let ready = provider.is_up(&state.config).await?;
     Ok(json!({
         "ready": ready,
         "message": if ready {

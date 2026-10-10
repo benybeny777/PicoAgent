@@ -1,0 +1,11 @@
+{
+  "marker": "フォールバック許可:",
+  "basisOpen": "（根拠: ",
+  "basisClose": "）",
+  "authorityPrefixes": [
+    "PR #",
+    "AGENTS.md",
+    "SPEC.md"
+  ],
+  "numberedAuthorityPrefix": "PR #"
+}

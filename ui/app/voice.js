@@ -5,6 +5,7 @@
 // ここへ来る本文は、どれも Rust 側の公開検査（`agent::guard_public_answer`）を通ったものだけ。
 
 import * as bridge from "./bridge.js";
+import { clearBackgroundFailure, notifyBackgroundFailure } from "./toast.js";
 import { errorDetail, errorMessage, logApp } from "./util.js";
 
 /** 読み上げ用に本文を整える（参考リンク・URL・記号だけの行を落とす）。 */
@@ -58,46 +59,83 @@ export function readingDelay(text) {
 }
 
 export function createVoice({ motion, lipSync, pager, status, onCancelVisible, onFinished }) {
-  let volume = 0.35; // PICOAGENT_TTS_VOLUME の既定(35)。設定適用前に鳴る音を100%にしない
+  let volume = 0; // 正常な設定の適用前には音声を出さない
+  let volumeError = "音量設定を読み込み中です";
   let enabled = null; // 読み上げが有効か（pet_speak の結果から覚える）。false のとき合成を要求しない
   let current = null;
   let cancelPlayback = null;
   let session = 0;
-  let failureNotified = false;
+  let character = { id: "", name: "キャラクター", manifest: {} };
+  const failures = new Map();
   let streamSpeech = null;
 
   // 画面の0〜100は人が感じる音量として扱う。振幅へ直線変換すると1%でも大きく聞こえるため二乗する。
-  const gain = () => volume * volume;
+  const gain = () => volumeError ? 0 : volume * volume;
 
   function shouldLipSync(audio) {
     return Boolean(audio && audio === current && enabled !== false && volume > 0.001 && !audio.paused && !audio.ended);
   }
 
-  function notifyFailure(error) {
-    logApp("warn", "音声の事前合成に失敗しました", errorDetail(error));
-    if (failureNotified) return;
-    failureNotified = true;
-    const detail = String(error?.message || error || "").trim();
-    status.set(detail
-      ? `読み上げできません: ${detail}`
-      : "読み上げできません。設定の「追加機能」から音声読み上げを導入してください");
+  function clearFailures(characterId, phase) {
+    const causes = failures.get(characterId);
+    if (!causes) return;
+    for (const [key, phases] of causes) {
+      if (phase) phases.delete(phase);
+      if (!phase || !phases.size) {
+        clearBackgroundFailure(key);
+        causes.delete(key);
+      }
+    }
+    if (!causes.size) failures.delete(characterId);
+  }
+
+  function notifyFailure(error, selected = character, phase = "synthesis") {
+    const detail = errorMessage(error);
+    const key = `tts-voice:${selected.id}:${detail}`;
+    if (!failures.has(selected.id)) failures.set(selected.id, new Map());
+    const causes = failures.get(selected.id);
+    if (!causes.has(key)) causes.set(key, new Set());
+    causes.get(key).add(phase);
+    const prefix = `${selected.id}の声`;
+    const message = detail.startsWith(prefix)
+      ? `${selected.name}の声${detail.slice(prefix.length)}`
+      : `${selected.name}の声を準備できません: ${detail}`;
+    notifyBackgroundFailure(key, message, error);
+    status.set(message);
+  }
+
+  async function prepareModel() {
+    const selected = character;
+    const voiceSession = session;
+    try {
+      const result = await bridge.prepareVoiceModel();
+      if (voiceSession === session && result?.enabled && result?.ready) clearFailures(selected.id, "preparation");
+      return result;
+    } catch (error) {
+      if (voiceSession === session) notifyFailure(error, selected, "preparation");
+      throw error;
+    }
   }
 
   /** 合成だけ行い、再生はしない。失敗・無効・空は null。 */
   async function prepare(text) {
     const speech = String(text ?? "").trim();
-    if (!speech) return null;
+    if (!speech || volumeError) return null;
     const voiceSession = session;
+    const selected = character;
     try {
       const result = await bridge.speak(speech);
       if (voiceSession !== session) return null;
       if (result?.enabled === false) enabled = false;
-      else if (result?.enabled) { enabled = true; failureNotified = false; }
+      else if (result?.enabled) {
+        enabled = true;
+        if (result.audio?.length) clearFailures(selected.id);
+      }
       if (!result?.enabled || result.skipped || !result.audio?.length) return null;
       return result;
     } catch (error) {
       if (voiceSession !== session) return null;
-      notifyFailure(error);
+      notifyFailure(error, selected);
       return null;
     }
   }
@@ -186,6 +224,7 @@ export function createVoice({ motion, lipSync, pager, status, onCancelVisible, o
 
   /** 事前合成済みの音声を再生する（起動時の挨拶・目覚まし・自発雑談）。 */
   async function playPrepared(result) {
+    if (volumeError) return;
     stop();
     const voiceSession = session;
     onCancelVisible(true);
@@ -196,7 +235,7 @@ export function createVoice({ motion, lipSync, pager, status, onCancelVisible, o
   /** 本文を読み上げる。配信形式では字幕のページと同期して読む。 */
   async function speak(text) {
     // 読み上げが無効・音量0なら合成しない（準備中表示や中止ボタンを出さない）。字幕の送りだけ行う。
-    if (enabled === false || volume <= 0.001) {
+    if (volumeError || enabled === false || volume <= 0.001) {
       stop();
       pager.timed(text);
       return;
@@ -241,7 +280,7 @@ export function createVoice({ motion, lipSync, pager, status, onCancelVisible, o
 
   // ── 生成中の先行読み上げ: 確定した文から順に合成・再生する ──────────────
   function beginStream() {
-    streamSpeech = { queue: [], consumed: "", spoken: false, done: false, disabled: enabled === false || volume <= 0.001, running: false };
+    streamSpeech = { queue: [], consumed: "", spoken: false, done: false, disabled: volumeError || enabled === false || volume <= 0.001, running: false };
   }
 
   function resetStream() {
@@ -324,6 +363,8 @@ export function createVoice({ motion, lipSync, pager, status, onCancelVisible, o
   }
 
   return {
+    prepareModel,
+    setCharacter(pack) { character = pack; },
     prepare,
     playPrepared,
     speak,
@@ -336,9 +377,8 @@ export function createVoice({ motion, lipSync, pager, status, onCancelVisible, o
     gain,
     get volume() { return volume; },
     setVolume(value) {
-      const numeric = parseFloat(value);
-      if (!Number.isFinite(numeric)) return;
-      volume = Math.min(1, Math.max(0, numeric / 100));
+      if (!Number.isInteger(value)) throw new Error("音量は検証済みの整数で指定してください");
+      volume = value / 100;
       if (current) current.volume = gain();
       if (volume <= 0.001) endSpeaking();
       else if (shouldLipSync(current)) {
@@ -346,6 +386,7 @@ export function createVoice({ motion, lipSync, pager, status, onCancelVisible, o
         lipSync.attach(current, () => shouldLipSync(current));
       }
     },
+    setVolumeError(error) { volumeError = error; if (error) stop(); },
     get enabled() { return enabled; },
     setEnabled(value) {
       enabled = value !== false;

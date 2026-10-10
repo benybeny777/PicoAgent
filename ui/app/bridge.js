@@ -29,14 +29,16 @@ export const idleChatter = () => api.idleChatter();
 export const dailyGreeting = () => api.dailyGreeting();
 export const dailyEvents = () => api.dailyEvents();
 export const alarms = () => api.alarms();
-export const alarmWake = id => api.alarmWake(id);
+export const alarmWake = (id, consumed = false) => api.alarmWake(id, consumed);
 
-export const setCharacterProfile = (characterId, profile, greeting) =>
-  api.setCharacterProfile(characterId, profile, greeting);
+export const setCharacterProfile = (characterId, profile, greeting, voice) =>
+  api.setCharacterProfile(characterId, profile, greeting, voice);
 export const userCharacters = () => api.userCharacters();
 export const assetUrl = path => api.assetUrl(path);
 export const saveScene = scenes => api.saveScene(scenes);
 export const saveUiPref = (key, value) => api.saveUiPref(key, value);
+export const setCharacterRenderer = (characterId, renderer) =>
+  api.setCharacterRenderer(characterId, renderer);
 
 export const menu = (context, x, y) => api.menu(context, x, y);
 export const layoutMenu = (x, y) => api.layoutMenu(x, y);

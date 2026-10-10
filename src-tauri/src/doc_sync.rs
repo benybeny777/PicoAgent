@@ -7,7 +7,11 @@
 
 /// 設定キーとして扱わない文字列（マーカー・テスト用ダミー・ドキュメント中の例）。
 /// 追加するときは、なぜ設定キーでないのかを理由として書き添えること。
-const NOT_CONFIG_KEYS: [(&str, &str); 14] = [
+const NOT_CONFIG_KEYS: [(&str, &str); 15] = [
+    (
+        "PICOAGENT_TEST_KEY_9001",
+        "整数設定の環境優先検査専用のダミー",
+    ),
     (
         "PICOAGENT_COMMAND_APPROVAL__",
         "run_command と対話ループの内部プロトコルのマーカー",
@@ -60,6 +64,11 @@ const NOT_CONFIG_KEYS: [(&str, &str); 14] = [
 /// ソース中に現れる `PICOAGENT_*` を集める。
 fn referenced_keys() -> std::collections::BTreeSet<String> {
     let mut keys = std::collections::BTreeSet::new();
+    keys.extend(
+        crate::config::ints::INT_SETTINGS
+            .iter()
+            .map(|setting| setting.key.to_string()),
+    );
     for source in crate::guard_scan::all_sources() {
         collect_keys(&source.text, &mut keys);
     }
@@ -83,6 +92,34 @@ fn referenced_keys() -> std::collections::BTreeSet<String> {
         keys.remove(skip);
     }
     keys
+}
+
+#[test]
+fn 数量設定の正本表は全宣言の既定範囲単位autoと一致する() {
+    let docs = read_repo_file("docs/SETTINGS.md").expect("設定仕様の正本");
+    for setting in crate::config::ints::INT_SETTINGS {
+        let expected = format!(
+            "| `{}` | `{}` | `{}` | `{}` | {} | {} |",
+            setting.key,
+            setting.default_text(),
+            setting.min,
+            setting.max,
+            if setting.unit.is_empty() {
+                "—"
+            } else {
+                setting.unit
+            },
+            if setting.default.is_none() {
+                "可"
+            } else {
+                "不可"
+            }
+        );
+        assert!(
+            docs.lines().any(|line| line.trim() == expected),
+            "整数宣言と正本表が異なります: {expected}"
+        );
+    }
 }
 
 fn collect_keys(text: &str, out: &mut std::collections::BTreeSet<String>) {

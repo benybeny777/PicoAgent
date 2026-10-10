@@ -97,7 +97,7 @@ struct Progress {
 }
 
 pub fn init(app: &AppHandle) {
-    // フォールバック許可: `OnceLock::set` は2回目以降 Err を返すだけで、
+    // `OnceLock::set` は2回目以降 Err を返すだけで、
     // 先に入っている同じ値がそのまま残る（起動時に一度だけ呼ぶ初期化）。
     let _ = RUNTIME_ROOT.set(crate::app_paths::bundled_dir(app));
     if let Some(root) = crate::app_paths::packaged_bundled_dir(app) {
@@ -850,7 +850,7 @@ pub(crate) async fn acquire_embedding_uv(app: &AppHandle) -> Result<PathBuf> {
     let archive = root.join(asset.cache_name);
     download_to(
         app,
-        crate::tools::http::client(),
+        crate::tools::http::client().map_err(anyhow::Error::msg)?,
         DownloadSpec {
             id: "embedding-memory",
             url: asset.url,
@@ -1257,7 +1257,7 @@ async fn install_modern_media_runtime(app: &AppHandle, id: &str, model: &str) ->
     let archive = cache.join(uv_asset.cache_name);
     download_to(
         app,
-        crate::tools::http::client(),
+        crate::tools::http::client().map_err(anyhow::Error::msg)?,
         DownloadSpec {
             id,
             url: uv_asset.url,
@@ -1817,7 +1817,7 @@ async fn install_whisper(app: &AppHandle) -> Result<()> {
     }
     .await;
 
-    // フォールバック許可: 成否にかかわらずPicoAgent管理下の作業用ファイルだけを掃除する。
+    // 成否にかかわらずPicoAgent管理下の作業用ファイルだけを掃除する。
     cleanup_file(app, "Whisper取得途中ファイル", &archive).await;
     cleanup_dir(app, "Whisper展開途中フォルダ", &unpacked).await;
     if result.is_err() {

@@ -2,8 +2,6 @@
 //
 // Google Docs は Drive の .gdoc ファイルではなく Docs API を正ルートにする。
 
-use std::time::Duration;
-
 use async_trait::async_trait;
 use serde_json::{json, Value};
 
@@ -15,14 +13,6 @@ const DOCS_BASE: &str = "https://docs.googleapis.com/v1/documents";
 const MAX_TEXT_CHARS: usize = 100_000;
 
 pub struct GoogleDocsTool;
-
-fn timeout_secs(cfg: &Config) -> u64 {
-    cfg.get("PICOAGENT_GOOGLE_DOCS_TIMEOUT_SECS", "20")
-        .parse::<u64>()
-        .ok()
-        .filter(|value| (3..=60).contains(value))
-        .unwrap_or(20)
-}
 
 fn collect_text(value: &Value, out: &mut String) {
     match value {
@@ -95,12 +85,7 @@ impl Tool for GoogleDocsTool {
                 "password",
                 "ya29...",
             ),
-            Field::new(
-                "PICOAGENT_GOOGLE_DOCS_TIMEOUT_SECS",
-                "Google Docs API 待ち時間（秒、3〜60）",
-                "text",
-                "20",
-            ),
+            Field::int(&crate::config::ints::GOOGLE_DOCS_TIMEOUT_SECS),
         ]
     }
 
@@ -114,7 +99,9 @@ impl Tool for GoogleDocsTool {
             );
         }
         let client = match reqwest::Client::builder()
-            .timeout(Duration::from_secs(timeout_secs(cfg)))
+            .timeout(crate::tool_try!(
+                cfg.duration_secs(&crate::config::ints::GOOGLE_DOCS_TIMEOUT_SECS)
+            ))
             .user_agent("PicoAgent/1.0 (Google Docs tool)")
             .build()
         {
@@ -132,7 +119,7 @@ impl Tool for GoogleDocsTool {
                     .json(&json!({ "title": title }))
                     .send()
                     .await;
-                handle_text_response(response, "Google Docs API").await
+                crate::tools::http::service_reply(cfg, response, "Google Docs API").await
             }
             "get_text" => {
                 let document_id = match document_id(&args) {
@@ -146,12 +133,12 @@ impl Tool for GoogleDocsTool {
                     .await
                 {
                     Ok(response) => response,
-                    Err(error) => return format!("エラー: Google Docs API への接続に失敗しました: {}", error),
+                    Err(error) => return format!("エラー: Google Docs API への接続に失敗しました: {}", error.without_url()),
                 };
                 let status = response.status();
                 let body = crate::tool_response_text!(response);
                 if !status.is_success() {
-                    return format!("エラー: Google Docs API が HTTP {} を返しました。", status);
+                    return format!("エラー: {}", crate::tools::http::safe_service_error(cfg, "Google Docs API", status, &body));
                 }
                 let parsed: Value = crate::tool_response_json!(&body);
                 let mut text = String::new();
@@ -168,7 +155,7 @@ impl Tool for GoogleDocsTool {
                     Err(error) => return format!("エラー: {}", error),
                 };
                 let text = args.get("text").and_then(Value::as_str).unwrap_or("");
-                let end_index = match fetch_end_index(&client, &token, document_id).await {
+                let end_index = match fetch_end_index(cfg, &client, &token, document_id).await {
                     Ok(index) => index,
                     Err(error) => return format!("エラー: {}", error),
                 };
@@ -180,7 +167,7 @@ impl Tool for GoogleDocsTool {
                         }
                     }]
                 });
-                handle_text_response(
+                crate::tools::http::service_reply(cfg,
                     client
                         .post(format!("{}/{}:batchUpdate", DOCS_BASE, document_id))
                         .bearer_auth(token)
@@ -212,7 +199,7 @@ impl Tool for GoogleDocsTool {
                         }
                     }]
                 });
-                handle_text_response(
+                crate::tools::http::service_reply(cfg,
                     client
                         .post(format!("{}/{}:batchUpdate", DOCS_BASE, document_id))
                         .bearer_auth(token)
@@ -237,6 +224,7 @@ fn document_id(args: &Value) -> Result<&str, String> {
 }
 
 async fn fetch_end_index(
+    cfg: &Config,
     client: &reqwest::Client,
     token: &str,
     document_id: &str,
@@ -247,11 +235,21 @@ async fn fetch_end_index(
         .query(&[("fields", "body/content/endIndex")])
         .send()
         .await
-        .map_err(|error| format!("Google Docs API への接続に失敗しました: {}", error))?;
+        .map_err(|error| {
+            format!(
+                "Google Docs API への接続に失敗しました: {}",
+                error.without_url()
+            )
+        })?;
     let status = response.status();
     let body = crate::tools::http::response_text(response).await?;
     if !status.is_success() {
-        return Err(format!("Google Docs API が HTTP {} を返しました。", status));
+        return Err(crate::tools::http::safe_service_error(
+            cfg,
+            "Google Docs API",
+            status,
+            &body,
+        ));
     }
     let parsed: Value = serde_json::from_str(&body)
         .map_err(|error| format!("Docs構造の解析に失敗しました: {}", error))?;
@@ -263,23 +261,6 @@ async fn fetch_end_index(
         .and_then(|item| item.get("endIndex"))
         .and_then(Value::as_u64)
         .ok_or_else(|| "文書末尾位置を取得できませんでした。".to_string())
-}
-
-async fn handle_text_response(
-    response: Result<reqwest::Response, reqwest::Error>,
-    label: &str,
-) -> String {
-    let response = match response {
-        Ok(response) => response,
-        Err(error) => return format!("エラー: {} への接続に失敗しました: {}", label, error),
-    };
-    let status = response.status();
-    let body = crate::tool_response_text!(response);
-    if status.is_success() {
-        body
-    } else {
-        format!("エラー: {} が HTTP {} を返しました。", label, status)
-    }
 }
 
 inventory::submit! { ToolReg { make: || Box::new(GoogleDocsTool) } }

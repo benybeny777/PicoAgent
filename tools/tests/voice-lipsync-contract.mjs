@@ -5,6 +5,7 @@ import test from "node:test";
 const voice = await readFile(new URL("../../ui/app/voice.js", import.meta.url), "utf8");
 const lipsync = await readFile(new URL("../../ui/app/lipsync.js", import.meta.url), "utf8");
 const commands = await readFile(new URL("../../src-tauri/src/commands.rs", import.meta.url), "utf8");
+const numeric = await readFile(new URL("../../src-tauri/src/numeric_settings.rs", import.meta.url), "utf8");
 const settings = await readFile(new URL("../../ui/settings.js", import.meta.url), "utf8");
 
 const functionSource = voice.match(/function shouldLipSync\(audio\) \{[\s\S]*?\n {2}\}/)?.[0];
@@ -46,11 +47,12 @@ test("すべてのリップシンク入口が共通判定を使う", () => {
 
 test("読み上げ音量の未保存時初期値は35", () => {
   // 初回はAivisを自動導入して読み上げを有効にするため、既定値がそのまま最初の音量になる。
-  // 100%相当は初対面の音量として大きすぎるので、画面側の初期値も含めて35へ揃える。
-  assert.equal((commands.match(/PICOAGENT_TTS_VOLUME", "35"/g) ?? []).length, 2);
+  // 設定確定前は鳴らさず、正常な既定35を宣言から適用する。
+  assert.match(numeric, /TTS_VOLUME: \("[^"\n]*", Some\(35\), 0, 100, "%"\)/);
+  assert.match(commands, /\("voiceVolume", &ints::TTS_VOLUME\)/);
   assert.match(settings, /PICOAGENT_TTS_VOLUME \?\? "35"/);
-  assert.match(voice, /let volume = 0\.35;/);
-  assert.match(voice, /const gain = \(\) => volume \* volume;/);
+  assert.match(voice, /let volume = 0;/);
+  assert.match(voice, /const gain = \(\) => volumeError \? 0 : volume \* volume;/);
   assert.match(settings, /音声・ゲーム効果音の音量（0〜100・初期値35）/);
 });
 
@@ -71,7 +73,7 @@ test("読み上げが無効なら合成経路へ入らず準備中表示も出�
   // 音が出ない設定で「読み上げ準備中…」「読み上げを中止」が出ると、準備が続いて
   // いるように見える。判定は入口の speak 1か所に置き、呼び出し側で重ねない。
   const speak = voice.slice(voice.indexOf("  async function speak(text) {"));
-  const guard = speak.indexOf("if (enabled === false || volume <= 0.001) {");
+  const guard = speak.indexOf("if (volumeError || enabled === false || volume <= 0.001) {");
   const prepare = speak.indexOf('status.set("読み上げ準備中…", "voice")');
   assert.ok(guard >= 0 && guard < prepare, "無効時の分岐が準備中表示より前にない");
   assert.match(speak, /pager\.timed\(text\);\s*\n\s*return;/);

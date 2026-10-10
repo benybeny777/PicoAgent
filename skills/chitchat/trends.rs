@@ -1,5 +1,4 @@
 use std::io::Cursor;
-use std::time::Duration;
 
 use feed_rs::parser;
 use serde_json::Value;
@@ -22,24 +21,24 @@ pub struct TopicSource {
     pub url: String,
 }
 
-pub async fn topic_brief(cfg: &Config) -> Option<TopicBrief> {
+pub async fn topic_brief(cfg: &Config) -> Result<Option<TopicBrief>, String> {
+    let timeout = cfg.duration_secs(&crate::config::ints::CHATTER_TOPIC_TIMEOUT_SECS)?;
     let mode = cfg
         .get("PICOAGENT_CHATTER_TOPIC_MODE", "auto")
         .trim()
         .to_ascii_lowercase();
     if mode == "off" || mode == "none" {
-        return None;
+        return Ok(None);
     }
-    let timeout = timeout_secs(cfg);
     let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(timeout))
+        .timeout(timeout)
         .user_agent("PicoAgent/1.0 (idle chatter topics)")
         .build()
-        .ok()?;
+        .map_err(|error| format!("話題取得の準備に失敗しました: {error}"))?;
 
     if mode != "news" && mode != "trends" {
         if let Some(topic) = x_topic(cfg, &client).await {
-            return Some(topic);
+            return Ok(Some(topic));
         }
     }
     if mode != "x" && mode != "news" {
@@ -52,28 +51,20 @@ pub async fn topic_brief(cfg: &Config) -> Option<TopicBrief> {
         )
         .await
         {
-            return Some(topic);
+            return Ok(Some(topic));
         }
     }
     if mode != "x" {
-        return rss_topics(
+        return Ok(rss_topics(
             cfg,
             &client,
             "PICOAGENT_CHATTER_NEWS_RSS_URLS",
             DEFAULT_NEWS_RSS,
             "トップニュース候補",
         )
-        .await;
+        .await);
     }
-    None
-}
-
-fn timeout_secs(cfg: &Config) -> u64 {
-    cfg.get("PICOAGENT_CHATTER_TOPIC_TIMEOUT_SECS", "8")
-        .parse::<u64>()
-        .ok()
-        .filter(|value| (3..=30).contains(value))
-        .unwrap_or(8)
+    Ok(None)
 }
 
 async fn x_topic(cfg: &Config, client: &reqwest::Client) -> Option<TopicBrief> {

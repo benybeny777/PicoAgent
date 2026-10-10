@@ -168,6 +168,7 @@ fn question_list(topic: &str, args: &Value) -> Vec<String> {
 }
 
 async fn search(
+    cfg: &Config,
     client: &reqwest::Client,
     query: &str,
     max_results: usize,
@@ -177,18 +178,8 @@ async fn search(
         .query(&[("q", query)])
         .send()
         .await
-        .map_err(|error| format!("Web検索への接続に失敗しました: {}", error))?;
-    let status = response.status();
-    if !status.is_success() {
-        return Err(format!(
-            "Web検索が HTTP {} を返しました。時間を置いて再試行してください。",
-            status
-        ));
-    }
-    let body = response
-        .text()
-        .await
-        .map_err(|error| format!("Web検索結果の読み取りに失敗しました: {}", error))?;
+        .map_err(|error| format!("Web検索への接続に失敗しました: {}", error.without_url()))?;
+    let body = crate::tools::http::service_body(cfg, "Web検索", Ok(response)).await?;
     extract_results(&body, query, max_results)
 }
 
@@ -873,12 +864,7 @@ impl Tool for ResearchReportTool {
     }
 
     fn config_schema(&self) -> Vec<Field> {
-        vec![Field::new(
-            "PICOAGENT_RESEARCH_TIMEOUT_SECS",
-            "調査レポート検索待ち時間（秒、3〜60）",
-            "text",
-            "15",
-        )]
+        vec![Field::int(&crate::config::ints::RESEARCH_TIMEOUT_SECS)]
     }
 
     async fn run(&self, cfg: &Config, args: Value) -> String {
@@ -898,12 +884,7 @@ impl Tool for ResearchReportTool {
             .and_then(|value| usize::try_from(value).ok())
             .filter(|value| (1..=MAX_RESULTS_PER_QUERY).contains(value))
             .unwrap_or(3);
-        let timeout = cfg
-            .get("PICOAGENT_RESEARCH_TIMEOUT_SECS", "15")
-            .parse::<u64>()
-            .ok()
-            .filter(|value| (3..=60).contains(value))
-            .unwrap_or(15);
+        let timeout = crate::tool_try!(cfg.int(&crate::config::ints::RESEARCH_TIMEOUT_SECS)) as u64;
         let questions = question_list(topic, &args);
         let client = match reqwest::Client::builder()
             .timeout(Duration::from_secs(timeout))
@@ -917,7 +898,7 @@ impl Tool for ResearchReportTool {
         let mut results = Vec::new();
         let mut failures = Vec::new();
         for question in &questions {
-            match search(&client, question, max_results).await {
+            match search(cfg, &client, question, max_results).await {
                 Ok(mut items) => results.append(&mut items),
                 Err(error) => failures.push(format!("{question}: {error}")),
             }
