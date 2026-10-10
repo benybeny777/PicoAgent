@@ -281,20 +281,29 @@ pub async fn service_reply(
     }
 }
 
+/// 接続・状態・エラー本文の検証を、JSONと音声の応答で共通にする。
+pub async fn service_response(
+    cfg: &Config,
+    label: &str,
+    response: Result<reqwest::Response, reqwest::Error>,
+) -> Result<reqwest::Response, String> {
+    let response = response
+        .map_err(|error| format!("{label} への接続に失敗しました: {}", error.without_url()))?;
+    let status = response.status();
+    if status.is_success() {
+        Ok(response)
+    } else {
+        let body = response_text(response).await?;
+        Err(safe_service_error(cfg, label, status, &body))
+    }
+}
+
 pub async fn service_body(
     cfg: &Config,
     label: &str,
     response: Result<reqwest::Response, reqwest::Error>,
 ) -> Result<String, String> {
-    let response = response
-        .map_err(|error| format!("{label} への接続に失敗しました: {}", error.without_url()))?;
-    let status = response.status();
-    let body = response_text(response).await?;
-    if status.is_success() {
-        Ok(body)
-    } else {
-        Err(safe_service_error(cfg, label, status, &body))
-    }
+    response_text(service_response(cfg, label, response).await?).await
 }
 
 static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();

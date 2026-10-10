@@ -186,7 +186,7 @@ window.picoagent = {
     try { return await getCurrentWindow().startResizeDragging(direction); }
     catch (error) { logInvokeError("startResizeDragging", error); throw error; }
   },
-  setCharacterProfile: (characterId, profile, greeting) => call("pet_set_character_profile", { characterId, profile, greeting }),
+  setCharacterProfile: (characterId, profile, greeting, voice) => call("pet_set_character_profile", { characterId, profile, greeting, voice }),
   relationshipState: () => call("pet_relationship_state"),
   relationshipEvent: (kind, detail = "") => call("pet_relationship_event", { kind, detail }),
   pinRelationshipMoment: (momentId, pinned) => call("pet_relationship_pin_moment", { momentId, pinned }),

@@ -31,8 +31,8 @@ export const dailyEvents = () => api.dailyEvents();
 export const alarms = () => api.alarms();
 export const alarmWake = id => api.alarmWake(id);
 
-export const setCharacterProfile = (characterId, profile, greeting) =>
-  api.setCharacterProfile(characterId, profile, greeting);
+export const setCharacterProfile = (characterId, profile, greeting, voice) =>
+  api.setCharacterProfile(characterId, profile, greeting, voice);
 export const userCharacters = () => api.userCharacters();
 export const assetUrl = path => api.assetUrl(path);
 export const saveScene = scenes => api.saveScene(scenes);

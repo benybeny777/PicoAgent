@@ -69,9 +69,9 @@
 | `PICOAGENT_TTS_DEVICE` | `auto` | 音声 | 同梱 Aivis の推論デバイス（内部設定。通常UIでは非表示） |
 | `PICOAGENT_TTS_PORT` | `11436` | 音声 | 同梱 Aivis のポート（内部設定。通常UIでは非表示。旧既定 `10102` は起動時に `11436` へ移行） |
 | `PICOAGENT_TTS_ENDPOINT` | （空） | 音声 | 外部VOICEVOX互換APIのURL。空ならPicoAgent専用Aivisを使う。指定時はこのPC上のHTTP URLだけを許可し、外部APIの起動・モデル導入・データ管理は行わない |
-| `PICOAGENT_TTS_SPEAKER` | `888753760` | 音声 | Aivis の speaker/style ID（内部設定。通常UIでは非表示） |
+| `PICOAGENT_TTS_SPEAKER` | `888753760` | 音声 | `character.json` に `voice` の指定がなく、キャラ別上書きもないキャラに使う全体のAivis speaker/style ID（内部設定。通常UIでは非表示）。声の解決失敗時の代替には使わない |
 | `PICOAGENT_TTS_VOLUME` | `35` | 音声 | キャラボイスとゲーム効果音の共通音量（0〜100）。人が感じる音量に合わせた共通カーブでフロントへ即反映し、1%は実効ゲイン0.0001とする。ゲーム画面の「消音」は効果音だけを追加で止める。ミュートまたは0では全キャラの口パクも停止 |
-| `PICOAGENT_TTS_CHARACTER_OVERRIDES` | `{}` | 音声 | キャラクターIDごとの Aivis speaker/style ID 上書き（「キャラの音声」で編集。任意で `modelUuid` / `modelName` / `speakerUuid` / `styleName` / `sourceUrl` も保持） |
+| `PICOAGENT_TTS_CHARACTER_OVERRIDES` | `{}` | 音声 | キャラクターIDごとのAivis speaker/style ID上書き（「キャラの音声」で編集。任意で `modelUuid` / `modelName` / `speakerUuid` / `styleName` / `sourceUrl` も保持）。manifestの既定声より優先し、空欄へ戻すとパック既定声を使う。UUID・スタイルの解決失敗は無音で理由を通知し、別の声へ切り替えない |
 | `PICOAGENT_LOCAL_MODEL_PRESET` | `auto`（初回に `lfm25_2_6b` を保存） | local | ローカルモデルプリセット（`lfm25_2_6b`: LFM2.5 2.6B QAD/約1.59GB、`small`: Gemma 4 E2B/約3.1GB、`balanced`: Gemma 4 E4B/約5.0GB、`large`: Gemma 4 12B/約7.1GB、`qwen35_4b`: Qwen3.5 4B/約2.7GB、`qwen35_9b`: Qwen3.5 9B/約5.7GB、`gpt_oss_20b`: OpenAI gpt-oss-20b/約12.1GB、`phi4mini`: Phi-4 mini/約2.5GB、互換用`lfm25_1_2b_jp`／`llmjp4_8b`、`custom`）。既存の明示選択は変更せず、旧プリセットIDは現行候補へ自動移行する |
 | `PICOAGENT_MODEL_URL` | LFM2.5 2.6B QAD Q4_0 GGUF | local | 同梱エンジンが取得するモデル URL |
 | `PICOAGENT_LOCAL_PORT` | `11435` | local | 同梱エンジンのポート |

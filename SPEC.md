@@ -246,6 +246,14 @@ inventory::submit! { ProviderReg { make: || Box::new(MyProvider) } }
 
 ### AivisSpeech Engine 連携（`aivis.rs` / `pet_speak`）
 
+キャラの既定声の正本は、同梱・利用者追加とも `character.json` の `voice` とする。実際に読み込めたキャラのID・人格・挨拶と同じ登録でmanifestの声をバックエンドへ渡し、キャラIDと声を同時に更新する。Rust側へキャラ別の声定数表を複製しない。
+
+声は① `PICOAGENT_TTS_CHARACTER_OVERRIDES` の選択中キャラの上書き、②読み込んだmanifestの `voice`、③ `voice` を持たないキャラだけ `PICOAGENT_TTS_SPEAKER` の全体設定、の順に決める。③は声の指定がないキャラへの利用者指定であり、読込・解決失敗の代替には使わない。上書きを空欄へ戻すとパック既定声へ戻る。学習済み声の採用は従来どおり①へ入り、既存のmanifest声値や保存済み上書きを変更しない。
+
+`voice` は `provider=aivis` と声の指定を検証し、UUIDの形式不正・未対応provider・解決不能を理由付きで返す。`speakerUuid` があれば `/speakers` で解決したstyle IDだけを使い、失敗時にmanifestの数値IDや全体の声へ切り替えない。`styleName` が指定されていて一致しない場合は、利用可能なスタイル名を含むエラーにする。スタイル名未指定時だけ、その話者の先頭スタイルを使う。`styleId` だけの指定はその数値IDを使う。
+
+声の準備・解決・読み上げに失敗した場合は発声せず、画面へキャラ・指定した声と理由を通知する。原因ごとに1回だけ知らせ、復旧後の失敗は再通知する。別の声で話して成功扱いにせず、切替途中の旧キャラの声も新しいキャラへ持ち越さない。利用者は設定「キャラの音声」で指定を確認し、必要なモデルの導入・修復後に再試行する。
+
 `PICOAGENT_TTS_ENABLED` が有効なら、回答を AivisSpeech Engine の `/audio_query` → `/synthesis` へ渡して WAV を作り、フロントで再生する。`/synthesis` へ渡す `volumeScale` は0.72以下に制限して約3dBの余裕を残す（0dBでのクリップ防止）。音声再生中だけ会話アニメーションを保つ。起動時・キャラ変更時の挨拶（`greeting`）も同じ経路で読み上げる。
 
 - **接続先**: 既定は PicoAgent 管理下の Aivis だけを使い、`http://127.0.0.1:<PICOAGENT_TTS_PORT>`（既定 `11436`）へつなぐ。同じポートの管理外プロセスを暗黙に再利用しない。`PICOAGENT_TTS_ENDPOINT` にこのPC上のHTTP URLを明示したときだけ、別途起動した VOICEVOX 互換 API へつなぎ、そのプロセスやモデルには触れない。デバイス・内蔵ポート・speaker ID は通常UIに出さない内部設定。`pet_speak` 時点で `/version` が未応答なら ready まで待つ。
@@ -259,8 +267,8 @@ inventory::submit! { ProviderReg { make: || Box::new(MyProvider) } }
   - 非 Windows ではコピー・展開後と起動直前に `run` の実行権限を補正する（`.app` 配下など chmod できないものは spawn の結果で判定）。配布物では `tauri.conf.json` の `bundle.resources` で `resources/bundled/**/*` を同梱する。
 - **保存先の正本**: 配置名・管理ファイル名は `crates/picoagent-core/src/paths.rs` に集約する。アプリは `app_paths` を通してOS・Tauriの保存先へ接続し、開発ツールも同じ配置定義を使う。各機能は `DataPath` を指定し、設定・履歴・モデル・WebView・子プロセスのプロファイルを独自の固定パスへ保存しない。
 - **専用プロファイル**: Aivis 子プロセスの `USERPROFILE` / `HOME` / `APPDATA` / `LOCALAPPDATA` を `PicoAgent/aivis-userdata/profile/` へ向け、モデル・辞書・キャッシュを利用者データ内へ閉じ込める。LibreOffice は `PicoAgent/office-profile/`、生成用 Python・ComfyUI は `PicoAgent/generation-runtime-data/`、ブラウザ操作は `PicoAgent/browser-profile/` だけを使う。これらはすべて `app_paths::data_dir()` 配下とし、開発版では `PicoAgent-Dev/`、別識別子の検証版ではその根の `instances/<識別子>/` へ分離する。通常版のプロファイルは読み込まない。
-- **話者**: 選択中キャラの `PICOAGENT_TTS_CHARACTER_OVERRIDES[characterId].speaker` を優先し、無ければ `default_character_tts_voice` のキャラ別既定声、対象外キャラだけ共通の `PICOAGENT_TTS_SPEAKER` を使う。組み込みキャラは、むぎ=`まお・あまあま`、りん=`るな・ノーマル`、まい=`まい・ノーマル`、あおい=`まお・おちつき`、ひより=`まお・ふつー`、はる=`花音・ノーマル`、イプシロン=`コハク・せつなめ`、まお=`まお・おちつき`、ライス=`阿井田 茂・Calm`、わんこ=`TANAKA・Happy`。
-  - `pet_prepare_voice_model` と `pet_speak` は、話者 UUID が `/speakers` に無ければモデル UUID の AIVMX を `/aivm_models/install` で導入し、`/speakers` から話者 UUID＋スタイル名で**実 style ID を実行時に解決**する（global style ID は導入時に決まるためハードコードせず、`styleId` 定数は解決失敗時の予備）。利用者が明示した speaker はそのまま使う。
+- **話者**: 上記の声の優先順と解決規則を、`pet_prepare_voice_model` と `pet_speak` の両方に適用する。各キャラの既定話者・スタイル・モデルUUIDは `characters/<id>/character.json` の `voice` を参照し、ここへキャラ別の表を複製しない。
+  - 話者 UUID が `/speakers` に無ければ指定モデル UUID の AIVMX を `/aivm_models/install` で導入し、話者 UUID＋スタイル名で**実 style ID を実行時に解決**する。global style ID は導入時に決まるため声定数で代用しない。導入・話者・指定スタイルの解決失敗は理由付きのエラーとし、発声せず通知する。UUIDを使わず明示した数値IDはその指定を使う。
 - アプリが起動した子プロセスだけを `RunEvent::Exit` で止め、利用者が手動起動していた Aivis には触らない。
 
 ### ログ

@@ -12,6 +12,7 @@ mod bundle_scope;
 mod character_learning;
 mod character_maker;
 mod character_pack;
+mod character_voice;
 mod commands;
 mod components;
 mod config;
@@ -344,7 +345,7 @@ pub fn run() {
             *state.memory_context.lock().unwrap() = memory::context(app.handle(), &state.config);
             // 履歴はキャラクター別。選択中キャラを文脈の持ち主として記録しておく。
             let character_id = state.config.get("PICOAGENT_CHARACTER", "mugi");
-            *state.character_id.lock().unwrap() = character_id.clone();
+            state.character.lock().unwrap().id = character_id.clone();
             let relationship_mode = state.config.get("PICOAGENT_COMPANION_MODE", "both");
             match relationship::load(app.handle(), &character_id, &relationship_mode) {
                 Ok(relationship) => {

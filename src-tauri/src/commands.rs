@@ -12,6 +12,7 @@ use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder
 
 use crate::agent;
 use crate::aivis;
+use crate::character_voice::CharacterVoice;
 use crate::config::Config;
 use crate::message::Message;
 use crate::providers;
@@ -66,19 +67,22 @@ fn replace_auto_summary(content: &str, summary: &str) -> String {
     )
 }
 
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct LoadedCharacter {
+    pub id: String,
+    pub profile: String,
+    pub greeting: String,
+    pub voice: Option<CharacterVoice>,
+    /// manifestを読み込んで登録が成功した場合だけtrue。声なし確定と未登録を区別する。
+    pub registered: bool,
+}
+
 pub struct AppState {
     pub config: Config,
     pub provider_id: Mutex<String>,
     pub model: Mutex<String>,
     pub messages: Mutex<Vec<Message>>,
-    pub character_profile: Mutex<String>,
-    /// 選択中キャラクターの `character.json` の `greeting`（人格そのままの挨拶）。
-    /// 短い挨拶にモデルを呼ばず返すとき、全キャラ共通の定型文にならないよう使う。
-    pub character_greeting: Mutex<String>,
-    /// 会話文脈が属する選択中キャラクターID。これが変わったら会話を破棄して
-    /// 旧キャラの一人称・自己紹介が新キャラの応答へ混ざらないようにする。
-    pub character_id: Mutex<String>,
-    /// 会話から暗黙的に抽出した長期メモリ。system 文脈へ差し込む。
+    pub character: Mutex<LoadedCharacter>,
     pub memory_context: Mutex<String>,
     /// キャラクターごとの関係性と共有した出来事。数値は見せず自然な距離感へ反映する。
     pub relationship_context: Mutex<String>,
@@ -108,9 +112,7 @@ impl AppState {
             provider_id: Mutex::new("local".to_string()),
             model: Mutex::new(String::new()),
             messages: Mutex::new(Vec::new()),
-            character_profile: Mutex::new(String::new()),
-            character_greeting: Mutex::new(String::new()),
-            character_id: Mutex::new(String::new()),
+            character: Mutex::new(LoadedCharacter::default()),
             memory_context: Mutex::new(String::new()),
             relationship_context: Mutex::new(String::new()),
             recent_chatter: Mutex::new(Vec::new()),
@@ -143,6 +145,62 @@ impl AppState {
         session
     }
 
+    /// 読込と検証を全部済ませてからID・人格・挨拶・声と会話を同時に確定する。
+    fn register_character(
+        &self,
+        mut next: LoadedCharacter,
+        prepare: impl FnOnce(bool) -> Result<(String, Vec<Message>), String>,
+    ) -> Result<(), String> {
+        if !crate::character_pack::is_valid_id(&next.id) {
+            return Err("キャラクターIDが不正です。".into());
+        }
+        if next.profile.chars().count() > 4000 {
+            return Err("キャラクター人格設定は4000文字以内にしてください。".into());
+        }
+        if next.greeting.chars().count() > 500 {
+            return Err("キャラクターの挨拶は500文字以内にしてください。".into());
+        }
+        if let Some(voice) = &next.voice {
+            voice
+                .validate()
+                .map_err(|error| voice.failure(&next.id, error))?;
+        }
+        next.registered = true;
+        let mut current = self.character.lock().unwrap();
+        let changed = !current.id.is_empty() && current.id != next.id;
+        // この後に失敗しうる読み込みは残さない。失敗時は旧スナップショットも会話も温存する。
+        let (relationship, recent) = prepare(changed)?;
+        let memory = self.memory_context.lock().unwrap().clone();
+        let prompt = agent::prompt::compose(
+            &self.config,
+            &next.profile,
+            &next.id,
+            &memory,
+            &relationship,
+        );
+        let mut relationship_context = self.relationship_context.lock().unwrap();
+        let mut messages = self.messages.lock().unwrap();
+        let kept = if changed {
+            recent
+        } else {
+            messages
+                .iter()
+                .filter(|m| m.role != "system")
+                .cloned()
+                .collect()
+        };
+        let mut prepared = vec![Message::new("system", prompt)];
+        prepared.extend(kept);
+        if changed {
+            self.bump_conversation_epoch();
+            self.pending_command.lock().unwrap().take();
+        }
+        *relationship_context = relationship;
+        *messages = prepared;
+        *current = next;
+        Ok(())
+    }
+
     /// 関係性の文脈を更新する。**中身が変わったときだけ true を返す。**
     ///
     /// system プロンプトの作り直しは、それ自体が同梱エンジンのプロンプトキャッシュを
@@ -160,43 +218,39 @@ impl AppState {
     /// system プロンプトを設定から作り直す。会話の流れ（system 以外）は保持する
     /// （人格やプロンプト変更で直近の会話文脈を失わないため）。
     pub fn reset_conversation(&self) {
-        let character_profile = self.character_profile.lock().unwrap().clone();
-        let character_id = self.character_id.lock().unwrap().clone();
-        let memory_context = self.memory_context.lock().unwrap().clone();
-        let relationship_context = self.relationship_context.lock().unwrap().clone();
-        let prompt = agent::prompt::compose(
-            &self.config,
-            &character_profile,
-            &character_id,
-            &memory_context,
-            &relationship_context,
-        );
-        let mut messages = self.messages.lock().unwrap();
-        let kept: Vec<Message> = messages
-            .iter()
-            .filter(|m| m.role != "system")
-            .cloned()
-            .collect();
-        let mut next = Vec::with_capacity(kept.len() + 1);
-        next.push(Message::new("system", prompt));
-        next.extend(kept);
-        *messages = next;
+        self.rebuild_conversation(false, || {});
     }
 
     /// 会話を完全に初期化する（system のみに戻す）。「新しい会話」用。
     pub fn clear_conversation(&self) {
-        let character_profile = self.character_profile.lock().unwrap().clone();
-        let character_id = self.character_id.lock().unwrap().clone();
+        self.rebuild_conversation(true, || {});
+    }
+
+    /// character→文脈→messagesの順で確定し、登録後に旧人格を書き戻さない。
+    /// 非公開のclosureは並行回帰の割込位置を固定するためだけに使う。
+    fn rebuild_conversation(&self, clear: bool, after_character_lock: impl FnOnce()) {
+        let character = self.character.lock().unwrap();
+        after_character_lock();
         let memory_context = self.memory_context.lock().unwrap().clone();
         let relationship_context = self.relationship_context.lock().unwrap().clone();
         let prompt = agent::prompt::compose(
             &self.config,
-            &character_profile,
-            &character_id,
+            &character.profile,
+            &character.id,
             &memory_context,
             &relationship_context,
         );
-        *self.messages.lock().unwrap() = vec![Message::new("system", prompt)];
+        let mut messages = self.messages.lock().unwrap();
+        let mut next = vec![Message::new("system", prompt)];
+        if !clear {
+            next.extend(
+                messages
+                    .iter()
+                    .filter(|message| message.role != "system")
+                    .cloned(),
+            );
+        }
+        *messages = next;
     }
 }
 
@@ -366,7 +420,7 @@ async fn maybe_summarize_context(
 /// 履歴ファイルの分割キーになる、現在アクティブな選択中キャラクターID。
 /// state 側が未設定（起動直後など）なら設定の選択キャラへフォールバックする。
 pub fn active_character_id(state: &AppState) -> String {
-    let id = state.character_id.lock().unwrap().clone();
+    let id = state.character.lock().unwrap().id.clone();
     if id.is_empty() {
         state.config.get("PICOAGENT_CHARACTER", "mugi")
     } else {
@@ -543,11 +597,12 @@ fn resolved_judge_model(
 /// `persona` として複製すると、統合AIが内部文脈を回答へ復唱する経路を増やしてしまう。
 fn stable_persona_prompt(state: &AppState) -> String {
     let mut persona = agent::prompt::base(&state.config);
-    let character_profile = state.character_profile.lock().unwrap().clone();
+    let character = state.character.lock().unwrap().clone();
+    let character_profile = character.profile;
     if !character_profile.is_empty() {
         persona.push_str("\n\n選択中キャラクターの人格設定:\n");
         persona.push_str(&character_profile);
-        let character_id = state.character_id.lock().unwrap().clone();
+        let character_id = character.id;
         persona.push_str(&crate::relationship_preset::profile_suffix(
             &state.config,
             &character_id,
@@ -1193,13 +1248,21 @@ pub async fn pet_prepare_voice_model(
     if !state.config.get_bool("PICOAGENT_TTS_ENABLED", false) {
         return Ok(json!({ "enabled": false }));
     }
-    aivis::ensure_started(&app)
-        .await
-        .map_err(|error| log_command_error(&app, "Aivis の起動確認に失敗しました", error))?;
+    let (character_id, voice) = effective_tts_voice(&state)?;
+    aivis::ensure_started(&app).await.map_err(|error| {
+        log_command_error(
+            &app,
+            "Aivis の起動確認に失敗しました",
+            voice.failure(&character_id, error),
+        )
+    })?;
     let endpoint = aivis::endpoint(&app, &state);
-    let voice = effective_tts_voice(&state);
-    prepare_tts_voice_model(&app, &state, &endpoint, &voice).await?;
-    let speaker = resolve_tts_speaker(&endpoint, voice).await;
+    prepare_tts_voice_model(&app, &state, &endpoint, &voice)
+        .await
+        .map_err(|error| voice.failure(&character_id, error))?;
+    let speaker = resolve_tts_speaker(&endpoint, &voice)
+        .await
+        .map_err(|error| voice.failure(&character_id, error))?;
     Ok(json!({ "enabled": true, "ready": true, "speaker": speaker }))
 }
 
@@ -1208,45 +1271,33 @@ pub fn pet_set_character_profile(
     character_id: String,
     profile: String,
     greeting: Option<String>,
+    voice: Option<CharacterVoice>,
     state: State<'_, AppState>,
     app: AppHandle,
 ) -> Result<Value, String> {
-    if !crate::character_pack::is_valid_id(&character_id) {
-        return Err("キャラクターIDが不正です。".to_string());
-    }
-    if profile.chars().count() > 4000 {
-        return Err("キャラクター人格設定は4000文字以内にしてください。".to_string());
-    }
-    let greeting = greeting.unwrap_or_default();
-    if greeting.chars().count() > 500 {
-        return Err("キャラクターの挨拶は500文字以内にしてください。".to_string());
-    }
-    *state.character_profile.lock().unwrap() = profile;
-    *state.character_greeting.lock().unwrap() = greeting;
-    let mode = state.config.get("PICOAGENT_COMPANION_MODE", "both");
-    let relationship = crate::relationship::load(&app, &character_id, &mode)?;
-    state.set_relationship_context(relationship_prompt_context(&state.config, &relationship));
-    let previous = {
-        let mut current = state.character_id.lock().unwrap();
-        let previous = current.clone();
-        *current = character_id.clone();
-        previous
-    };
-    if previous.is_empty() || previous == character_id {
-        // 起動直後の初回設定、または同一キャラの人格更新。直近の文脈は保持する。
-        state.reset_conversation();
-    } else {
-        // キャラクター変更: 旧キャラの会話文脈を捨て、切替先キャラの履歴を復元する。
-        // 旧キャラの履歴はファイルに残るため、戻れば続きから話せる。
-        state.bump_conversation_epoch();
-        state.pending_command.lock().unwrap().take();
-        state.clear_conversation();
-        let recent =
-            crate::history::load_recent(&app, &character_id).map_err(|error| error.to_string())?;
-        if !recent.is_empty() {
-            state.messages.lock().unwrap().extend(recent);
-        }
-    }
+    state.register_character(
+        LoadedCharacter {
+            id: character_id.clone(),
+            profile,
+            greeting: greeting.unwrap_or_default(),
+            voice,
+            registered: false,
+        },
+        |changed| {
+            let mode = state.config.get("PICOAGENT_COMPANION_MODE", "both");
+            let relationship = crate::relationship::load(&app, &character_id, &mode)?;
+            let recent = if changed {
+                crate::history::load_recent(&app, &character_id)
+                    .map_err(|error| error.to_string())?
+            } else {
+                Vec::new()
+            };
+            Ok((
+                relationship_prompt_context(&state.config, &relationship),
+                recent,
+            ))
+        },
+    )?;
     let stream = crate::stream_profile::resolve(&state.config, &character_id);
     Ok(json!({
         "ok": true,
@@ -2438,175 +2489,50 @@ fn is_chart_or_emoji(c: char) -> bool {
     )
 }
 
-struct TtsVoice {
-    /// 合成に使う style ID（フォールバック）。speaker_uuid があれば実 ID は実行時に解決する。
-    speaker: String,
-    model_uuid: Option<String>,
-    /// AivisHub モデルの話者 UUID。あれば導入確認と実 style ID 解決に使う。
-    speaker_uuid: Option<String>,
-    /// 複数スタイルから選ぶときのスタイル名（例: ノーマル）。
-    style_name: Option<String>,
-}
+type TtsVoice = CharacterVoice;
 
-// るな（AivisHub）の話者情報。global style ID はエンジンが導入時に算出するため、
-// ハードコードはフォールバックに留め、実 ID は speaker_uuid から `/speakers` で解決する。
-const RIN_AIVIS_SPEAKER: &str = "345585728";
-const RIN_AIVIS_MODEL_UUID: &str = "4f281e78-eba6-495a-8e50-5c322d02b5b1";
-const RIN_AIVIS_SPEAKER_UUID: &str = "aa63d66e-92fe-499e-9e0d-15dad4a61d0d";
-const RIN_AIVIS_STYLE_NAME: &str = "ノーマル";
-
-// まい（AivisHub「まい」）。実 style ID は speaker_uuid から `/speakers` で解決し、
-// 下記はフォールバック。
-const MAI_AIVIS_SPEAKER: &str = "1431611904";
-const MAI_AIVIS_MODEL_UUID: &str = "e9339137-2ae3-4d41-9394-fb757a7e61e6";
-const MAI_AIVIS_SPEAKER_UUID: &str = "41b7785f-35cc-4089-a360-dd8a63da5e75";
-const MAI_AIVIS_STYLE_NAME: &str = "ノーマル";
-
-// Live2D キャラの既定声（いずれも AivisHub）。実 style ID は speaker_uuid から
-// `/speakers` で解決する。解決失敗時のフォールバックは実IDが事前に分からないため、
-// 同梱既定声（Anneli ノーマル = PICOAGENT_TTS_SPEAKER の既定値）にして無音を避ける。
-const LIVE2D_AIVIS_FALLBACK_SPEAKER: &str = "888753760";
-// ひより（AivisHub「まお」）
-const HIYORI_AIVIS_MODEL_UUID: &str = "a59cb814-0083-4369-8542-f51a29e72af7";
-const HIYORI_AIVIS_SPEAKER_UUID: &str = "e756b8e4-b606-4e15-99b1-3f9c6a1b2317";
-const HIYORI_AIVIS_STYLE_NAME: &str = "ふつー";
-// はる（AivisHub「花音」）
-const HARU_AIVIS_MODEL_UUID: &str = "a670e6b8-0852-45b2-8704-1bc9862f2fe6";
-const HARU_AIVIS_SPEAKER_UUID: &str = "b1ca560f-f212-4e67-ab7d-0a4f5afb75a8";
-const HARU_AIVIS_STYLE_NAME: &str = "ノーマル";
-// イプシロン（AivisHub「コハク」）
-const EPSILON_AIVIS_MODEL_UUID: &str = "22e8ed77-94fe-4ef2-871f-a86f94e9a579";
-const EPSILON_AIVIS_SPEAKER_UUID: &str = "5680ac39-43c9-487a-bc3e-018c0d29cc38";
-const EPSILON_AIVIS_STYLE_NAME: &str = "せつなめ";
-// ライス（AivisHub「阿井田 茂」）
-const RICE_AIVIS_MODEL_UUID: &str = "47e53151-a378-46f3-abee-ce13aa07feb1";
-const RICE_AIVIS_SPEAKER_UUID: &str = "561e4e59-3bc9-4726-9028-44a3c12a6f1d";
-// わんこ（AivisHub「TANAKA」）
-const WANKO_AIVIS_MODEL_UUID: &str = "470a41e2-863f-4bf2-8a20-bf7cde0d8f7b";
-const WANKO_AIVIS_SPEAKER_UUID: &str = "e7b467ab-3947-4876-892f-fea9a75fd9e4";
-
-fn aivis_voice(model_uuid: &str, speaker_uuid: &str, style_name: &str) -> TtsVoice {
-    TtsVoice {
-        speaker: LIVE2D_AIVIS_FALLBACK_SPEAKER.to_string(),
-        model_uuid: Some(model_uuid.to_string()),
-        speaker_uuid: Some(speaker_uuid.to_string()),
-        style_name: Some(style_name.to_string()),
+fn effective_tts_voice(state: &AppState) -> Result<(String, TtsVoice), String> {
+    let character = state.character.lock().unwrap().clone();
+    if !character.registered {
+        return Err(
+            "キャラクターの人格と声がまだ登録されていないため、読み上げを準備できません。".into(),
+        );
     }
-}
-
-fn default_character_tts_voice(character_id: &str) -> Option<TtsVoice> {
-    match character_id {
-        "rin" => Some(TtsVoice {
-            speaker: RIN_AIVIS_SPEAKER.to_string(),
-            model_uuid: Some(RIN_AIVIS_MODEL_UUID.to_string()),
-            speaker_uuid: Some(RIN_AIVIS_SPEAKER_UUID.to_string()),
-            style_name: Some(RIN_AIVIS_STYLE_NAME.to_string()),
-        }),
-        "mai" => Some(TtsVoice {
-            speaker: MAI_AIVIS_SPEAKER.to_string(),
-            model_uuid: Some(MAI_AIVIS_MODEL_UUID.to_string()),
-            speaker_uuid: Some(MAI_AIVIS_SPEAKER_UUID.to_string()),
-            style_name: Some(MAI_AIVIS_STYLE_NAME.to_string()),
-        }),
-        "mugi" => Some(aivis_voice(
-            HIYORI_AIVIS_MODEL_UUID,
-            HIYORI_AIVIS_SPEAKER_UUID,
-            "あまあま",
-        )),
-        "aoi" => Some(aivis_voice(
-            HIYORI_AIVIS_MODEL_UUID,
-            HIYORI_AIVIS_SPEAKER_UUID,
-            "おちつき",
-        )),
-        "hiyori" => Some(aivis_voice(
-            HIYORI_AIVIS_MODEL_UUID,
-            HIYORI_AIVIS_SPEAKER_UUID,
-            HIYORI_AIVIS_STYLE_NAME,
-        )),
-        "haru" => Some(aivis_voice(
-            HARU_AIVIS_MODEL_UUID,
-            HARU_AIVIS_SPEAKER_UUID,
-            HARU_AIVIS_STYLE_NAME,
-        )),
-        "epsilon" => Some(aivis_voice(
-            EPSILON_AIVIS_MODEL_UUID,
-            EPSILON_AIVIS_SPEAKER_UUID,
-            EPSILON_AIVIS_STYLE_NAME,
-        )),
-        "mao" => Some(aivis_voice(
-            HIYORI_AIVIS_MODEL_UUID,
-            HIYORI_AIVIS_SPEAKER_UUID,
-            "おちつき",
-        )),
-        "rice" => Some(aivis_voice(
-            RICE_AIVIS_MODEL_UUID,
-            RICE_AIVIS_SPEAKER_UUID,
-            "Calm",
-        )),
-        "wanko" => Some(aivis_voice(
-            WANKO_AIVIS_MODEL_UUID,
-            WANKO_AIVIS_SPEAKER_UUID,
-            "Happy",
-        )),
-        _ => None,
-    }
-}
-
-fn effective_tts_voice(state: &AppState) -> TtsVoice {
-    // 保存値ではなく実際に読み込めた人格へ声を揃える（切替直後の取り違えを防ぐ）。
-    let active = state.character_id.lock().unwrap().clone();
-    let character_id = if active.is_empty() {
-        state.config.get("PICOAGENT_CHARACTER", "mugi")
-    } else {
-        active
-    };
-    let default = default_character_tts_voice(&character_id);
+    let character_id = character.id;
     let override_voice = state
         .config
         .get_all()
         .get("PICOAGENT_TTS_CHARACTER_OVERRIDES")
         .and_then(|value| value.get(&character_id))
         .cloned();
-    let override_speaker = override_voice
-        .as_ref()
-        .and_then(|value| value.get("speaker"))
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty());
-    let override_model_uuid = override_voice
-        .as_ref()
-        .and_then(|value| value.get("modelUuid"))
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty());
-    let override_speaker_uuid = override_voice
-        .as_ref()
-        .and_then(|value| value.get("speakerUuid"))
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty());
-    let override_style_name = override_voice
-        .as_ref()
-        .and_then(|value| value.get("styleName"))
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty());
-    if let Some(speaker) = override_speaker {
-        // 数値IDはフォールバックとして保ちつつ、保存済みの安定した話者UUIDを優先する。
-        // モデルの再読込でstyle IDが変わっても、同じキャラクターの声を解決できる。
-        return TtsVoice {
-            speaker: speaker.to_string(),
-            model_uuid: override_model_uuid.map(str::to_string),
-            speaker_uuid: override_speaker_uuid.map(str::to_string),
-            style_name: override_style_name.map(str::to_string),
-        };
-    }
-    default.unwrap_or_else(|| TtsVoice {
-        speaker: state.config.get("PICOAGENT_TTS_SPEAKER", "888753760"),
-        model_uuid: None,
-        speaker_uuid: None,
-        style_name: None,
-    })
+    let voice = if let Some(mut value) = override_voice
+        .filter(|value| !value.is_null() && value.as_object().is_none_or(|map| !map.is_empty()))
+    {
+        // 保存済み上書きはAivis専用の仕様で、providerを持たない既存形式も同じ型で検証する。
+        let object = value
+            .as_object_mut()
+            .ok_or_else(|| "キャラの声の上書きがオブジェクトではありません。".to_string())?;
+        object.entry("provider").or_insert(json!("aivis"));
+        serde_json::from_value::<TtsVoice>(value)
+            .map_err(|error| format!("{character_id}の声の上書きを読めません: {error}"))?
+    } else if let Some(voice) = character.voice {
+        voice
+    } else {
+        // voiceが無いキャラは全体設定の明示指定を使う（SPEC「話者」）。
+        TtsVoice {
+            provider: "aivis".into(),
+            style_id: Some(state.config.get("PICOAGENT_TTS_SPEAKER", "888753760")),
+            model_uuid: None,
+            model_name: None,
+            speaker_uuid: None,
+            style_name: None,
+            source_url: None,
+        }
+    };
+    voice
+        .validate()
+        .map_err(|error| voice.failure(&character_id, error))?;
+    Ok((character_id, voice))
 }
 
 async fn prepare_tts_voice_model(
@@ -2629,16 +2555,16 @@ async fn prepare_tts_voice_model(
     Ok(())
 }
 
-async fn resolve_tts_speaker(endpoint: &str, voice: TtsVoice) -> String {
-    match voice.speaker_uuid.as_deref() {
-        Some(speaker_uuid) => {
-            aivis::resolve_style_id(endpoint, speaker_uuid, voice.style_name.as_deref())
-                .await
-                // フォールバック許可: 既存環境の手動 style ID 指定を尊重し、解決失敗時も合成 API 側のエラーを返せるようにする。
-                .unwrap_or(voice.speaker)
-        }
-        None => voice.speaker,
+async fn resolve_tts_speaker(endpoint: &str, voice: &TtsVoice) -> Result<String, String> {
+    if let Some(speaker_uuid) = voice.speaker_uuid.as_deref() {
+        return aivis::resolve_style_id(endpoint, speaker_uuid, voice.style_name.as_deref())
+            .await
+            .map_err(|error| error.to_string());
     }
+    voice
+        .style_id
+        .clone()
+        .ok_or_else(|| "声のstyleIdがありません。".to_string())
 }
 
 #[tauri::command]
@@ -2654,67 +2580,77 @@ pub async fn pet_speak(
     if text.trim().is_empty() {
         return Ok(json!({ "enabled": true, "skipped": true }));
     }
-    aivis::ensure_started(&app)
-        .await
-        .map_err(|error| log_command_error(&app, "Aivis の起動確認に失敗しました", error))?;
-    let endpoint = aivis::endpoint(&app, &state);
-    let voice = effective_tts_voice(&state);
-    // AivisHub モデル指定があり未導入なら導入する。通常は起動時に事前導入済み。
-    prepare_tts_voice_model(&app, &state, &endpoint, &voice).await?;
-    // speaker_uuid があれば実 style ID を `/speakers` から解決する（取り違え防止）。
-    // 解決できなければ設定値の style ID を使う。
-    let speaker = resolve_tts_speaker(&endpoint, voice).await;
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(180))
-        .build()
-        .map_err(|error| {
-            log_command_error(&app, "Aivis HTTP クライアント作成に失敗しました", error)
-        })?;
-    let query_url = format!("{endpoint}/audio_query");
-    let query = client
-        .post(&query_url)
-        .query(&[("text", text.as_str()), ("speaker", speaker.as_str())])
-        .send()
+    let (character_id, voice) = effective_tts_voice(&state)?;
+    let result: Result<Value, String> = async {
+        aivis::ensure_started(&app)
+            .await
+            .map_err(|error| log_command_error(&app, "Aivis の起動確認に失敗しました", error))?;
+        let endpoint = aivis::endpoint(&app, &state);
+        // AivisHub モデル指定があり未導入なら導入する。通常は起動時に事前導入済み。
+        prepare_tts_voice_model(&app, &state, &endpoint, &voice).await?;
+        // speaker_uuid があれば実 style ID を `/speakers` から解決する（取り違え防止）。
+        // UUID指定の解決失敗では合成へ進まない。
+        let speaker = resolve_tts_speaker(&endpoint, &voice).await?;
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(180))
+            .build()
+            .map_err(|error| {
+                log_command_error(
+                    &app,
+                    "Aivis HTTP クライアント作成に失敗しました",
+                    error.without_url(),
+                )
+            })?;
+        let query_url = format!("{endpoint}/audio_query");
+        let query = crate::tools::http::service_response(
+            &state.config,
+            "Aivis の音声クエリ作成",
+            client
+                .post(&query_url)
+                .query(&[("text", text.as_str()), ("speaker", speaker.as_str())])
+                .send()
+                .await,
+        )
         .await
         .map_err(|error| log_command_error(&app, "Aivis の音声クエリ作成に失敗しました", error))?;
-    if !query.status().is_success() {
-        return Err(log_command_error(
-            &app,
-            "Aivis の音声クエリ作成に失敗しました",
-            format!("HTTP {}", query.status()),
-        ));
-    }
-    let mut audio_query: Value = query
-        .json()
-        .await
-        .map_err(|error| log_command_error(&app, "Aivis の音声クエリを読めませんでした", error))?;
-    limit_aivis_volume(&mut audio_query);
-    let synthesis_url = format!("{endpoint}/synthesis");
-    let wav = client
-        .post(&synthesis_url)
-        .query(&[("speaker", speaker.as_str())])
-        .json(&audio_query)
-        .send()
+        let mut audio_query: Value = query.json().await.map_err(|error| {
+            log_command_error(
+                &app,
+                "Aivis の音声クエリを読めませんでした",
+                error.without_url(),
+            )
+        })?;
+        limit_aivis_volume(&mut audio_query);
+        let synthesis_url = format!("{endpoint}/synthesis");
+        let wav = crate::tools::http::service_response(
+            &state.config,
+            "Aivis の音声合成",
+            client
+                .post(&synthesis_url)
+                .query(&[("speaker", speaker.as_str())])
+                .json(&audio_query)
+                .send()
+                .await,
+        )
         .await
         .map_err(|error| log_command_error(&app, "Aivis の音声合成に失敗しました", error))?;
-    if !wav.status().is_success() {
-        return Err(log_command_error(
-            &app,
-            "Aivis の音声合成に失敗しました",
-            format!("HTTP {}", wav.status()),
-        ));
+        let bytes = wav.bytes().await.map_err(|error| {
+            log_command_error(
+                &app,
+                "Aivis の音声データを読めませんでした",
+                error.without_url(),
+            )
+        })?;
+        let lip_sync = aivis_lip_sync_timeline(&audio_query);
+        Ok(json!({
+            "enabled": true,
+            "mime": "audio/wav",
+            "audio": bytes.to_vec(),
+            "lipSync": lip_sync
+        }))
     }
-    let bytes = wav
-        .bytes()
-        .await
-        .map_err(|error| log_command_error(&app, "Aivis の音声データを読めませんでした", error))?;
-    let lip_sync = aivis_lip_sync_timeline(&audio_query);
-    Ok(json!({
-        "enabled": true,
-        "mime": "audio/wav",
-        "audio": bytes.to_vec(),
-        "lipSync": lip_sync
-    }))
+    .await;
+    result.map_err(|error| voice.failure(&character_id, error))
 }
 
 /// Aivisのモデルによっては既定出力が0dBへ張り付き、クリップ由来のざらつきが出る。
@@ -3667,7 +3603,10 @@ pub fn restart_app(
 
     // 選択中キャラの履歴を文脈へ読み込み直す（旧キャラの会話は持ち越さない）。
     let character_id = state.config.get("PICOAGENT_CHARACTER", "mugi");
-    *state.character_id.lock().unwrap() = character_id.clone();
+    *state.character.lock().unwrap() = LoadedCharacter {
+        id: character_id.clone(),
+        ..LoadedCharacter::default()
+    };
     let relationship_mode = state.config.get("PICOAGENT_COMPANION_MODE", "both");
     let relationship = crate::relationship::load(&app, &character_id, &relationship_mode)?;
     state.set_relationship_context(relationship_prompt_context(&state.config, &relationship));
@@ -5231,14 +5170,320 @@ fn settings_tab(tab: Option<&str>) -> Option<&str> {
 
 #[cfg(test)]
 mod tests {
+    fn manifest_voice(id: &str) -> Option<super::CharacterVoice> {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../characters");
+        let manifest: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(root.join(id).join("character.json")).unwrap(),
+        )
+        .unwrap();
+        manifest
+            .get("voice")
+            .map(|value| serde_json::from_value(value.clone()).unwrap())
+    }
+
+    #[test]
+    fn 未登録の声は保存済みキャラや全体声へ切り替えない() {
+        let state = super::AppState::new();
+        state.config.set("PICOAGENT_CHARACTER", "mugi");
+        assert!(super::effective_tts_voice(&state).is_err());
+        state.character.lock().unwrap().id = "mugi".into();
+        assert!(super::effective_tts_voice(&state).is_err());
+        let source = include_str!("commands.rs");
+        for function in [
+            "pub async fn pet_prepare_voice_model",
+            "pub async fn pet_speak",
+        ] {
+            let body = source
+                .split(function)
+                .nth(1)
+                .unwrap()
+                .split("#[tauri::command]")
+                .next()
+                .unwrap();
+            assert!(
+                body.find("effective_tts_voice").unwrap()
+                    < body.find("aivis::ensure_started").unwrap()
+            );
+        }
+    }
+
+    #[test]
+    fn キャラの声は上書きと実読込manifestと全体指定の順で解決する() {
+        let state = super::AppState::new();
+        state.config.set("PICOAGENT_CHARACTER", "hiyori");
+        state.config.set("PICOAGENT_TTS_SPEAKER", "123");
+        for id in [
+            "rin",
+            "mai",
+            "mugi",
+            "aoi",
+            "hiyori",
+            "haru",
+            "epsilon",
+            "mao",
+            "rice",
+            "wanko",
+            "sena",
+            "mugi-normal-lvs",
+            "photoreal-prototype",
+        ] {
+            let voice = manifest_voice(id);
+            *state.character.lock().unwrap() = super::LoadedCharacter {
+                id: id.into(),
+                voice: voice.clone(),
+                registered: true,
+                ..Default::default()
+            };
+            let (active, result) = super::effective_tts_voice(&state).unwrap();
+            assert_eq!(active, id);
+            if let Some(voice) = voice {
+                assert_eq!(result, voice);
+            } else {
+                assert_eq!(result.style_id.as_deref(), Some("123"));
+            }
+        }
+        let voice = manifest_voice("mugi");
+        *state.character.lock().unwrap() = super::LoadedCharacter {
+            id: "追加パック".into(),
+            voice: voice.clone(),
+            registered: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            super::effective_tts_voice(&state).unwrap().1,
+            voice.unwrap()
+        );
+        state.config.set_value(
+            "PICOAGENT_TTS_CHARACTER_OVERRIDES",
+            serde_json::json!({"追加パック":{"speaker":"00123"}}),
+        );
+        let voice = super::effective_tts_voice(&state).unwrap().1;
+        assert_eq!(voice.style_id.as_deref(), Some("00123"));
+        assert_eq!(voice.model_uuid, None);
+        state.config.set_value(
+            "PICOAGENT_TTS_CHARACTER_OVERRIDES",
+            serde_json::json!({"追加パック":{"speaker":"bad"}}),
+        );
+        assert!(super::effective_tts_voice(&state).is_err());
+    }
+
+    #[test]
+    fn 人格登録の読込失敗は旧人格と声と履歴と世代を保持する() {
+        let _private = crate::agent::PRIVATE_CONTEXT_TEST_LOCK.lock().unwrap();
+        let state = super::AppState::new();
+        let old = super::LoadedCharacter {
+            id: "mugi".into(),
+            profile: "旧人格".into(),
+            greeting: "旧挨拶".into(),
+            voice: manifest_voice("mugi"),
+            registered: true,
+        };
+        *state.character.lock().unwrap() = old.clone();
+        *state.messages.lock().unwrap() = vec![crate::message::Message::new("user", "原文")];
+        let epoch = state.conversation_epoch();
+        let next = super::LoadedCharacter {
+            id: "rin".into(),
+            profile: "新人格".into(),
+            greeting: "新挨拶".into(),
+            voice: manifest_voice("rin"),
+            registered: true,
+        };
+        for stage in ["関係性", "会話履歴"] {
+            assert!(state
+                .register_character(next.clone(), |_| Err(format!("{stage}読込失敗")))
+                .is_err());
+            assert_eq!(*state.character.lock().unwrap(), old);
+            assert_eq!(state.messages.lock().unwrap()[0].content, "原文");
+            assert_eq!(state.conversation_epoch(), epoch);
+        }
+        state
+            .register_character(next.clone(), |changed| {
+                assert!(changed);
+                Ok((
+                    "新関係性".into(),
+                    vec![crate::message::Message::new("user", "新履歴")],
+                ))
+            })
+            .unwrap();
+        assert_eq!(*state.character.lock().unwrap(), next);
+        assert_eq!(state.messages.lock().unwrap()[1].content, "新履歴");
+        assert_eq!(state.conversation_epoch(), epoch + 1);
+        crate::agent::remember_private_context("");
+    }
+
+    #[test]
+    fn 会話再構成中のキャラ登録は旧人格を書き戻さない() {
+        use std::sync::{Arc, Barrier};
+        let mut outcomes = Vec::new();
+        for clear in [false, true] {
+            let state = Arc::new(super::AppState::new());
+            *state.character.lock().unwrap() = super::LoadedCharacter {
+                id: "old".into(),
+                profile: "旧人格".into(),
+                registered: true,
+                ..Default::default()
+            };
+            *state.messages.lock().unwrap() = vec![
+                Message::new("system", "旧system"),
+                Message::new("user", "既存の会話"),
+            ];
+            state.rebuild_conversation(clear, || {});
+            assert_eq!(
+                state.messages.lock().unwrap().len(),
+                if clear { 1 } else { 2 }
+            );
+            let entered = Arc::new(Barrier::new(2));
+            let resume = Arc::new(Barrier::new(2));
+            let reset = {
+                let state = state.clone();
+                let entered = entered.clone();
+                let resume = resume.clone();
+                std::thread::spawn(move || {
+                    state.rebuild_conversation(clear, || {
+                        entered.wait();
+                        resume.wait();
+                    })
+                })
+            };
+            entered.wait();
+            let character_locked = state.character.try_lock().is_err();
+            let queued = Arc::new(Barrier::new(2));
+            let registration = {
+                let state = state.clone();
+                let queued = queued.clone();
+                std::thread::spawn(move || {
+                    queued.wait();
+                    state
+                        .register_character(
+                            super::LoadedCharacter {
+                                id: "new".into(),
+                                profile: "新人格".into(),
+                                ..Default::default()
+                            },
+                            |_| Ok((String::new(), vec![Message::new("user", "新履歴")])),
+                        )
+                        .unwrap();
+                })
+            };
+            queued.wait();
+            if character_locked {
+                resume.wait();
+                reset.join().unwrap();
+                registration.join().unwrap();
+            } else {
+                registration.join().unwrap();
+                resume.wait();
+                reset.join().unwrap();
+            }
+            let character = state.character.lock().unwrap();
+            let messages = state.messages.lock().unwrap();
+            assert_eq!(character.id, "new");
+            let new_persona = messages[0].content.contains("新人格")
+                && !messages[0].content.contains("旧人格")
+                && messages
+                    .get(1)
+                    .is_some_and(|message| message.content == "新履歴");
+            outcomes.push((clear, character_locked, new_persona));
+        }
+        assert!(
+            outcomes
+                .iter()
+                .all(|(_, locked, current)| *locked && *current),
+            "会話再構成で旧人格を書き戻しました: {outcomes:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn 話者uuidの解決失敗は数値idへ切り替えない() {
+        use std::io::{Read, Write};
+        let server = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let endpoint = format!("http://{}", server.local_addr().unwrap());
+        server.set_nonblocking(true).unwrap();
+        let worker = std::thread::spawn(move || {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            let mut socket = loop {
+                match server.accept() {
+                    Ok((socket, _)) => break socket,
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        assert!(
+                            std::time::Instant::now() < deadline,
+                            "話者要求が到着しませんでした"
+                        );
+                        std::thread::sleep(std::time::Duration::from_millis(5));
+                    }
+                    Err(error) => panic!("話者要求の受信に失敗しました: {error}"),
+                }
+            };
+            socket.set_nonblocking(false).unwrap();
+            socket
+                .set_read_timeout(Some(std::time::Duration::from_secs(5)))
+                .unwrap();
+            let mut buffer = [0; 4096];
+            assert!(socket.read(&mut buffer).unwrap() > 0, "話者要求が空でした");
+            socket
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\n[]")
+                .unwrap();
+        });
+        let voice = manifest_voice("rin").unwrap();
+        let result = super::resolve_tts_speaker(&endpoint, &voice).await;
+        worker.join().unwrap();
+        assert!(result.is_err());
+        let voice: super::CharacterVoice =
+            serde_json::from_value(serde_json::json!({"provider":"aivis","styleId":"00123"}))
+                .unwrap();
+        assert_eq!(
+            super::resolve_tts_speaker(&endpoint, &voice).await.unwrap(),
+            "00123"
+        );
+    }
+
+    #[test]
+    fn 声の正本を複製する表と解決失敗後の数値切替を禁止する() {
+        let source = include_str!("commands.rs")
+            .split("#[cfg(test)]")
+            .next()
+            .unwrap();
+        assert!(!source.contains(&["default_character", "_tts_voice"].concat()));
+        assert!(!source.contains(&["_AIVIS_", "SPEAKER_UUID"].concat()));
+        let resolve = source
+            .split("async fn resolve_tts_speaker")
+            .nth(1)
+            .unwrap()
+            .split("#[tauri::command]")
+            .next()
+            .unwrap();
+        assert!(!resolve.contains("unwrap_or"));
+    }
+
+    #[test]
+    fn 音声httpは原因本文を安全に返して本文入りurlを出さない() {
+        let source = include_str!("commands.rs");
+        let speak = source
+            .split("pub async fn pet_speak(")
+            .nth(1)
+            .unwrap()
+            .split("/// Aivisのモデル")
+            .next()
+            .unwrap();
+        assert_eq!(
+            speak
+                .matches("crate::tools::http::service_response(")
+                .count(),
+            2
+        );
+        assert!(speak.contains("error.without_url()"));
+        assert!(!speak.contains("format!(\"HTTP {}\""));
+        assert_eq!(speak.matches("voice.failure(").count(), 1);
+    }
+
     use super::{
         aivis_lip_sync_timeline, centered_window_position, checked_main_ui_pref,
-        compacted_conversation, default_character_tts_voice, enable_tts_after_component_install,
-        limit_aivis_volume, multi_ai_context, parse_update_feed, preserve_unreadable_secrets,
-        probe_with_timeout, replace_auto_summary, resolved_judge_model, safe_wake_message,
-        settings_tab, speech_text, stable_persona_prompt, update_series_is_newer, update_status,
-        valid_stream_chat_font_px, validate_multi_ai_settings, verify_windows_installer,
-        version_is_newer, AUTO_SUMMARY_BEGIN, AUTO_SUMMARY_END, MAX_UPDATE_FEED_BYTES,
+        compacted_conversation, enable_tts_after_component_install, limit_aivis_volume,
+        multi_ai_context, parse_update_feed, preserve_unreadable_secrets, probe_with_timeout,
+        replace_auto_summary, resolved_judge_model, safe_wake_message, settings_tab, speech_text,
+        stable_persona_prompt, update_series_is_newer, update_status, valid_stream_chat_font_px,
+        validate_multi_ai_settings, verify_windows_installer, version_is_newer, AUTO_SUMMARY_BEGIN,
+        AUTO_SUMMARY_END, MAX_UPDATE_FEED_BYTES,
     };
 
     #[test]
@@ -5453,7 +5698,7 @@ mod tests {
     #[test]
     fn 統合aiの人格には長期メモリと会話中のsystem文脈を混ぜない() {
         let state = super::AppState::new();
-        *state.character_profile.lock().unwrap() = "むぎとして柔らかく話す。".to_string();
+        state.character.lock().unwrap().profile = "むぎとして柔らかく話す。".to_string();
         *state.memory_context.lock().unwrap() = "外へ重ねて渡さない長期メモリ".to_string();
         state.messages.lock().unwrap().push(Message::new(
             "system",
@@ -5517,69 +5762,6 @@ mod tests {
             serde_json::json!(r#"[{"provider":"local"}]"#),
         );
         assert!(validate_multi_ai_settings(&Config::new(), &consensus).is_err());
-    }
-
-    #[test]
-    fn 表示中のキャラの声を保存中のキャラより優先する() {
-        use super::{effective_tts_voice, AppState};
-        let state = AppState::new();
-        state.config.set("PICOAGENT_CHARACTER", "hiyori");
-        assert_eq!(
-            effective_tts_voice(&state).style_name.as_deref(),
-            Some("ふつー")
-        );
-        *state.character_id.lock().unwrap() = "mugi".to_string();
-        assert_eq!(
-            effective_tts_voice(&state).style_name.as_deref(),
-            Some("あまあま")
-        );
-        *state.character_id.lock().unwrap() = "hiyori".to_string();
-        assert_eq!(
-            effective_tts_voice(&state).style_name.as_deref(),
-            Some("ふつー")
-        );
-    }
-
-    #[test]
-    fn キャラ声の数値idと話者uuidを両方保持する() {
-        use super::{effective_tts_voice, AppState};
-        let state = AppState::new();
-        state.config.set("PICOAGENT_CHARACTER", "miko-mmd");
-        state.config.set_value(
-            "PICOAGENT_TTS_CHARACTER_OVERRIDES",
-            serde_json::json!({"miko-mmd":{"speaker":"1533692672","modelUuid":"8e120ad8","speakerUuid":"15bfc9c1","styleName":"ノーマル"}}),
-        );
-        let voice = effective_tts_voice(&state);
-        assert_eq!(voice.speaker, "1533692672");
-        assert_eq!(voice.model_uuid.as_deref(), Some("8e120ad8"));
-        assert_eq!(voice.speaker_uuid.as_deref(), Some("15bfc9c1"));
-        assert_eq!(voice.style_name.as_deref(), Some("ノーマル"));
-    }
-
-    #[test]
-    fn 組み込みキャラはそれぞれ既定声を持つ() {
-        let expected = [
-            ("mugi", "あまあま"),
-            ("rin", "ノーマル"),
-            ("mai", "ノーマル"),
-            ("hiyori", "ふつー"),
-            ("haru", "ノーマル"),
-            ("epsilon", "せつなめ"),
-            ("mao", "おちつき"),
-            ("rice", "Calm"),
-            ("wanko", "Happy"),
-        ];
-        for (character_id, style_name) in expected {
-            let voice = default_character_tts_voice(character_id)
-                .unwrap_or_else(|| panic!("{character_id} の既定声がありません"));
-            assert_eq!(
-                voice.style_name.as_deref(),
-                Some(style_name),
-                "{character_id}"
-            );
-            assert!(voice.model_uuid.is_some(), "{character_id}");
-            assert!(voice.speaker_uuid.is_some(), "{character_id}");
-        }
     }
 
     #[test]
