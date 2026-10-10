@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { runInNewContext } from "node:vm";
 import test from "node:test";
+import { frameBudget } from "../../ui/character/frame-budget.js";
 
 function deferred() {
   let resolve, reject;
@@ -102,10 +103,12 @@ test("読込途中の描画器は寸法と状態を確定するまで可視に�
     load() { return work.promise; }
     setFraming() { assert.equal(this.element.style.visibility, "hidden"); }
     setMotion() {} setSpeaking() {} setActive(value) { this.active = value; }
+    setFrameBudget(value) { this.fps = value; }
     dispose() { this.disposed = true; }
   }
   const unsupported = class { static supports() { return false; } };
   const factory = runInNewContext(`${hostSource}\ncreateCharacterHost`, {
+    frameBudget,
     ImageRenderer: Renderer, MmdRenderer: unsupported, Live2dRenderer: unsupported, MeshRenderer: unsupported,
     window: { matchMedia: () => ({ matches: false, addEventListener() {} }) },
     document: { hidden: false, addEventListener() {} },

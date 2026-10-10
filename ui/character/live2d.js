@@ -15,7 +15,7 @@ const MODEL_TIMEOUT_MS = 8000;
 const LEGACY_FRAME = Object.freeze({ width: 285, height: 315 });
 
 function loadModel(PIXI, url) {
-  const pending = PIXI.live2d.Live2DModel.from(url, { autoInteract: false });
+  const pending = PIXI.live2d.Live2DModel.from(url, { autoInteract: false, autoUpdate: false });
   return new Promise((resolve, reject) => {
     let finished = false;
     const timer = setTimeout(() => {
@@ -78,6 +78,10 @@ export class Live2dRenderer {
     this.element = this.canvas;
     this.reducedMotion = reducedMotion;
     this.mouth = -1;
+    this.active = false;
+    this.frameBudget = 0;
+    this.disposed = false;
+    this.ready = false;
     this.framing = "upper";
     this.layoutId = "pet";
   }
@@ -91,14 +95,22 @@ export class Live2dRenderer {
     const matching = all.filter(candidate => (candidate.sdk === "5" ? "5" : "4") === sdk);
     if (!matching.length) throw new Error(`Cubism ${sdk} のモデルがこのキャラクターパックにありません`);
     const PIXI = await ensureLive2d(sdk);
+    if (this.disposed) return;
     this.PIXI = PIXI;
     this.app = createTransparentApp(PIXI, this.canvas, 300, 300, window.devicePixelRatio || 1);
+    this.budgetController = window.PicoFrameScheduler.createPixiBudget(this.app.ticker, () => {
+      this.lastBlinkAt = performance.now();
+      this.lastModelUpdateAt = this.lastBlinkAt;
+    }, "Live2D");
     let lastError = null;
     for (const candidate of matching) {
       try {
-        this.model = await loadModel(PIXI, packUrl(pack, candidate.path));
+        const model = await loadModel(PIXI, packUrl(pack, candidate.path));
+        if (this.disposed) { model.destroy(); return; }
+        this.model = model;
         break;
       } catch (error) {
+        if (this.disposed) return;
         lastError = error;
         logApp("warn", `Live2Dモデル ${candidate.path} は現在のCubism Coreで読めません。次の互換モデルを試します`, errorDetail(error));
       }
@@ -117,24 +129,37 @@ export class Live2dRenderer {
     const lipEnabled = this.config.lipSync !== false;
     const lipParam = String(this.config.lipSyncParam || lipGroup?.Ids?.[0] || "ParamMouthOpenY");
     internal.on("beforeModelUpdate", () => {
-      if (lipEnabled && this.mouth >= 0) internal.coreModel.setParameterValueById(lipParam, this.mouth);
+      if (!this.disposed && lipEnabled && this.mouth >= 0) internal.coreModel.setParameterValueById(lipParam, this.mouth);
     });
     // ランタイムは「モーション再生中は自動まばたきを回さない」。待機モーションをループさせ続けるため、
     // モーション適用後に自前で回してランダム間隔のまばたきを取り戻す。
     if (internal.eyeBlink) {
-      let lastBlinkAt = performance.now();
+      this.lastBlinkAt = performance.now();
       internal.on("afterMotionUpdate", () => {
+        if (this.disposed || !this.active || !this.frameBudget) return;
         const now = performance.now();
-        const delta = Math.min((now - lastBlinkAt) / 1000, 0.5);
-        lastBlinkAt = now;
+        const delta = Math.min((now - this.lastBlinkAt) / 1000, 0.5);
+        this.lastBlinkAt = now;
         internal.eyeBlink.updateParameters(internal.coreModel, delta);
       });
     }
     this.motionEnabled = !this.reducedMotion || this.config.alwaysAnimate === true;
     if (!this.motionEnabled) internal.motionManager.groups.idle = "";
     else if (this.config.motions?.idle) internal.motionManager.groups.idle = this.config.motions.idle;
+    // 同梱ランタイムの自動更新はTicker.sharedを使うため、appの予算内だけで進める。
+    this.lastModelUpdateAt = performance.now();
+    this.updateModel = () => {
+      if (this.disposed || !this.ready || !this.active || !this.frameBudget) return;
+      const now = performance.now();
+      model.update(now - this.lastModelUpdateAt);
+      this.lastModelUpdateAt = now;
+    };
+    this.app.ticker.add(this.updateModel, this, PIXI.UPDATE_PRIORITY.HIGH);
     this.app.stage.addChild(model);
     this.buildFramings();
+    this.ready = true;
+    this.budgetController.setActive(this.active);
+    this.budgetController.setBudget(this.frameBudget);
     if (this.motionEnabled && this.config.motions?.idle) {
       model.motion(this.config.motions.idle, 0, PIXI.live2d?.MotionPriority?.IDLE ?? 1);
     }
@@ -183,6 +208,8 @@ export class Live2dRenderer {
     const fit = fitTransform(this.framingRect(this.framing), cssWidth, cssHeight);
     this.app.stage.scale.set(fit.scale);
     this.app.stage.position.set(fit.offsetX, fit.offsetY);
+    // サイズ確定時は停止中でも最後の表示を一度だけ更新する。
+    this.app.render();
   }
 
   setFraming(name) {
@@ -220,9 +247,15 @@ export class Live2dRenderer {
   setSleeping() {}
 
   setActive(active) {
-    if (!this.app) return;
-    if (active) this.app.ticker.start();
-    else this.app.ticker.stop();
+    if (this.disposed) return;
+    this.active = Boolean(active);
+    this.budgetController?.setActive(this.active && this.ready);
+  }
+
+  setFrameBudget(fps) {
+    if (this.disposed) return;
+    this.frameBudget = fps;
+    this.budgetController?.setBudget(fps);
   }
 
   setReducedMotion(reduced) {
@@ -234,8 +267,12 @@ export class Live2dRenderer {
   }
 
   dispose() {
+    this.disposed = true;
+    this.active = false;
+    this.budgetController?.setActive(false);
     this.mouth = -1;
     try {
+      if (this.updateModel) this.app?.ticker.remove(this.updateModel, this);
       if (this.model) {
         this.app?.stage?.removeChild(this.model);
         this.model.destroy();

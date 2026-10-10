@@ -5,7 +5,7 @@
 // 描画器の約束（どれも同じ）:
 //   load(pack) / element / framingRect(name) / defaultFraming() / sourcePixelsPerUnit /
 //   resize(cssW, cssH, pixelRatio) / setFraming / setMotion / setMouth / setSpeaking / setGaze /
-//   setSleeping / setActive / setReducedMotion / dispose
+//   setSleeping / setActive / setFrameBudget / setReducedMotion / dispose
 
 import { ImageRenderer } from "./image.js";
 import { Live2dRenderer } from "./live2d.js";
@@ -13,6 +13,7 @@ import { loadPack, packUrl, personaText } from "./manifest.js";
 import { MeshRenderer } from "./mesh.js";
 import { MmdRenderer } from "./mmd.js";
 import { aspectOf, resolveFraming } from "./framing.js";
+import { frameBudget } from "./frame-budget.js";
 import * as bridge from "../app/bridge.js";
 import { createEmitter, el, errorDetail, errorMessage, logApp } from "../app/util.js";
 
@@ -43,6 +44,7 @@ function pickRenderer(loaded, preference) {
 const GPU_FAILURE_PATTERN = /webgl|shader|gpu|context ?lost|getcontext|シェーダ/i;
 
 export function createCharacterHost({ container }) {
+  window.PicoFrameScheduler?.setFrameReporter((kind, fps) => logApp("debug", `${kind}の実描画回数`, `${fps.toFixed(1)}回/秒`));
   const events = createEmitter();
   const reduceMotionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
   let reducedMotion = reduceMotionQuery.matches;
@@ -51,6 +53,8 @@ export function createCharacterHost({ container }) {
   let generation = 0;
   let motion = "idle";
   let speaking = false;
+  let dragging = false;
+  let dragSessions = 0;
   let active = true;
   let displayReady = true;
   let layoutId = "pet";
@@ -91,13 +95,20 @@ export function createCharacterHost({ container }) {
     }
   }
 
+  function syncFrameState(target = renderer) {
+    if (!target) return;
+    const visible = active && displayReady && !sleeping && !document.hidden;
+    target.setActive(visible);
+    target.setFrameBudget(frameBudget({ active: visible, speaking, dragging: dragging || dragSessions > 0, motion, reducedMotion }));
+  }
+
   function applyState(target = renderer) {
     if (!target) return;
     target.setLayoutId?.(layoutId);
     target.setFraming(framing);
     target.setMotion(motion);
     target.setSpeaking(speaking);
-    target.setActive(active && displayReady && !sleeping && !document.hidden);
+    syncFrameState(target);
     if (size) target.resize(size.width, size.height, size.pixelRatio);
   }
 
@@ -152,6 +163,7 @@ export function createCharacterHost({ container }) {
       pack = loaded;
       sleeping = false;
       sleepImage.hidden = true;
+      syncFrameState();
       container.dataset.renderKind = renderer.constructor.kind;
       events.emit("loaded", pack);
       renderer.element.style.visibility = "";
@@ -196,10 +208,22 @@ export function createCharacterHost({ container }) {
       if (sleeping && motion !== "idle") host.setSleeping(false);
       renderer?.setMotion(motion);
       container.dataset.motion = motion;
+      syncFrameState();
     },
     setSpeaking(value) {
       speaking = Boolean(value);
       renderer?.setSpeaking(speaking);
+      syncFrameState();
+    },
+    setDragging(value) {
+      dragging = Boolean(value);
+      syncFrameState();
+    },
+    async withDragging(operation) {
+      dragSessions += 1;
+      syncFrameState();
+      try { return await operation(); }
+      finally { dragSessions -= 1; syncFrameState(); }
     },
     setMouth(level, form = 0) {
       if (speaking) renderer?.setMouth(level, form);
@@ -216,12 +240,12 @@ export function createCharacterHost({ container }) {
     },
     setActive(value) {
       active = Boolean(value);
-      renderer?.setActive(active && displayReady && !sleeping && !document.hidden);
+      syncFrameState();
     },
     /** 配置の可視状態とは別に、人格と描画が確定するまで描画ループを止める。 */
     setDisplayReady(value) {
       displayReady = Boolean(value);
-      renderer?.setActive(active && displayReady && !sleeping && !document.hidden);
+      syncFrameState();
     },
     /** 居眠り。寝姿の画像（boot.sleeping）があるキャラだけ眠る。 */
     setSleeping(value) {
@@ -237,7 +261,7 @@ export function createCharacterHost({ container }) {
         sleepImage.hidden = true;
         renderer?.element.removeAttribute("hidden");
       }
-      renderer?.setActive(active && displayReady && !sleeping && !document.hidden);
+      syncFrameState();
       return sleeping;
     },
     get sleeping() { return sleeping; },
@@ -269,10 +293,11 @@ export function createCharacterHost({ container }) {
     reducedMotion = event.matches;
     scheduleGlance();
     renderer?.setReducedMotion(reducedMotion);
+    syncFrameState();
     events.emit("reduced-motion", reducedMotion);
   });
   document.addEventListener("visibilitychange", () => {
-    renderer?.setActive(active && displayReady && !sleeping && !document.hidden);
+    syncFrameState();
   });
   return host;
 }

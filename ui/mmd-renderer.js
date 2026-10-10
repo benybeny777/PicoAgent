@@ -124,16 +124,18 @@
     if (segments.some(part => part === '..' || /%(?:2e|2f|5c|00)/iu.test(part))) throw new Error(`モデル外のテクスチャ参照です: ${value}`);
     return segments.filter(part => part && part !== '.').map(encodeURIComponent).join('/');
   }
-  async function create(canvas, { modelUrl, config = {}, interactive = false, signal } = {}) {
+  async function create(canvas, { modelUrl, config = {}, interactive = false, signal, frameGate } = {}) {
     instances.get(canvas)?.dispose();
     let disposed = false, engine, scene, observer, container;
+    let renderFrame = null, running = false, frameBudget = 0;
     let motion = false, mouth = 0, state = 'idle', pose = config.defaultPose === 'original' ? 'original' : 'natural';
     const dispose = () => {
       if (disposed) return;
       disposed = true;
       observer?.disconnect();
       signal?.removeEventListener('abort', dispose);
-      engine?.stopRenderLoop();
+      if (renderFrame && running) engine?.stopRenderLoop(renderFrame);
+      running = false;
       scene?.dispose();
       container?.dispose();
       engine?.dispose();
@@ -258,8 +260,7 @@
         const [x, y, z] = angles.map(value => Math.max(-180, Math.min(180, value)) * Math.PI / 180);
         bone.rotationQuaternion.copyFrom(base.multiply(B.Quaternion.FromEulerAngles(x, y, z)));
       }
-      const start = performance.now();
-      let lastUpdateAt = start;
+      let lastUpdateAt = performance.now(), animationTime = 0;
       let currentPose = pose === 'natural' ? combinePose(natural, profileFor(poseProfiles, state)) : new Map();
       const currentExpressions = new Map(affectedMorphs.map(name => [name, 0]));
       function update({ settle = false } = {}) {
@@ -276,7 +277,9 @@
           if (targetPose.has(name) || angles.some(value => Math.abs(value) > 0.01)) nextPose.set(name, angles);
         }
         currentPose = nextPose;
-        const time = (now - start) / 1000;
+        // 停止中の時間を呼吸・瞬きへ持ち越さず、描いた時間だけ進める。
+        if (!settle) animationTime += delta;
+        const time = animationTime;
         const renderedPose = new Map(currentPose);
         if (motion) {
           for (const [name, movement] of [
@@ -312,11 +315,14 @@
       observer = new ResizeObserver(() => { if (!disposed) { resize(); setFraming(framing); } });
       observer.observe(canvas);
       resize();
-      let lastFrame = -Infinity;
-      engine.runRenderLoop(() => {
+      if (!frameGate || !['setBudget', 'allow', 'reset'].every(name => typeof frameGate[name] === 'function')) {
+        throw new Error('MMD描画には共通フレーム予算が必要です');
+      }
+      frameGate.setBudget(0);
+      renderFrame = () => {
+        if (disposed || !running || document.hidden) return;
         const now = performance.now();
-        if (document.hidden || now - lastFrame < 1000 / 30) return;
-        lastFrame = now;
+        if (!frameGate.allow(now)) return;
         // CSS寸法が変わらないまま画素密度だけ変わる場合（DPIの違う画面へ移す）は
         // ResizeObserver が動かないため、描画側で追う。
         if (currentPixelRatio() !== appliedPixelRatio) {
@@ -325,9 +331,19 @@
         }
         update();
         scene.render();
-      });
+        window.PicoFrameScheduler?.recordCharacterFrame?.("MMD");
+      };
       const result = {
         setFraming,
+        setFrameBudget(fps) {
+          if (disposed || fps === frameBudget) return;
+          frameGate.setBudget(fps);
+          frameBudget = fps;
+          frameGate.reset();
+          lastUpdateAt = performance.now();
+          if (!fps && running) { engine.stopRenderLoop(renderFrame); running = false; }
+          else if (fps && !running) { running = true; engine.runRenderLoop(renderFrame); }
+        },
         setPixelRatio(value) {
           if (disposed) return;
           requestedPixelRatio = Number.isFinite(Number(value)) && Number(value) > 0 ? Number(value) : 0;
