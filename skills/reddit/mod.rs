@@ -118,7 +118,8 @@ impl Tool for RedditTool {
                     Ok(text) => text,
                     Err(error) => return format!("エラー: {}", error),
                 };
-                handle_text_response(
+                crate::tools::http::service_reply(
+                    cfg,
                     client
                         .post(format!("{}/api/submit", REDDIT_BASE))
                         .bearer_auth(token)
@@ -150,7 +151,8 @@ impl Tool for RedditTool {
                     .filter(|value| (1..=100).contains(value))
                     .unwrap_or(25)
                     .to_string();
-                handle_text_response(
+                crate::tools::http::service_reply(
+                    cfg,
                     client
                         .get(format!("{}/r/{}/hot", REDDIT_BASE, subreddit))
                         .bearer_auth(token)
@@ -170,7 +172,8 @@ impl Tool for RedditTool {
                     Ok(text) => text,
                     Err(error) => return format!("エラー: {}", error),
                 };
-                handle_text_response(
+                crate::tools::http::service_reply(
+                    cfg,
                     client
                         .post(format!("{}/api/comment", REDDIT_BASE))
                         .bearer_auth(token)
@@ -212,23 +215,6 @@ fn text_arg<'a>(args: &'a Value, key: &str, max_chars: usize) -> Result<&'a str,
         ));
     }
     Ok(text)
-}
-
-async fn handle_text_response(
-    response: Result<reqwest::Response, reqwest::Error>,
-    label: &str,
-) -> String {
-    let response = match response {
-        Ok(response) => response,
-        Err(error) => return format!("エラー: {} への接続に失敗しました: {}", label, error),
-    };
-    let status = response.status();
-    let body = crate::tool_response_text!(response);
-    if status.is_success() {
-        body
-    } else {
-        format!("エラー: {} が HTTP {} を返しました。", label, status)
-    }
 }
 
 inventory::submit! { ToolReg { make: || Box::new(RedditTool) } }

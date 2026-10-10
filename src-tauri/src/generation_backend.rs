@@ -578,24 +578,13 @@ pub fn generation_device(
 
 /// lowvram起動・OOM後の再試行を、利用者に分かる日本語で進捗欄へ出す。
 pub fn notify_progress(title: &str, body: &str) {
-    use tauri::Emitter;
-
     let Some(app) = crate::durable_jobs::app_handle() else {
         return;
     };
-    let payload = serde_json::json!({
-        "kind": "generation",
-        "ok": true,
-        "title": title,
-        "body": body,
-        "at": chrono::Local::now().to_rfc3339(),
-    });
-    if let Err(error) = app.emit("pet:notice", payload) {
-        crate::log_paths::append_app_log(
-            app,
-            &format!("生成の進捗を画面へ通知できません: {error}"),
-        );
-    }
+    crate::notice::emit(
+        app,
+        crate::notice::Notice::info("generation", title, body, true),
+    );
 }
 
 /// 導入済みランタイムの素性。GPU交換・ドライバー変更後に古いバックエンドを再利用しないための記録。

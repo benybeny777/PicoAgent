@@ -221,7 +221,7 @@ impl Tool for CurrencyRatesTool {
                 .find(|s| !s.is_empty())
                 .unwrap_or("JPY")
                 .to_string();
-            return currency_chart(&client, &base, &symbol, days).await;
+            return currency_chart(cfg, &client, &base, &symbol, days).await;
         }
 
         let response = match client
@@ -235,12 +235,20 @@ impl Tool for CurrencyRatesTool {
             .await
         {
             Ok(response) => response,
-            Err(error) => return format!("エラー: 為替APIへの接続に失敗しました: {}", error),
+            Err(error) => {
+                return format!(
+                    "エラー: 為替APIへの接続に失敗しました: {}",
+                    error.without_url()
+                )
+            }
         };
         let status = response.status();
         let body = crate::tool_response_text!(response);
         if !status.is_success() {
-            return format!("エラー: 為替APIが HTTP {} を返しました。", status);
+            return format!(
+                "エラー: {}",
+                crate::tools::http::safe_service_error(cfg, "為替API", status, &body)
+            );
         }
         let data: Value = crate::tool_response_json!(&body);
         let date = data.get("date").and_then(Value::as_str).unwrap_or("");
@@ -261,7 +269,13 @@ impl Tool for CurrencyRatesTool {
 }
 
 // Frankfurter の時系列を取得し、推移をスパークラインで返す。
-async fn currency_chart(client: &reqwest::Client, base: &str, symbol: &str, days: i64) -> String {
+async fn currency_chart(
+    cfg: &Config,
+    client: &reqwest::Client,
+    base: &str,
+    symbol: &str,
+    days: i64,
+) -> String {
     use chrono::{Duration as ChronoDuration, Local};
     let end = Local::now().date_naive();
     let start = end - ChronoDuration::days(days);
@@ -273,13 +287,15 @@ async fn currency_chart(client: &reqwest::Client, base: &str, symbol: &str, days
         .await
     {
         Ok(response) => response,
-        Err(error) => return format!("エラー: 為替APIへの接続に失敗しました: {}", error),
+        Err(error) => {
+            return format!(
+                "エラー: 為替APIへの接続に失敗しました: {}",
+                error.without_url()
+            )
+        }
     };
     if !response.status().is_success() {
-        return format!(
-            "エラー: 為替APIが HTTP {} を返しました。",
-            response.status()
-        );
+        return crate::tools::http::service_reply(cfg, Ok(response), "為替API").await;
     }
     let data: Value = match response.json().await {
         Ok(data) => data,

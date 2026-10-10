@@ -123,7 +123,8 @@ async fn export_pdf(
     output: Option<&SafePath>,
     timeout: u64,
 ) -> String {
-    let program = crate::tools::document_convert::office_cli_path(cfg);
+    let program = crate::tool_try!(crate::tools::document_convert::office_cli_path(cfg));
+    let program = program.to_string_lossy().into_owned();
     let out_dir = output.unwrap_or(input).parent_or_root(cfg);
     if let Err(error) = crate::permissions::fs::create_dir_all(&out_dir) {
         return format!("エラー: 出力フォルダ作成に失敗しました: {error}");

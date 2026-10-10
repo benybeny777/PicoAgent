@@ -40,7 +40,7 @@ impl Tool for PdfToolsTool {
     }
 
     fn description(&self) -> String {
-        "qpdf でPDF情報取得、ページ抽出、結合、回転、線形化を行い、Poppler pdftotext でPDF本文のテキスト抽出（extract_text）も行う。ツールは同梱（cargo xtask setup tools）→PATH の順で解決。".to_string()
+        "qpdf でPDF情報取得、ページ抽出、結合、回転、線形化を行い、Poppler pdftotext でPDF本文のテキスト抽出（extract_text）も行う。ツールは明示設定または同梱（cargo xtask setup tools）で解決。".to_string()
     }
 
     fn parameters(&self) -> Value {
@@ -64,13 +64,13 @@ impl Tool for PdfToolsTool {
         vec![
             Field::new(
                 "PICOAGENT_QPDF_PATH",
-                "qpdf 実行ファイルパス（空ならPicoAgent内→PATH）",
+                "qpdf 実行ファイルパス（空ならPicoAgent管理下）",
                 "text",
                 "qpdf",
             ),
             Field::new(
                 "PICOAGENT_PDFTOTEXT_PATH",
-                "pdftotext 実行ファイルパス（空なら同梱→PATH）",
+                "pdftotext 実行ファイルパス（空ならPicoAgent管理下）",
                 "text",
                 "pdftotext",
             ),
@@ -94,11 +94,8 @@ impl Tool for PdfToolsTool {
         if args.get("action").and_then(Value::as_str) == Some("extract_text") {
             return extract_text(cfg, &args, timeout).await;
         }
-        let mut command = crate::tools::process::command(super::resolve_cli_path(
-            cfg,
-            "PICOAGENT_QPDF_PATH",
-            "qpdf",
-            "qpdf",
+        let mut command = crate::tools::process::command(crate::tool_try!(
+            super::resolve_cli_path(cfg, "PICOAGENT_QPDF_PATH", "qpdf", "qpdf",)
         ));
         match args.get("action").and_then(Value::as_str).unwrap_or("") {
             "info" => {
@@ -196,12 +193,12 @@ async fn extract_text(cfg: &Config, args: &Value, timeout: u64) -> String {
         Ok(path) => path,
         Err(error) => return format!("エラー: {}", error),
     };
-    let mut command = crate::tools::process::command(super::resolve_cli_path(
+    let mut command = crate::tools::process::command(crate::tool_try!(super::resolve_cli_path(
         cfg,
         "PICOAGENT_PDFTOTEXT_PATH",
         "poppler",
         "pdftotext",
-    ));
+    )));
     // -layout は表や段組みのレイアウトを保ってテキスト化する。
     command.arg("-layout");
     if let Some(first) = args.get("first_page").and_then(Value::as_u64) {

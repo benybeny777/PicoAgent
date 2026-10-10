@@ -50,11 +50,11 @@ test("履歴の保存失敗と保存停止は会話中も画面へ届く", async
   // 起動時の案内だけでは、会話中に書けなくなった場合（容量不足・権限・切替後の保護）に
   // 何も出ない。保存できていないまま会話を続け、再起動でその分が消える。
   const history = await readFile(new URL("../../src-tauri/src/history.rs", import.meta.url), "utf8");
-  assert.match(history, /"kind": "background_failure",\s*\n\s*"key": "history-save",/);
-  assert.match(history, /"kind": "background_failure",\s*\n\s*"key": "history-save-blocked",/);
+  assert.match(history, /SAVE_FAILED\.report\([\s\S]*?"history-save"/);
+  assert.match(history, /BLOCKED\.report\([\s\S]*?"history-save-blocked"/);
   // 失敗と復旧は状態が変わったときだけ送る（毎ターン同じ通知を流さない）。
-  assert.match(history, /if !SAVE_FAILED\.swap\(true, Ordering::Relaxed\)/);
-  assert.match(history, /if SAVE_FAILED\.swap\(false, Ordering::Relaxed\)/);
+  assert.match(history, /static SAVE_FAILED: crate::notice::FailureLatch/);
+  assert.match(history, /会話履歴の保存が復旧しました/);
   // 画面側は通知一覧へ積まず、原因ごとに1度だけ知らせる経路へ回す。
   assert.match(notice, /if \(kind === "background_failure"\) \{[\s\S]*?clearBackgroundFailure\(key\);[\s\S]*?notifyBackgroundFailure\(key,[\s\S]*?return;/);
 });
@@ -70,4 +70,12 @@ test("GPU描画の失敗だけで描画キャッシュ削除を予約する", ()
   // 1回の起動で予約は1度だけ。
   assert.match(report, /if \(gpuResetRequested \|\| \(!force && !GPU_FAILURE_PATTERN\.test\(text\)\)\) return;\s*\n\s*gpuResetRequested = true;/);
   assert.match(character, /document\.addEventListener\("webglcontextlost", event => \{\s*reportGpuFailure\("WebGL context lost", true\);/);
+});
+
+test("関係性の読込失敗と購読前の通知が初期化で画面へ届く", () => {
+  assert.match(commands, /"relationshipError": relationship_error/);
+  assert.match(main, /if \(info\.relationshipError\) \{\s*notifyBackgroundFailure\("relationship-load"/);
+  assert.match(main, /await noticeSubscription;[\s\S]*?bridge\.init\(\)/);
+  assert.match(commands, /crate::notice::flush\(&app\);\s*Ok\(info\)/);
+  assert.match(commands, /if !matches!\(memory_result, Ok\(None\)\)/);
 });

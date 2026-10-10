@@ -421,9 +421,8 @@ async fn run_worker(
     let dir = job_dir(app, &job.id)?;
     let runtime = configured_runtime(app, &job.input)?;
     let ffmpeg_name =
-        crate::tools::resolve_cli_path(&state.config, "PICOAGENT_FFMPEG_PATH", "ffmpeg", "ffmpeg");
-    let ffmpeg = crate::tools::process::resolve_executable(&ffmpeg_name)
-        .ok_or("音声変換のffmpeg実体がありません。追加機能の作業ツールを導入してください")?;
+        crate::tools::resolve_cli_path(&state.config, "PICOAGENT_FFMPEG_PATH", "ffmpeg", "ffmpeg")?;
+    let ffmpeg = ffmpeg_name;
     let mut request = json!({"jobDir":dir,"runtimeRoot":runtime,"source":{"kind":job.input.source_kind,"value":job.input.source_value},"mode":job.input.mode,"characterName":job.input.character_name,"asrDevice":job.input.asr_device,"stopAtStep":1000,"scriptsRoot":scripts(app)?,"ffmpeg":ffmpeg,"ownerProcessId":std::process::id()});
     if let Some(Value::Object(extra)) = extra {
         for (key, value) in extra {
@@ -942,10 +941,8 @@ pub async fn settings_character_learning_setup(
             "PICOAGENT_FFMPEG_PATH",
             "ffmpeg",
             "ffmpeg",
-        );
-        let ffmpeg = crate::tools::process::resolve_executable(&ffmpeg_name).ok_or(
-            "音声変換のffmpegがありません。追加機能の作業ツールを導入してから準備してください",
         )?;
+        let ffmpeg = ffmpeg_name;
         let uv = cancellable(crate::components::acquire_embedding_uv(&app), &flag).await?;
         let shared = cancellable(crate::components::ensure_shared_python(&app, &uv), &flag).await?;
         let mut command = crate::tools::process::command_sync(&shared);

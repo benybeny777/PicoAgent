@@ -105,11 +105,13 @@ impl Tool for DiscordTool {
             Ok(response) if response.status().is_success() => {
                 "OK: Discord へ送信しました。".to_string()
             }
-            Ok(response) => format!(
-                "エラー: Discord Webhook が HTTP {} を返しました。",
-                response.status()
+            Ok(response) => {
+                crate::tools::http::service_reply(cfg, Ok(response), "Discord Webhook").await
+            }
+            Err(error) => format!(
+                "エラー: Discord Webhook への接続に失敗しました: {}",
+                error.without_url()
             ),
-            Err(error) => format!("エラー: Discord Webhook への接続に失敗しました: {}", error),
         }
     }
 }

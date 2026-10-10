@@ -105,7 +105,8 @@ impl Tool for MastodonTool {
                     .get("visibility")
                     .and_then(Value::as_str)
                     .unwrap_or("public");
-                handle_text_response(
+                crate::tools::http::service_reply(
+                    cfg,
                     client
                         .post(format!("{}/api/v1/statuses", base))
                         .bearer_auth(token)
@@ -118,7 +119,8 @@ impl Tool for MastodonTool {
             }
             "home_timeline" => {
                 let limit = limit_arg(&args, 20, 40).to_string();
-                handle_text_response(
+                crate::tools::http::service_reply(
+                    cfg,
                     client
                         .get(format!("{}/api/v1/timelines/home", base))
                         .bearer_auth(token)
@@ -135,7 +137,8 @@ impl Tool for MastodonTool {
                     Err(error) => return format!("エラー: {}", error),
                 };
                 let limit = limit_arg(&args, 20, 40).to_string();
-                handle_text_response(
+                crate::tools::http::service_reply(
+                    cfg,
                     client
                         .get(format!("{}/api/v2/search", base))
                         .bearer_auth(token)
@@ -173,23 +176,6 @@ fn limit_arg(args: &Value, fallback: u64, max: u64) -> u64 {
         .and_then(Value::as_u64)
         .filter(|value| (1..=max).contains(value))
         .unwrap_or(fallback)
-}
-
-async fn handle_text_response(
-    response: Result<reqwest::Response, reqwest::Error>,
-    label: &str,
-) -> String {
-    let response = match response {
-        Ok(response) => response,
-        Err(error) => return format!("エラー: {} への接続に失敗しました: {}", label, error),
-    };
-    let status = response.status();
-    let body = crate::tool_response_text!(response);
-    if status.is_success() {
-        body
-    } else {
-        format!("エラー: {} が HTTP {} を返しました。", label, status)
-    }
 }
 
 inventory::submit! { ToolReg { make: || Box::new(MastodonTool) } }
