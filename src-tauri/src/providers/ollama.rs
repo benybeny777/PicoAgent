@@ -122,7 +122,7 @@ impl Provider for Ollama {
 
     async fn list_models(&self, cfg: &Config) -> anyhow::Result<Vec<String>> {
         let url = format!("{}/api/tags", host(cfg));
-        let res = crate::tools::http::client()
+        let res = crate::tools::http::client().map_err(anyhow::Error::msg)?
             .get(&url)
             .timeout(crate::tools::http::metadata_timeout(cfg).map_err(anyhow::Error::msg)?)
             .send()
@@ -147,7 +147,7 @@ impl Provider for Ollama {
             cfg,
             "Ollama",
             "/api/tags",
-            crate::tools::http::client()
+            crate::tools::http::client()?
                 .get(url)
                 .timeout(std::time::Duration::from_secs(2)),
         )
@@ -171,7 +171,7 @@ impl Provider for Ollama {
             body["tools"] = json!(tools);
         }
         let url = format!("{}/api/chat", host(cfg));
-        let res = crate::tools::http::client()
+        let res = crate::tools::http::client().map_err(anyhow::Error::msg)?
             .post(&url)
             .json(&body)
             .send()
@@ -205,7 +205,7 @@ impl Provider for Ollama {
             body["tools"] = json!(tools);
         }
         let url = format!("{}/api/chat", host(cfg));
-        let res = crate::tools::http::client()
+        let res = crate::tools::http::client().map_err(anyhow::Error::msg)?
             .post(&url)
             .json(&body)
             .send()

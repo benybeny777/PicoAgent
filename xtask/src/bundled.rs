@@ -87,14 +87,20 @@ fn flatten(root: &Path, out: &Path, exe_stem: &str) -> Result<bool> {
         }
         let dest = out.join(&name);
         if file != dest {
-            // rename が失敗する（別デバイス等）場合はコピーで代替する。
-            if fs::rename(&file, &dest).is_err() {
-                fs::copy(&file, &dest)
-                    .with_context(|| format!("配置できません: {}", file.display()))?;
-            }
+            crate::util::rename_or_copy(
+                &file,
+                &dest,
+                |from, to| fs::rename(from, to),
+                || {
+                    fs::copy(&file, &dest)
+                        .with_context(|| format!("配置できません: {}", file.display()))?;
+                    fs::remove_file(&file)?;
+                    Ok(())
+                },
+            )?;
         }
         if is_exe {
-            make_executable(&dest);
+            make_executable(&dest)?;
             found_exe = true;
         }
     }
@@ -105,18 +111,18 @@ fn flatten(root: &Path, out: &Path, exe_stem: &str) -> Result<bool> {
 ///
 /// staging は一時ディレクトリ配下に作るため、TEMP がリポジトリと別ドライブ（Windows）や
 /// tmpfs（Linux コンテナ）にあると `rename` が EXDEV で必ず失敗する。`flatten` と同じく
-/// コピーで代替し、失敗したときは中途半端な配置先を残さない。
+/// 別ボリュームのときだけコピーし、失敗したときは中途半端な配置先を残さない。
 ///
 /// **配置が済んだあとの後処理失敗で `Err` を返してはいけない。** 呼び出し側は `Err` を
 /// 「配置できなかった」と解釈して旧版を同じパスへ `rename` し戻すため、配置先が埋まった
 /// まま `Err` を返すと Windows では復元も失敗し、旧版が `*-old-*` に取り残される
 /// （AGENTS.md の「取得・更新・ビルドの正常終了後は旧版・退避を残さない」に反する）。
-/// staging は一時ディレクトリ配下で、呼び出し側が作業フォルダごと掃除する。
+/// stagingは一時ディレクトリ配下で、呼び出し側が作業フォルダごと掃除する。
 fn place_dir(staged: &Path, dest: &Path) -> Result<()> {
-    place_dir_inner(staged, dest, cleanup_dir)
+    place_dir_inner(staged, dest, |from, to| fs::rename(from, to), cleanup_dir)
 }
 
-/// `place_dir` の本体。staging の掃除だけテストから差し替えられるようにしている。
+/// `place_dir`の本体。別ボリュームの移動結果と掃除失敗を検査で注入する。
 ///
 /// 掃除失敗を実ファイルシステムで再現する手が無い（root では権限で削除を阻めず、
 /// `remove_dir_all` はシンボリックリンクを追わずに消して成功する）ため、
@@ -124,14 +130,20 @@ fn place_dir(staged: &Path, dest: &Path) -> Result<()> {
 fn place_dir_inner(
     staged: &Path,
     dest: &Path,
+    rename: impl FnOnce(&Path, &Path) -> std::io::Result<()>,
     cleanup_staged: fn(&Path, &str) -> Result<()>,
 ) -> Result<()> {
-    if fs::rename(staged, dest).is_ok() {
+    let mut copied = false;
+    crate::util::rename_or_copy(staged, dest, rename, || {
+        copied = true;
+        if let Err(error) = copy_dir(staged, dest, &|_| false) {
+            cleanup_dir(dest, "配置に失敗したフォルダ")?;
+            return Err(error);
+        }
+        Ok(())
+    })?;
+    if !copied {
         return Ok(());
-    }
-    if let Err(error) = copy_dir(staged, dest, &|_| false) {
-        cleanup_dir(dest, "配置に失敗したフォルダ")?;
-        return Err(error);
     }
     if let Err(error) = cleanup_staged(staged, "配置済みstagingフォルダ") {
         warn(
@@ -267,7 +279,7 @@ pub fn fetch_engine() -> Result<()> {
     let (asset_selector, expected_sha256) = engine_asset_spec()?;
     let server = dir.join(exe_name("llama-server"));
     if engine_bundle_ready(&dir, &asset_selector, &expected_sha256) && !flag("LLAMACPP_FORCE") {
-        make_executable(&server);
+        make_executable(&server)?;
         log("setup:engine", format!("engine ready: {}", dir.display()));
         return Ok(());
     }
@@ -277,7 +289,7 @@ pub fn fetch_engine() -> Result<()> {
         cleanup_dir(&dir, "旧llama-server配置")?;
         crate::util::copy_dir(&legacy, &dir, &|_| false)?;
         fs::write(dir.join(".gitkeep"), "\n")?;
-        make_executable(&server);
+        make_executable(&server)?;
         log(
             "setup:engine",
             format!("旧 resources/engine から移行しました: {}", dir.display()),
@@ -405,6 +417,10 @@ fn engine_bundle_ready(dir: &Path, asset_selector: &str, expected_sha256: &str) 
 ///   `WHISPER_MODEL`   … tiny/base/small/medium/large-v3-turbo または URL（既定 small）
 ///   `WHISPER_FORCE=1` … 既存配置を再取得
 pub fn fetch_whisper() -> Result<()> {
+    crate::tools::fetch_component("whisper", "WHISPER_SKIP", fetch_whisper_inner)
+}
+
+fn fetch_whisper_inner() -> Result<()> {
     let dir = repo_root().join("src-tauri/resources/bundled/whisper");
     fs::create_dir_all(&dir)?;
     fetch_whisper_binary(&dir)?;
@@ -430,7 +446,7 @@ pub fn fetch_whisper() -> Result<()> {
 fn fetch_whisper_binary(dir: &Path) -> Result<()> {
     let exe = dir.join(exe_name("whisper-cli"));
     if exe.exists() && !flag("WHISPER_FORCE") {
-        make_executable(&exe);
+        make_executable(&exe)?;
         log(
             "setup:whisper",
             format!("whisper binary ready: {}", exe.display()),
@@ -757,35 +773,23 @@ pub fn fetch_live2d_samples() -> Result<()> {
             .next()
             .filter(|e| e.len() <= 4)
             .unwrap_or("jpg");
-        // プレビュー画像は設定画面のアイコンと起動待ち画面に使うだけで、モデルの動作には
-        // 関わらない。配布ページの URL は将来変わりうるので、取れなくても警告に留めて
-        // 共通のプレースホルダーで代替する（ここで失敗すると setup 全体が止まってしまう）。
         let preview = characters.join(sample.id).join(format!("preview.{ext}"));
-        if let Err(error) = ensure_file(sample.preview_url, &preview) {
-            log(
-                "setup:live2d",
-                format!(
-                    "警告: {} のプレビュー画像を取得できませんでした（表示は代替画像で続行します）: {error}",
-                    sample.label
-                ),
-            );
-        }
-        // 1体取得できなくても他のモデルの取得は続ける。配布元が落ちている・その host へ
-        // 到達できないネットワークでも、取れたモデルだけで起動できる方が実用的で、
-        // アプリ側もモデルが無いキャラは選択時にエラーを出すだけで済む。
-        let result = match sample.zip {
-            None => fetch_live2d_raw(&sample, &characters),
-            Some((url, runtime_dir)) => fetch_live2d_zip(&sample, url, runtime_dir, &characters),
-        };
-        if let Err(error) = result {
-            log(
-                "setup:live2d",
-                format!(
-                    "警告: {} のモデルを取得できませんでした（このキャラは選べません）: {error}",
-                    sample.label
-                ),
-            );
-        }
+        fetch_sample_assets(
+            || {
+                ensure_file(sample.preview_url, &preview)
+                    .map(|_| ())
+                    .with_context(|| format!("{}のプレビュー画像を取得できません", sample.label))
+            },
+            || {
+                match sample.zip {
+                    None => fetch_live2d_raw(&sample, &characters),
+                    Some((url, runtime_dir)) => {
+                        fetch_live2d_zip(&sample, url, runtime_dir, &characters)
+                    }
+                }
+                .with_context(|| format!("{}のモデルを取得できません", sample.label))
+            },
+        )?;
     }
 
     log(
@@ -797,6 +801,15 @@ pub fn fetch_live2d_samples() -> Result<()> {
         "  https://www.live2d.com/eula/live2d-free-material-license-agreement_jp.html",
     );
     Ok(())
+}
+
+/// 明示取得したサンプルは画像・モデルの両工程が成功した場合だけ利用可能にする。
+fn fetch_sample_assets(
+    preview: impl FnOnce() -> Result<()>,
+    model: impl FnOnce() -> Result<()>,
+) -> Result<()> {
+    preview()?;
+    model()
 }
 
 fn ensure_file(url: &str, dest: &Path) -> Result<u64> {
@@ -962,10 +975,39 @@ mod tests {
     }
 
     /// `rename` が使えない状況（別ドライブ・tmpfs の EXDEV 相当）でもコピーで配置し、
-    /// staging を残さないこと。ここでは配置先を非空にして `rename` を失敗させ、
-    /// コピー経路を通す（EXDEV そのものは単体テストから再現できない）。
+    /// stagingを残さないこと。別ボリュームのErrorKindを本番共通境界へ注入する。
     #[test]
-    fn renameできない場合もコピーで配置してstagingを残さない() {
+    fn 配置先が使用中なら元と配置先を変更せず停止する() {
+        let base = test_dir("occupied");
+        let staged = base.join("staged");
+        let dest = base.join("engine");
+        fs::create_dir_all(&staged).unwrap();
+        fs::write(staged.join("new"), b"new").unwrap();
+        fs::create_dir_all(&dest).unwrap();
+        fs::write(dest.join("old"), b"old").unwrap();
+        assert!(place_dir(&staged, &dest).is_err());
+        assert_eq!(fs::read(staged.join("new")).unwrap(), b"new");
+        assert_eq!(fs::read(dest.join("old")).unwrap(), b"old");
+        assert!(!dest.join("new").exists());
+        fs::remove_dir_all(base).unwrap();
+    }
+
+    #[test]
+    fn サンプル画像取得の失敗後にモデル取得へ進まない() {
+        let error = fetch_sample_assets(
+            || bail!("画像取得故障"),
+            || panic!("画像失敗後にモデル取得してはいけない"),
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("画像取得故障"));
+        assert!(fetch_sample_assets(|| Ok(()), || bail!("モデル取得故障"))
+            .unwrap_err()
+            .to_string()
+            .contains("モデル取得故障"));
+    }
+
+    #[test]
+    fn 別ボリュームだけコピーで配置してstagingを残さない() {
         let base = test_dir("copy");
         let staged = base.join("staged");
         let dest = base.join("engine");
@@ -975,7 +1017,13 @@ mod tests {
         fs::create_dir_all(&dest).unwrap();
         fs::write(dest.join("occupied"), b"old").unwrap();
 
-        place_dir(&staged, &dest).unwrap();
+        place_dir_inner(
+            &staged,
+            &dest,
+            |_, _| Err(std::io::ErrorKind::CrossesDevices.into()),
+            cleanup_dir,
+        )
+        .unwrap();
 
         assert_eq!(fs::read(dest.join("llama-server")).unwrap(), b"new");
         assert!(!staged.exists(), "配置後に staging を残してはいけない");
@@ -1002,11 +1050,16 @@ mod tests {
         let dest = base.join("engine");
         fs::create_dir_all(&staged).unwrap();
         fs::write(staged.join("llama-server"), b"new").unwrap();
-        // 非空の配置先があると rename は失敗し、コピー経路（EXDEV 相当）へ入る。
+        // 既存ファイルを保持した別ボリューム配置を注入する。
         fs::create_dir_all(&dest).unwrap();
         fs::write(dest.join("occupied"), b"old").unwrap();
 
-        let result = place_dir_inner(&staged, &dest, 掃除は必ず失敗する);
+        let result = place_dir_inner(
+            &staged,
+            &dest,
+            |_, _| Err(std::io::ErrorKind::CrossesDevices.into()),
+            掃除は必ず失敗する,
+        );
 
         assert!(
             result.is_ok(),

@@ -67,7 +67,7 @@ function measureContent(image) {
   context.drawImage(image, 0, 0, sampleWidth, sampleHeight);
   let data;
   try { data = context.getImageData(0, 0, sampleWidth, sampleHeight).data; }
-  catch { return { x: 0, y: 0, w: width, h: height }; } // フォールバック許可: 画素を読めない出所の画像は全体を可視範囲とみなす。
+  catch { return { x: 0, y: 0, w: width, h: height }; } // 画素を読めない出所の画像は全体を可視範囲とみなす。
   let minX = sampleWidth, minY = sampleHeight, maxX = -1, maxY = -1;
   for (let y = 0; y < sampleHeight; y += 1) {
     for (let x = 0; x < sampleWidth; x += 1) {

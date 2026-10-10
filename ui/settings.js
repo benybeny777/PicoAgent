@@ -1163,6 +1163,55 @@ function advancedGroup(title, note, children) {
   ].filter(Boolean));
 }
 
+// 検出と選択は草稿だけを変更する。永続化は既存の「変更を保存」に一本化する。
+function buildCliDetection(detect, applyPath) {
+  const button = el("button", { type: "button", className: "cli-detect", textContent: "ImageMagickを検出" });
+  const choices = el("select", { className: "cli-candidates", disabled: true, ariaLabel: "検出したImageMagickの実行パス" });
+  const apply = el("button", { type: "button", className: "cli-apply", disabled: true, textContent: "選択したパスを設定へ反映" });
+  const note = el("p", { className: "hint cli-diagnostic", textContent: "手動導入済みのImageMagick 7/6を確認します。選択後に変更を保存してください。" });
+  note.setAttribute("role", "status");
+  let report = null;
+  let detecting = false;
+  button.addEventListener("click", async () => {
+    if (detecting || settingsMutationBusy) return;
+    detecting = true;
+    button.disabled = true;
+    choices.disabled = true;
+    apply.disabled = true;
+    note.textContent = "ImageMagickの実行パスと名乗りを確認中…";
+    try {
+      const found = await detect("imagemagick");
+      if (!found || typeof found.settingKey !== "string" || !Array.isArray(found.candidates) || !Array.isArray(found.warnings)
+          || found.candidates.some(item => typeof item.path !== "string" || !item.path || typeof item.version !== "string")) {
+        throw new Error("CLI検出結果の形式が不正です");
+      }
+      report = found;
+      choices.replaceChildren(el("option", { value: "", textContent: "保存する候補を選択してください" }));
+      for (const candidate of found.candidates) choices.append(el("option", { value: candidate.path, textContent: candidate.path + "（" + candidate.version + "）" }));
+      choices.value = "";
+      choices.disabled = !found.candidates.length;
+      note.textContent = found.candidates.length ? "候補を選択して設定へ反映し、変更を保存してください。" : "ImageMagickは見つかりませんでした。同梱物を導入するか、手動導入したパスを設定してください。";
+      if (found.warnings.length) note.textContent += " 確認できなかった候補: " + found.warnings.join(" / ");
+    } catch (error) {
+      report = null;
+      choices.replaceChildren();
+      note.textContent = "検出できませんでした: " + errorMessage(error);
+    } finally {
+      detecting = false;
+      button.disabled = false;
+    }
+  });
+  choices.addEventListener("change", () => { apply.disabled = detecting || !report?.candidates.some(item => item.path === choices.value); });
+  apply.addEventListener("click", () => {
+    if (detecting || settingsMutationBusy || !report?.candidates.some(item => item.path === choices.value)) return;
+    try {
+      applyPath(report.settingKey, choices.value);
+      note.textContent = "選択したパスを草稿へ反映しました。「変更を保存」で確定してください。";
+    } catch (error) { note.textContent = "反映できませんでした: " + errorMessage(error); }
+  });
+  return el("div", { className: "field cli-detection" }, [button, choices, apply, note]);
+}
+
 function componentPresentation(item) {
   const managed = item.installMode === "managed";
   let actionLabel = "公式ページを開く";
@@ -1371,6 +1420,15 @@ function buildComponentManager() {
         });
         actions.append(remove);
       }
+      const cliDetection = item.id === "tools" ? buildCliDetection(
+          id => window.picoagent.settings.detectCli(id),
+          (key, path) => {
+            const input = inputs.get(key);
+            if (!input) throw new Error("ImageMagickの設定入力がありません。設定画面を読み直してください。");
+            input.value = path;
+            input.dispatchEvent(new Event("change", { bubbles: true }));
+          },
+        ) : null;
       const sourceLinks = el("div", { className: "component-source-links" });
       for (const source of item.sources || []) {
         sourceLinks.append(el("a", {
@@ -1389,6 +1447,7 @@ function buildComponentManager() {
           item.versionError ? el("small", { className: "component-version-warning", textContent: item.versionError }) : null,
           sourceLinks,
           licenseConsent,
+          cliDetection,
         ].filter(Boolean)),
         el("span", { className: "component-badge", textContent: badgeText }),
         actions,
@@ -2226,7 +2285,7 @@ async function meshFaceIconUrl(rigUrl, version) {
     canvas.getContext("2d").drawImage(image, centerX - size / 2, centerY - size / 2, size, size, 0, 0, 128, 128);
     return canvas.toDataURL("image/png");
   } catch (error) {
-    // フォールバック許可: 顔の切り出しに失敗しても、呼び出し側の通常の画像候補で表示できる。
+    // 顔の切り出しに失敗しても、呼び出し側の通常の画像候補で表示できる。
     logApp("warn", "キャラクターアイコンの顔切り出しに失敗しました", errorDetail(error));
     return "";
   }

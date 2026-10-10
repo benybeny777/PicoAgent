@@ -131,6 +131,7 @@ test("読込途中の描画器は寸法と状態を確定するまで可視に�
 function expandedSetup() {
   const calls = [];
   const messages = [];
+  const logs = [];
   const stage = { expanded: false, setExpanded: on => { stage.expanded = on; } };
   const button = { textContent: "拡大" };
   const queueAt = main.indexOf("let fullscreenQueue =");
@@ -138,9 +139,10 @@ function expandedSetup() {
   const setExpanded = runInNewContext(`${body}\nsetExpanded`, {
     stage, buttons: { expandButton: button }, status: { flash: text => messages.push(text) },
     bridge: { setFullscreen: on => { const work = deferred(); calls.push({ on, ...work }); return work.promise; } },
+    logApp: (...args) => logs.push(args), errorDetail: error => error.message,
     errorMessage: String, ambient: { flushNotice() {} }, setTimeout: callback => callback(),
   });
-  return { setExpanded, stage, button, calls, messages };
+  return { setExpanded, stage, button, calls, messages, logs };
 }
 
 test("全画面連打はネイティブ操作を直列化し古い失敗で最新状態を戻さない", async () => {
@@ -151,6 +153,7 @@ test("全画面連打はネイティブ操作を直列化し古い失敗で最�
   state.calls[0].reject(new Error("最初の切替失敗")); await first; await new Promise(setImmediate);
   assert.deepEqual(state.calls.map(call => call.on), [true, false]);
   assert.equal(state.stage.expanded, false); assert.equal(state.messages.length, 0);
+  assert.deepEqual(state.logs, [["warn", "直前の全画面切替失敗後に次の操作を開始します", "最初の切替失敗"]]);
   state.calls[1].resolve(); await second;
   assert.equal(state.button.textContent, "拡大");
 });
@@ -175,6 +178,9 @@ test("全画面連打が両方失敗したら未実行の楽観表示ではな�
   assert.equal(state.stage.expanded, false);
   assert.equal(state.button.textContent, "拡大");
   assert.equal(state.messages.length, 1);
+  assert.match(state.messages[0], /復帰失敗/);
+  assert.deepEqual(state.calls.map(call => call.on), [true, false]);
+  assert.deepEqual(state.logs, [["warn", "直前の全画面切替失敗後に次の操作を開始します", "拡大失敗"]]);
 });
 
 test("ネイティブドロップ読込中は最後のファイルの失敗を含め送信抑止を保持して解除する", async () => {

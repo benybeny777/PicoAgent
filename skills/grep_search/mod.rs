@@ -24,16 +24,7 @@ const MAX_LIMIT: usize = 300;
 const MAX_CONTEXT_LINES: u64 = 5;
 const MAX_LINE_CHARS: usize = 400;
 const TIMEOUT_SECS: u64 = 30;
-const SKIP_DIRS: [&str; 8] = [
-    "node_modules",
-    "target",
-    ".git",
-    "dist",
-    "build",
-    "__pycache__",
-    ".venv",
-    "venv",
-];
+use crate::tools::walk::{MAX_DEPTH, SKIP_DIRS};
 
 /// ripgrep の実行パスを解決する。優先順: 明示設定 → 同梱（setup tools）。
 fn ripgrep_path(cfg: &Config) -> Result<std::path::PathBuf, String> {
@@ -79,14 +70,12 @@ async fn search_with_ripgrep(
     command.args([
         "--line-number",
         "--with-filename",
-        "--no-messages",
-        // .gitignore の有無で結果が変わらないようにする（内蔵走査と対象を揃える）。
+        // .gitignore の有無で利用者が指定した検索対象を変えない。
         "--no-ignore-vcs",
         "--max-filesize",
         "2M",
-        "--max-depth",
-        "12",
     ]);
+    command.arg("--max-depth").arg(MAX_DEPTH.to_string());
     match query.mode {
         OutputMode::Content => {
             if query.context > 0 {
@@ -115,10 +104,18 @@ async fn search_with_ripgrep(
     command.arg("--").arg(&query.pattern).arg(root);
 
     let output = crate::tools::process::output(command, TIMEOUT_SECS, "ファイル内容検索").await?;
-    if !matches!(output.status.code(), Some(0 | 1)) {
+    search_output(output)
+}
+
+fn search_output(output: std::process::Output) -> Result<Vec<String>, String> {
+    if output.status.code() == Some(1) {
+        return Ok(Vec::new());
+    }
+    if !output.status.success() {
         return Err(format!(
-            "ripgrepで検索できません: {}",
-            String::from_utf8_lossy(&output.stderr)
+            "ripgrepで検索できません（終了コード {:?}）: {}",
+            output.status.code(),
+            text::preview(&String::from_utf8_lossy(&output.stderr), 2000)
         ));
     }
     Ok(String::from_utf8_lossy(&output.stdout)
@@ -349,5 +346,33 @@ mod tests {
         assert!(OutputMode::parse("").is_ok());
         assert!(OutputMode::parse("files_with_matches").is_ok());
         assert!(OutputMode::parse("なにか").is_err());
+    }
+    #[test]
+    fn 正常な該当なしと正規表現エラーを区別する() {
+        #[cfg(unix)]
+        use std::os::unix::process::ExitStatusExt;
+        #[cfg(windows)]
+        use std::os::windows::process::ExitStatusExt;
+        for code in [0, 1, 2] {
+            #[cfg(windows)]
+            let raw = code as u32;
+            #[cfg(unix)]
+            let raw = code << 8;
+            let output = std::process::Output {
+                status: std::process::ExitStatus::from_raw(raw),
+                stdout: b"a.txt:1:hello\n".to_vec(),
+                stderr: b"regex parse error: unclosed character class".to_vec(),
+            };
+            let result = super::search_output(output);
+            match code {
+                0 => assert_eq!(result.unwrap(), vec!["a.txt:1:hello"]),
+                1 => assert!(result.unwrap().is_empty()),
+                _ => {
+                    let error = result.unwrap_err();
+                    assert!(error.contains("unclosed character class"));
+                    assert!(error.contains("2"));
+                }
+            }
+        }
     }
 }

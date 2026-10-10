@@ -25,7 +25,7 @@ function loadStored() {
       ? { ...entry, status: "failed", ok: false, body: "アプリ終了により処理結果を確認できませんでした。" }
       : entry));
   } catch {
-    return []; // フォールバック許可: 破損したUIキャッシュは空のアクションセンターとして再構築する。
+    return []; // 破損したUIキャッシュは空のアクションセンターとして再構築する。
   }
 }
 

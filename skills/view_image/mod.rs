@@ -54,7 +54,7 @@ fn media_type(extension: &str) -> Option<&'static str> {
 fn marker(pending: &PendingImages) -> String {
     match serde_json::to_string(pending) {
         Ok(encoded) => format!("{MARKER}{encoded}"),
-        // フォールバック許可: 直列化に失敗したら添付をあきらめ、理由を文字列で返す
+        // 直列化に失敗したら添付をあきらめ、理由を文字列で返す
         // （マーカーを壊した形で返すと、agent 側が黙って無視することになるため）。
         Err(error) => format!("エラー: 画像を渡す準備に失敗しました: {error}"),
     }

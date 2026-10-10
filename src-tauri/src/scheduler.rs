@@ -257,7 +257,7 @@ fn load_run_history_unlocked(app: &AppHandle) -> anyhow::Result<Vec<ScheduledRun
     };
     match serde_json::from_str(&text) {
         Ok(records) => Ok(records),
-        // フォールバック許可: PR #463 採用案3。退避と通知に成功した領域だけ新規状態で続ける。
+        // フォールバック許可: PR #463 採用案3。退避と通知に成功した領域だけ新規状態で続ける。（根拠: PR #463 採用案。退避・通知と原本保護）
         // 次の保存で上書きして履歴を失わないよう、破損ファイルは退避してから続ける。
         Err(error) => {
             let saved = crate::store::quarantine_and_notify(

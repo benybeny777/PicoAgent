@@ -1,7 +1,7 @@
 // xtask/src/office.rs - OfficeCLI（LibreOffice）と AivisSpeech Engine の取得。
 //
 // 旧 `scripts/fetch-office.mjs` / `fetch-aivis.mjs` の置き換え。
-// どちらもベストエフォート同梱で、失敗しても既定では起動を続行する。
+// 取得失敗は理由を返し、後続の製品ビルドへ進まない。
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -12,34 +12,15 @@ use serde_json::Value;
 
 use crate::util::{
     cleanup_dir, cleanup_file, command_exists, download_to, env_or, exe_name, extract, find_file,
-    flag, get_json, log, make_executable, mb, repo_root, warn,
+    flag, get_json, log, make_executable, mb, repo_root,
 };
 
 // ── OfficeCLI（LibreOffice） ───────────────────────────────────────────
 
-/// LibreOffice を `resources/bundled/office/` へ配置する。
-///
-///   Windows … 公式 MSI を administrative install（`msiexec /a`）で展開（管理者権限不要）
-///   macOS   … 公式 DMG をマウントして `LibreOffice.app` をコピー
-///   Linux   … 公式のポータブル配布が無いため警告のみ（`apt` 等で導入し PATH の soffice を使う）
-///
-/// 失敗は既定で警告のみ（Office 変換なしで起動を続行）。必須なら `OFFICE_REQUIRED=1`。
-/// 再取得は `OFFICE_FORCE=1`、版は `LIBREOFFICE_VERSION` で上書きできる。
+/// LibreOfficeを配置する。取得失敗は停止し、OFFICE_SKIP=1だけ取得前に省略する。
+/// 同梱しないOS・CPUはtoolsの共通表で定義する。再取得はOFFICE_FORCE=1。
 pub fn fetch_office() -> Result<()> {
-    let result = fetch_office_inner();
-    match result {
-        Ok(()) => Ok(()),
-        Err(error) if !flag("OFFICE_REQUIRED") => {
-            // フォールバック許可: ベストエフォート同梱（未取得でも Office 変換以外は動く）。
-            warn("setup:office", error.to_string());
-            warn(
-                "setup:office",
-                "Office ファイル変換なしでの起動を続行します。必須にする場合は OFFICE_REQUIRED=1 を付けるか、PICOAGENT_LIBREOFFICE_PATH で既存の LibreOffice を指定してください。",
-            );
-            Ok(())
-        }
-        Err(error) => Err(error),
-    }
+    crate::tools::fetch_component("office", "OFFICE_SKIP", fetch_office_inner)
 }
 
 fn fetch_office_inner() -> Result<()> {
@@ -69,12 +50,12 @@ fn fetch_office_inner() -> Result<()> {
     } else if cfg!(target_os = "macos") {
         fetch_office_macos(&dir, &base, &version)?;
     } else {
-        bail!("Linux 向けの公式ポータブル配布が無いため同梱できません。apt 等で libreoffice を導入し、PATH の soffice か PICOAGENT_LIBREOFFICE_PATH 設定を使ってください。");
+        bail!("Linux 向けの公式ポータブル配布が無いため同梱できません。apt 等で libreoffice を導入し、設定の検出ボタンで実行パスを保存してください。");
     }
 
     let found =
         find_file(&dir, &wanted).ok_or_else(|| anyhow!("展開後に {wanted} が見つかりません。"))?;
-    let size = fs::metadata(&found).map(|m| m.len()).unwrap_or(0);
+    let size = fs::metadata(&found)?.len();
     log(
         "setup:office",
         format!("office cli fetched: {} ({})", found.display(), mb(size)),
@@ -147,41 +128,28 @@ fn fetch_office_macos(dir: &Path, base: &str, version: &str) -> Result<()> {
         .arg(mount.join("LibreOffice.app"))
         .arg(dir)
         .status();
-    // マウント解除は失敗しても続行する（コピー結果で判定する）。
-    let _ = Command::new("hdiutil").arg("detach").arg(&mount).status();
+    let detached = Command::new("hdiutil")
+        .arg("detach")
+        .arg(&mount)
+        .status()
+        .context("LibreOffice DMGのマウントを解除できません");
     cleanup_file(&dmg, "展開済みLibreOffice DMG")?;
 
-    if !copied.map(|status| status.success()).unwrap_or(false) {
-        bail!("LibreOffice.app のコピーに失敗しました");
-    }
+    let copied = copied.context("LibreOffice.appのコピーを起動できません")?;
+    anyhow::ensure!(copied.success(), "LibreOffice.appのコピーに失敗しました");
+    anyhow::ensure!(
+        detached?.success(),
+        "LibreOffice DMGのマウント解除に失敗しました: {}",
+        mount.display()
+    );
     Ok(())
 }
 
 // ── AivisSpeech Engine（読み上げ） ─────────────────────────────────────
 
-/// AivisSpeech Engine を `resources/bundled/aivis/` へ配置する。
-///
-/// 更新時は `AIVIS_RELEASE=latest` またはタグを指定、再取得は `AIVIS_FORCE=1`。
-/// `.7z.001` の展開に `7z` / `7za` が要るため、無い環境では警告のみで続行する
-/// （必須にする場合は `AIVIS_REQUIRED=1`）。
+/// AivisSpeech Engineを配置する。取得失敗は停止し、AIVIS_SKIP=1だけ取得前に省略する。
 pub fn fetch_aivis() -> Result<()> {
-    match fetch_aivis_inner() {
-        Ok(()) => Ok(()),
-        Err(error) => {
-            let message = error.to_string();
-            let missing_7z = message.contains("7z") || message.contains("p7zip");
-            if !cfg!(windows) && !flag("AIVIS_REQUIRED") && missing_7z {
-                // フォールバック許可: 展開ツールが無い環境では音声なしで起動を続ける。
-                warn("setup:aivis", message);
-                warn(
-                    "setup:aivis",
-                    "音声を使わない起動は続行します。Aivis を必須にする場合は AIVIS_REQUIRED=1 を指定してください。",
-                );
-                return Ok(());
-            }
-            Err(error)
-        }
-    }
+    crate::tools::fetch_component("aivis", "AIVIS_SKIP", fetch_aivis_inner)
 }
 
 fn fetch_aivis_inner() -> Result<()> {
@@ -191,7 +159,7 @@ fn fetch_aivis_inner() -> Result<()> {
 
     if !flag("AIVIS_FORCE") {
         if let Some(existing) = find_file(&dir, &run) {
-            make_executable(&existing);
+            make_executable(&existing)?;
             log("setup:aivis", format!("aivis ready: {}", dir.display()));
             return Ok(());
         }
@@ -205,6 +173,7 @@ fn fetch_aivis_inner() -> Result<()> {
         }
     }
 
+    let extractor = aivis_extractor(command_exists)?;
     let default_tag = aivis_target_version()?;
     let tag = env_or("AIVIS_RELEASE", &default_tag);
     let api = if tag == "latest" {
@@ -224,7 +193,7 @@ fn fetch_aivis_inner() -> Result<()> {
 
     let extracted = work.join("x");
     fs::create_dir_all(&extracted)?;
-    extract_aivis(&archive, &extracted)?;
+    extract_aivis(&archive, &extracted, extractor)?;
 
     let run_path = find_file(&extracted, &run)
         .ok_or_else(|| anyhow!("AivisSpeech Engine の run 実行ファイルが見つかりません"))?;
@@ -282,32 +251,26 @@ fn pick_aivis_asset(release: &Value) -> Result<(String, String)> {
     bail!("一致するアセットが見つかりません: {want}*.7z.001")
 }
 
-fn extract_aivis(archive: &Path, out: &Path) -> Result<()> {
-    let seven = if command_exists("7z") {
-        Some("7z")
-    } else if command_exists("7za") {
-        Some("7za")
-    } else {
-        None
-    };
-    if let Some(seven) = seven {
-        let status = Command::new(seven)
-            .arg("x")
-            .arg(archive)
-            .arg(format!("-o{}", out.display()))
-            .arg("-y")
-            .status()
-            .with_context(|| format!("{seven} を起動できません"))?;
-        if !status.success() {
-            bail!("{seven} での展開に失敗しました");
-        }
-        return Ok(());
+fn aivis_extractor(exists: impl Fn(&str) -> bool) -> Result<&'static str> {
+    // 利用者決定: #472の展開候補7z/7za、Windowsのtarを取得前に確認する。
+    ["7z", "7za"].into_iter().chain(cfg!(windows).then_some("tar"))
+        .find(|program| exists(program))
+        .context("Aivis展開ツールがありません。7-Zipを導入してください。macOSはbrew install p7zip、Linuxはp7zipを導入して再実行してください。取得は開始していません。")
+}
+
+fn extract_aivis(archive: &Path, out: &Path, extractor: &str) -> Result<()> {
+    if extractor == "tar" {
+        return extract(archive, out);
     }
-    if !cfg!(windows) && archive.to_string_lossy().ends_with(".7z.001") {
-        bail!("Aivis の .7z.001 展開には 7z/7za が必要です。macOS は `brew install p7zip` を実行してください。");
-    }
-    extract(archive, out)
-        .context("展開に失敗しました。7-Zip をインストールするか、tar が 7z 展開に対応する環境で実行してください。")
+    let status = Command::new(extractor)
+        .arg("x")
+        .arg(archive)
+        .arg(format!("-o{}", out.display()))
+        .arg("-y")
+        .status()
+        .with_context(|| format!("{extractor}を起動できません"))?;
+    anyhow::ensure!(status.success(), "{extractor}での展開に失敗しました");
+    Ok(())
 }
 
 /// `run` があるディレクトリ一式を配置先へコピーする。
@@ -327,13 +290,29 @@ fn copy_engine_tree(run_path: &Path, dest: &Path) -> Result<()> {
     if !dest_run.is_file() {
         bail!("run 実行ファイルの配置に失敗しました");
     }
-    make_executable(&dest_run);
+    make_executable(&dest_run)?;
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn aivis取得前に展開ツールの欠損で停止する() {
+        let error = aivis_extractor(|_| false).unwrap_err().to_string();
+        assert!(error.contains("取得は開始していません"));
+        assert_eq!(aivis_extractor(|program| program == "7za").unwrap(), "7za");
+        assert_eq!(aivis_extractor(|program| program == "7z").unwrap(), "7z");
+        assert!(
+            include_str!("office.rs")
+                .find("let extractor = aivis_extractor")
+                .unwrap()
+                < include_str!("office.rs")
+                    .find("let release = get_json")
+                    .unwrap()
+        );
+    }
 
     #[test]
     fn aivisの開発取得も配布対象版を正本にする() {

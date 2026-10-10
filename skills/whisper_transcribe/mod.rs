@@ -34,37 +34,22 @@ fn is_audio(path: &Path) -> bool {
     )
 }
 
-fn latest_file(cfg: &Config, root: &Path) -> Option<SafePath> {
-    let mut best: Option<(PathBuf, SystemTime)> = None;
-    let mut stack = vec![root.to_path_buf()];
-    while let Some(dir) = stack.pop() {
-        let Ok(entries) = std::fs::read_dir(&dir) else {
-            continue;
-        };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_dir() {
-                stack.push(path);
-                continue;
-            }
-            if !is_audio(&path) {
-                continue;
-            }
-            let modified = entry
-                .metadata()
-                .and_then(|meta| meta.modified())
-                .unwrap_or(SystemTime::UNIX_EPOCH);
-            if best
-                .as_ref()
-                .map(|(_, current)| modified > *current)
-                .unwrap_or(true)
-            {
-                best = Some((path, modified));
-            }
-        }
+fn latest_file(cfg: &Config, root: &Path) -> Result<Option<SafePath>, String> {
+    let root = crate::permissions::resolve(cfg, &root.to_string_lossy())?;
+    let walked = crate::tools::walk::files(cfg, &root);
+    if walked.truncated || !walked.skipped.is_empty() {
+        return Err(format!(
+            "最新の音声を確定できません。音声パスを明示指定してください。{}",
+            walked.diagnostic()
+        ));
     }
-    // 走査で得たパスも許可判定を通してから返す。
-    best.and_then(|(path, _)| crate::permissions::resolve(cfg, &path.to_string_lossy()).ok())
+    walked
+        .files
+        .iter()
+        .filter(|file| is_audio(&file.relative))
+        .max_by_key(|file| file.modified)
+        .map(|file| root.join(cfg, &file.relative.to_string_lossy()))
+        .transpose()
 }
 
 fn output_stem(cfg: &Config, audio: &SafePath) -> Result<SafePath, String> {
@@ -116,9 +101,9 @@ fn trim_output(bytes: &[u8]) -> String {
         end -= 1;
     }
     format!(
-        "{}\n…（{}バイトで打ち切り）",
+        "{}\n…（約{:.3}MBで打ち切り）",
         &text[..end],
-        MAX_COMMAND_OUTPUT_BYTES
+        MAX_COMMAND_OUTPUT_BYTES as f64 / 1_000_000.0
     )
 }
 
@@ -137,17 +122,75 @@ fn ffmpeg_path(cfg: &Config) -> Result<std::path::PathBuf, String> {
     crate::tools::resolve_cli_path(cfg, "PICOAGENT_FFMPEG_PATH", "ffmpeg", "ffmpeg")
 }
 
-/// 非 WAV 音声を ffmpeg で 16kHz モノラル WAV（whisper.cpp の推奨入力）へ前処理する。
-/// WAVは変換不要としてNoneを返す。必要な変換が失敗したら理由を返して停止する。
+/// 拡張子だけでは判定せず、RIFFの形式・チャンク境界を一定量の読取で確認する。
+/// 16kHz・モノラル・16bit PCMかつ音声データがある入力だけを無変換で使う。
+fn whisper_ready_wav(audio: &SafePath) -> Result<bool, String> {
+    let length = crate::permissions::fs::metadata(audio)?.len();
+    if length < 12 {
+        return Ok(false);
+    }
+    let header = crate::permissions::fs::read_range(audio, 0, 12)?;
+    if header.get(..4).unwrap() != b"RIFF" || header.get(8..12).unwrap() != b"WAVE" {
+        return Ok(false);
+    }
+    let end = u32::from_le_bytes(header.get(4..8).unwrap().try_into().unwrap()) as u64 + 8;
+    if end > length || end < 12 {
+        return Ok(false);
+    }
+    let mut offset = 12u64;
+    let mut format_ok = false;
+    let mut data_ok = false;
+    while offset + 8 <= end {
+        let chunk = crate::permissions::fs::read_range(audio, offset, 8)?;
+        let size = u32::from_le_bytes(chunk.get(4..8).unwrap().try_into().unwrap()) as u64;
+        let start = offset + 8;
+        let next = start + size + size % 2;
+        if next > end {
+            return Ok(false);
+        }
+        match chunk.get(..4).unwrap() {
+            b"fmt " => {
+                if size < 16 {
+                    return Ok(false);
+                }
+                let format =
+                    crate::permissions::fs::read_range(audio, start, size.min(40) as usize)?;
+                let tag = u16::from_le_bytes(format.get(0..2).unwrap().try_into().unwrap());
+                // WAVE_FORMAT_EXTENSIBLEでも、PCMサブ形式の同じ要件を確認する。
+                let pcm = tag == 1
+                    || (tag == 0xfffe
+                        && size >= 40
+                        && u16::from_le_bytes(format.get(16..18).unwrap().try_into().unwrap())
+                            >= 22
+                        && u16::from_le_bytes(format.get(18..20).unwrap().try_into().unwrap())
+                            == 16
+                        && format.get(24..40).unwrap()
+                            == [1, 0, 0, 0, 0, 0, 16, 0, 128, 0, 0, 170, 0, 56, 155, 113]);
+                format_ok = pcm
+                    && u16::from_le_bytes(format.get(2..4).unwrap().try_into().unwrap()) == 1
+                    && u32::from_le_bytes(format.get(4..8).unwrap().try_into().unwrap()) == 16000
+                    && u32::from_le_bytes(format.get(8..12).unwrap().try_into().unwrap()) == 32000
+                    && u16::from_le_bytes(format.get(12..14).unwrap().try_into().unwrap()) == 2
+                    && u16::from_le_bytes(format.get(14..16).unwrap().try_into().unwrap()) == 16;
+            }
+            b"data" => data_ok = size > 0 && size.is_multiple_of(2),
+            _ => {}
+        }
+        offset = next;
+    }
+    Ok(offset == end && format_ok && data_ok)
+}
+
+/// 要件を満たす音声以外をffmpegで16kHzモノラルPCM WAVへ前処理する。
+/// 必要な変換が失敗したら理由を返して停止する。
 async fn convert_to_wav(cfg: &Config, audio: &SafePath) -> Result<Option<SafePath>, String> {
-    let is_wav = audio.extension_lossy() == "wav";
-    if is_wav {
+    if whisper_ready_wav(audio)? {
         return Ok(None);
     }
     let unique = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0);
+        .map_err(|error| format!("変換用一時ファイルの時刻を取得できません: {error}"))?
+        .as_nanos();
     let out = std::env::temp_dir().join(format!(
         "picoagent-transcribe-{}-{}.wav",
         std::process::id(),
@@ -174,8 +217,9 @@ async fn convert_to_wav(cfg: &Config, audio: &SafePath) -> Result<Option<SafePat
             let error = match result {
                 Err(error) => error,
                 Ok(output) => format!(
-                    "音声をWAVへ変換できません: {}",
-                    String::from_utf8_lossy(&output.stderr)
+                    "音声をWAVへ変換できません（終了コード {:?}）: {}",
+                    output.status.code(),
+                    trim_output(&output.stderr)
                 ),
             };
             match remove_internal_file(&out) {
@@ -351,7 +395,7 @@ impl Tool for WhisperTranscribeTool {
                 Err(error) => return format!("エラー: {error}"),
             }
         } else {
-            match latest_file(cfg, &base) {
+            match crate::tool_try!(latest_file(cfg, &base)) {
                 Some(path) => path,
                 None => {
                     return format!(
@@ -459,6 +503,115 @@ mod tests {
     use crate::permissions::SafePath;
     use crate::tools::Tool;
 
+    #[test]
+    fn 最新音声は走査欠損や深さ打切りを別候補で隠さない() {
+        let dir = tempfile::tempdir().unwrap();
+        let cfg = crate::config::Config::new();
+        cfg.set("PICOAGENT_ALLOWED_ROOT", &dir.path().to_string_lossy());
+        let valid = dir.path().join("valid.wav");
+        std::fs::write(&valid, wav(16000, 1, 1, 16)).unwrap();
+        assert_eq!(
+            super::latest_file(&cfg, dir.path())
+                .unwrap()
+                .unwrap()
+                .as_path(),
+            valid
+        );
+        let secret = dir.path().join("secret.wav");
+        std::fs::write(&secret, wav(16000, 1, 1, 16)).unwrap();
+        cfg.set("PICOAGENT_DENIED_PATHS", &secret.to_string_lossy());
+        let error = super::latest_file(&cfg, dir.path()).unwrap_err();
+        assert!(error.contains("最新の音声を確定できません"));
+        assert!(error.contains("読めずに飛ばした"));
+        cfg.set("PICOAGENT_DENIED_PATHS", "");
+        let mut nested = dir.path().to_path_buf();
+        for _ in 0..13 {
+            nested.push("deep");
+        }
+        std::fs::create_dir_all(&nested).unwrap();
+        std::fs::write(nested.join("latest.wav"), wav(16000, 1, 1, 16)).unwrap();
+        let error = super::latest_file(&cfg, dir.path()).unwrap_err();
+        assert!(error.contains("上限で打ち切り"));
+        assert!(error.contains("明示指定"));
+    }
+
+    fn wav(rate: u32, channels: u16, tag: u16, bits: u16) -> Vec<u8> {
+        let mut bytes = b"RIFF".to_vec();
+        bytes.extend_from_slice(&38u32.to_le_bytes());
+        bytes.extend_from_slice(b"WAVEfmt ");
+        bytes.extend_from_slice(&16u32.to_le_bytes());
+        bytes.extend_from_slice(&tag.to_le_bytes());
+        bytes.extend_from_slice(&channels.to_le_bytes());
+        bytes.extend_from_slice(&rate.to_le_bytes());
+        let align = channels * (bits / 8);
+        bytes.extend_from_slice(&(rate * align as u32).to_le_bytes());
+        bytes.extend_from_slice(&align.to_le_bytes());
+        bytes.extend_from_slice(&bits.to_le_bytes());
+        bytes.extend_from_slice(b"data");
+        bytes.extend_from_slice(&2u32.to_le_bytes());
+        bytes.extend_from_slice(&[0, 0]);
+        bytes
+    }
+
+    #[tokio::test]
+    async fn 無変換は拡張子でなくモノラル16khzのpcm実体に限定する() {
+        let dir = tempfile::tempdir().unwrap();
+        let cfg = crate::config::Config::new();
+        cfg.set(
+            "PICOAGENT_FFMPEG_PATH",
+            &dir.path().join("missing-ffmpeg").to_string_lossy(),
+        );
+        let audio = SafePath::app_owned(dir.path().join("input.wav"));
+        for (rate, channels, tag, bits) in [
+            (16000, 1, 1, 16),
+            (44100, 1, 1, 16),
+            (16000, 2, 1, 16),
+            (16000, 1, 3, 32),
+            (16000, 1, 1, 8),
+        ] {
+            std::fs::write(audio.as_path(), wav(rate, channels, tag, bits)).unwrap();
+            let valid = (rate, channels, tag, bits) == (16000, 1, 1, 16);
+            assert_eq!(super::whisper_ready_wav(&audio).unwrap(), valid);
+            let result = convert_to_wav(&cfg, &audio).await;
+            if valid {
+                assert!(result.unwrap().is_none());
+            } else {
+                assert!(result.unwrap_err().contains("PICOAGENT_FFMPEG_PATH"));
+            }
+        }
+        let mut extensible = wav(16000, 1, 1, 16);
+        extensible[4..8].copy_from_slice(&62u32.to_le_bytes());
+        extensible[16..20].copy_from_slice(&40u32.to_le_bytes());
+        extensible[20..22].copy_from_slice(&0xfffeu16.to_le_bytes());
+        let extension = [
+            22, 0, 16, 0, 4, 0, 0, 0, 1, 0, 0, 0, 0, 0, 16, 0, 128, 0, 0, 170, 0, 56, 155, 113,
+        ];
+        extensible.splice(36..36, extension);
+        std::fs::write(audio.as_path(), &extensible).unwrap();
+        assert!(convert_to_wav(&cfg, &audio).await.unwrap().is_none());
+        // Extensibleのfloatサブ形式をPCMとして読み替えない。
+        extensible[44] = 3;
+        std::fs::write(audio.as_path(), &extensible).unwrap();
+        assert!(convert_to_wav(&cfg, &audio).await.is_err());
+        for broken in [
+            b"dummy".to_vec(),
+            {
+                let mut bytes = wav(16000, 1, 1, 16);
+                bytes.pop();
+                bytes
+            },
+            {
+                let mut bytes = wav(16000, 1, 1, 16);
+                bytes[40..44].copy_from_slice(&100u32.to_le_bytes());
+                bytes
+            },
+        ] {
+            std::fs::write(audio.as_path(), broken).unwrap();
+            assert!(!super::whisper_ready_wav(&audio).unwrap());
+            assert!(convert_to_wav(&cfg, &audio).await.is_err());
+        }
+    }
+
     #[tokio::test]
     async fn 必要な前処理が欠損したら元音声で続行しない() {
         let dir = tempfile::tempdir().unwrap();
@@ -499,18 +652,18 @@ mod tests {
         cfg.set("PICOAGENT_FFMPEG_PATH", "ffmpeg");
         let runtime = tokio::runtime::Runtime::new().unwrap();
         let converted = runtime.block_on(convert_to_wav(&cfg, &SafePath::app_owned(mp3.clone())));
-        let wav = converted
+        let converted_wav = converted
             .expect("変換処理は成功する")
             .expect("mp3 は WAV へ変換されるはず");
-        assert!(wav.exists());
+        assert!(converted_wav.exists());
         // RIFF ヘッダを持つ本物の WAV になっている。
-        let head = std::fs::read(&wav).unwrap();
+        let head = std::fs::read(&converted_wav).unwrap();
         assert_eq!(&head[..4], b"RIFF");
-        let _ = std::fs::remove_file(&wav);
+        let _ = std::fs::remove_file(&converted_wav);
 
         // WAV 入力は前処理せず None（元ファイルのまま使う）。
         let plain = dir.join("plain.wav");
-        std::fs::write(&plain, b"dummy").unwrap();
+        std::fs::write(&plain, wav(16000, 1, 1, 16)).unwrap();
         assert!(runtime
             .block_on(convert_to_wav(&cfg, &SafePath::app_owned(plain.clone())))
             .unwrap()

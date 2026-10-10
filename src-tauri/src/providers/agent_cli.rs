@@ -344,24 +344,16 @@ fn timeout_secs(cfg: &Config) -> Result<u64, String> {
 fn model_choices(
     default: String,
     mut read: impl FnMut(Kind) -> anyhow::Result<Vec<String>>,
-) -> Vec<String> {
+) -> anyhow::Result<Vec<String>> {
     let mut choices = vec![default];
     for (selected, prefix) in [(Kind::Claude, "claude"), (Kind::Codex, "codex")] {
         if !choices.iter().any(|value| value == prefix) {
             choices.push(prefix.into());
         }
-        match read(selected) {
-            Ok(models) => {
-                choices.extend(models.into_iter().map(|model| format!("{prefix}:{model}")))
-            }
-            // フォールバック許可: 候補取得の失敗はCLIごとに隔離する。実行時の既定設定エラーは
-            // request_argsで伝播させ、誤ったモデルによる推論は開始しない。
-            Err(error) => crate::log_paths::log_detached(&format!(
-                "{prefix}のモデル候補を取得できませんでした: {error}"
-            )),
-        }
+        let models = read(selected).map_err(|error| error.context(format!("{prefix}のモデル候補を取得できませんでした")))?;
+        choices.extend(models.into_iter().map(|model| format!("{prefix}:{model}")));
     }
-    choices
+    Ok(choices)
 }
 
 /// 正規形会話をCLIの1ターン用プロンプトへ畳む。初回またはセッション非対応CLIでは
@@ -684,7 +676,7 @@ impl Provider for AgentCli {
     }
 
     async fn list_models(&self, cfg: &Config) -> anyhow::Result<Vec<String>> {
-        Ok(model_choices(self.default_model(cfg), models::list))
+        model_choices(self.default_model(cfg), models::list)
     }
 
     async fn is_up(&self, cfg: &Config) -> Result<bool, String> {
@@ -849,17 +841,16 @@ inventory::submit! { ProviderReg { make: || Box::new(AgentCli) } }
 #[cfg(test)]
 mod tests {
     #[test]
-    fn 片方の候補取得に失敗しても正常側と既定選択を残す() {
+    fn 候補取得の失敗は一部候補へ降格せず原因を返す() {
         let choices = super::model_choices("claude".into(), |selected| {
             if selected == super::Kind::Codex {
                 anyhow::bail!("キャッシュ破損");
             }
             Ok(vec!["opus".into(), "future-claude".into()])
         });
-        assert_eq!(
-            choices,
-            vec!["claude", "claude:opus", "claude:future-claude", "codex"]
-        );
+        let error = choices.unwrap_err();
+        assert!(format!("{error:#}").contains("codexのモデル候補"));
+        assert!(format!("{error:#}").contains("キャッシュ破損"));
     }
     #[test]
     fn 選択モデルは新規と再開へ安全指定を保って渡す() {

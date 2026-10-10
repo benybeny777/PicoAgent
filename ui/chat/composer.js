@@ -39,7 +39,7 @@ export function createComposer({ form, input, preview: previewBox, suggestions, 
   function readDraft() {
     try { return draftStore.readDraft(localStorage.getItem(DRAFT_KEY)); }
     catch (error) {
-      // フォールバック許可: localStorage を読めない環境では書きかけの復元だけを諦めて会話は続ける。
+      // localStorage を読めない環境では書きかけの復元だけを諦めて会話は続ける。
       logApp("warn", "書きかけを読めませんでした", errorDetail(error));
       return "";
     }
@@ -388,7 +388,7 @@ export function createComposer({ form, input, preview: previewBox, suggestions, 
         const presence = await bridge.configPresence(quick.requiredKeys(quick.DEFAULT_QUICK_ACTIONS));
         defaultItems = quick.visibleQuickActions(quick.DEFAULT_QUICK_ACTIONS, presence);
       } catch (error) {
-        // フォールバック許可: 確認できないときは連携設定の要らないボタンだけを出す。
+        // 確認できないときは連携設定の要らないボタンだけを出す。
         logApp("warn", "クイック操作の設定状態を確認できませんでした", errorDetail(error));
         defaultItems = quick.visibleQuickActions(quick.DEFAULT_QUICK_ACTIONS, {});
       }

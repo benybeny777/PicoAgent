@@ -156,7 +156,7 @@ impl FailureLatch {
         });
     }
 
-    fn report_with(
+    pub(crate) fn report_with(
         &self,
         key: &str,
         title: &str,

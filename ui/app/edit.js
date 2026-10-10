@@ -7,7 +7,7 @@
 
 import { anchorFactors } from "./scene-model.js";
 import { SOURCE_LABELS } from "../sources/index.js";
-import { el } from "./util.js";
+import { el, errorDetail, logApp } from "./util.js";
 
 const MIN_SIZE = 48;
 const CORNERS = ["top-left", "top-right", "bottom-left", "bottom-right"];
@@ -181,16 +181,22 @@ export function createEditor({ layer, toolbar, stageElement, stage, host, toast,
     await commit(current.name, draggedRect(current, event));
   }
 
+  async function runOperation(operation, message) {
+    try { await operation(); }
+    catch (error) {
+      // 保存失敗の画面通知はstageが持つ。編集器は理由を記録し、枠の後処理を続ける。
+      logApp("error", message, errorDetail(error));
+    } finally { render(); }
+  }
+
   async function commit(name, windowRect) {
-    try { await stage.commit(name, windowRect); }
-    catch { /* 保存失敗は stage がトーストで知らせる */ }
-    render();
+    await runOperation(() => stage.commit(name, windowRect), "配置の変更を確定できませんでした");
   }
 
   function reset(name) {
     flushWheel(false);
-    if (name === "character") stage.resetCharacter().catch(() => {});
-    else stage.commit(name, null).catch(() => {});
+    return runOperation(() => name === "character" ? stage.resetCharacter() : stage.commit(name, null),
+      "配置を自動設定へ戻せませんでした");
   }
 
   /** 配置の編集中だけ、ホイールで中心を保って拡大縮小する。 */
@@ -239,14 +245,13 @@ export function createEditor({ layer, toolbar, stageElement, stage, host, toast,
   for (const [name, label] of [["full", "全身"], ["upper", "上半身"], ["bust", "胸上"]]) {
     const button = el("button", { type: "button", className: "chip", textContent: label, dataset: { framing: name } });
     button.addEventListener("click", () => {
-      flushWheel();
-      stage.setFraming(name).then(render).catch(() => {});
+      editor.setFraming(name);
     });
     framingGroup.append(button);
   }
   resetButton.addEventListener("click", () => {
     flushWheel(false);
-    if (mode === "all") stage.resetLayout().then(render).catch(() => {});
+    if (mode === "all") runOperation(() => stage.resetLayout(), "この形式の配置を既定へ戻せませんでした");
     else reset("character");
   });
   doneButton.addEventListener("click", () => editor.stop());
@@ -262,7 +267,7 @@ export function createEditor({ layer, toolbar, stageElement, stage, host, toast,
       sourceList.replaceChildren(...stage.sourceNames().map(name => {
         const placement = stage.placementOf(name);
         const box = el("input", { type: "checkbox", checked: placement?.visible !== false });
-        box.addEventListener("change", () => stage.setVisible(name, box.checked).then(render).catch(() => {}));
+        box.addEventListener("change", () => runOperation(() => stage.setVisible(name, box.checked), "ソースの表示設定を保存できませんでした"));
         return el("label", { className: "edit-source" }, [box, SOURCE_LABELS[name] || name]);
       }));
     }
@@ -288,6 +293,11 @@ export function createEditor({ layer, toolbar, stageElement, stage, host, toast,
   const editor = {
     get active() { return mode !== ""; },
     get mode() { return mode; },
+    resetCharacter() { return reset("character"); },
+    setFraming(name) {
+      flushWheel();
+      return runOperation(() => stage.setFraming(name), "キャラの構図を保存できませんでした");
+    },
     start(nextMode = "all") {
       if (mode) editor.stop();
       mode = nextMode === "character" ? "character" : "all";

@@ -226,6 +226,7 @@ mod tests {
         );
         let server = Server::raw(format!("HTTP/1.1 429 Too Many Requests\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{body}", body.len()).into_bytes());
         let response = crate::tools::http::client()
+            .unwrap()
             .get(&server.url)
             .send()
             .await
@@ -259,6 +260,7 @@ mod tests {
             });
             let server = Server::raw(reply);
             let response = crate::tools::http::client()
+                .unwrap()
                 .get(&server.url)
                 .send()
                 .await
@@ -288,7 +290,7 @@ mod tests {
                 &cfg,
                 "検査AI",
                 "/models",
-                crate::tools::http::client().get(&server.url),
+                crate::tools::http::client().unwrap().get(&server.url),
             )
             .await;
             if status == 200 {
@@ -303,7 +305,7 @@ mod tests {
             &cfg,
             "検査AI",
             "/models",
-            crate::tools::http::client().get(&server.url),
+            crate::tools::http::client().unwrap().get(&server.url),
         )
         .await;
         assert!(result.is_err());

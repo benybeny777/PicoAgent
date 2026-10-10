@@ -1328,7 +1328,7 @@ async fn run_scoped(
     }
 
     // 計画ステップ: 複雑クエリをサブタスクに分解し、進捗としてだけ表示する。
-    // （PICOAGENT_PLANNING_ENABLED=true かつ複雑クエリのみ。設定OFF・単純質問はスキップ）。
+    // スーパーエージェントの複雑な質問だけで行う。単独の旧計画設定は使わない。
     if super_agent {
         emit_status("計画を立てています…".to_string());
     }
@@ -1336,11 +1336,11 @@ async fn run_scoped(
         feedback::planning_step(provider, cfg, model, &original_user_text),
         cancel,
     )
-    .await
-    .flatten();
+    .await;
     if cancelled() {
         return direct_answer(messages, CANCEL_MESSAGE.to_string());
     }
+    let plan = plan.ok_or_else(|| anyhow::anyhow!(CANCEL_MESSAGE))??;
     if let Some(plan) = plan {
         if super_agent {
             // 計画本文をそのままフロントへ送り、実行前にステップ一覧を見せる。
@@ -1619,7 +1619,7 @@ async fn run_scoped(
                 };
                 // 自己評価が回答を作り直しても、「これから検索する」という約束や出典欠落を
                 // 最終表示へ戻さない。取得済み見出しによる救済もここより前では書き換えられる。
-                let improved = finalize_sourced_answer(improved, &sources);
+                let improved = finalize_sourced_answer(improved?, &sources);
                 let safe = make_safe_final_answer(
                     provider,
                     cfg,
@@ -1660,7 +1660,7 @@ async fn run_scoped(
     else {
         return direct_answer(messages, CANCEL_MESSAGE.to_string());
     };
-    let improved = finalize_sourced_answer(improved, &sources);
+    let improved = finalize_sourced_answer(improved?, &sources);
     let safe = make_safe_final_answer(
         provider,
         cfg,
@@ -1772,6 +1772,7 @@ mod tests {
             self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             if let Some(url) = &self.transport_url {
                 crate::tools::http::client()
+                    .map_err(anyhow::Error::msg)?
                     .get(url)
                     .send()
                     .await
@@ -1996,7 +1997,6 @@ mod tests {
     #[tokio::test]
     async fn 画像付き最新依頼は挨拶や先回り検索より先にモデルへ渡す() {
         let cfg = crate::config::Config::new();
-        cfg.set("PICOAGENT_PLANNING_ENABLED", "false");
         cfg.set("PICOAGENT_SELF_EVAL_ENABLED", "false");
         for text in [
             "こんにちは",
@@ -2014,7 +2014,6 @@ mod tests {
     #[tokio::test]
     async fn 過去の画像は最新のテキスト依頼の定型処理を妨げない() {
         let cfg = crate::config::Config::new();
-        cfg.set("PICOAGENT_PLANNING_ENABLED", "false");
         cfg.set("PICOAGENT_SELF_EVAL_ENABLED", "false");
         let provider = ImageRequestProvider(std::sync::atomic::AtomicUsize::new(0));
         let mut messages = vec![
@@ -2063,7 +2062,6 @@ mod tests {
         use std::sync::atomic::{AtomicBool, Ordering};
         use std::sync::Arc;
         let cfg = crate::config::Config::new();
-        cfg.set("PICOAGENT_PLANNING_ENABLED", "false");
         cfg.set("PICOAGENT_SELF_EVAL_ENABLED", "false");
         let cancel = Arc::new(AtomicBool::new(false));
         let request = Arc::clone(&cancel);

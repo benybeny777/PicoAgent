@@ -156,8 +156,8 @@ createContextMenu({
   openExternalUrl,
   onCharacterAction(action, framing) {
     if (action === "edit-character") editor.start("character");
-    else if (action === "reset-character") stage.resetCharacter().then(() => editor.render()).catch(() => {});
-    else if (action === "set-framing") stage.setFraming(framing).then(() => editor.render()).catch(() => {});
+    else if (action === "reset-character") editor.resetCharacter();
+    else if (action === "set-framing") editor.setFraming(framing);
   },
 });
 
@@ -197,7 +197,9 @@ async function setExpanded(on) {
   stage.setExpanded(on);
   buttons.expandButton.textContent = on ? "戻す" : "拡大";
   // ネイティブ窓への変更は順番に送る。古い失敗で最新の操作を巻き戻さない。
-  const operation = fullscreenQueue.catch(() => undefined).then(async () => {
+  const operation = fullscreenQueue.catch(error => {
+    logApp("warn", "直前の全画面切替失敗後に次の操作を開始します", errorDetail(error));
+  }).then(async () => {
     if (generation !== expandedGeneration) return;
     await bridge.setFullscreen(on);
     confirmedExpanded = on;
@@ -436,7 +438,7 @@ async function loadCharacter(characterId, { speakGreeting = true } = {}) {
 
 function localStorageVariant(characterId) {
   try { return localStorage.getItem(`picoagent.variant.${characterId}`) || ""; }
-  catch { return ""; } // フォールバック許可: 保存領域を読めない環境では既定の見た目として扱う。
+  catch { return ""; } // 保存領域を読めない環境では既定の見た目として扱う。
 }
 
 // ── 表示形式 ─────────────────────────────────────────────────
