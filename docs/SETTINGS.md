@@ -47,7 +47,7 @@
 | `PICOAGENT_PLANNING_ENABLED` | `false` | 基本 | 複雑な質問（120文字超・疑問符2個以上・手順系語）をサブタスクへ自動分解するプランニングステップを有効化する |
 | `PICOAGENT_SELF_EVAL_ENABLED` | `false` | 基本 | 回答が短すぎる・拒否パターンを含む場合に1回再生成する自己評価ステップを有効化する |
 | `PICOAGENT_SUPER_AGENT` | `false` | AIモデル | スーパーエージェントモード。計画ステップ・自己評価を一括有効化し、ループ上限を引き上げ、進捗を `pet:agent_status` で可視化する |
-| `PICOAGENT_SUPER_AGENT_MAX_STEPS` | `12` | AIモデル | スーパーエージェントモードのトップレベル最大ループ数（呼び出し値〜30 にクランプ） |
+| `PICOAGENT_SUPER_AGENT_MAX_STEPS` | `12` | AIモデル | スーパーエージェントモードのトップレベル最大ループ数。宣言した整数範囲を満たさない値は理由つきで拒否し、範囲内へ丸めない |
 | `PICOAGENT_TOOL_CONTEXT_TURNS` | `5` | AIモデル | モデルへ渡すスキル定義の並び順を決めるときに見る、過去の利用者発話の件数。`0` ですべての発話を見る。候補から外す判断には使わず、コンテキストに収まる分はすべて渡す |
 | `PICOAGENT_MULTI_AI_MODE` | `single` | 複数AI | `single` / `consensus` / `collaborate` / `divide`。既定は従来どおり単発。単発以外は Pro 対象の `subagent` を通るため、Pro でなければ保存を拒否し、実行時にライセンスが切れていれば理由を画面へ返す。参加AI設定が壊れていても`single`へ戻す保存は受け付ける |
 | `PICOAGENT_MULTI_AI_AGENTS` | `[]` | 複数AI | 参加AI（name / provider / model / focus）のJSON配列。複数モードでは2〜8件 |
@@ -77,7 +77,7 @@
 | `PICOAGENT_MODEL_URL` | LFM2.5 2.6B QAD Q4_0 GGUF | local | 同梱エンジンが取得するモデル URL |
 | `PICOAGENT_LOCAL_PORT` | `11435` | local | 同梱エンジンのポート |
 | `PICOAGENT_LOCAL_VISION_ENABLED` | `false` | local | Gemma 4 E2B（small）の共通画像入力。通常チャットの画像添付とスキルで共有し、ゲーム設定には依存しない。`setup local-vision`で追加資産を明示導入する。保存時にエンジンを再起動して反映し、通常起動で追加取得しない |
-| `PICOAGENT_LOCAL_CTX` | `32768` | local | コンテキスト長。保存値と環境変数が未設定の場合だけ選択プリセットの値を保存する。**下限は 32,768 で、これより小さい保存値（旧既定の 8,192 など）は読み取り時に引き上げる**。全スキル定義だけで約16,000トークンあり、狭いコンテキストではモデルへ渡せるスキルが数件まで削られるため |
+| `PICOAGENT_LOCAL_CTX` | `32768` | local | コンテキスト長。保存値と環境変数が未設定の場合だけ選択プリセットの値を保存する。下限32,768を満たさない保存値や環境値は理由つきで拒否し、自動で引き上げない。旧既定8,192などを保存している場合は設定を32,768以上へ修正する。全スキル定義だけで約16,000トークンあるため狭い値は使わない |
 | `PICOAGENT_LOCAL_NGL` | `999` | local | GPU へオフロードするレイヤ数（`999`=全レイヤ優先 / `0`=CPU 固定） |
 | `PICOAGENT_LOCAL_GPU_DEVICE` | （空=既定先頭） | local | 使用 GPU の指定（複数 GPU 環境向け、例 `Vulkan1`）。保存名は同じバックエンド候補だけへ渡し、CUDA等の別候補は各方式の既定先頭デバイスで起動する |
 | `OLLAMA_HOST` | `http://127.0.0.1:11434` | ollama | Ollama 接続先 |
@@ -143,7 +143,7 @@
 | `PICOAGENT_TRANSCRIBE_MODEL` | 空 | meeting_recorder / whisper_transcribe | ローカルWhisperモデルのパス。手動設定が最優先、空なら共通配置正本の固定 `models/ggml-small.bin`。別名のモデルを自動探索しない。`WHISPER_MODEL` を変えて導入したモデルもここへ明示する |
 | `PICOAGENT_TRANSCRIBE_ARGS` | `-m {model} -f {audio} -otxt -of {output_stem}` | meeting_recorder / whisper_transcribe | 文字起こし実行時の引数テンプレート |
 | `PICOAGENT_TRANSCRIBE_DIARIZE_ARGS` | `-tdrz` | meeting_recorder / whisper_transcribe | `diarize=true` 時に追加するローカル話者分類引数 |
-| `PICOAGENT_TRANSCRIBE_TIMEOUT_SECS` | `1800` | meeting_recorder / whisper_transcribe | ローカル文字起こしタイムアウト秒（10〜7200） |
+| `PICOAGENT_TRANSCRIBE_TIMEOUT_SECS` | `1800` | meeting_recorder / whisper_transcribe | ローカル文字起こしタイムアウト秒（10〜7200）。ファイル指定は設定秒、音声入力はその範囲内で最大120秒。不正値は両経路で拒否 |
 | `PICOAGENT_WEATHER_DEFAULT_LOCATION` | （なし） | weather | 天気の地点。保存済み地点を正本とし、空欄の場合だけHTTPSのIP位置情報から現在地を概算する。旧版が自動保存した `Tokyo` は未設定へ移行し、東京を固定する場合は「東京都」等を保存する |
 | `PICOAGENT_WEATHER_DISABLE_AUTO_LOCATION` | `false` | weather | 地名未指定時の現在地IP自動取得を無効化 |
 | `PICOAGENT_WEATHER_TIMEOUT_SECS` | `15` | weather | 天気API待ち時間（秒、3〜60） |
@@ -275,3 +275,77 @@
 各キーは環境変数としても渡せる（既定値としての参照のみ。保存先は常に `config.json`）。
 
 ---
+
+## 整数数量設定の範囲正本
+
+整数数量だけを扱う表です。ID・座標・倍率は対象外です。空欄は宣言の既定値、`auto`は可とした項目だけで指定できます。上限の大きい値も精度を落とさず検証し、実行画面で安全な整数範囲を超える居眠り時間は十進文字列から正確に比較します。
+
+| キー | 既定 | 最小 | 最大 | 単位 | auto |
+|---|---|---|---|---|---|
+| `PICOAGENT_AGENT_CLI_TIMEOUT_SECS` | `180` | `10` | `600` | 秒 | 不可 |
+| `PICOAGENT_API_PORT` | `11500` | `1` | `65535` | — | 不可 |
+| `PICOAGENT_BLUESKY_TIMEOUT_SECS` | `20` | `3` | `60` | 秒 | 不可 |
+| `PICOAGENT_BOOT_TIMEOUT_MS` | `120000` | `3000` | `120000` | ms | 不可 |
+| `PICOAGENT_BROWSER_MAX_CHARS` | `auto` | `0` | `9223372036854775807` | 文字 | 可 |
+| `PICOAGENT_BROWSER_PORT` | `11437` | `1` | `65535` | — | 不可 |
+| `PICOAGENT_BROWSER_TIMEOUT_SECS` | `30` | `5` | `180` | 秒 | 不可 |
+| `PICOAGENT_BUBBLE_FONT_PX` | `13` | `10` | `28` | px | 不可 |
+| `PICOAGENT_CHATTER_MAX_SECS` | `240` | `30` | `3600` | 秒 | 不可 |
+| `PICOAGENT_CHATTER_MIN_SECS` | `90` | `30` | `3600` | 秒 | 不可 |
+| `PICOAGENT_CHATTER_TOPIC_TIMEOUT_SECS` | `8` | `3` | `30` | 秒 | 不可 |
+| `PICOAGENT_CLIPBOARD_MAX_CHARS` | `3000` | `500` | `8000` | 文字 | 不可 |
+| `PICOAGENT_CODE_RUNNER_TIMEOUT_SECS` | `60` | `1` | `300` | 秒 | 不可 |
+| `PICOAGENT_COMMAND_TIMEOUT_SECS` | `30` | `1` | `120` | 秒 | 不可 |
+| `PICOAGENT_CURRENCY_TIMEOUT_SECS` | `15` | `3` | `60` | 秒 | 不可 |
+| `PICOAGENT_DESKTOP_MAX_OPS_PER_MIN` | `60` | `1` | `600` | 回 | 不可 |
+| `PICOAGENT_DISCORD_TIMEOUT_SECS` | `15` | `3` | `60` | 秒 | 不可 |
+| `PICOAGENT_DOCUMENT_CONVERT_TIMEOUT_SECS` | `120` | `5` | `300` | 秒 | 不可 |
+| `PICOAGENT_GAME_MAX_OPS` | `1` | `1` | `100` | 回 | 不可 |
+| `PICOAGENT_GITHUB_TIMEOUT_SECS` | `20` | `3` | `60` | 秒 | 不可 |
+| `PICOAGENT_GMAIL_CLEANUP_MAX_RESULTS` | `50` | `0` | `9223372036854775807` | 件 | 不可 |
+| `PICOAGENT_GMAIL_TIMEOUT_SECS` | `20` | `3` | `60` | 秒 | 不可 |
+| `PICOAGENT_GOOGLE_CALENDAR_TIMEOUT_SECS` | `20` | `3` | `60` | 秒 | 不可 |
+| `PICOAGENT_GOOGLE_DOCS_TIMEOUT_SECS` | `20` | `3` | `60` | 秒 | 不可 |
+| `PICOAGENT_GOOGLE_DRIVE_TIMEOUT_SECS` | `20` | `3` | `60` | 秒 | 不可 |
+| `PICOAGENT_GOOGLE_SHEETS_TIMEOUT_SECS` | `20` | `3` | `60` | 秒 | 不可 |
+| `PICOAGENT_GOOGLE_TASKS_TIMEOUT_SECS` | `15` | `3` | `60` | 秒 | 不可 |
+| `PICOAGENT_HTTP_METADATA_TIMEOUT_SECS` | `15` | `3` | `60` | 秒 | 不可 |
+| `PICOAGENT_HTTP_TIMEOUT_SECS` | `20` | `3` | `60` | 秒 | 不可 |
+| `PICOAGENT_IMAGE_TOOLS_TIMEOUT_SECS` | `120` | `5` | `300` | 秒 | 不可 |
+| `PICOAGENT_JIRA_TIMEOUT_SECS` | `20` | `3` | `60` | 秒 | 不可 |
+| `PICOAGENT_LINEAR_TIMEOUT_SECS` | `20` | `3` | `60` | 秒 | 不可 |
+| `PICOAGENT_LINKEDIN_TIMEOUT_SECS` | `20` | `3` | `60` | 秒 | 不可 |
+| `PICOAGENT_LOCAL_CTX` | `32768` | `32768` | `9223372036854775807` | トークン | 不可 |
+| `PICOAGENT_LOCAL_NGL` | `999` | `0` | `9223372036854775807` | レイヤ | 不可 |
+| `PICOAGENT_LOCAL_PORT` | `11435` | `1` | `65535` | — | 不可 |
+| `PICOAGENT_MARKET_TIMEOUT_SECS` | `15` | `3` | `60` | 秒 | 不可 |
+| `PICOAGENT_MASTODON_TIMEOUT_SECS` | `20` | `3` | `60` | 秒 | 不可 |
+| `PICOAGENT_MEMORY_MAX_ITEMS` | `80` | `10` | `200` | 件 | 不可 |
+| `PICOAGENT_MISSKEY_TIMEOUT_SECS` | `20` | `3` | `60` | 秒 | 不可 |
+| `PICOAGENT_MS_GRAPH_TIMEOUT_SECS` | `20` | `3` | `60` | 秒 | 不可 |
+| `PICOAGENT_MS_OFFICE_TIMEOUT_SECS` | `120` | `5` | `300` | 秒 | 不可 |
+| `PICOAGENT_MULTI_AGENT_MAX_CONCURRENCY` | `3` | `1` | `8` | 候補 | 不可 |
+| `PICOAGENT_NAP_MINUTES` | `15` | `0` | `9223372036854775807` | 分 | 不可 |
+| `PICOAGENT_NEWS_SCRAPE_MAX_ITEMS` | `8` | `1` | `12` | 件 | 不可 |
+| `PICOAGENT_NEWS_SCRAPE_TIMEOUT_SECS` | `15` | `3` | `60` | 秒 | 不可 |
+| `PICOAGENT_NOTION_TIMEOUT_SECS` | `20` | `3` | `60` | 秒 | 不可 |
+| `PICOAGENT_PDF_TIMEOUT_SECS` | `120` | `5` | `300` | 秒 | 不可 |
+| `PICOAGENT_REDDIT_TIMEOUT_SECS` | `20` | `3` | `60` | 秒 | 不可 |
+| `PICOAGENT_RESEARCH_TIMEOUT_SECS` | `15` | `3` | `60` | 秒 | 不可 |
+| `PICOAGENT_RSS_TIMEOUT_SECS` | `15` | `3` | `60` | 秒 | 不可 |
+| `PICOAGENT_SLACK_TIMEOUT_SECS` | `15` | `3` | `60` | 秒 | 不可 |
+| `PICOAGENT_STREAM_CHAT_FONT_PX` | `22` | `18` | `48` | px | 不可 |
+| `PICOAGENT_SUBAGENT_MAX_DEPTH` | `2` | `1` | `9223372036854775807` | 段 | 不可 |
+| `PICOAGENT_SUPER_AGENT_MAX_STEPS` | `12` | `1` | `30` | 回 | 不可 |
+| `PICOAGENT_TODOIST_TIMEOUT_SECS` | `15` | `3` | `60` | 秒 | 不可 |
+| `PICOAGENT_TOOL_CONTEXT_TURNS` | `5` | `0` | `9223372036854775807` | 件 | 不可 |
+| `PICOAGENT_TOOL_OUTPUT_MAX_CHARS` | `auto` | `1000` | `60000` | 文字 | 可 |
+| `PICOAGENT_TRANSCRIBE_TIMEOUT_SECS` | `1800` | `10` | `7200` | 秒 | 不可 |
+| `PICOAGENT_TRELLO_TIMEOUT_SECS` | `15` | `3` | `60` | 秒 | 不可 |
+| `PICOAGENT_TTS_PORT` | `11436` | `1` | `65535` | — | 不可 |
+| `PICOAGENT_TTS_VOLUME` | `35` | `0` | `100` | % | 不可 |
+| `PICOAGENT_WEATHER_TIMEOUT_SECS` | `15` | `3` | `60` | 秒 | 不可 |
+| `PICOAGENT_WEB_FETCH_TIMEOUT_SECS` | `20` | `3` | `60` | 秒 | 不可 |
+| `PICOAGENT_WEB_SEARCH_MAX_RESULTS` | `5` | `1` | `8` | 件 | 不可 |
+| `PICOAGENT_WEB_SEARCH_TIMEOUT_SECS` | `15` | `3` | `60` | 秒 | 不可 |
+| `PICOAGENT_X_TIMEOUT_SECS` | `20` | `3` | `60` | 秒 | 不可 |

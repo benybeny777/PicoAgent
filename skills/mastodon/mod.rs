@@ -59,12 +59,7 @@ impl Tool for MastodonTool {
                 "password",
                 "",
             ),
-            Field::new(
-                "PICOAGENT_MASTODON_TIMEOUT_SECS",
-                "Mastodon API 待ち時間（秒、3〜60）",
-                "text",
-                "20",
-            ),
+            Field::int(&crate::config::ints::MASTODON_TIMEOUT_SECS),
         ]
     }
 
@@ -81,12 +76,7 @@ impl Tool for MastodonTool {
             .get("PICOAGENT_MASTODON_BASE_URL", "https://mastodon.social")
             .trim_end_matches('/')
             .to_string();
-        let timeout = cfg
-            .get("PICOAGENT_MASTODON_TIMEOUT_SECS", "20")
-            .parse::<u64>()
-            .ok()
-            .filter(|value| (3..=60).contains(value))
-            .unwrap_or(20);
+        let timeout = crate::tool_try!(cfg.int(&crate::config::ints::MASTODON_TIMEOUT_SECS)) as u64;
         let client = match reqwest::Client::builder()
             .timeout(Duration::from_secs(timeout))
             .user_agent("PicoAgent/1.0 (Mastodon tool)")

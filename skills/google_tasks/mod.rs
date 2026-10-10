@@ -60,12 +60,7 @@ impl Tool for GoogleTasksTool {
                 "text",
                 "@default",
             ),
-            Field::new(
-                "PICOAGENT_GOOGLE_TASKS_TIMEOUT_SECS",
-                "Google Tasks API 待ち時間（秒、3〜60）",
-                "text",
-                "15",
-            ),
+            Field::int(&crate::config::ints::GOOGLE_TASKS_TIMEOUT_SECS),
         ]
     }
 
@@ -78,12 +73,8 @@ impl Tool for GoogleTasksTool {
                 "Google Tasks API を使える OAuth access token が必要です。",
             );
         }
-        let timeout = cfg
-            .get("PICOAGENT_GOOGLE_TASKS_TIMEOUT_SECS", "15")
-            .parse::<u64>()
-            .ok()
-            .filter(|value| (3..=60).contains(value))
-            .unwrap_or(15);
+        let timeout =
+            crate::tool_try!(cfg.int(&crate::config::ints::GOOGLE_TASKS_TIMEOUT_SECS)) as u64;
         let client = match reqwest::Client::builder()
             .timeout(Duration::from_secs(timeout))
             .user_agent("PicoAgent/1.0 (Google Tasks tool)")

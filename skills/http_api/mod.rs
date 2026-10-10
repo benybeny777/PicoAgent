@@ -73,12 +73,7 @@ impl Tool for HttpApiTool {
                 "password",
                 "",
             ),
-            Field::new(
-                "PICOAGENT_HTTP_TIMEOUT_SECS",
-                "http_api 待ち時間（秒、3〜60）",
-                "text",
-                "20",
-            ),
+            Field::int(&crate::config::ints::HTTP_TIMEOUT_SECS),
         ]
     }
 
@@ -92,7 +87,7 @@ impl Tool for HttpApiTool {
             Ok(_) => return "エラー: url は http または https を指定してください。".to_string(),
             Err(error) => return format!("エラー: url の解析に失敗しました: {}", error),
         };
-        let timeout = crate::tools::http::timeout(cfg, "PICOAGENT_HTTP_TIMEOUT_SECS", 20, 3, 60);
+        let timeout = crate::tool_try!(cfg.duration_secs(&crate::config::ints::HTTP_TIMEOUT_SECS));
         let mut request = crate::tools::http::GuardedRequest::get(
             url,
             crate::tools::http::UrlPolicy::domains(&cfg.get("PICOAGENT_HTTP_ALLOWED_DOMAINS", "")),
@@ -186,3 +181,38 @@ impl Tool for HttpApiTool {
 }
 
 inventory::submit! { ToolReg { make: || Box::new(HttpApiTool) } }
+
+#[cfg(test)]
+mod numeric_tests {
+    use crate::config::Config;
+    use crate::tools::{
+        http_api::HttpApiTool, rss_feed::RssFeedTool, web_fetch::WebFetchTool, Tool,
+    };
+    use serde_json::json;
+
+    #[tokio::test]
+    async fn 不正な整数設定はスキルから理由を返し要求を送らない() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let url = format!("http://{}/", listener.local_addr().unwrap());
+        let tools: [(&dyn Tool, &str); 3] = [
+            (&HttpApiTool, "PICOAGENT_HTTP_TIMEOUT_SECS"),
+            (&RssFeedTool, "PICOAGENT_RSS_TIMEOUT_SECS"),
+            (&WebFetchTool, "PICOAGENT_WEB_FETCH_TIMEOUT_SECS"),
+        ];
+        for (tool, key) in tools {
+            for invalid in ["abc", "-1", "0", "61", "１．５", "9223372036854775808"] {
+                let cfg = Config::new();
+                cfg.set(key, invalid);
+                cfg.set("PICOAGENT_HTTP_ALLOWED_DOMAINS", "127.0.0.1");
+                let result = tool.run(&cfg, json!({"url":url})).await;
+                assert!(result.starts_with("エラー:"), "{}: {result}", tool.name());
+                assert!(result.contains(key), "{}: {result}", tool.name());
+                assert_eq!(
+                    listener.accept().unwrap_err().kind(),
+                    std::io::ErrorKind::WouldBlock
+                );
+            }
+        }
+    }
+}

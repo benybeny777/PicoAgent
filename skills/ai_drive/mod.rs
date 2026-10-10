@@ -65,6 +65,7 @@ async fn send_chunks(
     job_id: &str,
 ) -> Result<(), String> {
     let client = crate::tools::http::client();
+    let timeout = timeout(cfg, provider)?;
     let chunks = total.div_ceil(CHUNK_BYTES as u64);
     let mut offset = 0u64;
     let mut sent = 0u64;
@@ -86,7 +87,7 @@ async fn send_chunks(
         let end = offset + length as u64;
         let response = client
             .put(session)
-            .timeout(timeout(cfg, provider))
+            .timeout(timeout)
             .header(header::CONTENT_LENGTH, length)
             .header(
                 header::CONTENT_RANGE,
@@ -231,13 +232,13 @@ async fn icloud_download(cfg: &Config, cloud_relative: &str, local_relative: &st
         .unwrap_or_else(|error| format!("エラー: AI Driveへ保存できません: {error}"))
 }
 
-fn timeout(cfg: &Config, provider: &str) -> Duration {
+fn timeout(cfg: &Config, provider: &str) -> Result<Duration, String> {
     let key = if provider == "google" {
         "PICOAGENT_GOOGLE_DRIVE_TIMEOUT_SECS"
     } else {
         "PICOAGENT_MS_GRAPH_TIMEOUT_SECS"
     };
-    crate::tools::http::timeout(cfg, key, 20, 3, 60)
+    cfg.duration_key(key)
 }
 
 fn token(cfg: &Config, provider: &str) -> Result<String, String> {
@@ -304,7 +305,7 @@ async fn google_upload(
     );
     let existing = match client
         .get(format!("{GOOGLE_API}/files"))
-        .timeout(timeout(cfg, "google"))
+        .timeout(crate::tool_try!(timeout(cfg, "google")))
         .bearer_auth(&token)
         .query(&[
             ("q", query.as_str()),
@@ -359,7 +360,7 @@ async fn google_upload(
     }
     let response = match client
         .post(format!("{GOOGLE_UPLOAD}/files?uploadType=resumable"))
-        .timeout(timeout(cfg, "google"))
+        .timeout(crate::tool_try!(timeout(cfg, "google")))
         .bearer_auth(&token)
         .header("X-Upload-Content-Length", total)
         .json(&metadata)
@@ -430,7 +431,7 @@ async fn onedrive_upload(
     let client = crate::tools::http::client();
     let response = match client
         .post(endpoint)
-        .timeout(timeout(cfg, "onedrive"))
+        .timeout(crate::tool_try!(timeout(cfg, "onedrive")))
         .bearer_auth(&token)
         .json(&json!({"item":{"@microsoft.graph.conflictBehavior":"fail","name":display_name}}))
         .send()
@@ -495,7 +496,7 @@ async fn download(cfg: &Config, provider: &str, file_id: &str, relative: &str) -
     };
     let response = match crate::tools::http::client()
         .get(url)
-        .timeout(timeout(cfg, provider))
+        .timeout(crate::tool_try!(timeout(cfg, provider)))
         .bearer_auth(token)
         .send()
         .await

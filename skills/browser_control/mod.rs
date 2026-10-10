@@ -68,10 +68,7 @@ fn allowed_domain(cfg: &Config, url: &Url) -> bool {
 
 fn launch_options(cfg: &Config) -> Result<cdp::LaunchOptions, String> {
     let browser_path = cdp::resolve_browser(&cfg.get("PICOAGENT_BROWSER_PATH", ""))?;
-    let port = cfg
-        .get("PICOAGENT_BROWSER_PORT", &cdp::DEFAULT_PORT.to_string())
-        .parse::<u16>()
-        .unwrap_or(cdp::DEFAULT_PORT);
+    let port = cfg.int(&crate::config::ints::BROWSER_PORT)? as u16;
     Ok(cdp::LaunchOptions {
         browser_path,
         port,
@@ -79,30 +76,21 @@ fn launch_options(cfg: &Config) -> Result<cdp::LaunchOptions, String> {
             .get("PICOAGENT_BROWSER_HEADLESS", "false")
             .trim()
             .eq_ignore_ascii_case("true"),
-        startup_timeout_secs: timeout_secs(cfg),
+        startup_timeout_secs: timeout_secs(cfg)?,
     })
 }
 
-fn timeout_secs(cfg: &Config) -> u64 {
-    cfg.get("PICOAGENT_BROWSER_TIMEOUT_SECS", "30")
-        .parse::<u64>()
-        .ok()
-        .filter(|value| (5..=180).contains(value))
-        .unwrap_or(30)
+fn timeout_secs(cfg: &Config) -> Result<u64, String> {
+    Ok(cfg.int(&crate::config::ints::BROWSER_TIMEOUT_SECS)? as u64)
 }
 
 /// 本文へ割り当てる文字数。既定は「使用中モデルのコンテキスト長に合わせた自動計算」。
-fn text_budget(cfg: &Config) -> usize {
-    let configured = cfg.get("PICOAGENT_BROWSER_MAX_CHARS", "auto");
-    let trimmed = configured.trim();
-    let limit = if trimmed.eq_ignore_ascii_case("auto") {
-        crate::tools::tool_output_limit(cfg)
-    } else {
-        trimmed
-            .parse::<usize>()
-            .unwrap_or_else(|_| crate::tools::tool_output_limit(cfg))
+fn text_budget(cfg: &Config) -> Result<usize, String> {
+    let limit = match cfg.int_or_auto(&crate::config::ints::BROWSER_MAX_CHARS)? {
+        Some(value) => value as usize,
+        None => crate::tools::tool_output_limit(cfg)?,
     };
-    limit.saturating_sub(OVERHEAD_CHARS).max(500)
+    Ok(limit.saturating_sub(OVERHEAD_CHARS).max(500))
 }
 
 /// 操作対象のタブを選ぶ。直近に開いたタブが残っていればそれ、無ければ先頭のページ。
@@ -262,24 +250,9 @@ impl Tool for BrowserControlTool {
                 "checkbox",
                 "false",
             ),
-            Field::new(
-                "PICOAGENT_BROWSER_PORT",
-                "CDP のデバッグポート",
-                "text",
-                "11437",
-            ),
-            Field::new(
-                "PICOAGENT_BROWSER_TIMEOUT_SECS",
-                "1操作の待ち時間（秒、5〜180）",
-                "text",
-                "30",
-            ),
-            Field::new(
-                "PICOAGENT_BROWSER_MAX_CHARS",
-                "1回に読む本文の最大文字数（auto=モデルのコンテキスト長に合わせる）",
-                "text",
-                "auto",
-            ),
+            Field::int(&crate::config::ints::BROWSER_PORT),
+            Field::int(&crate::config::ints::BROWSER_TIMEOUT_SECS),
+            Field::int(&crate::config::ints::BROWSER_MAX_CHARS),
         ]
     }
 
@@ -314,7 +287,8 @@ impl Tool for BrowserControlTool {
             Err(error) => return error,
         };
         let port = options.port;
-        let timeout = timeout_secs(cfg);
+        let timeout = options.startup_timeout_secs;
+        let text_budget = crate::tool_try!(text_budget(cfg));
 
         match action.as_str() {
             "open" => {
@@ -354,7 +328,7 @@ impl Tool for BrowserControlTool {
                 if let Err(error) = conn.wait_ready(timeout).await {
                     return error;
                 }
-                match render_page(cfg, &mut conn, 0, text_budget(cfg)).await {
+                match render_page(cfg, &mut conn, 0, text_budget).await {
                     Ok(rendered) => wrap_untrusted(rendered),
                     Err(error) => error,
                 }
@@ -376,7 +350,7 @@ impl Tool for BrowserControlTool {
                     Ok(conn) => conn,
                     Err(error) => return error,
                 };
-                match render_page(cfg, &mut conn, offset, text_budget(cfg)).await {
+                match render_page(cfg, &mut conn, offset, text_budget).await {
                     Ok(rendered) => wrap_untrusted(rendered),
                     Err(error) => error,
                 }
@@ -458,24 +432,20 @@ mod tests {
     }
 
     #[test]
-    fn 待ち時間は範囲外なら既定へ戻す() {
-        assert_eq!(timeout_secs(&config(&[])), 30);
+    fn 待ち時間の不正値は拒否する() {
+        assert_eq!(timeout_secs(&config(&[])).unwrap(), 30);
         assert_eq!(
-            timeout_secs(&config(&[("PICOAGENT_BROWSER_TIMEOUT_SECS", "60")])),
+            timeout_secs(&config(&[("PICOAGENT_BROWSER_TIMEOUT_SECS", "60")])).unwrap(),
             60
         );
-        assert_eq!(
-            timeout_secs(&config(&[("PICOAGENT_BROWSER_TIMEOUT_SECS", "9999")])),
-            30,
-            "範囲外は既定へ戻す"
-        );
+        assert!(timeout_secs(&config(&[("PICOAGENT_BROWSER_TIMEOUT_SECS", "9999")])).is_err());
     }
 
     #[test]
     fn 本文予算はコンテキスト長に追随する() {
         // 32,768 が下限なので、追随するかは下限より上の値どうしで比べる。
-        let narrow = text_budget(&config(&[("PICOAGENT_LOCAL_CTX", "32768")]));
-        let wide = text_budget(&config(&[("PICOAGENT_LOCAL_CTX", "131072")]));
+        let narrow = text_budget(&config(&[("PICOAGENT_LOCAL_CTX", "32768")])).unwrap();
+        let wide = text_budget(&config(&[("PICOAGENT_LOCAL_CTX", "131072")])).unwrap();
         assert!(
             wide > narrow,
             "コンテキストを広げたら本文予算も増える: {narrow} -> {wide}"
@@ -485,6 +455,15 @@ mod tests {
     #[test]
     fn 本文予算は明示指定を優先する() {
         let cfg = config(&[("PICOAGENT_BROWSER_MAX_CHARS", "5000")]);
-        assert_eq!(text_budget(&cfg), 5000 - super::OVERHEAD_CHARS);
+        assert_eq!(text_budget(&cfg).unwrap(), 5000 - super::OVERHEAD_CHARS);
+    }
+    #[test]
+    fn 不正な本文予算は自動予算へ降格しない() {
+        for value in ["abc", "-1", "１．５"] {
+            let cfg = config(&[("PICOAGENT_BROWSER_MAX_CHARS", value)]);
+            assert!(text_budget(&cfg)
+                .unwrap_err()
+                .contains("PICOAGENT_BROWSER_MAX_CHARS"));
+        }
     }
 }

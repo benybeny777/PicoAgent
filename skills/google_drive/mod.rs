@@ -1,7 +1,5 @@
 // skills/google_drive/mod.rs - Google Drive の検索・テキストファイル作成スキル。
 
-use std::time::Duration;
-
 use async_trait::async_trait;
 use serde_json::{json, Value};
 
@@ -15,14 +13,6 @@ const MAX_NAME_CHARS: usize = 300;
 const MAX_TEXT_BYTES: usize = 128 * 1024;
 
 pub struct GoogleDriveTool;
-
-fn timeout_secs(cfg: &Config) -> u64 {
-    cfg.get("PICOAGENT_GOOGLE_DRIVE_TIMEOUT_SECS", "20")
-        .parse::<u64>()
-        .ok()
-        .filter(|value| (3..=60).contains(value))
-        .unwrap_or(20)
-}
 
 #[async_trait]
 impl Tool for GoogleDriveTool {
@@ -66,12 +56,7 @@ impl Tool for GoogleDriveTool {
                 "password",
                 "ya29...",
             ),
-            Field::new(
-                "PICOAGENT_GOOGLE_DRIVE_TIMEOUT_SECS",
-                "Google Drive API 待ち時間（秒、3〜60）",
-                "text",
-                "20",
-            ),
+            Field::int(&crate::config::ints::GOOGLE_DRIVE_TIMEOUT_SECS),
         ]
     }
 
@@ -85,7 +70,9 @@ impl Tool for GoogleDriveTool {
             );
         }
         let client = match reqwest::Client::builder()
-            .timeout(Duration::from_secs(timeout_secs(cfg)))
+            .timeout(crate::tool_try!(
+                cfg.duration_secs(&crate::config::ints::GOOGLE_DRIVE_TIMEOUT_SECS)
+            ))
             .user_agent("PicoAgent/1.0 (Google Drive tool)")
             .build()
         {

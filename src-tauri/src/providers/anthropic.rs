@@ -192,9 +192,24 @@ impl Provider for Anthropic {
 
     fn config_schema(&self) -> Vec<Field> {
         vec![
-            Field::new("PICOAGENT_ANTHROPIC_API_KEY", "Anthropic API キー", "password", "sk-ant-..."),
-            Field::new("PICOAGENT_ANTHROPIC_MODEL", "既定モデル", "text", DEFAULT_MODEL),
-            Field::new("PICOAGENT_ANTHROPIC_BASE_URL", "エンドポイント", "text", DEFAULT_BASE_URL),
+            Field::new(
+                "PICOAGENT_ANTHROPIC_API_KEY",
+                "Anthropic API キー",
+                "password",
+                "sk-ant-...",
+            ),
+            Field::new(
+                "PICOAGENT_ANTHROPIC_MODEL",
+                "既定モデル",
+                "text",
+                DEFAULT_MODEL,
+            ),
+            Field::new(
+                "PICOAGENT_ANTHROPIC_BASE_URL",
+                "エンドポイント",
+                "text",
+                DEFAULT_BASE_URL,
+            ),
         ]
     }
 
@@ -205,18 +220,24 @@ impl Provider for Anthropic {
     async fn list_models(&self, cfg: &Config) -> anyhow::Result<Vec<String>> {
         let key = api_key(cfg);
         if key.is_empty() {
-            return Ok(STATIC_MODELS.iter().map(|model| model.to_string()).collect());
+            return Ok(STATIC_MODELS
+                .iter()
+                .map(|model| model.to_string())
+                .collect());
         }
         let url = format!("{}/models", base_url(cfg));
         let res = crate::tools::http::client()
             .get(&url)
             .header("x-api-key", key)
             .header("anthropic-version", ANTHROPIC_VERSION)
-            .timeout(crate::tools::http::metadata_timeout(cfg))
+            .timeout(crate::tools::http::metadata_timeout(cfg).map_err(anyhow::Error::msg)?)
             .send()
             .await?;
         if !res.status().is_success() {
-            return Ok(STATIC_MODELS.iter().map(|model| model.to_string()).collect());
+            return Ok(STATIC_MODELS
+                .iter()
+                .map(|model| model.to_string())
+                .collect());
         }
         let data: Value = res.json().await?;
         let mut models: Vec<String> = data
@@ -236,26 +257,28 @@ impl Provider for Anthropic {
         Ok(models)
     }
 
-    async fn is_up(&self, cfg: &Config) -> bool {
-        let key = api_key(cfg);
-        if key.is_empty() {
-            return false;
-        }
-        let url = format!("{}/models", base_url(cfg));
-        match reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(3))
-            .build()
-        {
-            Ok(c) => c
-                .get(&url)
-                .header("x-api-key", key)
-                .header("anthropic-version", ANTHROPIC_VERSION)
-                .send()
-                .await
-                .map(|r| r.status().is_success())
-                .unwrap_or(false),
-            Err(_) => false,
-        }
+    async fn is_up(&self, cfg: &Config) -> Result<bool, String> {
+        Ok({
+            let key = api_key(cfg);
+            if key.is_empty() {
+                return Ok(false);
+            }
+            let url = format!("{}/models", base_url(cfg));
+            match reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(3))
+                .build()
+            {
+                Ok(c) => c
+                    .get(&url)
+                    .header("x-api-key", key)
+                    .header("anthropic-version", ANTHROPIC_VERSION)
+                    .send()
+                    .await
+                    .map(|r| r.status().is_success())
+                    .unwrap_or(false),
+                Err(_) => false,
+            }
+        })
     }
 
     async fn chat(
@@ -296,7 +319,10 @@ impl Provider for Anthropic {
             let text = crate::tools::http::response_text(res)
                 .await
                 .map_err(anyhow::Error::msg)?;
-            anyhow::bail!("{}", crate::tools::http::service_error("Claude", "/messages", status, &text));
+            anyhow::bail!(
+                "{}",
+                crate::tools::http::service_error("Claude", "/messages", status, &text)
+            );
         }
         let data: Value = res.json().await?;
         Ok(from_anthropic_message(&data))

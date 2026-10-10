@@ -160,12 +160,7 @@ impl Tool for CurrencyRatesTool {
                 "text",
                 "JPY",
             ),
-            Field::new(
-                "PICOAGENT_CURRENCY_TIMEOUT_SECS",
-                "為替API待ち時間（秒、3〜60）",
-                "text",
-                "15",
-            ),
+            Field::int(&crate::config::ints::CURRENCY_TIMEOUT_SECS),
         ]
     }
 
@@ -191,12 +186,7 @@ impl Tool for CurrencyRatesTool {
                     .to_ascii_uppercase()
             });
         let amount = args.get("amount").and_then(Value::as_f64).unwrap_or(1.0);
-        let timeout = cfg
-            .get("PICOAGENT_CURRENCY_TIMEOUT_SECS", "15")
-            .parse::<u64>()
-            .ok()
-            .filter(|value| (3..=60).contains(value))
-            .unwrap_or(15);
+        let timeout = crate::tool_try!(cfg.int(&crate::config::ints::CURRENCY_TIMEOUT_SECS)) as u64;
         let client = match reqwest::Client::builder()
             .timeout(Duration::from_secs(timeout))
             .user_agent("PicoAgent/1.0 (Currency tool)")

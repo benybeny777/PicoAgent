@@ -88,12 +88,7 @@ impl Tool for MicrosoftGraphTool {
                 "text",
                 "",
             ),
-            Field::new(
-                "PICOAGENT_MS_GRAPH_TIMEOUT_SECS",
-                "Microsoft Graph API 待ち時間（秒、3〜60）",
-                "text",
-                "20",
-            ),
+            Field::int(&crate::config::ints::MS_GRAPH_TIMEOUT_SECS),
         ]
     }
 
@@ -106,12 +101,7 @@ impl Tool for MicrosoftGraphTool {
                 "Outlook/Teams/予定表にアクセスできる OAuth access token が必要です。",
             );
         }
-        let timeout = cfg
-            .get("PICOAGENT_MS_GRAPH_TIMEOUT_SECS", "20")
-            .parse::<u64>()
-            .ok()
-            .filter(|value| (3..=60).contains(value))
-            .unwrap_or(20);
+        let timeout = crate::tool_try!(cfg.int(&crate::config::ints::MS_GRAPH_TIMEOUT_SECS)) as u64;
         let client = match reqwest::Client::builder()
             .timeout(Duration::from_secs(timeout))
             .user_agent("PicoAgent/1.0 (Microsoft Graph tool)")

@@ -79,8 +79,8 @@
 
 | command | 引数 | 戻り値・役割 |
 |---|---|---|
-| `settings_load` | なし | 設定一式と各コネクタのスキーマ |
-| `settings_save` | `patch`, `baseRevisions` | 保存結果 |
+| `settings_load` | なし | 設定一式と各コネクタのスキーマ、`numberSettings`（整数宣言のメタデータ） |
+| `settings_save` | `patch`, `baseRevisions` | 保存結果。不正時は`{conflicts:[],invalid:[{key,message}]}`で変更全体を保存しない。接続確認失敗時は`up:null,providerError` |
 | `settings_list_models` | `id` | モデル名の配列 |
 | `settings_test_tool` | `name` | 接続確認の結果 |
 | `settings_memory_list` | なし | 長期メモリの一覧 |
@@ -153,3 +153,13 @@
 通知の組み立てと送信は `notice.rs` が所有し、`at` はローカル時刻のRFC 3339。種類固有のキーは維持する。起動中の通知は待機し、メイン画面が `pet:notice` の購読完了を待ってから `pet_init` の末尾で待機通知を `pet:notice` へ順番に送る。待機列と新着通知は同じロック内で直列化し、失敗と復旧の順序を守る。画面の再読込時は未復旧の失敗も再送する。復旧の無い一度きりの出来事（状態ファイルの破損退避 `kind=state_quarantined`、起動時の更新確認の失敗 `kind=update` の `ok=false`）は `background_failure` にせず、通知一覧へ1件残す。会話履歴の保存停止はキャラごとに管理し、止めているキャラが1体も無くなったときだけ解除（`ok=true`）を送る。`relationshipError` は `relationship-load` の原因キーで画面へ知らせる。
 
 `pet_set_character_profile` の `voice` は読み込めた `character.json` の `voice` オブジェクトまたは `null`。ID・人格・挨拶・声を同じスナップショットとして登録し、声の検証・関係性・履歴の読込に失敗した場合は旧組を温存する。Aivisの `speakerUuid` と `modelUuid` はUUID形式、`styleId` は数値文字列を保持する。声の解決に失敗した `pet_prepare_voice_model` と `pet_speak` は理由付きエラーを返し、別の声で合成しない。
+
+### 整数数量と接続確認の契約
+
+`settings_load`・`pet_init`・`pet:ui`の`numberSettings`は`{[key]:{range:[最小文字列,最大文字列],unit,allow_auto,default:文字列,label}}`。コネクタの整数`Field`も同じ宣言の`range`・`unit`・`allow_auto`を持つ。実行画面の`fontPx`・`streamChatFontPx`・`voiceVolume`・`chatterMinSecs`・`chatterMaxSecs`・`napMinutes`は正常な整数を返し、不正時は`null`と`invalidNumbers:[{key,message}]`を返す。安全なJavaScript整数範囲を超える正常値は十進文字列であり、居眠り時間は`BigInt`で扱う。
+
+画面は不正値を既定値・前回値へ置換しない。音量は音声出力、自発会話の間隔は自発会話、居眠り時間は居眠りを理由付きで停止する。文字サイズは該当する会話表示・入力を固定スタイルの診断へ止め、設定を開く導線を残す。正常な更新を受けて各部品が復旧する。保存の`invalid`では草稿・未保存表示・保存済み正本を維持し、正常保存だけで理由を解除する。
+
+`pet_init`・`settings_save`と接続更新の`pet:ui`の`up`は正常時`bool`、確認失敗時`null`であり、`providerError`が理由を持つ。`null`を未接続や前回の接続状態へ丸めず、接続状態不明と理由を表示する。
+
+接続更新だけの`pet:ui {up,providerError}`では数量設定を再適用しない。正常な接続確認が届いた時だけ接続状態不明を解除する。

@@ -3,6 +3,13 @@ import test from "node:test";
 import vm from "node:vm";
 import { uiFile } from "./lib/ui-source.mjs";
 
+const integerMetadata = {
+  PICOAGENT_CHATTER_MIN_SECS: { range: ["30", "3600"] },
+  PICOAGENT_CHATTER_MAX_SECS: { range: ["30", "3600"] },
+  PICOAGENT_NAP_MINUTES: { range: ["0", "9223372036854775807"] },
+};
+function quantities(values) { return { numberSettings: integerMetadata, chatterMinSecs: 90, chatterMaxSecs: 240, napMinutes: 0, ...values }; }
+
 function target() {
   const handlers = new Map();
   return {
@@ -38,6 +45,7 @@ function environment(file, factory, extra = {}) {
   });
   const util = uiFile("app/util.js");
   const wait = util.slice(util.indexOf("export async function waitWithLimit"), util.indexOf("/** 指定時間内に応答しない fetch"));
+  vm.runInContext(util.slice(util.indexOf("export function readIntegerSetting")).replace("export function", "function"), context);
   vm.runInContext(wait.replace("export async function", "async function"), context);
   vm.runInContext(uiFile(file).replace(/^import .*;\r?$/gm, "").replace("export function", "function") + `\nthis.factory = ${factory};`, context);
   async function settle() { for (let step = 0; step < 20; step += 1) await Promise.resolve(); }
@@ -118,7 +126,7 @@ test("同時に期限が来た全リマインダーを一つの通知として�
     voice: { speaking: false, prepare: async text => { prepared.push(text); return null; } },
     host: { sleeping: false }, motion: {}, isBusy: () => false, isExpanded: () => false,
   });
-  ambient.start({ napMinutes: 0 });
+  ambient.start(quantities({ napMinutes: 0 }));
   await new Promise(resolve => setImmediate(resolve));
   assert.deepEqual(displayed, ["会議\n薬"]);
   assert.deepEqual(prepared, displayed);
@@ -159,7 +167,7 @@ test("キャラ切替前に生成を始めた雑談は遅れて届いても新�
     voice: { speaking: false, prepare: async () => null }, host: { sleeping: false }, motion: {},
     isBusy: () => false, isExpanded: () => false,
   });
-  ambient.applyChatter({ chatterEnabled: true, chatterMinSecs: 30, chatterMaxSecs: 30 });
+  ambient.applyChatter(quantities({ chatterEnabled: true, chatterMinSecs: 30, chatterMaxSecs: 30 }));
   const old = [...env.timers.values()][0]();
   ambient.reset();
   resolveChatter({ enabled: true, reply: "旧キャラの雑談" });
@@ -205,7 +213,7 @@ function alarmEnvironment(prepare = async () => null) {
     voice: { prepare: text => { speech.push(text); return prepare(text); }, playPrepared: value => played.push(value), stop() {} },
     host: { sleeping: false }, motion: {}, isBusy: () => true, isExpanded: () => false,
   });
-  ambient.start({ napMinutes: 0 });
+  ambient.start(quantities({ napMinutes: 0 }));
   return { ...env, ambient, shown, history, speech, played, failures, recoveries, alarms, wakeArgs, beforeWakePublish: callback => { beforeWakePublish = callback; }, failAlarmRead: error => { alarmReadError = error; }, get wakeCalls() { return wakeCalls; }, resolveWake: value => resolveWake(value), rejectWake: value => rejectWake(value), acknowledge: () => acknowledge() };
 }
 
@@ -495,7 +503,7 @@ test("自発雑談は混雑応答を表示せず次の機会に再予約する",
     voice: { speaking: false, prepare: async text => { speech.push(text); return null; } },
     host: { sleeping: false }, motion: {}, isBusy: () => false, isExpanded: () => false,
   });
-  ambient.applyChatter({ chatterEnabled: true, chatterMinSecs: 30, chatterMaxSecs: 30 });
+  ambient.applyChatter(quantities({ chatterEnabled: true, chatterMinSecs: 30, chatterMaxSecs: 30 }));
   await env.advance(30000);
   assert.equal(calls, 1);
   assert.deepEqual(displayed, []);
@@ -504,4 +512,17 @@ test("自発雑談は混雑応答を表示せず次の機会に再予約する",
   await env.advance(30000);
   assert.equal(calls, 2);
   assert.deepEqual(displayed, ["次の雑談"]);
+});
+
+test("数量不正は自発会話と居眠りだけ理由付きで止め正常値で再開する", async () => {
+  const env = alarmEnvironment();
+  env.ambient.applyChatter(quantities({ chatterEnabled: true, chatterMinSecs: null, napMinutes: null, invalidNumbers: [{ key: "PICOAGENT_CHATTER_MIN_SECS", message: "間隔が不正です" }, { key: "PICOAGENT_NAP_MINUTES", message: "居眠りが不正です" }] }));
+  assert.ok(env.failures.some(([key, message]) => key === "integer-chatter" && message.includes("間隔が不正")));
+  assert.ok(env.failures.some(([key, message]) => key === "integer-nap" && message.includes("居眠りが不正")));
+  assert.equal(env.timers.size, 3, "停止中は監視タイマーだけ残す");
+  env.ambient.applyChatter(quantities({ chatterEnabled: true, napMinutes: "9223372036854775807" }));
+  assert.equal(env.timers.size, 4, "正常値の更新で雑談を再予約する");
+  assert.ok(env.recoveries.includes("integer-chatter"));
+  assert.ok(env.recoveries.includes("integer-nap"));
+  await env.advance(30000);
 });

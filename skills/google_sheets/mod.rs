@@ -59,12 +59,7 @@ impl Tool for GoogleSheetsTool {
                 "text",
                 "",
             ),
-            Field::new(
-                "PICOAGENT_GOOGLE_SHEETS_TIMEOUT_SECS",
-                "Google Sheets API 待ち時間（秒、3〜60）",
-                "text",
-                "20",
-            ),
+            Field::int(&crate::config::ints::GOOGLE_SHEETS_TIMEOUT_SECS),
         ]
     }
 
@@ -99,12 +94,8 @@ impl Tool for GoogleSheetsTool {
         else {
             return "エラー: range が指定されていません。".to_string();
         };
-        let timeout = cfg
-            .get("PICOAGENT_GOOGLE_SHEETS_TIMEOUT_SECS", "20")
-            .parse::<u64>()
-            .ok()
-            .filter(|value| (3..=60).contains(value))
-            .unwrap_or(20);
+        let timeout =
+            crate::tool_try!(cfg.int(&crate::config::ints::GOOGLE_SHEETS_TIMEOUT_SECS)) as u64;
         let client = match reqwest::Client::builder()
             .timeout(Duration::from_secs(timeout))
             .user_agent("PicoAgent/1.0 (Google Sheets tool)")

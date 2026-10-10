@@ -17,7 +17,6 @@ const MAX_BODY_CHARS: usize = 20_000;
 const MAX_SUBJECT_CHARS: usize = 300;
 const MAX_QUERY_CHARS: usize = 500;
 const MAX_READ_BODY_CHARS: usize = 8_000;
-const DEFAULT_CLEANUP_LIMIT: u64 = 50;
 const GMAIL_PAGE_SIZE: u64 = 500;
 
 pub struct GmailTool;
@@ -29,32 +28,6 @@ fn gmail_base(cfg: &Config) -> String {
     )
     .trim_end_matches('/')
     .to_string()
-}
-
-fn bounded_u64_setting(raw: &str, fallback: u64, min: u64, max: u64) -> u64 {
-    // フォールバック許可: 補助設定が壊れていても Gmail の主要操作は既定値で続行する。
-    raw.parse::<u64>()
-        .ok()
-        .filter(|value| (min..=max).contains(value))
-        .unwrap_or(fallback.clamp(min, max))
-}
-
-fn parse_timeout(cfg: &Config) -> u64 {
-    bounded_u64_setting(&cfg.get("PICOAGENT_GMAIL_TIMEOUT_SECS", "20"), 20, 3, 60)
-}
-
-fn parse_cleanup_limit(cfg: &Config) -> Option<u64> {
-    let raw = cfg.get(
-        "PICOAGENT_GMAIL_CLEANUP_MAX_RESULTS",
-        &DEFAULT_CLEANUP_LIMIT.to_string(),
-    );
-    // フォールバック許可: cleanup 上限の補助設定が壊れていても既定上限で安全に続行する。
-    let value = raw.parse::<u64>().unwrap_or(DEFAULT_CLEANUP_LIMIT);
-    if value == 0 {
-        None
-    } else {
-        Some(value)
-    }
 }
 
 fn string_arg<'a>(args: &'a Value, key: &str) -> Result<&'a str, String> {
@@ -455,18 +428,8 @@ impl Tool for GmailTool {
                 "text",
                 "https://gmail.googleapis.com/gmail/v1",
             ),
-            Field::new(
-                "PICOAGENT_GMAIL_TIMEOUT_SECS",
-                "Gmail API 待ち時間（秒、3〜60）",
-                "text",
-                "20",
-            ),
-            Field::new(
-                "PICOAGENT_GMAIL_CLEANUP_MAX_RESULTS",
-                "Gmail整理/掃除の既定上限（0で無制限）",
-                "text",
-                "50",
-            ),
+            Field::int(&crate::config::ints::GMAIL_TIMEOUT_SECS),
+            Field::int(&crate::config::ints::GMAIL_CLEANUP_MAX_RESULTS),
         ]
     }
 
@@ -479,8 +442,11 @@ impl Tool for GmailTool {
                 "Gmail API の読み取り・変更・送信に必要な OAuth access token が必要です。",
             );
         }
-        let timeout_secs = parse_timeout(cfg);
-        let cleanup_limit = parse_cleanup_limit(cfg);
+        let timeout_secs =
+            crate::tool_try!(cfg.int(&crate::config::ints::GMAIL_TIMEOUT_SECS)) as u64;
+        let cleanup_count =
+            crate::tool_try!(cfg.int(&crate::config::ints::GMAIL_CLEANUP_MAX_RESULTS)) as u64;
+        let cleanup_limit = (cleanup_count != 0).then_some(cleanup_count);
         let action = args
             .get("action")
             .and_then(Value::as_str)

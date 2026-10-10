@@ -1,7 +1,5 @@
 // skills/notion/mod.rs - Notion の検索・データベースページ作成スキル。
 
-use std::time::Duration;
-
 use async_trait::async_trait;
 use serde_json::{json, Value};
 
@@ -15,14 +13,6 @@ const MAX_TITLE_CHARS: usize = 300;
 const MAX_CONTENT_CHARS: usize = 2000;
 
 pub struct NotionTool;
-
-fn timeout_secs(cfg: &Config) -> u64 {
-    cfg.get("PICOAGENT_NOTION_TIMEOUT_SECS", "20")
-        .parse::<u64>()
-        .ok()
-        .filter(|value| (3..=60).contains(value))
-        .unwrap_or(20)
-}
 
 fn notion_post(client: &reqwest::Client, token: String, url: String) -> reqwest::RequestBuilder {
     client
@@ -77,12 +67,7 @@ impl Tool for NotionTool {
                 "text",
                 "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
             ),
-            Field::new(
-                "PICOAGENT_NOTION_TIMEOUT_SECS",
-                "Notion API 待ち時間（秒、3〜60）",
-                "text",
-                "20",
-            ),
+            Field::int(&crate::config::ints::NOTION_TIMEOUT_SECS),
         ]
     }
 
@@ -93,7 +78,9 @@ impl Tool for NotionTool {
         }
         let action = args.get("action").and_then(Value::as_str).unwrap_or("");
         let client = match reqwest::Client::builder()
-            .timeout(Duration::from_secs(timeout_secs(cfg)))
+            .timeout(crate::tool_try!(
+                cfg.duration_secs(&crate::config::ints::NOTION_TIMEOUT_SECS)
+            ))
             .user_agent("PicoAgent/1.0 (Notion tool)")
             .build()
         {

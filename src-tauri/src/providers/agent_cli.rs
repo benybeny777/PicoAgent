@@ -336,12 +336,9 @@ fn request_args(
     Ok(args)
 }
 
-fn timeout_secs(cfg: &Config) -> u64 {
-    cfg.get("PICOAGENT_AGENT_CLI_TIMEOUT_SECS", "180")
-        .parse::<u64>()
-        .ok()
-        .filter(|value| (10..=600).contains(value))
-        .unwrap_or(180)
+fn timeout_secs(cfg: &Config) -> Result<u64, String> {
+    cfg.int(&crate::config::ints::AGENT_CLI_TIMEOUT_SECS)
+        .map(|value| value as u64)
 }
 
 fn model_choices(
@@ -673,12 +670,7 @@ impl Provider for AgentCli {
                 "text",
                 "",
             ),
-            Field::new(
-                "PICOAGENT_AGENT_CLI_TIMEOUT_SECS",
-                "1回の応答を待つ秒数（10〜600）",
-                "text",
-                "180",
-            ),
+            Field::int(&crate::config::ints::AGENT_CLI_TIMEOUT_SECS),
         ]
     }
 
@@ -695,13 +687,15 @@ impl Provider for AgentCli {
         Ok(model_choices(self.default_model(cfg), models::list))
     }
 
-    async fn is_up(&self, cfg: &Config) -> bool {
-        let mut command = crate::tools::process::command(program(cfg));
-        command.arg("--version");
-        crate::tools::process::output(command, 15, "CLI エージェントの確認")
-            .await
-            .map(|output| output.status.success())
-            .unwrap_or(false)
+    async fn is_up(&self, cfg: &Config) -> Result<bool, String> {
+        Ok({
+            let mut command = crate::tools::process::command(program(cfg));
+            command.arg("--version");
+            crate::tools::process::output(command, 15, "CLI エージェントの確認")
+                .await
+                .map(|output| output.status.success())
+                .unwrap_or(false)
+        })
     }
 
     async fn chat(
@@ -711,6 +705,7 @@ impl Provider for AgentCli {
         messages: &[Message],
         tools: &[Value],
     ) -> anyhow::Result<Message> {
+        let timeout = timeout_secs(cfg).map_err(anyhow::Error::msg)?;
         let selected = kind_for_model(cfg, model);
         let session = ACTIVE_SESSION.try_with(Clone::clone).ok();
         // custom CLIは応答形式もセッション引数も分からないため、従来どおり1往復に限定する。
@@ -781,7 +776,7 @@ impl Provider for AgentCli {
         // プロンプトは引数として渡す。シェルを経由しないので解釈の事故が起きない。
         command.arg(&prompt);
 
-        let output = crate::tools::process::output(command, timeout_secs(cfg), "CLI エージェント")
+        let output = crate::tools::process::output(command, timeout, "CLI エージェント")
             .await
             .map_err(|error| {
                 anyhow::anyhow!("{error}（{program} が入っているか、PATH と PICOAGENT_AGENT_CLI_PATH を確認してください）")
@@ -1236,10 +1231,12 @@ mod tests {
     }
 
     #[test]
-    fn 待ち時間は範囲外なら既定へ戻す() {
-        assert_eq!(timeout_secs(&Config::new()), 180);
+    fn 待ち時間は範囲外なら理由付きで拒否する() {
+        assert_eq!(timeout_secs(&Config::new()).unwrap(), 180);
         let cfg = Config::new();
         cfg.set("PICOAGENT_AGENT_CLI_TIMEOUT_SECS", "99999");
-        assert_eq!(timeout_secs(&cfg), 180);
+        assert!(timeout_secs(&cfg)
+            .unwrap_err()
+            .contains("PICOAGENT_AGENT_CLI_TIMEOUT_SECS"));
     }
 }

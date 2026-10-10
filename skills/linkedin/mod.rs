@@ -59,12 +59,7 @@ impl Tool for LinkedInTool {
                 "text",
                 "urn:li:person:...",
             ),
-            Field::new(
-                "PICOAGENT_LINKEDIN_TIMEOUT_SECS",
-                "LinkedIn API 待ち時間（秒、3〜60）",
-                "text",
-                "20",
-            ),
+            Field::int(&crate::config::ints::LINKEDIN_TIMEOUT_SECS),
         ]
     }
 
@@ -77,12 +72,7 @@ impl Tool for LinkedInTool {
                 "LinkedIn API の access token が必要です。",
             );
         }
-        let timeout = cfg
-            .get("PICOAGENT_LINKEDIN_TIMEOUT_SECS", "20")
-            .parse::<u64>()
-            .ok()
-            .filter(|value| (3..=60).contains(value))
-            .unwrap_or(20);
+        let timeout = crate::tool_try!(cfg.int(&crate::config::ints::LINKEDIN_TIMEOUT_SECS)) as u64;
         let client = match reqwest::Client::builder()
             .timeout(Duration::from_secs(timeout))
             .user_agent("PicoAgent/1.0 (LinkedIn tool)")

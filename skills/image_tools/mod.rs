@@ -246,22 +246,13 @@ impl Tool for ImageToolsTool {
                 "text",
                 "",
             ),
-            Field::new(
-                "PICOAGENT_IMAGE_TOOLS_TIMEOUT_SECS",
-                "画像操作タイムアウト秒（5〜300）",
-                "text",
-                "120",
-            ),
+            Field::int(&crate::config::ints::IMAGE_TOOLS_TIMEOUT_SECS),
         ]
     }
 
     async fn run(&self, cfg: &Config, args: Value) -> String {
-        let timeout = cfg
-            .get("PICOAGENT_IMAGE_TOOLS_TIMEOUT_SECS", "120")
-            .parse::<u64>()
-            .ok()
-            .filter(|value| (5..=300).contains(value))
-            .unwrap_or(120);
+        let timeout =
+            crate::tool_try!(cfg.int(&crate::config::ints::IMAGE_TOOLS_TIMEOUT_SECS)) as u64;
         match args.get("action").and_then(Value::as_str).unwrap_or("") {
             "convert" => run_convert(cfg, &args, timeout).await,
             "info" => run_info(cfg, &args, timeout).await,

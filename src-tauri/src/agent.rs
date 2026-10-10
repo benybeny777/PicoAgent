@@ -1159,17 +1159,19 @@ async fn run_scoped(
     // スーパーエージェントモードのトップレベルでは自律ループの上限を引き上げる
     // （多段のツール連鎖・自己反省を回し切れるようにする）。サブエージェントは元の上限のまま。
     let max_steps = if super_agent && agent_depth() <= 1 {
-        cfg.get("PICOAGENT_SUPER_AGENT_MAX_STEPS", "12")
-            .parse::<usize>()
-            .unwrap_or(12)
-            .clamp(max_steps, 30)
+        let configured = cfg
+            .int(&crate::config::ints::SUPER_AGENT_MAX_STEPS)
+            .map_err(anyhow::Error::msg)? as usize;
+        anyhow::ensure!(configured >= max_steps,
+            "PICOAGENT_SUPER_AGENT_MAX_STEPS はこの処理の最小ステップ数 {max_steps} 以上にしてください");
+        configured
     } else {
         max_steps
     };
     // 進捗ステータス（計画→実行・ツール実行の可視化）をフロントへ送る。
     let emit_status = make_status_emitter(app);
 
-    let mut schemas = tools::schemas_for_text("");
+    let mut schemas = tools::schemas_for_conversation(cfg, "", &[]).map_err(anyhow::Error::msg)?;
     let mut last = String::new();
     // 事前Web検索で得た参照元URL（最終回答の末尾に「参考:」として添える）。
     let mut sources: Vec<SourceLink> = Vec::new();
@@ -1234,7 +1236,8 @@ async fn run_scoped(
             .collect();
         let earlier_assistant_texts: Vec<&str> =
             earlier_assistant_owned.iter().map(String::as_str).collect();
-        schemas = tools::schemas_for_conversation(cfg, &user_text, &earlier_user_texts);
+        schemas = tools::schemas_for_conversation(cfg, &user_text, &earlier_user_texts)
+            .map_err(anyhow::Error::msg)?;
         // 画像付き依頼は本文だけでは意図を決められない。先回り実行や定型回答を
         // 適用せず、画像と依頼をモデルへ渡してから通常のツール選択へ進む。
         let has_images = messages[user_index]
@@ -1719,8 +1722,8 @@ mod tests {
         async fn list_models(&self, _cfg: &crate::config::Config) -> anyhow::Result<Vec<String>> {
             Ok(vec![])
         }
-        async fn is_up(&self, _cfg: &crate::config::Config) -> bool {
-            true
+        async fn is_up(&self, _cfg: &crate::config::Config) -> Result<bool, String> {
+            Ok(true)
         }
         async fn chat(
             &self,
@@ -1748,6 +1751,22 @@ mod tests {
                 "画像には赤い丸と青い四角が見えます。",
             ))
         }
+    }
+
+    #[tokio::test]
+    async fn スーパーエージェント上限を呼出最小へ黙って引き上げない() {
+        let cfg = crate::config::Config::new();
+        cfg.set("PICOAGENT_SUPER_AGENT", "true");
+        cfg.set("PICOAGENT_SUPER_AGENT_MAX_STEPS", "12");
+        let provider = ImageRequestProvider(std::sync::atomic::AtomicUsize::new(0));
+        let mut messages = vec![Message::new("user", "画像を説明して")];
+        let error = super::run_scoped(&cfg, &provider, "test", &mut messages, 20, None, None)
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("PICOAGENT_SUPER_AGENT_MAX_STEPS"));
+        assert_eq!(provider.0.load(std::sync::atomic::Ordering::SeqCst), 0);
+        assert_eq!(messages.len(), 1);
     }
 
     #[tokio::test]
@@ -1800,8 +1819,8 @@ mod tests {
         async fn list_models(&self, _cfg: &crate::config::Config) -> anyhow::Result<Vec<String>> {
             Ok(vec![])
         }
-        async fn is_up(&self, _cfg: &crate::config::Config) -> bool {
-            true
+        async fn is_up(&self, _cfg: &crate::config::Config) -> Result<bool, String> {
+            Ok(true)
         }
         async fn chat(
             &self,

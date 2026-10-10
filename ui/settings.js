@@ -634,7 +634,8 @@ function groupedModelField(key, label, value, groups, options = {}) {
 }
 
 // 1つの設定項目を描画して inputs に登録する。
-function field(key, label, type, value, placeholder) {
+function field(key, label, type, value, placeholder, schema = null) {
+  const numberSchema = data?.numberSettings?.[key] || (schema?.range ? schema : null);
   if (key === "PICOAGENT_LOCAL_MODEL_PRESET") {
     return localModelPresetField(key, label, value || "auto");
   }
@@ -649,24 +650,17 @@ function field(key, label, type, value, placeholder) {
     const cb = el("input", { type: "checkbox", checked: Boolean(value) });
     return registerInput(key, cb, markSearchable(el("div", { className: "field inline" }, [cb, el("label", { textContent: label })]), key, label));
   }
-  const inputType = type === "password" ? "password" : type === "number" ? "number" : "text";
-  const input = el("input", { type: inputType, value: value ?? "", placeholder: placeholder || "" });
-  if (key === "PICOAGENT_TTS_VOLUME") {
-    input.min = "0";
-    input.max = "100";
-    input.step = "1";
-  }
-  if (key === "PICOAGENT_STREAM_CHAT_FONT_PX") {
-    input.min = "18";
-    input.max = "48";
-    input.step = "1";
-  }
+  const inputType = numberSchema ? "text" : type === "password" ? "password" : type === "number" ? "number" : "text";
+  const input = el("input", { type: inputType, value: value ?? "", placeholder: numberSchema?.default ?? placeholder ?? "" });
+  if (numberSchema) window.PicoIntegerInput.attach(input, numberSchema);
   if (key === "PICOAGENT_MODEL") input.setAttribute("list", "modelOptions");
   // 天気の地点は一覧から選べるようにする（自由入力も残す）。
   if (key === "PICOAGENT_WEATHER_DEFAULT_LOCATION") {
     input.setAttribute("list", "weatherLocationOptions");
   }
-  return registerInput(key, input, markSearchable(el("div", { className: "field" }, [el("label", { textContent: label }), input]), key, label, placeholder));
+  const children = [el("label", { textContent: label }), input];
+  if (numberSchema) children.push(el("p", { className: "hint", textContent: `範囲: ${numberSchema.range.join("〜")}${numberSchema.unit || ""}。空欄は既定値${numberSchema.default ?? placeholder ?? ""}${numberSchema.allow_auto ? "。autoも指定できます" : ""}` }));
+  return registerInput(key, input, markSearchable(el("div", { className: "field" }, children), key, label, placeholder));
 }
 
 function multiAiSettingsField(values) {
@@ -2018,7 +2012,7 @@ function renderSkillCard(tool, values) {
     } else if (tool.name === "task_scheduler") {
       panel.append(buildScheduleEditor(values.PICOAGENT_SCHEDULED_TASKS));
     } else {
-      for (const f of tool.configSchema) panel.append(field(f.key, f.label, f.type, values[f.key], f.placeholder));
+      for (const f of tool.configSchema) panel.append(field(f.key, f.label, f.type, values[f.key], f.placeholder, f));
     }
     panel.addEventListener("click", event => event.stopPropagation());
     card.addEventListener("click", () => {
@@ -4134,7 +4128,7 @@ async function render() {
     block.append(el("div", { className: "subhead", textContent: provider.label }));
     const guide = setupGuideNode(provider.id, provider.configSchema);
     if (guide) block.append(guide);
-    for (const f of provider.configSchema) block.append(field(f.key, f.label, f.type, providerDraftValues[f.key] ?? v[f.key], f.placeholder));
+    for (const f of provider.configSchema) block.append(field(f.key, f.label, f.type, providerDraftValues[f.key] ?? v[f.key], f.placeholder, f));
     activeProviderBlock = block;
     provSec.append(block);
     // CLIからローカルAIへ戻った際に作り直される入力にも、モデル同期を接続する。
@@ -4273,7 +4267,7 @@ function collect() {
   const patch = cloneSettings({ ...(savedSnapshot || {}), ...(data.values || {}) });
   Object.assign(patch, providerDraftValues);
   for (const [key, input] of inputs) {
-    patch[key] = input.type === "checkbox" ? input.checked : input.value;
+    patch[key] = input.type === "checkbox" ? input.checked : input.dataset.integerSetting ? window.PicoIntegerInput.normalize(input.value) : input.value;
   }
   for (const warning of data.unavailableSecrets || []) {
     const input = inputs.get(warning.key);
@@ -4360,22 +4354,42 @@ function confirmRestart() {
   });
 }
 
-function validateSettingsNumberFields() {
-  const fields = [
-    ["PICOAGENT_STREAM_CHAT_FONT_PX", "display", "配信チャットの文字サイズ"],
-    ["PICOAGENT_TTS_VOLUME", "voice", "音声・ゲーム効果音の音量"],
-  ];
-  for (const [key, tabId, label] of fields) {
-    const input = inputs.get(key);
-    if (!input || input.checkValidity()) continue;
-    // 別タブや検索で隠れた入力にはブラウザの警告が出せない。入力欄を先に見せる。
-    if (settingsSearch) settingsSearch.value = "";
-    if (clearSettingsSearch) clearSettingsSearch.hidden = true;
-    activateSettingsTab(tabId);
-    statusEl.textContent = `${label}の入力内容を確認してください。`;
-    input.reportValidity();
-    return false;
+function clearNumberErrors() {
+  for (const [key, input] of inputs) {
+    input.removeAttribute("aria-invalid");
+    inputWrappers.get(key)?.querySelector(".integer-error")?.remove();
   }
+}
+
+function showNumberErrors(invalid) {
+  clearNumberErrors();
+  for (const item of invalid) {
+    const input = inputs.get(item.key);
+    const wrapper = inputWrappers.get(item.key);
+    if (!input || !wrapper) continue;
+    input.setAttribute("aria-invalid", "true");
+    wrapper.append(el("div", { className: "field-note integer-error", role: "alert", textContent: item.message }));
+  }
+  const first = invalid[0];
+  const input = inputs.get(first?.key);
+  if (settingsSearch) settingsSearch.value = "";
+  if (clearSettingsSearch) clearSettingsSearch.hidden = true;
+  applySettingsSearch();
+  const panel = input?.closest(".tab-panel");
+  if (panel) activateSettingsTab(panel.id.replace(/^panel-/, ""));
+  statusEl.textContent = invalid.map(item => `${data.numberSettings?.[item.key]?.label || item.key}: ${item.message}`).join(" / ");
+  input?.focus();
+}
+
+function validateSettingsNumberFields() {
+  const invalid = [];
+  for (const [key, input] of inputs) {
+    const schema = data.numberSettings?.[key];
+    if (!schema) continue;
+    const message = window.PicoIntegerInput.reason(input, schema);
+    if (message) invalid.push({ key, message });
+  }
+  if (invalid.length) { showNumberErrors(invalid); return false; }
   return true;
 }
 
@@ -4394,6 +4408,10 @@ saveBtn.addEventListener("click", async () => {
       return;
     }
     const res = await window.picoagent.settings.save(request.patch, request.baseRevisions);
+    if (Array.isArray(res.invalid) && res.invalid.length) {
+      showNumberErrors(res.invalid);
+      return;
+    }
     if (Array.isArray(res.conflicts) && res.conflicts.length) {
       const draft = cloneSettings(request.patch);
       const latest = await window.picoagent.settings.load();
@@ -4407,6 +4425,7 @@ saveBtn.addEventListener("click", async () => {
       statusEl.textContent = `別の操作で更新された設定を読み直しました（${res.conflicts.length}件）。入力内容を確認して、もう一度保存してください`;
       return;
     }
+    clearNumberErrors();
     savedSnapshot = cloneSettings(current);
     data.values = cloneSettings(current);
     data.valueRevisions = cloneSettings(res.valueRevisions || data.valueRevisions);
@@ -4422,7 +4441,7 @@ saveBtn.addEventListener("click", async () => {
         statusEl.textContent = "保存しました（次回の起動時に反映されます）";
       }
     } else {
-      statusEl.textContent = res.up ? "保存しました（接続OK）" : "保存しました（AIに未接続）";
+      statusEl.textContent = res.up === null ? `保存しました（接続状態不明: ${res.providerError || "接続状態を確認できません"}）` : res.up ? "保存しました（接続OK）" : "保存しました（AIに未接続）";
     }
     // ホットキーは保存と同時に張り直す。登録できなかった場合は黙って無効にせず伝える。
     if (res.hotkeyWarning) {

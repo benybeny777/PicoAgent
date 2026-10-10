@@ -11,7 +11,6 @@ use tauri::AppHandle;
 
 use crate::config::Config;
 
-const MAX_ITEMS_DEFAULT: usize = 80;
 const MAX_CONTEXT_ITEMS: usize = 24;
 const MAX_ITEM_CHARS: usize = 140;
 
@@ -230,11 +229,12 @@ fn update_with(
     if candidates.is_empty() {
         return Ok(None);
     }
+    let limit = max_items(cfg)?;
     // 読む→直す→書き戻すの間に別の会話と競合すると、片方が覚えた内容が消える。
     let _guard = crate::store::lock_state("memory.json");
     let mut store = read().map_err(|error| error.to_string())?;
     let before = serde_json::to_string(&store).map_err(|error| error.to_string())?;
-    merge_candidates(&mut store, candidates, max_items(cfg));
+    merge_candidates(&mut store, candidates, limit);
     let after = serde_json::to_string(&store).map_err(|error| error.to_string())?;
     if before == after {
         return Ok(None);
@@ -243,11 +243,9 @@ fn update_with(
     Ok(Some(context_from_store(&store)))
 }
 
-fn max_items(cfg: &Config) -> usize {
-    cfg.get("PICOAGENT_MEMORY_MAX_ITEMS", &MAX_ITEMS_DEFAULT.to_string())
-        .parse::<usize>()
-        .map(|value| value.clamp(10, 200))
-        .unwrap_or(MAX_ITEMS_DEFAULT)
+fn max_items(cfg: &Config) -> Result<usize, String> {
+    cfg.int(&crate::config::ints::MEMORY_MAX_ITEMS)
+        .map(|value| value as usize)
 }
 
 fn merge_candidates(store: &mut MemoryStore, candidates: Vec<(String, String)>, max_items: usize) {
@@ -404,6 +402,21 @@ mod tests {
             |_| Ok(()),
         );
         assert!(result.unwrap().unwrap().contains("私はRustが好きです"));
+    }
+
+    #[test]
+    fn 不正な保持件数では記憶を読まず保存しない() {
+        let cfg = crate::config::Config::new();
+        for value in ["9", "201", "abc", "1.5", "-1"] {
+            cfg.set("PICOAGENT_MEMORY_MAX_ITEMS", value);
+            let result = super::update_with(
+                &cfg,
+                "私はRustが好きです",
+                || panic!("不正設定で読込してはいけない"),
+                |_| panic!("不正設定で保存してはいけない"),
+            );
+            assert!(result.unwrap_err().contains("PICOAGENT_MEMORY_MAX_ITEMS"));
+        }
     }
 
     #[test]

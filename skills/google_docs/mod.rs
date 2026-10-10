@@ -2,8 +2,6 @@
 //
 // Google Docs は Drive の .gdoc ファイルではなく Docs API を正ルートにする。
 
-use std::time::Duration;
-
 use async_trait::async_trait;
 use serde_json::{json, Value};
 
@@ -15,14 +13,6 @@ const DOCS_BASE: &str = "https://docs.googleapis.com/v1/documents";
 const MAX_TEXT_CHARS: usize = 100_000;
 
 pub struct GoogleDocsTool;
-
-fn timeout_secs(cfg: &Config) -> u64 {
-    cfg.get("PICOAGENT_GOOGLE_DOCS_TIMEOUT_SECS", "20")
-        .parse::<u64>()
-        .ok()
-        .filter(|value| (3..=60).contains(value))
-        .unwrap_or(20)
-}
 
 fn collect_text(value: &Value, out: &mut String) {
     match value {
@@ -95,12 +85,7 @@ impl Tool for GoogleDocsTool {
                 "password",
                 "ya29...",
             ),
-            Field::new(
-                "PICOAGENT_GOOGLE_DOCS_TIMEOUT_SECS",
-                "Google Docs API 待ち時間（秒、3〜60）",
-                "text",
-                "20",
-            ),
+            Field::int(&crate::config::ints::GOOGLE_DOCS_TIMEOUT_SECS),
         ]
     }
 
@@ -114,7 +99,9 @@ impl Tool for GoogleDocsTool {
             );
         }
         let client = match reqwest::Client::builder()
-            .timeout(Duration::from_secs(timeout_secs(cfg)))
+            .timeout(crate::tool_try!(
+                cfg.duration_secs(&crate::config::ints::GOOGLE_DOCS_TIMEOUT_SECS)
+            ))
             .user_agent("PicoAgent/1.0 (Google Docs tool)")
             .build()
         {

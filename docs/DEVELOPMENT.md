@@ -354,7 +354,7 @@ NSIS アンインストーラは、インストール先またはPicoAgent管理
 | `src-tauri/src/engine.rs` | 同梱 llama-server とモデル GGUF のライフサイクル（DL・spawn・状態通知） |
 | `src-tauri/src/agent.rs` / `agent/{prompt,feedback}.rs` | エージェント実行ループ／systemルールと文脈の合成／任意の計画・自己評価。スキルとメモリは既存の各正本を使い、実体のないhooks層は作らない |
 | `src-tauri/src/api_server.rs` | Ollama 風ローカル HTTP API（既定無効・127.0.0.1 のみ・`PICOAGENT_API_KEY` で Bearer 認証。`/api/chat` `/api/generate` `/v1/chat/completions` `/mcp` ほか） |
-| `src-tauri/src/mcp/{mod,client,server}.rs` | MCP 層（agent / skills / mcp の3層構成の相互運用部）。client: `PICOAGENT_MCP_SERVERS` の stdio サーバを起動し `mcp__<サーバ>__<ツール>` として動的登録（tools::dispatch / schemas_for_text からフォールバック参照）。server: `/mcp` でスキルを MCP ツールとして公開 |
+| `src-tauri/src/mcp/{mod,client,server}.rs` | MCP 層（agent / skills / mcp の3層構成の相互運用部）。client: `PICOAGENT_MCP_SERVERS` の stdio サーバを起動し `mcp__<サーバ>__<ツール>` として動的登録（tools::dispatch / schemas_for_conversation から候補として参照）。server: `/mcp` でスキルを MCP ツールとして公開 |
 | `src-tauri/src/permissions.rs` | **全スキル共通のファイル許可の正本**。`resolve()` が許可判定を通した `SafePath` を返し（生成経路は resolve / join / sibling のみ）、`permissions::fs` が `SafePath` 専用のファイル操作を提供する。`permissions::guard` のテストがスキルの自前実装・`resolve` 漏れを検出 |
 | `src-tauri/src/text.rs` | **文字列を安全に扱う共通層**。`preview()`（文字数＋`…`）、`truncate_bytes()`（バイト上限だが文字の途中で切らない）、`Utf8Stream`（ストリーミング受信の逐次 UTF-8 デコード）。`text::guard` のテストが固定長バイト添字での切り出しと、ストリーミングでの直接 lossy 変換を検出 |
 | `src-tauri/src/doc_sync.rs` | **ドキュメントと実装のズレを検出する設計ガード**（テスト専用）。実装が参照する `PICOAGENT_*` がすべて `docs/SETTINGS.md` に載っているか、逆に一覧だけに残った削除漏れが無いかを双方向で照合する。`skills/` と SPEC の**スキル分類表**（役割と副作用の一覧）も同じく双方向で照合し、載せ忘れ・消し忘れを検出する |
@@ -465,3 +465,11 @@ scripts/setup-character-learning-runtime.pyは共有Python3.12から専用venv�
 学習workerと管理導入のPython回帰検査はtools/tests/character-learning-python.mjsから通常のcargo xtask verifyに含める。Python 3.10以上をPATHに置くか、LEARNING_TEST_PYTHONに実行ファイルを明示する。-Sで外部パッケージを無効にし、モデル取得なしで状態・入力保護・実OSロック・導入再開を検査する。管理学習ランタイムのPythonは3.12で固定する。
 
 管理学習環境は取得前にnvidia-smiのcompute_cap/driver_versionを照合し、CUDA12.8/Torch2.10の対応世代とWindowsドライバー570.65以上に限定する（基準: [CUDA12.8公式release notes](https://docs.nvidia.com/cuda/archive/12.8.0/cuda-toolkit-release-notes/index.html)・[PyTorch2.10 release](https://github.com/pytorch/pytorch/releases/tag/v2.10.0)）。混在GPU構成では対応GPUをCUDA_VISIBLE_DEVICESで選ぶ。明示選択した既存ランタイムへこの固定wheel制限を掛けない。文字起こしはUIでGPU/CUDA float16既定、CPU/int8を明示選択可能。GPU選択の失敗ではCPUへ切り替えずasr.jsonとstatus.jsonへ理由を保存する。ASR前にCUDA/CTranslate2 float16対応と空き6.0GBを検査する。この値は[公式faster-whisper benchmark](https://github.com/SYSTRAN/faster-whisper#benchmark)のlarge-v2 float16（約4.525GB）へ余裕を加えた保守的運用値であり、large-v3の保証値ではない。旧asrDeviceなしはCPUとして正規化し、再開来歴を維持する。
+
+### 整数設定の宣言と画面への供給
+
+整数の既定値・範囲・単位・`auto`許可は`config::ints`の`IntSetting`だけに宣言する。コネクタの`Field::int`と`settings_load.numberSettings`、`pet_init`・`pet:ui`の`numberSettings`はこの宣言を共有する。範囲の両端は精度を失わない十進文字列、既定値も文字列とし、設定画面側へ別の範囲表を作らない。仕様上の量の一覧は[SETTINGS.md](SETTINGS.md)に置き、宣言と一致することをガードする。
+
+`ui/settings-number.js`は整数入力の正規化・範囲判定だけを所有する。編集時は全角入力を失わない`text`、有効な整数の編集終了後は`number`へ戻す。不正な草稿をブラウザーの空欄化で捨てずに保持する。保存APIの`invalid`は変更全体の不保存を示し、正本と未保存状態を更新してはならない。
+
+実行画面の数量は正常時の整数と、不正時の`null`・`invalidNumbers`を`readIntegerSetting`で検査する。停止や診断の所有者は音声・会話欄・ambientの各部品であり、既定値への置換はしない。関連するVM検査と`settings-display.mjs`の全角入力・不正保存・復旧検査を変更時に実行する。

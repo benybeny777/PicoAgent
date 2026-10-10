@@ -412,25 +412,8 @@ fn is_public_ip(ip: IpAddr) -> bool {
 }
 
 /// モデル一覧のような短い問い合わせの待ち時間。設定画面のプロバイダ選択が固まらないようにする。
-pub fn metadata_timeout(cfg: &Config) -> Duration {
-    timeout(cfg, "PICOAGENT_HTTP_METADATA_TIMEOUT_SECS", 15, 3, 60)
-}
-
-/// 秒単位の設定を共通の範囲へ丸めてDurationへ変換する。
-pub fn timeout(
-    cfg: &Config,
-    key: &str,
-    default_secs: u64,
-    min_secs: u64,
-    max_secs: u64,
-) -> Duration {
-    let default_value = default_secs.to_string();
-    let seconds = cfg
-        .get(key, &default_value)
-        .parse::<u64>()
-        .unwrap_or(default_secs)
-        .clamp(min_secs, max_secs);
-    Duration::from_secs(seconds)
+pub fn metadata_timeout(cfg: &Config) -> Result<Duration, String> {
+    cfg.duration_secs(&crate::config::ints::HTTP_METADATA_TIMEOUT_SECS)
 }
 
 /// 外部サービスの応答本文を、読取失敗を空本文へ落とさず取得する。
@@ -775,18 +758,16 @@ mod guarded_tests {
 mod tests {
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
     #[test]
-    fn 待ち時間設定を範囲内へ正規化する() {
+    fn 待ち時間の不正値を理由付きで返す() {
         let cfg = crate::config::Config::new();
-        cfg.set("TEST_TIMEOUT", "999");
-        assert_eq!(
-            super::timeout(&cfg, "TEST_TIMEOUT", 20, 3, 60).as_secs(),
-            60
-        );
-        cfg.set("TEST_TIMEOUT", "broken");
-        assert_eq!(
-            super::timeout(&cfg, "TEST_TIMEOUT", 20, 3, 60).as_secs(),
-            20
-        );
+        for value in ["999", "broken", "2", "-1", "3.5"] {
+            cfg.set("PICOAGENT_HTTP_METADATA_TIMEOUT_SECS", value);
+            let error = super::metadata_timeout(&cfg).unwrap_err();
+            assert!(error.contains("PICOAGENT_HTTP_METADATA_TIMEOUT_SECS"));
+        }
+        cfg.set("PICOAGENT_HTTP_METADATA_TIMEOUT_SECS", "3");
+        assert_eq!(super::metadata_timeout(&cfg).unwrap().as_secs(), 3);
+        assert!(cfg.duration_key("TEST_TIMEOUT").is_err());
     }
 
     #[test]

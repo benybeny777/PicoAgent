@@ -503,6 +503,7 @@ async fn run_transcribe_command(
 }
 
 async fn transcribe(cfg: &Config, args: &Value) -> String {
+    let timeout = crate::tool_try!(cfg.int(&crate::config::ints::TRANSCRIBE_TIMEOUT_SECS)) as u64;
     let base = meeting_root(cfg);
     let audio = if let Some(audio_text) = args
         .get("audio_path")
@@ -547,12 +548,6 @@ async fn transcribe(cfg: &Config, args: &Value) -> String {
             .and_then(Value::as_bool)
             .unwrap_or(false),
     );
-    let timeout = cfg
-        .get("PICOAGENT_TRANSCRIBE_TIMEOUT_SECS", "1800")
-        .parse::<u64>()
-        .ok()
-        .filter(|value| (10..=7200).contains(value))
-        .unwrap_or(1800);
     let output = match run_transcribe_command(&program, &args_list, timeout).await {
         Ok(output) => output,
         Err(error) => return error,
@@ -842,12 +837,7 @@ impl Tool for MeetingRecorderTool {
                 "text",
                 "-tdrz",
             ),
-            Field::new(
-                "PICOAGENT_TRANSCRIBE_TIMEOUT_SECS",
-                "ローカル文字起こしタイムアウト秒",
-                "text",
-                "1800",
-            ),
+            Field::int(&crate::config::ints::TRANSCRIBE_TIMEOUT_SECS),
         ]
     }
 

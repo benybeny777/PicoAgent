@@ -47,12 +47,7 @@ impl Tool for RssFeedTool {
     fn config_schema(&self) -> Vec<Field> {
         vec![
             Field::new("PICOAGENT_RSS_DEFAULT_URL", "RSS既定URL", "text", ""),
-            Field::new(
-                "PICOAGENT_RSS_TIMEOUT_SECS",
-                "RSS取得待ち時間（秒、3〜60）",
-                "text",
-                "15",
-            ),
+            Field::int(&crate::config::ints::RSS_TIMEOUT_SECS),
         ]
     }
 
@@ -83,7 +78,7 @@ impl Tool for RssFeedTool {
         let request = crate::tools::http::GuardedRequest::get(
             url.clone(),
             crate::tools::http::UrlPolicy::PublicWeb,
-            crate::tools::http::timeout(cfg, "PICOAGENT_RSS_TIMEOUT_SECS", 15, 3, 60),
+            crate::tool_try!(cfg.duration_secs(&crate::config::ints::RSS_TIMEOUT_SECS)),
             MAX_FEED_BYTES,
             "PicoAgent/1.0 (RSS tool)",
         );
