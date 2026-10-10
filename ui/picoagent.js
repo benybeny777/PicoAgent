@@ -15,11 +15,11 @@ function logBridgeError(context, error) {
   const detail = error && (error.stack || error.message) ? error.stack || error.message : String(error);
   try {
     invoke("pet_log", { level: "error", message: `${context} 失敗`, detail: String(detail) }).catch(logError => {
-      // フォールバック許可: pet_log 自体の失敗は再帰ログにせず、開発者コンソールへだけ出す。
+      // pet_log 自体の失敗は再帰ログにせず、開発者コンソールへだけ出す。
       console.warn("invoke エラーログ保存に失敗しました", logError);
     });
   } catch (logError) {
-    // フォールバック許可: pet_log 自体の失敗は再帰ログにせず、開発者コンソールへだけ出す。
+    // pet_log 自体の失敗は再帰ログにせず、開発者コンソールへだけ出す。
     console.warn("invoke エラーログ保存に失敗しました", logError);
   }
 }
@@ -270,6 +270,7 @@ window.picoagent = {
     // 不具合の連絡へ添える診断情報を1ファイルへ書き出す（秘密値は含めない）。
     exportDiagnostics: () => call("settings_export_diagnostics"),
     componentStatus: () => call("settings_components_status"),
+    detectCli: (id) => call("settings_detect_cli", { id }),
     generationEnvironment: () => call("settings_generation_environment"),
     installComponents: (ids, enableTts = false, acceptedLicenseIds = []) => call("settings_components_install", { ids, enableTts, acceptedLicenseIds }),
     removeComponent: (id) => call("settings_components_remove", { id }),

@@ -162,8 +162,10 @@ pub trait Tool: Send + Sync {
     async fn run(&self, cfg: &Config, args: Value) -> String;
 }
 
+pub mod cli_detection;
 pub mod http;
 pub mod process;
+pub mod walk;
 pub mod whisper;
 
 pub struct ToolReg {
@@ -214,7 +216,7 @@ fn resolve_cli_in(
             return std::path::absolute(path)
                 .map_err(|error| format!("実行パスを解決できません: {error}"));
         }
-        // フォールバック許可: PR #472の利用者決定。明示したコマンド名だけPATHで解決する。
+        // フォールバック許可: PR #472の利用者決定。明示したコマンド名だけPATHで解決する。（根拠: PR #472）
         return process::resolve_executable(configured)
             .ok_or_else(|| format!("{key} で指定したコマンドがPATHにありません"));
     }

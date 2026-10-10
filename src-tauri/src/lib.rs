@@ -7,8 +7,6 @@ mod alarm;
 mod api_server;
 mod app_paths;
 mod boot_screen;
-#[cfg(test)]
-mod bundle_scope;
 mod character_learning;
 mod character_maker;
 mod character_pack;
@@ -19,8 +17,6 @@ mod config;
 mod conversation_turn;
 mod daily;
 mod diagnostics;
-#[cfg(test)]
-mod doc_sync;
 mod downloaded_characters;
 mod durable_jobs;
 mod emotion;
@@ -29,8 +25,6 @@ mod engine_backend;
 mod game;
 mod generation_backend;
 mod gpu;
-#[cfg(test)]
-mod guard_scan;
 mod history;
 mod hotkey;
 mod layout;
@@ -61,8 +55,6 @@ mod text;
 mod tools;
 mod topic_guard;
 mod tracer;
-#[cfg(test)]
-mod ui_contract;
 mod usage;
 mod user_characters;
 mod user_skills;
@@ -145,6 +137,7 @@ pub fn run() {
             commands::pet_complete_onboarding,
             commands::pet_show_onboarding,
             commands::settings_components_status,
+            commands::settings_detect_cli,
             commands::settings_generation_environment,
             commands::settings_components_install,
             commands::settings_components_remove,
@@ -222,7 +215,12 @@ pub fn run() {
             menu::handle_event(app, event.id().as_ref());
         })
         .setup(|app| {
-            let managed_data = app_paths::data_dir(app.handle());
+            let managed_data = app_paths::resolve_data_dir(app.handle()).map_err(std::io::Error::other)?;
+            if !app.manage(app_paths::ManagedDataDir(managed_data.clone())) {
+                return Err(std::io::Error::other("管理保存先は既に初期化されています").into());
+            }
+            // 設定・取得・プロバイダが通信する前に標準HTTPを確定する。
+            tools::http::init().map_err(std::io::Error::other)?;
             std::fs::create_dir_all(&managed_data)?;
             log_paths::allow_asset_scope(app.handle());
             if let Err(error) = migration::migrate_identity_dirs(app.handle(), &managed_data) {
@@ -1027,6 +1025,15 @@ fn save_window_layout_on_exit(app_handle: &tauri::AppHandle) {
         log_paths::append_app_log(app_handle, &error);
     }
 }
+
+#[cfg(test)]
+mod bundle_scope;
+#[cfg(test)]
+mod doc_sync;
+#[cfg(test)]
+mod guard_scan;
+#[cfg(test)]
+mod ui_contract;
 
 #[cfg(test)]
 mod window_layout_tests {

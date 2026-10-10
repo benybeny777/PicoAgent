@@ -13,16 +13,42 @@ pub fn data_path(app: &AppHandle, entry: DataPath<'_>) -> PathBuf {
     path_at(&data_dir(app), entry)
 }
 
-/// 開発ビルドの保存先の根（Windowsは `%APPDATA%\PicoAgent-Dev`）。製品ビルドでは `None`。
-///
-/// 開発中の設定・履歴・キャラ・記憶・モデル・同梱ランタイムを、インストーラで入れた通常版の
-/// `PicoAgent` と完全に分ける。起動経路（起動バッチ・`cargo xtask dev`・`cargo tauri dev`）ではなく
-/// ビルドの種類で決めるので、どの起動でも通常版の領域へは触れない。リポジトリの外に置き、
-/// worktree や clone を作り直しても取得済みのモデル・音声を共有する。
-pub fn dev_data_root() -> Option<PathBuf> {
-    // フォールバック許可: OSの保存先を取れない開発環境でも、通常版の領域へは降格させない。
-    cfg!(debug_assertions)
-        .then(|| dev_data_root_for(&dirs::data_dir().unwrap_or_else(std::env::temp_dir)))
+/// setupで確定した、このアプリインスタンス専用の管理保存先。
+pub(crate) struct ManagedDataDir(pub PathBuf);
+
+/// 保存先を起動時に一度だけ確定する。取得不能なら他の領域へ切り替えない。
+pub(crate) fn resolve_data_dir(app: &AppHandle) -> Result<PathBuf, String> {
+    resolve_data_dir_with(
+        cfg!(debug_assertions),
+        app.config().identifier.as_str(),
+        dirs::data_dir,
+        || {
+            app.path()
+                .app_data_dir()
+                .map_err(|error| format!("製品の管理保存先を取得できません: {error}"))
+        },
+    )
+}
+
+fn resolve_data_dir_with(
+    development: bool,
+    identifier: &str,
+    os_data: impl FnOnce() -> Option<PathBuf>,
+    product_data: impl FnOnce() -> Result<PathBuf, String>,
+) -> Result<PathBuf, String> {
+    let root = if development {
+        let os = os_data()
+            .ok_or("開発版のOS保存先を取得できません。管理データを初期化せず起動を停止します")?;
+        dev_data_root_for(&os)
+    } else {
+        let product = product_data()?;
+        let parent = product
+            .parent()
+            .filter(|path| !path.as_os_str().is_empty())
+            .ok_or("製品の管理保存先の親ディレクトリを取得できません。起動を停止します")?;
+        product_root(parent)
+    };
+    Ok(managed_dir(root, identifier))
 }
 
 /// このビルドの同梱物（`resources/bundled`）の唯一の置き場所。
@@ -67,22 +93,11 @@ pub fn character_learning_scripts_dir(app: &AppHandle) -> Result<PathBuf, String
         .map_err(|error| format!("同梱の学習処理の保存先を取得できません: {error}"))
 }
 
+/// setupがManagedDataDirを登録してから、コマンド・ログ・各機能の初期化を始める。
+/// AppStateと同じTauriの必須state契約を使う。未初期化状態は呼び出し順の不具合であり、
+/// 別領域を返して処理を続けない。複数AppHandleもそれぞれの確定保存先を参照する。
 pub fn data_dir(app: &AppHandle) -> PathBuf {
-    let identifier = app.config().identifier.as_str();
-    if let Some(root) = dev_data_root() {
-        return managed_dir(root, identifier);
-    }
-    match app.path().app_data_dir() {
-        Ok(path) => {
-            let root = path.parent().map(product_root).unwrap_or(path);
-            managed_dir(root, identifier)
-        }
-        // フォールバック許可: 保存先取得自体の失敗を記録するため、ログだけは一時領域へ退避する。
-        Err(error) => {
-            eprintln!("ログ保存先を取得できないため一時領域を使います: {error}");
-            product_root(&std::env::temp_dir())
-        }
-    }
+    app.state::<ManagedDataDir>().inner().0.clone()
 }
 
 pub fn cache_dir(app: &AppHandle) -> PathBuf {
@@ -119,6 +134,113 @@ pub fn browser_profile_dir() -> Result<PathBuf, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn 保存先取得失敗は別領域を探索せず起動を止める() {
+        use std::cell::Cell;
+        let product_calls = Cell::new(0);
+        let error = resolve_data_dir_with(
+            true,
+            "com.picoagent.desktop",
+            || None,
+            || {
+                product_calls.set(product_calls.get() + 1);
+                Ok(PathBuf::from("/temporary/product"))
+            },
+        )
+        .unwrap_err();
+        assert!(error.contains("OS保存先"));
+        assert_eq!(product_calls.get(), 0);
+        let os_calls = Cell::new(0);
+        for product in [
+            Err("OSが保存先を返せません".into()),
+            Ok(PathBuf::from("/")),
+            Ok(PathBuf::from("single")),
+        ] {
+            assert!(resolve_data_dir_with(
+                false,
+                "com.picoagent.desktop",
+                || {
+                    os_calls.set(os_calls.get() + 1);
+                    Some(PathBuf::from("/temporary"))
+                },
+                || product
+            )
+            .is_err());
+        }
+        assert_eq!(os_calls.get(), 0);
+    }
+
+    #[test]
+    fn 起動時の確定保存先で製品開発検査版を分離する() {
+        let os = PathBuf::from("/data");
+        let mut roots = Vec::new();
+        for (development, identifier) in [
+            (false, "com.picoagent.desktop"),
+            (true, "com.picoagent.desktop"),
+            (true, "com.picoagent.ui-check"),
+        ] {
+            roots.push(
+                resolve_data_dir_with(
+                    development,
+                    identifier,
+                    || Some(os.clone()),
+                    || Ok(os.join(identifier)),
+                )
+                .unwrap(),
+            );
+        }
+        assert_eq!(
+            roots,
+            [
+                os.join("PicoAgent"),
+                os.join("PicoAgent-Dev"),
+                os.join("PicoAgent-Dev/instances/com.picoagent.ui-check")
+            ]
+        );
+        for left in 0..roots.len() {
+            for right in left + 1..roots.len() {
+                assert_ne!(roots[left], roots[right]);
+            }
+        }
+    }
+
+    #[test]
+    fn setupは保存先を確定登録してから依存初期化を始める() {
+        let source = crate::guard_scan::backend_sources()
+            .iter()
+            .find(|source| source.path.ends_with("lib.rs"))
+            .unwrap()
+            .body();
+        let setup = source.split(".setup(|app| {").nth(1).unwrap();
+        let resolve = setup.find("app_paths::resolve_data_dir").unwrap();
+        let registered = setup.find("app.manage(app_paths::ManagedDataDir").unwrap();
+        let first_consumer = setup
+            .find("std::fs::create_dir_all(&managed_data)")
+            .unwrap();
+        assert!(resolve < registered && registered < first_consumer);
+        let path_source = crate::guard_scan::backend_sources()
+            .iter()
+            .find(|source| source.path.ends_with("app_paths.rs"))
+            .unwrap()
+            .body();
+        let lookup = path_source
+            .split("pub fn data_dir(")
+            .nth(1)
+            .unwrap()
+            .split("pub fn cache_dir")
+            .next()
+            .unwrap();
+        assert!(lookup.contains("app.state::<ManagedDataDir>()"));
+        for alternate in [
+            "resolve_data_dir",
+            "dirs::data_dir",
+            "temp_dir",
+            "app_data_dir",
+        ] {
+            assert!(!lookup.contains(alternate));
+        }
+    }
 
     #[test]
     fn 開発版の保存で通常版と別識別子の設定や履歴を変更しない() {
@@ -218,7 +340,14 @@ mod tests {
         assert_eq!(root, os.join("PicoAgent-Dev"));
         assert_ne!(root, os.join("PicoAgent"));
         // テストは開発ビルドなので、通常版の `PicoAgent` ではなく `PicoAgent-Dev` を指す。
-        assert!(dev_data_root().unwrap().ends_with("PicoAgent-Dev"));
+        assert!(resolve_data_dir_with(
+            true,
+            "com.picoagent.desktop",
+            || Some(os.to_path_buf()),
+            || unreachable!("開発版では製品領域を取得しない")
+        )
+        .unwrap()
+        .ends_with("PicoAgent-Dev"));
     }
 
     #[test]

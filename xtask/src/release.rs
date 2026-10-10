@@ -41,10 +41,10 @@ struct Artifact {
 /// `latest.json` が同じ版なら他OSの枠を残したまま該当枠だけを差し替えるので、
 /// OSごとに1回ずつ実行できる。版が変わった場合は前の版のURLを引き継がず枠を空にする。
 pub fn write_update_feed(args: &[String]) -> Result<()> {
-    let installer = args
-        .first()
-        .map(std::path::PathBuf::from)
-        .context("使い方: cargo xtask update-feed <配布物(.exe/.dmg)> [更新内容]")?;
+    let (destination, args) = update_feed_args(args)?;
+    let installer = args.first().map(std::path::PathBuf::from).context(
+        "使い方: cargo xtask update-feed <配布物(.exe/.dmg)> --output <latest.json> [更新内容]",
+    )?;
     anyhow::ensure!(
         installer.is_file(),
         "配布物が見つかりません: {}",
@@ -71,9 +71,8 @@ pub fn write_update_feed(args: &[String]) -> Result<()> {
         verify_macos_dmg(&installer)?;
     }
     let sha256 = file_sha256(&installer)?;
-    let destination = repo_root().join("distribution/site/latest.json");
     let mut feed =
-        same_version_feed(&destination, &version).unwrap_or_else(|| empty_feed(&version));
+        same_version_feed(&destination, &version)?.unwrap_or_else(|| empty_feed(&version));
     if args.len() > 1 {
         let notes = args[1..].join(" ");
         anyhow::ensure!(
@@ -93,7 +92,12 @@ pub fn write_update_feed(args: &[String]) -> Result<()> {
     )?;
     log(
         "update-feed",
-        format!("{} / {} bytes / SHA-256 {}", artifact.label, size, sha256),
+        format!(
+            "{} / {} / SHA-256 {}",
+            artifact.label,
+            crate::util::mb(size),
+            sha256
+        ),
     );
     Ok(())
 }
@@ -127,13 +131,76 @@ fn classify_artifact(name: &str) -> Result<Artifact> {
     bail!("対応していない配布物です。.exe または .dmg を指定してください: {name}")
 }
 
-/// 同じ版の既存フィードだけを引き継ぐ。版が変われば他OSの枠は前の版のURLなので破棄する。
-fn same_version_feed(path: &Path, version: &str) -> Option<Value> {
-    let value: Value = serde_json::from_str(&fs::read_to_string(path).ok()?).ok()?;
-    if !value.is_object() || !value.get("platforms")?.is_object() {
-        return None;
+/// 配布正本へ出力する場所を利用者が明示する。
+fn update_feed_args(args: &[String]) -> Result<(std::path::PathBuf, Vec<String>)> {
+    anyhow::ensure!(
+        args.iter().filter(|arg| arg.as_str() == "--output").count() == 1,
+        "--outputを1つ指定してください。配布正本側のlatest.jsonへ明示出力します"
+    );
+    let position = args.iter().position(|arg| arg == "--output").context("update-feedには --output <配布正本側のlatest.json> が必要です。20側distribution/siteへは暗黙に書き込みません。")?;
+    let output = args
+        .get(position + 1)
+        .filter(|arg| !arg.starts_with("--"))
+        .context("--outputの出力ファイルを指定してください")?;
+    let path = std::path::PathBuf::from(output);
+    anyhow::ensure!(
+        path.file_name().is_some_and(|name| name == "latest.json"),
+        "出力ファイル名はlatest.jsonを指定してください"
+    );
+    let remaining = args
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| *index != position && *index != position + 1)
+        .map(|(_, value)| value.clone())
+        .collect();
+    Ok((path, remaining))
+}
+
+/// 同じ版だけ他OS枠を保持する。版違いは新規、不在以外の読込・schema失敗は停止する。
+fn same_version_feed(path: &Path, version: &str) -> Result<Option<Value>> {
+    let text = match fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => {
+            return Err(error)
+                .with_context(|| format!("更新フィードを読めません: {}", path.display()))
+        }
+    };
+    let value: Value = serde_json::from_str(&text)
+        .with_context(|| format!("更新フィードが不正なJSONです: {}", path.display()))?;
+    anyhow::ensure!(
+        value.is_object() && value.get("platforms").is_some_and(Value::is_object),
+        "更新フィードのplatformsが不正です: {}",
+        path.display()
+    );
+    anyhow::ensure!(
+        value.get("schemaVersion").and_then(Value::as_u64) == Some(1),
+        "更新フィードのschemaVersionが不正です: {}",
+        path.display()
+    );
+    anyhow::ensure!(
+        value.get("notes").is_some_and(Value::is_string)
+            && value.get("releasePage").is_some_and(Value::is_string),
+        "更新フィードのnotes/releasePageが不正です: {}",
+        path.display()
+    );
+    for (platform, item) in value["platforms"].as_object().unwrap() {
+        anyhow::ensure!(
+            item.get("url").is_some_and(Value::is_string)
+                && item.get("size").and_then(Value::as_u64).is_some()
+                && item.get("sha256").is_some_and(Value::is_string),
+            "更新フィードのplatforms.{platform}が不正です: {}",
+            path.display()
+        );
     }
-    (value.get("version")?.as_str()? == version).then_some(value)
+    let existing = value
+        .get("version")
+        .and_then(Value::as_str)
+        .filter(|version| !version.is_empty())
+        .with_context(|| format!("更新フィードのversionが不正です: {}", path.display()))?;
+    parse_semver(existing)
+        .with_context(|| format!("更新フィードのversionが不正です: {}", path.display()))?;
+    Ok((existing == version).then_some(value))
 }
 
 fn empty_feed(version: &str) -> Value {
@@ -615,6 +682,61 @@ mod tests {
     };
 
     #[test]
+    fn 更新フィードの出力先は明示必須で暗黙配布へ書かない() {
+        assert!(super::update_feed_args(&["setup.exe".into()]).is_err());
+        for args in [
+            vec!["--output".into()],
+            vec!["--output".into(), "wrong.json".into()],
+            vec![
+                "--output".into(),
+                "latest.json".into(),
+                "--output".into(),
+                "latest.json".into(),
+            ],
+        ] {
+            assert!(super::update_feed_args(&args).is_err());
+        }
+        let (path, args) = super::update_feed_args(&[
+            "setup.exe".into(),
+            "--output".into(),
+            "temp/latest.json".into(),
+            "更新内容".into(),
+        ])
+        .unwrap();
+        assert_eq!(path, std::path::PathBuf::from("temp/latest.json"));
+        assert_eq!(args, ["setup.exe", "更新内容"]);
+    }
+
+    #[test]
+    fn 不在だけ新規で読込不能と不正schemaは既存を保持して止める() {
+        let root = crate::util::repo_root()
+            .join("temp")
+            .join(format!("feed-invalid-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("latest.json");
+        assert!(same_version_feed(&path, "1.0.3").unwrap().is_none());
+        for value in [
+            serde_json::json!({"version":"1.0.3"}),
+            serde_json::json!({"version":"1.0.3","platforms":[]}),
+            serde_json::json!({"schemaVersion":2,"version":"1.0.3","platforms":{}}),
+            serde_json::json!({"schemaVersion":1,"version":"1.0.3","notes":"","releasePage":"","platforms":{"windows-x64":{"url":1}}}),
+        ] {
+            let bytes = serde_json::to_vec(&value).unwrap();
+            std::fs::write(&path, &bytes).unwrap();
+            let error = same_version_feed(&path, "1.0.3").unwrap_err().to_string();
+            assert!(error.contains(path.to_str().unwrap()));
+            assert_eq!(std::fs::read(&path).unwrap(), bytes);
+        }
+        std::fs::remove_file(&path).unwrap();
+        std::fs::create_dir(&path).unwrap();
+        assert!(same_version_feed(&path, "1.0.3")
+            .unwrap_err()
+            .to_string()
+            .contains("読めません"));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn 販売設定はキャラを重複なく列挙する() {
         let value = super::manifest().unwrap();
         let characters = included_characters(&value).unwrap();
@@ -958,13 +1080,13 @@ mod tests {
         std::fs::write(&path, serde_json::to_string(&existing).unwrap()).unwrap();
 
         // 同じ版ならWindowsの枠を残したままmacOSの枠を足せる。
-        let same = same_version_feed(&path, "1.0.3").unwrap();
+        let same = same_version_feed(&path, "1.0.3").unwrap().unwrap();
         assert_eq!(same["platforms"]["windows-x64"]["url"], "既存");
         // 版が上がったら前の版のURLを引き継がない。
-        assert!(same_version_feed(&path, "1.0.4").is_none());
-        // JSONとして壊れていても落ちずに空のひな形へ落ちる。
+        assert!(same_version_feed(&path, "1.0.4").unwrap().is_none());
+        // JSON破損は既存OS枠を消さず理由付きで停止する。
         std::fs::write(&path, b"{").unwrap();
-        assert!(same_version_feed(&path, "1.0.3").is_none());
+        assert!(same_version_feed(&path, "1.0.3").is_err());
         std::fs::remove_dir_all(root).unwrap();
     }
 

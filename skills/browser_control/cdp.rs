@@ -290,7 +290,7 @@ pub fn stop() -> Result<(), String> {
 /// `cargo xtask stop` にも同じ目印での回収がある（`assets::BROWSER_PROFILE_NEEDLE`）。
 fn stop_profile_browsers() -> Result<(), String> {
     let Ok(profile) = isolated_profile_dir() else {
-        return Ok(()); // フォールバック許可: 保存先を決められない環境では起動もしていない。
+        return Ok(()); // 保存先を決められない環境では起動もしていない。
     };
     let needle = profile.display().to_string().replace('\\', "/");
     terminate_by_command_line(&needle)

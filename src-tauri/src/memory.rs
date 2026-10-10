@@ -50,7 +50,7 @@ pub fn load(app: &AppHandle) -> anyhow::Result<MemoryStore> {
     };
     match serde_json::from_str(&text) {
         Ok(store) => Ok(store),
-        // フォールバック許可: PR #463 採用案3。退避と通知に成功した領域だけ新規状態で続ける。
+        // フォールバック許可: PR #463 採用案3。退避と通知に成功した領域だけ新規状態で続ける。（根拠: PR #463 採用案。退避・通知と原本保護）
         // そのまま次の保存で上書きすると記憶が恒久的に消えるので、退避してから続ける。
         Err(error) => {
             let saved = crate::store::quarantine_and_notify(

@@ -101,7 +101,7 @@ pub fn lock_state(key: &str) -> std::sync::MutexGuard<'static, ()> {
     static LOCKS: OnceLock<Mutex<HashMap<String, &'static Mutex<()>>>> = OnceLock::new();
     let registry = LOCKS.get_or_init(|| Mutex::new(HashMap::new()));
     let mutex: &'static Mutex<()> = {
-        // フォールバック許可: ロックが毒された場合も更新自体は続ける（中身は () で不変）。
+        // ロックが毒された場合も更新自体は続ける（中身は () で不変）。
         let mut map = registry
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());

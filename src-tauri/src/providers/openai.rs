@@ -181,7 +181,7 @@ pub(crate) async fn stream_chat(
 
     // API キー不要のローカルエンジン（llama-server）からも呼ばれるため、
     // 空キーのときは Authorization ヘッダ自体を付けない（空 Bearer で弾かれるのを防ぐ）。
-    let request = crate::tools::http::client()
+    let request = crate::tools::http::client().map_err(anyhow::Error::msg)?
         .post(url)
         .json(&body)
         .timeout(Duration::from_secs(600));
@@ -363,7 +363,7 @@ impl Provider for OpenAI {
                 .collect());
         }
         let url = format!("{}/models", base_url(cfg));
-        let res = crate::tools::http::client()
+        let res = crate::tools::http::client().map_err(anyhow::Error::msg)?
             .get(&url)
             .bearer_auth(&key)
             .timeout(crate::tools::http::metadata_timeout(cfg).map_err(anyhow::Error::msg)?)
@@ -403,7 +403,7 @@ impl Provider for OpenAI {
             cfg,
             "OpenAI互換API",
             "/models",
-            crate::tools::http::client()
+            crate::tools::http::client()?
                 .get(url)
                 .bearer_auth(key)
                 .timeout(std::time::Duration::from_secs(3)),
@@ -428,7 +428,7 @@ impl Provider for OpenAI {
             body["tools"] = json!(tools);
         }
         let url = format!("{}/chat/completions", base_url(cfg));
-        let res = crate::tools::http::client()
+        let res = crate::tools::http::client().map_err(anyhow::Error::msg)?
             .post(&url)
             .bearer_auth(api_key(cfg))
             .json(&body)
@@ -502,7 +502,7 @@ impl Provider for OpenAI {
             body["response_format"] = json!({"type": "json_object"});
         }
         let url = format!("{}/chat/completions", base_url(cfg));
-        let res = crate::tools::http::client()
+        let res = crate::tools::http::client().map_err(anyhow::Error::msg)?
             .post(&url)
             .bearer_auth(api_key(cfg))
             .json(&body)

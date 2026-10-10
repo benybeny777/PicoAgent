@@ -320,7 +320,8 @@ pub async fn service_body(
     response_text(service_response(cfg, label, response).await?).await
 }
 
-static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+type SharedClient = OnceLock<Result<reqwest::Client, String>>;
+static CLIENT: SharedClient = OnceLock::new();
 
 /// 接続確立の上限。応答本文には掛からないので、モデルDLや生成のストリーミングは妨げない。
 /// 到達しないホストでTCP接続がOS既定（分単位）まで滞留するのを防ぐ。
@@ -331,16 +332,48 @@ const MAX_SERVICE_RESPONSE_BYTES: usize = 8 * 1024 * 1024;
 
 /// 専用のUser-Agent、DNS固定、リダイレクト制御等が不要な経路で接続プールを共有する標準クライアント。
 /// 個別の待ち時間はRequestBuilder::timeoutで指定する。
-pub fn client() -> &'static reqwest::Client {
-    CLIENT.get_or_init(|| {
+pub fn init() -> Result<(), String> {
+    initialize_client(&CLIENT, || {
         reqwest::Client::builder()
             .connect_timeout(Duration::from_secs(CONNECT_TIMEOUT_SECS))
             .read_timeout(Duration::from_secs(READ_TIMEOUT_SECS))
             .build()
-            // フォールバック許可: TLSバックエンド初期化の失敗でHTTPを一切使えなくしないため、
-            // 接続上限なしの既定クライアントで続行する。
-            .unwrap_or_else(|_| reqwest::Client::new())
+            .map_err(|error| {
+                format!(
+                    "標準HTTPクライアントを初期化できません: {}",
+                    error.without_url()
+                )
+            })
     })
+}
+
+fn initialize_client(
+    state: &SharedClient,
+    build: impl FnOnce() -> Result<reqwest::Client, String>,
+) -> Result<(), String> {
+    state
+        .get_or_init(build)
+        .as_ref()
+        .map(|_| ())
+        .map_err(Clone::clone)
+}
+
+fn initialized_client(state: &SharedClient) -> Result<&reqwest::Client, String> {
+    state
+        .get()
+        .ok_or_else(|| "標準HTTPクライアントが未初期化です。起動時の初期化が必要です".to_string())?
+        .as_ref()
+        .map_err(Clone::clone)
+}
+
+/// 起動時に確定した接続プールだけを返す。初期化失敗後に別クライアントを作らない。
+pub fn client() -> Result<&'static reqwest::Client, String> {
+    // 単体検査はTauri setupを実行しないため、同じ起動時初期化を検査入口で呼ぶ。
+    // 未初期化・初期化失敗の境界は独立したSharedClientで同じ関数を検査する。
+    if cfg!(test) {
+        init()?;
+    }
+    initialized_client(&CLIENT)
 }
 
 /// URL取得スキルがローカル端末や社内ネットワークをSSRFで読まないための宛先検査。
@@ -488,6 +521,45 @@ macro_rules! tool_response_json {
 #[cfg(test)]
 mod guarded_tests {
     use super::*;
+
+    #[test]
+    fn 未初期化と初期化失敗は通信を始めず再生成もしない() {
+        let state = SharedClient::new();
+        assert!(initialized_client(&state).unwrap_err().contains("未初期化"));
+        let calls = std::sync::atomic::AtomicUsize::new(0);
+        for _ in 0..2 {
+            let error = initialize_client(&state, || {
+                calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                Err("TLS初期化の試験失敗".into())
+            })
+            .unwrap_err();
+            assert_eq!(error, "TLS初期化の試験失敗");
+        }
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert_eq!(
+            initialized_client(&state).unwrap_err(),
+            "TLS初期化の試験失敗"
+        );
+    }
+
+    #[test]
+    fn 起動時に標準接続プールを一度だけ確定する() {
+        init().unwrap();
+        let first = client().unwrap();
+        init().unwrap();
+        assert!(std::ptr::eq(first, client().unwrap()));
+        let sources = crate::guard_scan::all_sources();
+        let source = sources
+            .iter()
+            .find(|source| {
+                source.path.to_string_lossy().replace('\\', "/") == "src-tauri/src/lib.rs"
+            })
+            .unwrap();
+        let setup = source.body().split(".setup(|app| {").nth(1).unwrap();
+        assert!(
+            setup.find("tools::http::init()").unwrap() < setup.find("components::init(").unwrap()
+        );
+    }
     use std::sync::{Arc, Mutex};
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -965,6 +1037,7 @@ mod guard {
         ];
         let violations: Vec<String> = crate::guard_scan::all_sources()
             .into_iter()
+            .chain(crate::guard_scan::xtask_sources())
             .filter(|source| !source.path.ends_with("tools/http.rs"))
             .flat_map(|source| {
                 banned

@@ -69,7 +69,7 @@ async fn send_chat(cfg: &Config, body: &Value) -> anyhow::Result<Message> {
         "{}/chat/completions",
         base_url(cfg).map_err(anyhow::Error::msg)?
     );
-    let res = crate::tools::http::client()
+    let res = crate::tools::http::client().map_err(anyhow::Error::msg)?
         .post(&url)
         .json(body)
         .send()
@@ -504,7 +504,7 @@ impl Provider for Local {
             .map(|preset| preset.id.to_string())
             .chain(std::iter::once("custom".to_string()))
             .collect();
-        let res = crate::tools::http::client()
+        let res = crate::tools::http::client().map_err(anyhow::Error::msg)?
             .get(&url)
             .timeout(std::time::Duration::from_secs(2))
             .send()
@@ -537,7 +537,7 @@ impl Provider for Local {
             cfg,
             "ローカルAIエンジン",
             "/health",
-            crate::tools::http::client()
+            crate::tools::http::client()?
                 .get(url)
                 .timeout(std::time::Duration::from_secs(2)),
         )

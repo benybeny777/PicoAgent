@@ -241,7 +241,7 @@ pub fn load_recent(app: &AppHandle, character_id: &str) -> anyhow::Result<Vec<Me
             ));
         }
     };
-    // フォールバック許可: PR #463 採用案3。退避と通知に成功した領域だけ新規状態で続ける。
+    // フォールバック許可: PR #463 採用案3。退避と通知に成功した領域だけ新規状態で続ける。（根拠: PR #463 採用案。退避・通知と原本保護）
     // ただし次の保存で上書きして会話を失わないよう、破損ファイルは退避してから続ける。
     let all: Vec<Message> = match serde_json::from_str(&text) {
         Ok(all) => all,
@@ -320,7 +320,7 @@ pub fn save(app: &AppHandle, character_id: &str, messages: &[Message]) {
         crate::store::write_json_atomic(&target, &recent)?;
         Ok(())
     })();
-    // フォールバック許可: PR #463 採用案。保存失敗を通知して会話を継続する。
+    // フォールバック許可: PR #463 採用案。保存失敗を通知して会話を継続する。（根拠: PR #463 採用案。退避・通知と原本保護）
     SAVE_FAILED.report(
         app,
         "history-save",

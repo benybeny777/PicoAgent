@@ -150,7 +150,7 @@ fn ensure_executable(path: &Path) -> anyhow::Result<()> {
     }
     permissions.set_mode(permissions.mode() | 0o755);
     if let Err(error) = std::fs::set_permissions(path, permissions) {
-        // フォールバック許可: .app 配下など実行時に chmod できない同梱リソースは spawn 側の成否に委ねる。
+        // .app 配下など実行時に chmod できない同梱リソースは spawn 側の成否に委ねる。
         if error.kind() != std::io::ErrorKind::PermissionDenied {
             return Err(error.into());
         }
@@ -470,7 +470,11 @@ async fn download_model(app: &AppHandle, dest: &PathBuf) -> anyhow::Result<()> {
     let expected = local::preset_by_url(&url);
     set_status(app, json!({ "phase": "download", "percent": 0 }));
 
-    let mut res = crate::tools::http::client().get(&url).send().await?;
+    let mut res = crate::tools::http::client()
+        .map_err(anyhow::Error::msg)?
+        .get(&url)
+        .send()
+        .await?;
     if !res.status().is_success() {
         anyhow::bail!("モデル取得に失敗: {} {}", res.status(), url);
     }
@@ -558,7 +562,7 @@ async fn download_model(app: &AppHandle, dest: &PathBuf) -> anyhow::Result<()> {
         }
     }
     // 取得と検証は済んでいるので、回収に失敗しても起動は止めず理由を残す。
-    // フォールバック許可: 残った一時ファイルは次の取得成功時に再び回収を試みる。
+    // 残った一時ファイルは次の取得成功時に再び回収を試みる。
     if let Err(error) = remove_stale_model_parts(dest, std::process::id()) {
         crate::log_paths::append_app_log(app, &format!("警告: {error:#}"));
     }
@@ -640,7 +644,7 @@ async fn gpu_vram_bytes() -> Option<u64> {
     {
         let mut command = crate::tools::process::command("nvidia-smi.exe");
         command.args(["--query-gpu=memory.total", "--format=csv,noheader,nounits"]);
-        // フォールバック許可: nvidia-smi が無い、または3秒以内に応答しないPCでは
+        // nvidia-smi が無い、または3秒以内に応答しないPCでは
         // 専用VRAMを不明としてRAMだけで候補を案内する。
         let output = crate::tools::process::output(command, 3, "NVIDIA GPUメモリ量の確認")
             .await
@@ -939,7 +943,7 @@ async fn ensure_and_start_inner(app: AppHandle, start_generation: u64) {
             &format!("検証済み現行版へ移行し、旧ローカルモデル{removed}件を削除しました"),
         ),
         Ok(_) => {}
-        // フォールバック許可: 旧ファイルの掃除失敗だけで検証済み現行モデルの起動を止めない。失敗はログへ残す。
+        // 旧ファイルの掃除失敗だけで検証済み現行モデルの起動を止めない。失敗はログへ残す。
         Err(error) => crate::log_paths::append_app_log(
             &app,
             &format!("旧ローカルモデルの掃除に失敗しました: {error}"),

@@ -128,10 +128,11 @@ AIモデルなど数GBの取得は `setup` を明示したときだけ行いま�
 | `cargo xtask setup tools` | 精度向上用の OSS CLI（Pandoc / ripgrep / ffmpeg / ImageMagick ほか） |
 
 - 全部必要なときだけ `cargo xtask setup all`。引数なしの `cargo xtask setup` は、不要な大容量取得を防ぐため実行しません
+- 取得対象の部品で失敗した場合は理由を表示して停止します。開発中に取得自体を省く場合だけ `OFFICE_SKIP=1` / `AIVIS_SKIP=1` / `WHISPER_SKIP=1` / `TOOLS_SKIP=1` を明示します（失敗後の続行指定はありません）
 - 再取得は `TOOLS_FORCE=1` などの環境変数、対象を絞るなら `PICOAGENT_SETUP_TOOLS=pandoc,ripgrep`
 - `cargo xtask build` も追加機能を取得しない軽量構成です。Aivis・Whisper・Office・外部CLIまで含めるときだけ `cargo xtask build-full`
 - Ubuntu の配布確認は `cargo xtask setup engine` のあと `cargo xtask build --bundles deb,appimage`
-- 公式のポータブル配布が無いツールは手動で導入し、対応する設定に実行パスを入れます。設定にコマンド名だけ（例 `ffmpeg`）を明示した場合は共通探索で解決します（macOSではPATHの後に既存Homebrew配置も確認）。未設定時はPicoAgent管理下の同梱物だけを使い、欠損は導入・修復を案内します
+- 公式のポータブル配布が無いツールは手動で導入し、対応する設定の検出ボタンで実行パスを確認して保存します。設定にコマンド名だけ（例 `ffmpeg`）を明示した場合は共通探索で解決します（macOSではPATHの後に既存Homebrew配置も確認）。未設定時はPicoAgent管理下の同梱物だけを使い、欠損は導入・修復を案内します
 - 文字起こしの既定モデルは固定の `ggml-small.bin` です。別名のWhisperモデルは `PICOAGENT_TRANSCRIBE_MODEL` にパスを指定してください
 
 ### 叩く AI を選ぶ

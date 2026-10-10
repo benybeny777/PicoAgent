@@ -4,7 +4,7 @@
 
 設定キーを追加・変更・削除したときは、この一覧を同じPRで更新します。`doc_sync::guard` が実装との追加漏れ・削除漏れを双方向で検出します。
 
-実行パス設定でいう「共通探索」は、利用者がコマンド名を明示した場合だけ `tools::process::resolve_executable()` を使うことです。環境PATHを確認し、macOSでは続けて既存Homebrew配置 `/opt/homebrew/bin`・`/usr/local/bin` を確認します。未設定時はPicoAgent管理下の同梱物だけを使います。
+実行パス設定でいう「共通探索」は、利用者がコマンド名を明示した場合だけ `tools::process::resolve_executable()` を使うことです。環境PATHを確認し、macOSでは続けて既存Homebrew配置 `/opt/homebrew/bin`・`/usr/local/bin` を確認します。未設定時はPicoAgent管理下の同梱物だけを使います。 設定「追加機能・更新」のImageMagick検出は候補を表示するだけです。候補選択・草稿反映後に「変更を保存」で確定し、検出だけで既存値は変えません。v6は同じフォルダの`identify`も必要で、Windowsのシステム`convert`は候補にしません。
 
 ## 設定キー一覧
 
@@ -44,8 +44,7 @@
 | `PICOAGENT_MEMORY_ENABLED` | `true` | 基本 | 会話から好み・自己情報・継続指示を暗黙的に長期メモリへ保存する |
 | `PICOAGENT_MEMORY_DEVICE` | `gpu` | 基本 | 標準のEmbeddingGemma 2記憶検索の実行先。`gpu`はCUDA/MPS優先、非対応構成はCPU。`cpu`はCPU固定。保存後に検索プロセスへ反映する |
 | `PICOAGENT_PROJECT_RULES_AUTO_CAPTURE` | `false` | 基本 | 強く言い渡された作法を作業フォルダの `AGENTS.md` へ自動で追記する（既定は無効。利用者のフォルダにあるファイルを書き換えるため） |
-| `PICOAGENT_PLANNING_ENABLED` | `false` | 基本 | 複雑な質問（120文字超・疑問符2個以上・手順系語）をサブタスクへ自動分解するプランニングステップを有効化する |
-| `PICOAGENT_SELF_EVAL_ENABLED` | `false` | 基本 | 回答が短すぎる・拒否パターンを含む場合に1回再生成する自己評価ステップを有効化する |
+| `PICOAGENT_SELF_EVAL_ENABLED` | `false` | 基本 | 回答が短すぎる・拒否パターンを含む場合に1回再生成する自己評価を有効化。再生成失敗・空回答はターン失敗とし、最初の回答も公開・保存しない |
 | `PICOAGENT_SUPER_AGENT` | `false` | AIモデル | スーパーエージェントモード。計画ステップ・自己評価を一括有効化し、ループ上限を引き上げ、進捗を `pet:agent_status` で可視化する |
 | `PICOAGENT_SUPER_AGENT_MAX_STEPS` | `12` | AIモデル | スーパーエージェントモードのトップレベル最大ループ数。宣言した整数範囲を満たさない値は理由つきで拒否し、範囲内へ丸めない |
 | `PICOAGENT_TOOL_CONTEXT_TURNS` | `5` | AIモデル | モデルへ渡すスキル定義の並び順を決めるときに見る、過去の利用者発話の件数。`0` ですべての発話を見る。候補から外す判断には使わず、コンテキストに収まる分はすべて渡す |
@@ -259,9 +258,9 @@
 | `PICOAGENT_QPDF_PATH` | 空 | pdf_tools | qpdf実行ファイルの明示指定。空なら同梱のみ。コマンド名の明示指定時だけ共通探索から解決 |
 | `PICOAGENT_PDFTOTEXT_PATH` | 空 | pdf_tools | Poppler pdftotext実行ファイルの明示指定。空なら同梱のみ。コマンド名の明示指定時だけ共通探索から解決 |
 | `PICOAGENT_PANDOC_PATH` | 空 | document_convert | Pandoc実行ファイルの明示指定。空なら同梱のみ。コマンド名の明示指定時だけ共通探索から解決 |
-| `PICOAGENT_MAGICK_PATH` | 空 | image_tools | ImageMagick実行ファイルの明示指定。空なら同梱 `magick` のみ。コマンド名の明示指定時だけ共通探索から解決。v6 `convert` / `identify` は明示指定時だけ使う |
+| `PICOAGENT_MAGICK_PATH` | 空 | image_tools | ImageMagick実行ファイルの明示指定。空なら同梱 `magick` のみ。コマンド名の明示指定時だけ共通探索から解決。v6 `convert` / `identify` は明示指定時だけ使う。同じフォルダの両実行ファイルを必要とし、Windowsシステムの `convert` は拒否する |
 | `PICOAGENT_IMAGE_TOOLS_TIMEOUT_SECS` | `120` | image_tools | 画像操作タイムアウト秒（5〜300） |
-| `PICOAGENT_FFMPEG_PATH` | 空 | whisper_transcribe | ffmpeg実行ファイルの明示指定（非wav音声の16kHz WAV前処理用）。空なら同梱のみ。コマンド名の明示指定時だけ共通探索から解決 |
+| `PICOAGENT_FFMPEG_PATH` | 空 | whisper_transcribe | ffmpeg実行ファイルの明示指定（実体が16kHz・モノラル・16bit PCM WAV以外の音声の前処理用）。空なら同梱のみ。コマンド名の明示指定時だけ共通探索から解決 |
 | `PICOAGENT_RIPGREP_PATH` | 空 | doc_search / grep_search | ripgrep実行ファイルの明示指定。空なら同梱のみ。コマンド名 `rg` の明示指定時だけ共通探索から解決。欠損・実行失敗はエラーとし、内蔵検索へ切り替えない |
 | `PICOAGENT_SETUP_TOOLS` | （空） | xtask | `cargo xtask setup tools` で取得対象を絞る開発用環境変数（カンマ区切り） |
 | `PICOAGENT_API_ENABLED` | `false` | ローカルAPI | ローカル HTTP API を有効化（127.0.0.1 のみ。変更は再起動後に反映） |

@@ -1280,6 +1280,9 @@ button.tab:active {
 }
 .component-card-actions { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:6px; }
 .component-card-actions .danger { border-color:var(--err-border); background:var(--err-bg); color:var(--err-ink); }
+/* 検出候補と失敗理由の長い実行パスを、カードの確定幅内でそのまま読めるようにする。 */
+.cli-detection { min-width:0; max-width:100%; overflow-wrap:anywhere; }
+.cli-detection select { min-width:0; max-width:100%; }
 @media (max-width:760px) {
   .component-card { grid-template-columns:minmax(0,1fr) auto; }
   .component-card-actions { grid-column:1 / -1; width:100%; }

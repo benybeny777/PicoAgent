@@ -64,7 +64,7 @@ graph TD
 | ルール | `agent/prompt.rs` | 基本system prompt、キャラ人格、利用者が選んだ関係、長期メモリ、関係性文脈を一定順序で合成する。通常の再構築と「新しい会話」は同じ `agent::prompt::compose()` を通す |
 | スキル | `src-tauri/src/tools/mod.rs` / `skills/<名前>/` / `user_skills.rs` | Rust Toolは候補選択、schema、許可判定、実行、副作用を持つ。利用者のSKILL.mdは指示だけを持ち、既存Toolの境界内で使う |
 | メモリ | `memory.rs` / `history.rs` / `relationship.rs` | 全キャラ共通の長期メモリ、キャラ別会話履歴、キャラ別関係性を別の保存単位で持つ |
-| フィードバックループ | `agent/feedback.rs` / `agent.rs` | 前者は任意の計画生成と自己評価、後者は `chat → tool_calls → 結果 → chat` の実行ループ |
+| フィードバックループ | `agent/feedback.rs` / `agent.rs` | 前者はスーパーエージェントの計画生成と自己評価、後者は `chat → tool_calls → 結果 → chat` の実行ループ |
 | 実行中イベント | `agent.rs` / `commands.rs` | 進捗、ツール実行、承認待ち、画面通知を発生元から送る。外部拡張用の共通hook契約は無いため `hooks` 層は作らない |
 
 基本ルールは、利用者が明示した関係プリセットを上書きしない（家族呼びは既定では禁止し、「妹」「姉」を選んだ場合だけ関係差分を人格の後ろへ足す）。「新しい会話」でも関係差分・長期メモリ・関係性文脈を落とさない。
@@ -93,7 +93,7 @@ graph TD
 
 - グローバルホットキーは `hotkey.rs`（`tauri-plugin-global-shortcut`）。起動時と設定保存時に `apply()` が全解除してから張り直す。呼び出しキーはウィンドウを表示・最小化解除・前面化してから `pet:hotkey`（payload `"summon"`）を送り、`renderer.js` が居眠りを解除して入力欄を開く。隠すキーは表示中なら `hide()`、隠れていれば呼び出しと同じ動作。**呼び出しキーが登録できていない状態で隠れたままにはしない**（`apply()` が表示へ戻す）。終了時は `release()` で全解除する。空欄は既定値、片方だけ止めるときは `off`。
 - `Tracer`（`tracer.rs`）はツール実行ごとのレイテンシを直近200件保持し、`pet_traces` がスナップショットとツール別集計（平均レイテンシ・呼び出し回数・エラー数）を返す。
-- `usage.rs` はトークン使用量を `app_data_dir/usage.json` へ保存し、`pet_usage` が今月のプロバイダ／モデル別集計と全期間累計を返す。90日より古いレコードは削除する。`app_data_dir` を取れない場合は一時領域へ逃げず、空集計で会話を続けて診断ログへ記録する。
+- `usage.rs` はトークン使用量を `app_data_dir/usage.json` へ保存し、`pet_usage` が今月のプロバイダ／モデル別集計と全期間累計を返す。90日より古いレコードは削除する。保存先は起動時に確定した管理領域を使う。保存先の取得失敗では起動を停止し、一時領域や空集計へ切り替えない。
 
 ### 会話履歴と長期メモリ
 
@@ -160,8 +160,8 @@ Claude Code / Codex CLI を非対話（`claude -p` / `codex exec`）で呼び、
 6. 返ったトークン使用量（`Message.usage`）を `usage::record()` で `app_data_dir/usage.json` に保存する。
 7. ツール実行は `Tracer::start_span()` で計測し、`Tracer::record()` で直近200件を持つ。
 8. ツール出力は `PICOAGENT_TOOL_OUTPUT_MAX_CHARS`（既定 `auto`＝local はコンテキスト長の45%〔1,000〜60,000文字〕、クラウドは24,000文字）で打ち切る。`tools::check_injection()` でプロンプトインジェクションの試行を検査し、検知時は警告付きで包む。**同じ検査を添付ファイルの抽出本文**（`commands.rs` の `mark_untrusted_if_injection`）と**先回り実行が差し込む本文**（`agent.rs` の `mark_untrusted_tool_output`）にも通す。引数 JSON の解析失敗（`_raw`）はツールを呼ばずエラー文字列を返して再試行させる（`dispatch_or_error()`）。
-9. `PICOAGENT_PLANNING_ENABLED` または `PICOAGENT_SUPER_AGENT` が有効で、質問が複雑（120文字超・疑問符2個以上・手順系の語）なら、`provider.chat_with_options(json_mode=true)` でサブタスクへ分解し（`planning_step()`）、system 追記として付けてからループへ進む。
-10. `PICOAGENT_SELF_EVAL_ENABLED` または `PICOAGENT_SUPER_AGENT` が有効で、最終応答が短すぎる（8文字未満）か拒否パターンを含むなら、`provider.chat()` で1回再生成する（`self_improve()`。失敗時は元の応答）。
+9. `PICOAGENT_SUPER_AGENT` が有効なトップレベルの複雑な質問だけで、`provider.chat_with_options(json_mode=true)` により最大4件の手順を生成し、公開検査を通して進捗へ表示する（`planning_step()`）。計画は会話のsystemや利用者の原文へ混ぜない。生成・JSON形式・公開検査が失敗したら理由を返してターンを止める。単独では生成した計画を使わない旧計画設定を廃止し、保存済みの旧設定は実行に使わない。
+10. `PICOAGENT_SELF_EVAL_ENABLED` または `PICOAGENT_SUPER_AGENT` が有効で、最終応答が短すぎる（8文字未満）か拒否パターンを含むなら、`provider.chat()` で1回再生成する（`self_improve()`）。再生成の失敗や空白だけの応答は具体的な理由を返し、そのターンを失敗で終える。最初の回答も公開・保存しない。
 11. **スーパーエージェントモード（`PICOAGENT_SUPER_AGENT=true`）**: 計画・自己評価を有効にし、トップレベルの `max_steps` を `PICOAGENT_SUPER_AGENT_MAX_STEPS`（既定12、〜30）へ上げる。計画開始・計画内容・「考え中…」・「考え直しています…」・「ツールを実行中: …」を `pet:agent_status` で送る（内部ループの現在値と上限は出さない）。ツールの実行有無・対象・成否は文言から推測させず、`pet:agent_activity` の `started` / `completed` / `waiting` と `tools` / `failedTools` で通知する。
 12. **ネスト深さ**: `run()` は `tokio::task_local!` の `AGENT_DEPTH` をタスクごとに増やす。`subagent` は深さが `PICOAGENT_SUBAGENT_MAX_DEPTH`（既定2）以上ならネストを拒否する。プロセス全体のカウンターにしないので、並行する兄弟AIを相互にネスト扱いしない。計画・自己評価はトップレベル（深さ1）だけで行う。
 
@@ -205,6 +205,8 @@ inventory::submit! { ProviderReg { make: || Box::new(MyProvider) } }
 ```
 
 接続先・APIキー・モデルは各メソッド内で `cfg.get()` から都度読む（再起動なしに反映するため）。`on_chunk` は async_trait の Send 境界のため `Arc<dyn Fn(String) + Send + Sync>` で渡す。
+
+標準HTTPクライアントは起動時に接続10秒・無通信120秒の上限を持つ接続プールとして一度だけ初期化する。初期化失敗は理由つきで起動を止め、別クライアントへ切り替えない。初期化前の利用もエラーにする。個別の問い合わせ期限はリクエストで指定する。
 
 ### 同梱プロバイダ
 
@@ -264,10 +266,10 @@ inventory::submit! { ProviderReg { make: || Box::new(MyProvider) } }
 - **準備**: 初回合成は話者モデルのロードに時間がかかるため HTTP タイムアウトは180秒。キャラ固有の AivisHub モデルは `pet_prepare_voice_model` で起動シーケンス中に導入する。読み上げ有効時は表示した起動画面で「声を準備中…」を出し、Aivis起動・モデル導入・挨拶がある場合はその音声合成まで終えてから通常画面へ移る。失敗はログだけにせず診断案内を残す。
 - **同梱物の修復**: 管理下のAivisは`run`と管理情報、WindowsではPython本体DLLが揃っている場合だけ起動候補にする。`run.exe`だけが残った不完全な配置は起動せず、同梱リソースから入れ替えてから音声準備へ進む。入れ替え前の複製も同じ条件で検査し、不完全なら既存配置を置き換えない。
 - **起動画面との関係**: `aivis_status`（`{ enabled, up }`）を起動時のキャラ描画ゲートに使う。準備画面でキャラの描画と会話履歴を戻し、ローカルAIの取得・照合・起動も同じ画面で待つ（初回セットアップ未完了なら待たずに案内を出す）。`ready` までは送信ボタンとクイック操作を無効にし、`error` は診断・修復へ進む理由として常時表示する。一時表示が終わっても空欄にせず、保持中の準備・失敗理由へ戻す。TTS 有効なら起動時の挨拶も合成してから通常画面へ戻し、復帰後に再生する（`prepareSpeech` → `playPreparedSpeech`）。準備が長引いても、フロントは `pet_init` が渡す間隔で `pet_boot_progress` を送り続ける。
-- **配置**: 実行ファイルは利用者データの `PicoAgent/bundled/aivis/` から起動する。同梱配置 `resources/bundled/aivis/` は起動元にせず、初回にコピーして使う（同梱側の `run.exe` が新しければ起動前に上書き）。配布対象版は `component-manifest.json` の `targetVersion` を正本とし、実行時取得と `office::fetch_aivis` が同じ値を読む。手動は `cargo xtask setup aivis`、取得確認だけは `AIVIS_RELEASE=latest` やタグで上書きできる。同梱が無ければ同じ公式リリースを実行時に取得して展開する（`7z` / `7za` / `tar`。macOS の `.7z.001` は p7zip が必要。事前取得で `7z` が無ければ警告だけにし、必須にするなら `AIVIS_REQUIRED=1`）。
+- **配置**: 実行ファイルは利用者データの `PicoAgent/bundled/aivis/` から起動する。同梱配置 `resources/bundled/aivis/` は起動元にせず、初回にコピーして使う（同梱側の `run.exe` が新しければ起動前に上書き）。配布対象版は `component-manifest.json` の `targetVersion` を正本とし、実行時取得と `office::fetch_aivis` が同じ値を読む。手動は `cargo xtask setup aivis`、取得確認だけは `AIVIS_RELEASE=latest` やタグで上書きできる。同梱が無ければ同じ公式リリースを実行時に取得して展開する（`7z` / `7za` / `tar`。macOS の `.7z.001` は p7zip が必要。事前取得で展開ツールが無い場合も理由付きで停止し、取得を省くときは取得前に `AIVIS_SKIP=1` を明示する）。
   - 大容量取得は接続30秒・受信無通信120秒の上限を持ち、全体時間では打ち切らない。再導入と同梱版更新は固有のステージングへ展開・検査し、旧版を退避してから原子的に入れ替え、失敗時は戻す。停止した管理中プロセスは、読み上げ有効時だけ再起動する。
   - 非 Windows ではコピー・展開後と起動直前に `run` の実行権限を補正する（`.app` 配下など chmod できないものは spawn の結果で判定）。配布物では `tauri.conf.json` の `bundle.resources` で `resources/bundled/**/*` を同梱する。
-- **保存先の正本**: 配置名・管理ファイル名は `crates/picoagent-core/src/paths.rs` に集約する。アプリは `app_paths` を通してOS・Tauriの保存先へ接続し、開発ツールも同じ配置定義を使う。各機能は `DataPath` を指定し、設定・履歴・モデル・WebView・子プロセスのプロファイルを独自の固定パスへ保存しない。
+- **保存先の正本**: 配置名・管理ファイル名は `crates/picoagent-core/src/paths.rs` に集約する。アプリは `app_paths` を通してOS・Tauriの保存先へ接続し、開発ツールも同じ配置定義を使う。各機能は `DataPath` を指定し、設定・履歴・モデル・WebView・子プロセスのプロファイルを独自の固定パスへ保存しない。 起動の最初に管理保存先を取得して `ManagedDataDir` に登録し、全機能がその確定先を再利用する。開発版のOS保存先、製品版の保存先またはその親を取得できなければ起動を止め、一時領域や通常版へ切り替えない。別のアプリインスタンスはそれぞれの保存先を持つ。
 - **専用プロファイル**: Aivis 子プロセスの `USERPROFILE` / `HOME` / `APPDATA` / `LOCALAPPDATA` を `PicoAgent/aivis-userdata/profile/` へ向け、モデル・辞書・キャッシュを利用者データ内へ閉じ込める。LibreOffice は `PicoAgent/office-profile/`、生成用 Python・ComfyUI は `PicoAgent/generation-runtime-data/`、ブラウザ操作は `PicoAgent/browser-profile/` だけを使う。これらはすべて `app_paths::data_dir()` 配下とし、開発版では `PicoAgent-Dev/`、別識別子の検証版ではその根の `instances/<識別子>/` へ分離する。通常版のプロファイルは読み込まない。
 - **話者**: 上記の声の優先順と解決規則を、`pet_prepare_voice_model` と `pet_speak` の両方に適用する。各キャラの既定話者・スタイル・モデルUUIDは `characters/<id>/character.json` の `voice` を参照し、ここへキャラ別の表を複製しない。
   - 話者 UUID が `/speakers` に無ければ指定モデル UUID の AIVMX を `/aivm_models/install` で導入し、話者 UUID＋スタイル名で**実 style ID を実行時に解決**する。global style ID は導入時に決まるため声定数で代用しない。導入・話者・指定スタイルの解決失敗は理由付きのエラーとし、発声せず通知する。UUIDを使わず明示した数値IDはその指定を使う。
@@ -277,7 +279,7 @@ inventory::submit! { ProviderReg { make: || Box::new(MyProvider) } }
 
 - 実行時ログは利用者データの `PicoAgent/log/` にまとめる（Windows 例: `%APPDATA%\PicoAgent\log\`。開発ビルドは `%APPDATA%\PicoAgent-Dev\log\`）。アプリ本体とフロントのエラーは `app`、Aivis の stdout/stderr は `aivis`、llama-server は `engine` へ追記する（`app.<日付>.log` / `engine.<日付>.log` / `aivis.<日付>.log`）。
 - バックエンドのパニックは `std::panic::set_hook`、フロントは大域 `error`/`unhandledrejection`、`window.picoagent` の `invoke` ラッパ、Tauriイベントの購読・コールバック・解除、WebAudio 等の非同期解放失敗で捕捉し、文脈付きで `app` へ記録する。
-- 起動時の更新確認はオフライン・タイムアウトだけを正常な見送りとし、通信異常・フィード解析失敗は `app` へ残す。ログ保存先そのものを取れない場合に限り、一時領域へ退避して stderr にも理由を出す。
+- 起動時の更新確認はオフライン・タイムアウトだけを正常な見送りとし、通信異常・フィード解析失敗は `app` へ残す。管理保存先を取得できない場合は起動を止め、ログを含む管理データを一時領域へ保存しない。
 - 1日ごとに日付付きファイル（`app.<YYYY-MM-DD>.log` など。`log_paths::dated_name`）へ分け、1週間（`LOG_RETAIN_DAYS=7`）保持する。起動時と1日ごとのタイマーで `prune_old_logs` が古い `.log` を消す。**会話履歴（`history-<キャラID>.json`）はログではないので対象外。**
 - Aivis が起動直後に終了したり ready 待ちがタイムアウトしたら、当日の `aivis` ログ末尾をエラー文字列に含めて返す。
 
@@ -289,6 +291,8 @@ inventory::submit! { ProviderReg { make: || Box::new(MyProvider) } }
 - `PICOAGENT_TRANSCRIBE_PROGRAM` / `PICOAGENT_TRANSCRIBE_MODEL` が設定されていれば手動導入物を最優先し、空のときだけ同梱物を使う。
 - `meeting_recorder` と `whisper_transcribe` は `tools::whisper` で実行ファイル・モデルを共通解決する。既定モデルは `crates/picoagent-core/src/paths.rs` の固定 `models/ggml-small.bin` で、取得・管理・実行が同じ定義を使う。別の `WHISPER_MODEL` で導入したモデルを使うときは `PICOAGENT_TRANSCRIBE_MODEL` に明示する。任意の `.bin` を名前順で選ばず、欠損は修復エラーにする。
 - 文字起こしごとに1回だけ起動し、完了・失敗・タイムアウトで終える。ファイル指定は`PICOAGENT_TRANSCRIBE_TIMEOUT_SECS`の設定秒、音声入力は同じ設定の範囲内で最大120秒の操作期限を持つ。不正設定は両経路で理由付きエラーとし、操作期限へ置換しない。標準入力は使わない。
+- 音声パス省略時は録音・議事録ルートの最新音声を選ぶ。共通走査が上限で打ち切られた場合や読めない対象があれば、最新と確定できないため自動選択を止め、省略理由と音声パスの明示指定を案内する。
+- 無変換で使う音声は、拡張子でなくWAVの実体が16kHz・モノラル・16bit PCMで音声データを持つことを確認する。それ以外はffmpegで同形式へ変換する。ffmpegの欠損・失敗時はWhisperを起動せず理由を返す。
 - `diarize=true` のときだけ `PICOAGENT_TRANSCRIBE_DIARIZE_ARGS`（既定は tinydiarize の `-tdrz`）を足す。精度とマーカー形式はローカル実装とモデルに依存する。
 - 設定画面から消せるのは利用者データ側の管理領域だけで、手動導入物や開発用同梱物は消さない。
 
@@ -302,6 +306,8 @@ inventory::submit! { ProviderReg { make: || Box::new(MyProvider) } }
 - **操作**: 更新・推奨版への復帰・修復・削除は、維持または削除されるデータを画面内に示す二段階操作（10秒経過またはフォーカス移動で解除）。進捗は共通の部品で工程名と経過時間を出し、総量が分かれば実数パーセント、分からなければ不定バーにする。導入・更新・修復・削除はバックエンドの共通ロックで直列化する。共通Pythonの削除可否は、同じ排他内で中断復旧を終えてから依存モデルの存在を検査する。`PicoAgent/aivis-userdata/` の音声モデル・辞書・設定には触れない。
 - **中断からの復旧**: 起動時と導入・削除の前に、導入操作と同じ排他の中で終了済みプロセスの途中データを処理する。単体更新の退避先（追加機能の `.backup-<id>-<pid>`、Aivis の `.backup-aivis-<pid>-<連番>`）は本体が無ければ旧版を戻し、あれば消す。Aivisは復元に成功してから後続の退避先を消し、復元失敗だけを理由に別の旧版を捨てない。共通Pythonとキャラ作成基盤の組更新は、片方だけ配置済みなら両方を旧版へ戻し、両方配置済みなら新版を維持する。復元に失敗したときは判断に必要な途中データを残し、導入・削除を続行しない。新版を配置できた後に旧版の掃除だけ失敗しても導入は成功として扱い、残りは次回片付ける。
   - NVFP4専用生成環境の`media-runtime-old`だけが残った場合は、利用者が導入を再実行したときに取得・空き容量検査より先に本体へ戻して実行検証する。実行できなければ退避先へ戻して停止し、既存本体がある場合は旧版で上書きしない。同意・対応環境の確認を省略せず、起動時に任意機能の取得を始めない。
+- **手動CLIの検出**: 「追加機能・更新」のツールカードでImageMagickを検出し、候補選択→草稿へ反映→「変更を保存」で確定する。検出だけでは旧設定を上書きしない。環境PATHと、macOSでは既存Homebrew配置を共通探索する。v6は同じフォルダの`identify`を必須とし、Windowsの同名システム`convert`をImageMagickとして採用しない。未設定時の実行は同梱専用という規則を変えない。
+- **開発用の取得**: `cargo xtask setup`と製品ビルドで同梱表が対象にする取得は、取得・展開・検査の失敗を理由付きで停止する。省略は取得前の`AIVIS_SKIP=1`・`OFFICE_SKIP=1`・`WHISPER_SKIP=1`・`TOOLS_SKIP=1`などの明示指定だけとし、旧`*_REQUIRED`指定で必須／任意を切り替えない。取得対象外のOS・CPUへ別資産を導入せず、公式の手動導入先と実行パス設定の案内を出す。
 - **取得元**: 第三者ソフトウェアを PicoAgent の Release へ再アップロードしない。`component-manifest.json` は `version=2` / `policy=direct-upstream`、公式取得元表示、管理対象の `targetVersion` だけを持つ。`installMode=managed`（Aivis、Whisper、生成基盤と選んだモデル）は各公式配布元から `PicoAgent/bundled/<id>/` へ直接取得し、GitHub Release API のサイズと SHA-256 digest、固定モデルの SHA-256、HTTPS、上限サイズ、zip slip、展開容量を検査してから原子的に入れ替える。`installMode=external`（LibreOffice、Pandoc、FFmpeg、qpdf、Poppler、ImageMagick、ripgrep）は公式ページを表示するだけで、外部導入物を削除しない。
 - **生成基盤**: 共有 Python 3.12 と ComfyUI を `character-maker` で管理し、Qwen 画像編集にも使う。Wan と LTX 0.9.8 は `video-wan`／`video-ltx` の別コンポーネント。Krea 2／LTX 2.5（`krea-2-turbo-nvfp4`、`ltx-2.5-nvfp4`）は Python 本体だけを再利用し、`media-runtime` へ独立 venv と ComfyUI を置く。対象は Windows x64・CUDA 13・演算能力12以上・VRAM 8GB以上・RAM 32GB以上で、8GBでの実動作保証ではない。利用条件と GPU・RAM・空き容量・権限を取得前に確かめ、条件不足を非量子化モデルへの切替などで回避しない。低VRAMでは CPU 退避・タイル復号・小さい既定寸法を使い、補間拡大はしない。共通 Python 未導入なら取得前に止め、共通 Python を含む基盤は追加モデルより先に削除できない。確認状態は [管理モデル](docs/models.md) を参照。
 - **オフライン**: 起動時確認は黙って見送り、明示操作では同じ画面内に「オフラインのため見送り」と出す（エラー画面・モーダル・フキダシは出さない）。
@@ -763,7 +769,11 @@ JSON-RPC 2.0、プロトコルバージョン `2024-11-05`。
 - **永続ジョブ**（`durable_jobs.rs` + `job_center`）: `ai_drive` と `artifact_pipeline` だけが対象で、引数・状態・試行回数・結果を `app_data_dir/durable-jobs.json` へ保存する（`store::lock_state("durable-jobs")` で直列化、`store::write_json_atomic` で確定、破損時は原本を退避できた場合だけ空で開始）。
   - 起動時に `running` を `queued` へ戻し、安全な工程の先頭からやり直す。取り出しは1本のループで、実行は最大3件まで並べる。1回30分、自動復旧は通算5回まで（明示の再試行では数え直す）。ワーカー内の異常終了を次のジョブへ波及させない。アプリ終了中は動かない。
   - 進捗はスキルが `durable_jobs::report_progress()` で報告し（`ai_drive` はチャンク送信、`artifact_pipeline` は工程単位）、開始・進捗・完了・中止・再試行のたびに `pet:notice`（`kind=durable_job`・`jobId`・`state`・`progress`）を送る。フロントは `jobId` で同じ行を上書きし、未読数は状態が変わったときだけ増やす。途中経過は1〜99へ丸め、終了済みへ遅れて届いた進捗は捨てる。
+  - 進捗の保存失敗は `FailureLatch` から画面へ理由を1回通知し、実際の保存成功で復旧を通知する。転送・生成そのものは継続するが、保存できなかった進捗は再起動時に戻らない。進捗保存→失敗／復旧通知→通常進捗イベントだけを専用排他で順序確定し、転送・生成の本処理はその排他の外で動かす。
+  - 進捗を保存できないときは理由つきで「処理は続けていますが、進捗を保存できません」と原因ごとに1回通知する。転送・生成は続け、保存が成功したら通知の抑制を解除する。
   - 成果物はジョブ所有マーカーが一致する専用フォルダだけを作り直し、クラウド転送は安定した転送IDで二重登録を避ける。アップロードセッションURLとワーカー内部トークンは永続化しない。401 は `waiting_auth` で止め、設定更新後の明示再試行を待つ。`run_command` のプロセスジョブとは別責務。
+
+管理保存先は起動時にアプリの識別子とビルド種別から一度だけ確定し、そのAppHandleの全機能で再利用する。OS保存先や製品保存先の親を取得できない場合は理由つきで起動を止め、一時フォルダや別の製品領域へ切り替えない。
 
 ### 画面と操作
 
@@ -876,15 +886,18 @@ JSON-RPC 2.0、プロトコルバージョン `2024-11-05`。
 ### 共通層
 
 - **プロセス実行（`tools/process.rs`）**: `process::command()` が Windows のコンソール窓抑止（`CREATE_NO_WINDOW`）・`kill_on_drop`・stdio の既定を当てた `Command` を返し、`process::output()` / `output_text()` がタイムアウト付きで実行し、打ち切り時は `terminate_process_tree()` でツリーごと回収する。未導入がありうる外部CLIは `output_or_install_hint()` を使い、**起動できなかったときだけ**導入案内を足す。実行ファイルの存在確認は `process::resolve_executable()`（PATH＋macOS では Homebrew の `/opt/homebrew/bin`・`/usr/local/bin`、Windows では PATHEXT）と `has_executable()` にまとめ、**ログインシェル（`sh -lc "command -v ..."`）で確かめない**（ログインシェルのPATHにはあってもGUIアプリの素のPATHには無く、spawn で失敗するため）。**スキルが `Command::new` を直接使うことと、`tokio::time::timeout(..., command.output())` で自前に包むことは禁止**で、`tools::process::guard` が直接起動・自前 `hide_window` / `CREATE_NO_WINDOW`・自前タイムアウトを検出する。
+- **共通ファイル走査（`tools/walk.rs`）**: `glob_files`・`grep_search`・最新音声探索は許可済み`SafePath`からだけ走査する。深さ12・最大2万件で打ち切り、権限・リンク・読込失敗等の省略件数と理由例（最大3件）、上限による不完全さを返す。検索は取得できた結果に診断を添え、最新音声の確定には完全な走査を要求する。
 - **許可（`permissions.rs`）**: 許可判定を通ったパスは専用型 **`SafePath`** で表し、生成経路を `resolve()` / `SafePath::join()` / `SafePath::sibling()` に限る（内部 `PathBuf` は非公開。派生パスも再検証する）。ファイル操作は `SafePath` だけを受ける `permissions::fs` を使い、アプリ内部が決めたパスだけ `SafePath::app_owned` を使う。**スキル側での許可判定の再実装は禁止**で、`permissions::guard` が `skills/**/mod.rs` を走査して自前判定（`fn bounded_path(base:` 等）と `resolve` を通さないパス引数を検出する（例外は独自の追加制約を持つ `run_command` / `code_runner` / `trash_file`）。
   - **正本キーは `PICOAGENT_ALLOWED_ROOT`（主ルート、既定はホーム）／`PICOAGENT_ALLOWED_PATHS`（追加許可ルート）／`PICOAGENT_DENIED_PATHS`（追加拒否）**で、設定「安全・許可」で編集する。`C:\Windows` / `C:\Program Files` / `C:\Program Files (x86)` は常に拒否する（`is_system_protected`）。既存の最深祖先を実体化し、シンボリックリンクやジャンクション経由のルート外到達も拒否する。
   - 対象: `read_file` / `workspace_files` / `trash_file` / `ms_office` / `document_convert` / `pdf_tools` / `image_tools` / `research_report` / `spark_workspace` / `genspark_suite` / `artifact_pipeline` / `ai_drive` / `meeting_recorder` / `whisper_transcribe` / `run_command` / `code_runner` / `scheduler` とドロップファイルの読込。
 - **コマンド実行の承認（`run_command`）**: `PICOAGENT_COMMAND_ENABLED=true` が必要。コマンドが `PICOAGENT_COMMAND_ALLOWLIST` に完全一致しない、または `cwd` が許可ルート外なら、チャットへ確認を返す。「許可」で保留中の1件だけ実行し、「永続許可」で引数を含むコマンド全体を `PICOAGENT_COMMAND_ALLOWLIST` へ、必要なら cwd を `PICOAGENT_ALLOWED_PATHS` へ保存してから実行する。「キャンセル」で破棄する。`git diff` の許可に後続引数は含まれず、`git diff --stat` は別登録が必要。`C:\Windows` と `C:\Program Files*` 配下はチャットで許可されても実行先や編集先にしない（`workspace_files` の `write` / `append` / `mkdir` も同じ）。
 - **ユーザーへの確認（`ask_user`）**: `run_command` の承認カードと同じマーカー方式で、`agent.rs` がループを止め、`commands.rs` が質問と `choices` を返す（クイック操作欄が選択肢ボタンになる）。保留中の質問は `AppState.pending_question` が1件だけ持ち、次の発話で必ず解除する。
 - **自力実行（`code_runner`）**: cwd 検査と文字列 denylist ではスクリプト内部のルート外アクセスや難読化された物理削除を防げないため、OSレベルの隔離実行を用意するまで `agent_callable=false` でモデルへ公開しない。
-- **プロジェクト文脈**: `pet_send` のたびに `project::project_context()` が選択中プロジェクトの未完了課題（上位5件）と直近の記録（4件）を1,200文字までにまとめ、`apply_project_context()` が system の `[プロジェクト文脈]`〜`[/プロジェクト文脈]` ブロックを**入れ替える**。台帳が読めないときは差し込まずに続ける。
+- **プロジェクト文脈**: `pet_send` のたびに `project::project_context()` が選択中プロジェクトの未完了課題（上位5件）と直近の記録（4件）を1,200文字までにまとめ、`apply_project_context()` が system の `[プロジェクト文脈]`〜`[/プロジェクト文脈]` ブロックを**入れ替える**。台帳を読めないときは理由を返し、推論・履歴保存へ進まない。
 
 ### 終了と製品化
+
+- 更新フィードは `cargo xtask update-feed <配布物> --output <配布正本側のlatest.json> [更新内容]` で出力先を必ず明示する。20側の`distribution/site`へ暗黙に書かず、既存フィードの読込・解析失敗では空のフィードを出力しない。
 
 - **終了**: `RunEvent::Exit` で `engine::stop` が llama-server を止め、`aivis::stop` がアプリ自身で起動した Aivis だけを止める。右クリック「PicoAgent を終了」と、チャットの `app_control`（`quit`）で終了できる。
 - **残存プロセスの停止**: `cargo xtask dev` / `cargo xtask build` は起動前に残存プロセスを止め、DLL ロック（Windows os error 32）を防ぐ。手動は `cargo xtask stop`。Unix 系は `pgrep` / `pkill` の完全一致で `llama-server` / `PicoAgent` / `picoagent` だけを止め、Aivis は管理下の `run`（`resources/bundled/aivis/run` / `resources/aivis/run` / `PicoAgent/bundled/aivis/run`）だけを止める。撮影ツールの `node` はコマンドラインに `tools/screenshots/` を含むものだけをツリーごと止める（`node` は他アプリも使うため名前だけでは止めない）。`browser_control` のブラウザは、`browser_control::stop` と `cargo xtask stop` の両方が `--user-data-dir` に専用プロファイル（`<データ領域>/PicoAgent/browser-profile`）を持つものだけを止める（Chrome / Edge は起動直後に本体を立て直すため、子ハンドルへの `kill` / `taskkill /T` は届かない）。

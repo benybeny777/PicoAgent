@@ -1034,7 +1034,7 @@ pub async fn pet_init(app: AppHandle, state: State<'_, AppState>) -> Result<Valu
         .collect();
     let character_id = state.config.get("PICOAGENT_CHARACTER", "mugi");
     let relationship_mode = state.config.get("PICOAGENT_COMPANION_MODE", "both");
-    // フォールバック許可: PR #463 採用案6。読込失敗を画面へ知らせて起動を続ける
+    // フォールバック許可: PR #463 採用案6。読込失敗を画面へ知らせて起動を続ける（根拠: PR #463）
     // （`pet_init` が失敗するとフロントはローディングから先へ進めない）。
     // 読めなかった理由を戻り値で画面へ渡し、元のファイルは保存し直さない。
     let (relationship, relationship_error) =
@@ -1223,6 +1223,13 @@ pub fn pet_show_onboarding(app: AppHandle) -> Result<(), String> {
         settings.hide().map_err(|error| error.to_string())?;
     }
     main.set_focus().map_err(|error| error.to_string())
+}
+
+/// 利用者が検出ボタンを押した時だけ、固定したCLI候補を確認する。保存は既存設定APIで行う。
+#[tauri::command]
+pub async fn settings_detect_cli(id: String) -> Result<Value, String> {
+    let report = crate::tools::cli_detection::detect(&id).await?;
+    serde_json::to_value(report).map_err(|error| format!("CLI検出結果を返せません: {error}"))
 }
 
 /// 初回起動と設定画面で共用する追加コンポーネントの準備状態。
@@ -2049,7 +2056,7 @@ pub async fn pet_send(
     // セマンティックメモリ: クエリに関連するメモリを今回のリクエスト向けに絞り込み、
     // 今回の convo の system メッセージのみ更新する（state.memory_context は変えない）。
     {
-        // フォールバック許可: 意味検索を使えない間（初回導入中・オフライン・非対応構成）も
+        // フォールバック許可: 意味検索を使えない間（初回導入中・オフライン・非対応構成）も（根拠: PR #428 意味検索を使えない間の通常メモリ）
         // 会話は止めず、system文脈に入っている言及回数順の記憶で応答し、理由を画面へ出す。
         let semantic_ctx = match crate::memory::context_for_query(&app, &state.config, &text).await
         {
@@ -2077,7 +2084,7 @@ pub async fn pet_send(
     // 起動時ではなく毎回作り直して古い内容が残らないようにする。
     apply_project_context(
         &mut convo,
-        &crate::tools::project::project_context(&state.config),
+        &crate::tools::project::project_context(&state.config)?,
     );
     // SKILL.mdは利用者が会話中や外部エディタから変更できるため、索引を毎ターン
     // 入れ替える。本文は必要になったときだけuser_skillツールで読み、systemを肥大化させない。
@@ -3162,7 +3169,7 @@ pub(crate) fn encrypt_existing_secrets(app: &AppHandle, config: &Config) {
             failures.push(error.to_string());
         }
     }
-    // フォールバック許可: PR #463 採用案4。平文が残ることを通知し起動を続ける。
+    // フォールバック許可: PR #463 採用案4。平文が残ることを通知し起動を続ける。（根拠: PR #463）
     static SECRET_MIGRATION: crate::notice::FailureLatch = crate::notice::FailureLatch::new();
     let result = if failures.is_empty() {
         Ok(())
@@ -4454,7 +4461,7 @@ struct UpdateDownloadCleanup {
 impl Drop for UpdateDownloadCleanup {
     fn drop(&mut self) {
         if self.armed {
-            // フォールバック許可: 失敗・中断時のPicoAgent管理下更新一時ファイルだけを掃除する。
+            // 失敗・中断時のPicoAgent管理下更新一時ファイルだけを掃除する。
             if let Err(error) = std::fs::remove_file(&self.partial) {
                 if error.kind() != std::io::ErrorKind::NotFound {
                     crate::log_paths::append_app_log(
@@ -4781,7 +4788,7 @@ pub fn spawn_update_check(app: AppHandle) {
         if !enabled {
             return;
         }
-        // フォールバック許可: オフラインは通常状態として何も表示しない。通信・解析エラーはログへ残す。
+        // オフラインは通常状態として何も表示しない。通信・解析エラーはログと通知へ残す。
         let body = match fetch_update_feed().await {
             Ok(Some(body)) => body,
             Ok(None) => return,

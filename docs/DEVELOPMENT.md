@@ -53,6 +53,12 @@ uv pip compile sidecar/requirements-comfy-rocm.in \
 
 ソースからの初回起動は [README.md の「まず動かす」](../README.md#-まず動かす)から始めてください。
 
+## 取得の停止と明示省略
+
+Office・Aivis・Whisper・OSS CLIは同梱表で取得対象の組合せに限って取得し、失敗時は後続ビルドを停止します。取得前に省く場合だけ `OFFICE_SKIP=1` / `AIVIS_SKIP=1` / `WHISPER_SKIP=1` / `TOOLS_SKIP=1` を指定します。軽量ビルドは従来どおり未同梱の追加機能を取得しません。`*_REQUIRED` による失敗後の続行は廃止しました。Aivisの展開ツールは取得前に確認し、欠損時は導入方法を表示します。明示取得したLive2Dサンプルも画像・モデルの取得失敗で停止し、代替画像や一部だけの成功へ降格しません。実行権限の付与失敗も理由付きで停止します。
+
+同梱する組合せの唯一の表は `xtask/src/tools.rs` の `BUNDLE_TARGETS` です。OfficeはWindows x64とmacOS x64/arm64、AivisはWindows x64とmacOS/Linux x64/arm64、WhisperはWindows/macOS/Linux x64/arm64、Pandoc/ripgrep/ffmpegはWindows x64とmacOS/Linux x64/arm64、qpdf/Poppler/ImageMagickはWindows x64を取得対象とします。それ以外は現在の同梱配布対象外なので取得を試みず、手動導入後に設定の検出ボタンで実行パスを保存します。この表は取得候補の規定であり、各OSの実取得・起動確認の合格を示しません。
+
 ## MMDランタイムの準備
 
 `cargo xtask setup mmd`は`node tools/mmd-runtime/build.mjs`を実行する。再生成時はNode.jsとnpmをPATHへ用意する。`tools/mmd-runtime/package-lock.json`に固定したbabylon-mmd 1.3.0、Babylon.js 9.30.0、esbuild 0.28.2を`npm ci`で取得し、`ui/vendor/mmd/`へバンドル、ライセンス、版とSHA-256を含む`runtime.json`を配置する。生成済みランタイムはGit管理し、通常起動・通常ビルドは取得を実行しない。`build-ui`は固定lockと配信ファイルのSHA-256を照合し、欠損・不一致を明示して停止する。ライセンス原文はLFへ揃えてからハッシュを計算し、Windowsと他OSの改行変換で不一致を起こさない。
@@ -103,7 +109,7 @@ graph LR
 
 | コマンド | 内容 |
 |---|---|
-| `cargo xtask dev` | 開発起動（未取得の同梱物は自動取得） |
+| `cargo xtask dev` | 最小構成の開発起動（追加機能はsetupで明示取得） |
 | `cargo xtask build` | 製品ビルド（各 OS の配布バンドルを生成） |
 | `cargo xtask stop` | 残存プロセスの停止 |
 | `cargo xtask cli <cmd>` | ローカル API を叩く CLI（status/models/chat/ask/repl） |
@@ -130,7 +136,7 @@ graph LR
 | `cargo xtask verify` | PR前の書式（`skills/`はrustfmtへ直接渡す）・静的解析・テスト・共通スキル正本とClaude Code用自動認識ファイル・JavaScript構文・画面の契約テスト（`tools/tests/*.mjs`）・Git差分の一括検証 |
 
 > `sync-characters` と `build-ui` は `cargo xtask dev` / `build` が自動実行するため、通常は個別に実行する必要はありません。
-> `setup *` も同様に自動実行されるので、明示的に呼ぶのは特定の同梱物だけ取り直したいときです。
+> 追加機能の取得は `setup <対象>` / `setup all` または `build-full` で明示します。通常の開発起動・軽量ビルドには任意の大容量取得を加えません。
 
 LocalVTuberStudio形式の実画面検査は、まずリポジトリ直下を`uv run python -m http.server 8776 --bind 0.0.0.0 --directory .`で配信する。Codex DesktopのPlaywrightは製品依存へ追加せず、`load_workspace_dependencies`で取得した現行パスを指定する。2026年9月7日時点では次の形だが、存在しない場合は固定値を推測せず再取得する。
 
@@ -164,7 +170,7 @@ cargo xtask build-beta --bundles nsis
 cargo xtask build-distribution
 
 # 作成した配布物からlatest.jsonのサイズ・SHA-256を生成（.exe と .dmg を受け付ける）
-cargo xtask update-feed src-tauri\target\release\bundle\nsis\PicoAgent_<版>_x64-setup.exe "更新内容"
+cargo xtask update-feed src-tauri\target\release\bundle\nsis\PicoAgent_<版>_x64-setup.exe --output <配布正本checkout>\site\latest.json "更新内容"
 ```
 
 `bump-version`はソースの現行版を起点に採番する。OS別の公開版が遅れていて`latest.json`がソースより古い場合は許容するが、公開版がソースより新しい場合は二重採番として停止する。
@@ -201,8 +207,10 @@ cargo xtask build-beta --bundles app,dmg
 # src-tauri/target/release/bundle/dmg/PicoAgent_<版>_aarch64.dmg
 
 # latest.json へ登録（OSごとに1回ずつ実行できる）
-cargo xtask update-feed src-tauri/target/release/bundle/dmg/PicoAgent_<版>_aarch64.dmg "更新内容"
+cargo xtask update-feed src-tauri/target/release/bundle/dmg/PicoAgent_<版>_aarch64.dmg --output <配布正本checkout>/site/latest.json "更新内容"
 ```
+
+`update-feed` は `--output <latest.json>` が必須です。旧コマンドには出力先を追加してください。配布正本は `C:/00_PG/21_PicoAgent-LP`（他環境では同じ配布リポジトリのcheckout）であり、その目的別PR内へ出力します。本体側 `distribution/site` へ暗黙に書き込まないため、配布の編集・公開は配布リポジトリの手順で行います。既存フィードの不在だけ新規扱いにし、読込・JSON・schemaの失敗は既存の他OS枠を保持したまま停止します。
 
 `update-feed` は拡張子とファイル名のCPU種別から `windows-x64` / `macos-arm64` / `macos-x64` の枠を選び、`latest.json` の版が同じなら他OSの枠を残したまま該当枠だけを差し替えます。版が上がった場合は前の版のURLを引き継がず枠を空にします。`.exe` はPE署名、`.dmg` はUDIFトレーラ（`koly`）を確認してから登録するため、取り違えた成果物は登録できません。
 
@@ -381,7 +389,7 @@ NSIS アンインストーラは、インストール先またはPicoAgent管理
 | `xtask`（`bundled::fetch_engine`） | 同梱エンジン取得（`cargo xtask setup engine`） |
 | `xtask`（`bundled::fetch_whisper`） | 同梱Whisper CLIとモデル取得（`cargo xtask setup whisper`） |
 | `xtask/src/office.rs` | OfficeCLI（LibreOffice）と AivisSpeech Engine の取得（`cargo xtask setup office` / `setup aivis`。`src-tauri/resources/bundled/` 配下、Git 管理外。どちらもベストエフォート） |
-| `xtask`（`tools::fetch_all`） | 精度向上用 OSS CLI 取得（`cargo xtask setup tools`。Pandoc/ripgrep/ffmpeg/qpdf/poppler/ImageMagick を `src-tauri/resources/bundled/tools/<ツール名>/` へ、Git 管理外。配布が無い OS 分は警告のみで PATH へフォールバック） |
+| `xtask`（`tools::fetch_all`） | 精度向上用 OSS CLI 取得（`cargo xtask setup tools`。Pandoc/ripgrep/ffmpeg/qpdf/poppler/ImageMagick を `src-tauri/resources/bundled/tools/<ツール名>/` へ、Git 管理外。OS・CPUの取得対象は `xtask/src/tools.rs` の単一同梱表。対象外は取得せず手動導入後に設定の検出ボタンでパスを保存。取得対象の失敗は停止） |
 | `xtask`（`cli`） | ローカル API を叩く最小 CLI（`cargo xtask cli status/models/chat/ask/repl`。接続先は `PICOAGENT_API_PORT` / `PICOAGENT_API_KEY`） |
 | `xtask`（`bundled::fetch_live2d_runtime`） | Live2D ランタイムを `ui/vendor/live2d/` へ取得（`cargo xtask setup live2d`）。公式サンプルは自動取得せず、開発者が条件確認後に `cargo xtask setup live2d-samples` を明示実行する。いずれも git 管理外 |
 | `xtask/src/assets.rs` | ルート `characters/`（正本）を検証後に `ui/assets/characters/` へ差分同期、`ui/` を `ui-dist/` へ差分ビルド、残存プロセス停止（いずれも dev/build 前に自動実行）。停止は名前一致の `picoagent` / `llama-server` / `whisper-cli`、PicoAgent管理下のAivis、`tools/screenshots/` を起動経路に持つ `node` に限る。全再構築は直接コマンドの`--force`だけ |

@@ -118,7 +118,7 @@ impl Provider for CompatProvider {
     async fn list_models(&self, cfg: &Config) -> anyhow::Result<Vec<String>> {
         let key = cfg.get(self.0.api_key_key, "");
         if key.is_empty() {
-            // フォールバック許可: PR #467 の利用者決定。未設定時だけ通信せず選択候補を示す。
+            // フォールバック許可: 未設定時だけ通信せず選択候補を示す。（根拠: PR #467 の利用者決定）
             return Ok(self
                 .0
                 .static_models
@@ -127,6 +127,7 @@ impl Provider for CompatProvider {
                 .collect());
         }
         let response = http::client()
+            .map_err(anyhow::Error::msg)?
             .get(self.url(cfg, "/models"))
             .bearer_auth(key)
             .timeout(http::metadata_timeout(cfg).map_err(anyhow::Error::msg)?)
@@ -142,7 +143,7 @@ impl Provider for CompatProvider {
         if key.is_empty() {
             return Ok(false);
         }
-        let request = http::client()
+        let request = http::client()?
             .get(self.url(cfg, "/models"))
             .bearer_auth(key)
             .timeout(Duration::from_secs(3));
@@ -165,6 +166,7 @@ impl Provider for CompatProvider {
             );
         }
         let response = http::client()
+            .map_err(anyhow::Error::msg)?
             .post(self.url(cfg, "/chat/completions"))
             .bearer_auth(key)
             .json(&self.body(cfg, model, messages, tools))

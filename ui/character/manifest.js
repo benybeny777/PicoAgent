@@ -38,7 +38,7 @@ export async function listCharacters() {
 /** 保存された見た目の違い（variant）の選択。キャラごとに WebView の localStorage へ覚える。 */
 export function savedVariant(characterId) {
   try { return localStorage.getItem(`picoagent.variant.${characterId}`) || "default"; }
-  catch { return "default"; } // フォールバック許可: 保存領域を読めない環境では既定の見た目で表示する。
+  catch { return "default"; } // 保存領域を読めない環境では既定の見た目で表示する。
 }
 
 export function rememberVariant(characterId, variantId) {

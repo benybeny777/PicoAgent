@@ -64,7 +64,7 @@ async fn send_chunks(
     total: u64,
     job_id: &str,
 ) -> Result<(), String> {
-    let client = crate::tools::http::client();
+    let client = crate::tools::http::client()?;
     let timeout = timeout(cfg, provider)?;
     let chunks = total.div_ceil(CHUNK_BYTES as u64);
     let mut offset = 0u64;
@@ -293,7 +293,7 @@ async fn google_upload(
     if total == 0 {
         return "エラー: 空ファイルはGoogle Driveへアップロードできません。".to_string();
     }
-    let client = crate::tools::http::client();
+    let client = crate::tool_try!(crate::tools::http::client());
     let stable_key = if idempotency_key.is_empty() {
         job_id
     } else {
@@ -428,7 +428,7 @@ async fn onedrive_upload(
             encoded_segment(folder_id)
         )
     };
-    let client = crate::tools::http::client();
+    let client = crate::tool_try!(crate::tools::http::client());
     let response = match client
         .post(endpoint)
         .timeout(crate::tool_try!(timeout(cfg, "onedrive")))
@@ -494,7 +494,7 @@ async fn download(cfg: &Config, provider: &str, file_id: &str, relative: &str) -
                 .to_string()
         }
     };
-    let response = match crate::tools::http::client()
+    let response = match crate::tool_try!(crate::tools::http::client())
         .get(url)
         .timeout(crate::tool_try!(timeout(cfg, provider)))
         .bearer_auth(token)

@@ -33,7 +33,7 @@ struct AivisInstallCleanup {
 
 impl Drop for AivisInstallCleanup {
     fn drop(&mut self) {
-        // フォールバック許可: 正常・失敗・中断時のPicoAgent管理下一時物だけを掃除する。
+        // 正常・失敗・中断時のPicoAgent管理下一時物だけを掃除する。
         if let Err(error) = std::fs::remove_dir_all(&self.path) {
             if error.kind() != std::io::ErrorKind::NotFound {
                 crate::log_paths::append_app_log(
@@ -429,7 +429,7 @@ fn ensure_executable(path: &Path) -> anyhow::Result<()> {
     }
     permissions.set_mode(permissions.mode() | 0o755);
     if let Err(error) = std::fs::set_permissions(path, permissions) {
-        // フォールバック許可: .app 配下など実行時に chmod できない同梱リソースは spawn 側の成否に委ねる。
+        // .app 配下など実行時に chmod できない同梱リソースは spawn 側の成否に委ねる。
         if error.kind() != std::io::ErrorKind::PermissionDenied {
             return Err(error.into());
         }
@@ -1254,8 +1254,11 @@ pub fn start_background(app: &tauri::AppHandle) -> anyhow::Result<()> {
         Some(path) => {
             if let Some(resource) = resource_engine_path(app) {
                 if resource_is_newer(&resource, &path) {
-                    // フォールバック許可: 同梱リソース更新に失敗しても既存の実行時配置が使える場合は起動を優先する。
-                    copy_resource_to_install(app)?.unwrap_or(path)
+                    // 更新の失敗は上位へ返す。同梱リソースが無いときだけ更新せず既存配置を使う。
+                    match copy_resource_to_install(app)? {
+                        Some(updated) => updated,
+                        None => path,
+                    }
                 } else {
                     path
                 }

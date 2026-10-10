@@ -49,7 +49,7 @@ impl Config {
             Ok(text) => match serde_json::from_str::<Value>(&text) {
                 Ok(Value::Object(map)) => *self.values.lock().unwrap() = map,
                 Ok(_) | Err(_) => {
-                    // フォールバック許可: 破損時は空設定で起動（初回起動を成立させるため）。
+                    // フォールバック許可: 破損時は空設定で起動（初回起動を成立させるため）。（根拠: PR #463 採用案。退避・通知と原本保護）
                     // ただし「設定が全部消えた」ように見える事象の原因調査ができるよう必ず記録する。
                     // 破損ファイルはその場に残すと次の保存（＝空設定の書き戻し）で消えてしまうので退避する。
                     if let Some(saved) = crate::store::quarantine_corrupt(&file) {
@@ -310,7 +310,7 @@ impl Config {
         write_snapshot: impl FnOnce(&std::path::Path, &Value) -> anyhow::Result<()>,
     ) -> anyhow::Result<()> {
         // スナップショットの採取から書き込みまでを直列化する（並び替わりを防ぐ）。
-        // フォールバック許可: 毒された場合も保存自体は続ける（中身は () で不変）。
+        // 毒された場合も保存自体は続ける（中身は () で不変）。
         let _write = self
             .write
             .lock()

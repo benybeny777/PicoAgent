@@ -1,5 +1,7 @@
 # 未完了タスク
 
+- PR #470 の実機受入: 既存設定と資産を隔離できるWindows WebView2／macOS GUI環境で、ImageMagick検出→候補選択→草稿反映→明示保存、検出だけでは旧設定が変わらないこと、v6の同フォルダidentify、Windowsシステムconvertの拒否、macOSのPATH／既存Homebrew探索を確認する。Windows ACLやリンクによる走査省略理由、最新音声の不完全探索時の明示パス案内、実ffmpeg変換失敗後のWhisper非起動、進捗保存失敗の画面通知・復旧と転送継続も確認する。取得・外部CLI・実音声の実行を利用者が許可し、復元可能な試験データが揃ったことを着手条件とし、模擬・静的検査を実機合格へ読み替えない。
+
 - PR #467 の外部プロバイダ受入: 利用者が実API呼び出しと費用を許可し、隔離できる資格情報が揃ったときに、各サービスのモデル一覧・ツールと画像・停止・認証失敗の実応答を確認する。ローカル模擬HTTPの状態・送信内容・秘密除去の検査は、外部サービスの互換性や課金を伴う実生成の証明とは分ける。
 
 - PR #466 のWindows WebView2受入: 隔離設定で全角IME・貼付・不正欄の理由・草稿保持・訂正再保存を確認する。保存済み値と環境変数の不正が起動時に通知され、文字サイズの診断と設定導線が3形式の最小窓でも操作できること、音量不正では実音声を出さず、雑談・居眠りの不正ではその機能を止め、正常保存後に復旧することを確認する。利用者の設定や資格情報を破壊せず、既存資産と隔離できる実機環境を着手条件にする。Chromium・模擬IPC・単体検査はネイティブ描画と実音声の受入に読み替えない。
@@ -80,7 +82,6 @@
 | Ryzen APUのROCm判定 | ROCm 10.0はRyzen AI Max／AI 300・400／200系をWindows対応としているが、Windowsが返すGPU名は「AMD Radeon(TM) 8060S Graphics」のような内蔵GPU名で、`WINDOWS_ROCM_RUNTIME_SKUS`のCPU名とは一致しないため現状はVulkanを使う。CPU名（またはPCI ID）と内蔵GPU名を突き合わせる判定を実機で確認してから対応させる |
 | Linuxの専用GPU経路 | 固定llama.cpp版に対応するLinux CUDA／ROCm資産を独自ビルド・配布し、対応実GPUで起動とGPU利用を確認する。現状のUbuntu版はVulkan→CPU |
 | Ubuntu実Wayland | Ubuntu 24.04 LTS x64の実Wayland環境で、画面共有許可、画面取得、入力拒否時の理由付きエラーを確認する |
-| macOSのスキル外部CLIのPATH解決不一致 | 追加機能の導入判定（`components.rs`）とAivisの分割書庫展開は共通の`tools::process::resolve_executable()`へ揃えたが、**スキルが実際に起動する経路は未対応**。`tools::resolve_cli_path()`は明示設定にも同梱にも無い場合`"pandoc"`のような素の名前を返し、`ms_office` / `pdf_tools` / `document_convert` / `whisper_transcribe` / `doc_search`はそれをそのままspawnするため、GUI起動のmacOSではHomebrew導入分を掴めない可能性がある。素の名前を絶対パスへ変えると`image_tools`の`if resolved != "magick"`（ImageMagick v6の`convert`へ落とす分岐）と`document_convert`の名前比較が意味を失うので、**解決結果の扱いを決めてから**着手する。macOS実機でLibreOffice連携またはOSSツール群を使う作業のときに確認・修正 |
 | macOS Intel版 | 現在は配布対象外。`xtask/src/bundled.rs`が同梱エンジンの資産をxtask自身のホストarch（`cfg!(target_arch)`）で選ぶため、Apple Silicon機から`--target x86_64-apple-darwin`で作るとarm64版エンジンが入ったx64アプリになり、ローカルAIが起動しない。対象へ加えるには、実機のIntel Macでビルドするか、`bundled.rs`をビルド対象archへ追従させる（xtaskへ対象archを渡し、資産選択・SHA-256照合・配置先をすべてその値で行う）。どちらを採るか決めてから着手する |
 | macOS版の署名・公証 | Apple Developer Programの証明書と`notarytool`を用意し、署名・公証を通してから`distribution/release.json`の`platforms`へ`macos`を追加し、`signing.macosReady`を判定する。未署名アルファの間はGatekeeperの回避手順を取得ページで案内する |
 | 高精細キャラの分離取得 | アルファ版の試用結果を踏まえ、画質を落とさず配布容量を分離する設計を決める |

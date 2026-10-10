@@ -22,11 +22,11 @@
   function logApp(level, message, detail) {
     try {
       window.picoagent?.log?.(level, message, detail == null ? "" : String(detail)).catch(error => {
-        // フォールバック許可: ログ保存自体の失敗は再帰ログにせず、開発者コンソールへだけ出す。
+        // ログ保存自体の失敗は再帰ログにせず、開発者コンソールへだけ出す。
         console.warn("アプリログ保存に失敗しました", error);
       });
     } catch (error) {
-      // フォールバック許可: ログ保存自体の失敗は再帰ログにせず、開発者コンソールへだけ出す。
+      // ログ保存自体の失敗は再帰ログにせず、開発者コンソールへだけ出す。
       console.warn("アプリログ保存に失敗しました", error);
     }
   }

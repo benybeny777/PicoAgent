@@ -86,6 +86,7 @@
 | `settings_memory_list` | なし | 長期メモリの一覧 |
 | `settings_memory_delete` | `category`, `text`, `updatedAt` | 削除結果 |
 | `settings_components_status` | なし | 追加機能の状態の配列 |
+| `settings_detect_cli` | `id`（固定対象ID: `imagemagick`） | 名乗り確認済みのCLI候補と診断。設定は保存しない |
 | `settings_components_install` | `ids`, `enableTts`, `acceptedLicenseIds` | 導入結果。進捗は `component:progress` |
 | `settings_components_remove` | `id` | 削除結果 |
 | `settings_generation_environment` | なし | 画像・動画生成の実行環境 |
