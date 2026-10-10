@@ -197,8 +197,11 @@ test("任意キャラクターのI/O待ちはすべて有界化する", async ()
 
 test("選択キャラ失敗時は別キャラを出さず診断を表示する", () => {
   assert.match(startup, /characterSource\.element\.style\.visibility = "hidden";/);
-  assert.match(startup, /startupError = `選択したキャラを読み込めません: /);
-  assert.match(main, /if \(startupError\) status\.setSticky\(startupError, "error"\);/);
+  assert.match(startup, /characterError = `選択したキャラを読み込めません: /);
+  assert.match(main, /if \(characterError\) status\.set\(characterError, "character-load"\);/);
+  assert.match(main, /status\.clear\("character-load"\);/);
+  assert.ok(startup.indexOf("chat.history.hydrate(info.history)") < startup.indexOf("await loadCharacter("), "履歴は描画失敗前に復元する");
+  assert.equal(startup.split("chat.history.hydrate(info.history)").length, 2, "履歴の復元は一度だけ行う");
   assert.doesNotMatch(startup, /loadCharacter\("mugi"/);
 });
 

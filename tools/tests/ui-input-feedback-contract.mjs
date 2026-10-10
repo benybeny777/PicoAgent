@@ -80,7 +80,7 @@ test("非表示へ切り替えたAIの入力は保存収集でも保持し復号
   vm.runInContext(`let providerDraftValues = {}; const savedSnapshot = {};
     const PRESERVE_UNREADABLE_SECRET = "keep";
     const characterSelect = null, characterPersona = null, characterSpeaker = null, characterLive2dSdkSelect = null;
-    const characterOverrides = {}, characterVoiceOverrides = {}, characterLive2dSdkOverrides = {}, characterFraming = {}, characterStreamProfiles = {};
+    const characterOverrides = {}, characterVoiceOverrides = {}, characterLive2dSdkOverrides = {}, characterRendererOverrides = {}, characterFraming = {}, characterStreamProfiles = {};
     const alarmEditorState = null, scheduleEditorState = null;`, context);
   vm.runInContext(settings.slice(settings.indexOf("function rememberProviderDraft("), settings.indexOf("function cloneSettings(")), context);
   vm.runInContext(settings.slice(settings.indexOf("function collect()"), settings.indexOf("// 再起動の確認画面")), context);
@@ -119,7 +119,7 @@ test("競合の再表示で非表示AIの草稿と最新値を両方保持する
   });
   vm.runInContext(`const providerDraftValues = {};
     const savedSnapshot = { PICOAGENT_PROVIDER: "local", OPENAI_MODEL: "旧モデル", OTHER_PROVIDER_MODEL: "旧モデル" };
-    const characterOverrides = {}, characterVoiceOverrides = {}, characterLive2dSdkOverrides = {}, characterStreamProfiles = {};
+    const characterOverrides = {}, characterVoiceOverrides = {}, characterLive2dSdkOverrides = {}, characterRendererOverrides = {}, characterStreamProfiles = {};
     const alarmEditorState = null, scheduleEditorState = null;`, context);
   vm.runInContext(settings.slice(settings.indexOf("function collect()"), settings.indexOf("// 再起動の確認画面")), context);
   assert.equal(context.collect().OPENAI_MODEL, "草稿モデル");
@@ -133,7 +133,7 @@ test("キャラ切替が途中で失敗しても旧キャラの欄と草稿を�
     const sdk = { value: "4", options: [{ disabled: false }, { disabled: true }] };
     const context = vm.createContext({
       document: { activeElement: null },
-      characterPersona: persona, characterSpeaker: speaker, characterLive2dSdkSelect: sdk,
+      characterPersona: persona, characterSpeaker: speaker, characterLive2dSdkSelect: sdk, characterRendererSelect: null,
       characterLive2dSdkField: { hidden: false }, characterLive2dSdkHint: { textContent: "旧SDKの説明" },
       characterSelect: { value: "new", setAttribute() {}, focus() {} },
       characterCatalog: { characters: [{ id: "old", name: "旧キャラ" }, { id: "new", name: "新キャラ" }] },
@@ -151,7 +151,7 @@ test("キャラ切替が途中で失敗しても旧キャラの欄と草稿を�
       saveCurrentCharacterPersona(id) { context.personas[id] = persona.value; },
       saveCurrentCharacterVoice(id) { context.voices[id] = speaker.value; },
       saveCurrentCharacterLive2dSdk(id) { context.sdks[id] = sdk.value; },
-      personas: {}, voices: {}, sdks: {},
+      personas: {}, voices: {}, sdks: {}, loadCharacterRenderer: async () => {},
     });
     vm.runInContext(`let previousCharacter = "old", displayedCharacterId = "old";
       let characterSwitchQueue = Promise.resolve(), characterSwitchPending = 0;

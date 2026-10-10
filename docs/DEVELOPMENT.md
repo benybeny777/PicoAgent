@@ -326,6 +326,10 @@ NSIS アンインストーラは、インストール先またはPicoAgent管理
 
 ## 📄 主要ファイル
 
+キャラ描画の選択は `ui/character/index.js` の登録表と各方式の `supports()` を正本とし、最優先の対応方式1つだけを初期化する。失敗時に下位方式を試さず、キャラなし診断・再試行へ進む。利用者の明示2D指定は `PICOAGENT_RENDERER_OVERRIDES` のIDごとの `image` だけで、通常へ戻す操作はそのIDを削除する。メイン画面は狭い保存口 `pet_set_character_renderer` の成功後に再読込し、設定画面は草稿・保存・リセットへ同期する。古い世代の読込・診断操作を最新の表示へ混ぜない。
+
+追加キャラ一覧の取得と正規化は両画面で共通化する。取得失敗を空一覧へ降格せず、元の選択ID・未保存草稿を保持する。関連編集だけを停止し、他設定の保存へキャラの既定値を書き戻さない。理由と再取得操作は復旧まで保持する。Live2DのSDKモデル候補の選択と、描画方式をまたぐ切替を混同しない。
+
 外部HTTP取得の安全経路は `src-tauri/src/tools/http.rs` の `fetch_guarded` に集約する。全ホップの用途別URL方針・公開IP確認、検査済みDNS解決先固定、秘密ヘッダ除去、時間・本文・転送上限を一緒に保つ。DNS固定のため `no_proxy()` で直接接続し、プロキシ必須環境ではこの経路を使えない。`web_fetch` の先頭取得＋打切り表示と、API・RSSの上限超過エラーを区別する。通常の外向きHTTPは共有クライアントを使い、API応答は `service_reply` / `service_body` で短い理由とHTTP状態コードを返す。既知の設定秘密値を切詰め前に伏せ、本文取得失敗を空へ降格しない。
 
 外部CLIは `tools::resolve_cli_path` で明示指定、未設定時だけ管理下の同梱物を解決する。コマンド名だけの明示指定時に限り共通探索を使う（macOSではPATHの後に既存Homebrew配置 `/opt/homebrew/bin`・`/usr/local/bin` も確認）。指定先や優先する管理配置の欠損は修復エラーにする。Whisperの2スキルは `tools::whisper` で解決し、固定モデル名は取得側と共通の `crates/picoagent-core/src/paths.rs` を正本とする。別名の導入モデルは `PICOAGENT_TRANSCRIBE_MODEL` へ明示し、`.bin` の名前順探索はしない。

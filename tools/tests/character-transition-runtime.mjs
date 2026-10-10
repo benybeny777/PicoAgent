@@ -9,13 +9,14 @@ function deferred() {
   const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
   return { promise, resolve, reject };
 }
-const main = readFileSync(new URL("../../ui/app/main.js", import.meta.url), "utf8");
+const main = readFileSync(new URL("../../ui/app/main.js", import.meta.url), "utf8").replace(/\r\n/g, "\n");
 const loadFunction = main.slice(main.indexOf("async function loadCharacter("), main.indexOf("\nfunction localStorageVariant("));
 const hostSource = readFileSync(new URL("../../ui/character/index.js", import.meta.url), "utf8")
-  .replace(/^import[\s\S]*?;\r?\n/gm, "").replace(/export (function|const)/g, "$1");
+  .replace(/^import[\s\S]*?;\r?\n/gm, "").replace(/export (function|const|class)/g, "$1");
 
 function setup(initialSignature = "") {
-  const loads = [], profiles = [], greetings = [], appearances = [];
+  const loads = [], profiles = [], greetings = [], appearances = [], diagnostics = [];
+  let diagnostic = null;
   const element = { style: {}, dataset: {} };
   let statusText = "";
   const context = {
@@ -24,15 +25,17 @@ function setup(initialSignature = "") {
     characterSource: { element }, stage: { setCharacter() {} }, chrome: { setCharacterName() {} },
     status: { set: text => { statusText = text; }, clear: () => { statusText = ""; } },
     renderCharacterOptions() {}, motion: { rest() {} }, personaText: () => "人格",
-    characterOverrides: {}, sdkOverrides: {}, errorMessage: String,
+    characterOverrides: {}, sdkOverrides: {}, rendererOverrides: {}, errorMessage: String,
+    characterDiagnostic: { show(id, error) { diagnostic = { id, error }; diagnostics.push(diagnostic); }, clear() { diagnostic = null; } },
     bridge: { setCharacterProfile: (id, profile, greeting, voice) => { const work = deferred(); profiles.push({ id, voice, ...work }); return work.promise; } },
     applyStreamAppearance: value => appearances.push(value), chat: { renderReply() {} },
   };
   const api = runInNewContext(`let loadedSignature = ${JSON.stringify(initialSignature)};
-    let characterName = ""; let characterLoadGeneration = 0; let characterLoads = 0;
+    let characterName = ""; let requestedCharacterId = ""; let characterLoadGeneration = 0; let characterLoads = 0;
     ${loadFunction}
     ({ loadCharacter, get signature() { return loadedSignature; } })`, context);
   return { ...api, api, loads, profiles, greetings, appearances, element, get statusText() { return statusText; },
+    diagnostics, get diagnostic() { return diagnostic; },
     async finishLoad(index) {
       const id = loads[index].id;
       loads[index].resolve({ pack: { id, name: id, manifest: { voice: { provider: "aivis", styleId: "123" } } }, greeting: `${id}の挨拶` });
@@ -62,6 +65,7 @@ test("新キャラへ移った後の古い読込失敗は現在の表示を隠�
   assert.equal(await first, null);
   assert.equal(state.element.style.visibility, "");
   assert.equal(state.statusText, "");
+  assert.equal(state.diagnostics.length, 0);
 });
 
 test("切替待ち中に元キャラへ戻した場合は署名一致でも読込を省略しない", async () => {
@@ -81,10 +85,12 @@ test("人格登録失敗は未確定キャラを隠して診断を残し同じ�
   await assert.rejects(first, /人格登録失敗/);
   assert.equal(state.element.style.visibility, "hidden");
   assert.match(state.statusText, /人格登録失敗/);
+  assert.equal(state.diagnostic.id, "a");
   const second = state.loadCharacter("a"); await state.finishLoad(1);
   state.profiles[1].resolve("aの背景"); await second;
   assert.equal(state.element.style.visibility, "");
   assert.equal(state.statusText, "");
+  assert.equal(state.diagnostic, null);
 });
 
 test("読込途中の描画器は寸法と状態を確定するまで可視にしない", async () => {

@@ -48,6 +48,7 @@ mod project_rules;
 mod providers;
 mod relationship;
 mod relationship_preset;
+mod renderer_setting;
 mod scene;
 mod scheduler;
 mod secret;
@@ -211,6 +212,7 @@ pub fn run() {
             commands::pet_reset_layout,
             commands::pet_save_scene,
             commands::pet_save_ui_pref,
+            commands::pet_set_character_renderer,
             menu::pet_menu,
             menu::pet_layout_menu,
             menu::pet_character_menu,
