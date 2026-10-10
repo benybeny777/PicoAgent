@@ -2107,18 +2107,15 @@ pub async fn pet_send(
             RELATIONSHIP_SAVE.report(&app, "relationship-save", "関係性の保存",
                 relationship_result.as_ref().map(|_| ()).map_err(|error| format!("関係性を保存できないため、この会話の出来事を反映できません: {error}")),
                 "関係性の保存が復旧しました");
-            match relationship_result {
-                Ok(relationship) => {
-                    // 文面が変わったときだけ system を作り直す（毎ターンだとプロンプト
-                    // キャッシュが無効化され、全文の再評価が走る）。
-                    if state.set_relationship_context(relationship_prompt_context(
-                        &state.config,
-                        &relationship,
-                    )) {
-                        state.rebuild_from_character(character, false);
-                    }
+            if let Ok(relationship) = relationship_result {
+                // 文面が変わったときだけ system を作り直す（毎ターンだとプロンプト
+                // キャッシュが無効化され、全文の再評価が走る）。
+                if state.set_relationship_context(relationship_prompt_context(
+                    &state.config,
+                    &relationship,
+                )) {
+                    state.rebuild_from_character(character, false);
                 }
-                Err(_) => {}
             }
         }
         capture_project_rules(&app, &state.config, &user_text);

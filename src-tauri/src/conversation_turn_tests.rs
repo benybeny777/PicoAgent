@@ -63,6 +63,7 @@ async fn mock_user_turn(state: Arc<AppState>, provider: Arc<DelayedProvider>) {
     agent::with_cancel(turn.flag(), async {
         let mut messages = state.messages.lock().unwrap().clone();
         messages.push(Message::new("user", "利用者の発話"));
+        // 非公開利用: 同期回帰の模擬応答は検査用AppStateだけに置き、画面・音声・保存履歴へ渡さない。
         let reply = provider
             .chat(&state.config, "", &messages, &[])
             .await
