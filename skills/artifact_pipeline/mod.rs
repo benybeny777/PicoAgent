@@ -9,56 +9,11 @@ use serde_json::{json, Value};
 use super::{Tool, ToolReg};
 use crate::config::Config;
 use crate::permissions::SafePath;
+use crate::text::{html_escape_clean as html_escape, xml_escape_clean as xml_escape};
 
 pub struct ArtifactPipelineTool;
 
-/// XMLが禁じる制御文字を落としつつ、実体参照へ置き換える。
-/// 成果物1行ごとに呼ぶので、収集してから5回置換し直すのではなく1回の走査で組み立てる。
-fn xml_escape(text: &str) -> String {
-    let mut out = String::with_capacity(text.len());
-    for ch in text.chars() {
-        match ch {
-            '&' => out.push_str("&amp;"),
-            '<' => out.push_str("&lt;"),
-            '>' => out.push_str("&gt;"),
-            '"' => out.push_str("&quot;"),
-            '\'' => out.push_str("&apos;"),
-            '\u{9}' | '\u{A}' | '\u{D}' => out.push(ch),
-            _ if ch >= '\u{20}' => out.push(ch),
-            _ => {}
-        }
-    }
-    out
-}
-
-fn html_escape(text: &str) -> String {
-    xml_escape(text)
-}
-
-fn slug(text: &str) -> String {
-    let value: String = text
-        .chars()
-        .take(40)
-        .map(|ch| {
-            if ch.is_ascii_alphanumeric() {
-                ch.to_ascii_lowercase()
-            } else {
-                '-'
-            }
-        })
-        .collect();
-    let compact = value
-        .split('-')
-        .filter(|part| !part.is_empty())
-        .collect::<Vec<_>>()
-        .join("-");
-    if compact.is_empty() {
-        "project".to_string()
-    } else {
-        compact
-    }
-}
-
+/// 生成したOffice各部を、一つのZIP成果物へまとめる。
 fn zip_bytes(parts: &[(&str, String)]) -> Result<Vec<u8>, String> {
     let mut writer = zip::ZipWriter::new(Cursor::new(Vec::new()));
     let options = zip::write::SimpleFileOptions::default()
@@ -430,7 +385,12 @@ impl Tool for ArtifactPipelineTool {
                     Value::String(format!(
                         "PicoAgent-AI-Drive/projects/{}-{}",
                         Local::now().format("%Y%m%d-%H%M%S%3f"),
-                        slug(&topic)
+                        crate::text::slug(
+                            &topic,
+                            "project",
+                            40,
+                            crate::text::SlugPolicy::AsciiInput
+                        )
                     )),
                 );
             }

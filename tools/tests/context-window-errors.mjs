@@ -68,10 +68,7 @@ for (const action of ["cut", "paste"]) {
   });
 }
 
-test("上端メニューとウィンドウ操作の失敗は理由を画面へ出して再操作できる", async () => {
-  const alerts = [];
-  const reject = async () => { throw new Error("検査用の操作拒否"); };
-  const menu = dom.createElement("div");
+function windowChrome({ menu, appElement, alerts = [], reject = async () => {}, dependencies = {} }) {
   const factory = load("app/window-chrome.js", "createWindowChrome", {
     el, Element: menu.constructor, toast: text => alerts.push(text), logApp() {},
     ResizeObserver: class { observe() {} disconnect() {} },
@@ -81,9 +78,17 @@ test("上端メニューとウィンドウ操作の失敗は理由を画面へ�
     errorDetail: String, errorMessage: error => error.message, preview: value => value,
     bridge: { layoutMenu: reject, characterMenu: reject, openSettings: reject,
       minimizeWindow: reject, toggleMaximizeWindow: reject, closeWindow: reject, startWindowResize: reject },
+    ...dependencies,
   });
+  return factory({ menu, appElement, stageElement: dom.createElement("div"), onEditLayout() {}, onGame() {}, listCharacters: async () => [] });
+}
+
+test("上端メニューとウィンドウ操作の失敗は理由を画面へ出して再操作できる", async () => {
+  const alerts = [];
+  const reject = async () => { throw new Error("検査用の操作拒否"); };
+  const menu = dom.createElement("div");
   const appElement = { querySelector: () => null, classList: { add() {}, remove() {}, toggle() {}, contains: () => false } };
-  factory({ menu, appElement, stageElement: dom.createElement("div"), onEditLayout() {}, onGame() {}, listCharacters: async () => [] });
+  windowChrome({ menu, appElement, alerts, reject });
   const items = menu.children[1].children;
   // 📌（常に表示）は失敗しうる外部操作を持たないので、失敗通知の対象から外す。
   const controls = [...menu.children[3].children].filter(button => button.className !== "window-pin");
@@ -94,5 +99,31 @@ test("上端メニューとウィンドウ操作の失敗は理由を画面へ�
     assert.equal(alerts.length, previous + 1);
     assert.equal(Boolean(button.disabled), false);
     assert.match(alerts.at(-1), /検査用の操作拒否|一覧を取得できません/);
+  }
+});
+
+test("上端表示の余白は通常と最小診断でcss正本を読み縮尺にかかわらず操作の下へ配置する", () => {
+  for (const scale of [1, 2]) {
+    let base = 12;
+    const frames = [];
+    const menu = dom.createElement("div"), chat = dom.createElement("section"), appElement = dom.createElement("div");
+    menu.getBoundingClientRect = () => ({ left: 0, right: 200, bottom: 48 });
+    chat.getBoundingClientRect = () => ({ left: 0, right: 200 * scale, top: 0, width: 200 * scale });
+    chat.offsetWidth = 200;
+    chat.style.getPropertyValue = key => chat.style[key] || "";
+    appElement.querySelector = () => chat;
+    let resized;
+    const chrome = windowChrome({ menu, appElement, dependencies: {
+      requestAnimationFrame: callback => { frames.push(callback); return 1; }, clearTimeout() {},
+      getComputedStyle: () => ({ getPropertyValue: key => key === "--chat-chrome-base-padding" ? `${base}px` : "" }),
+      ResizeObserver: class { constructor(callback) { resized = callback; } observe() {} disconnect() {} },
+    } });
+    chrome.setPinned(true);
+    frames.shift()();
+    assert.equal((base + Number.parseFloat(chat.style["--chat-chrome-inset"])) * scale, 54);
+    base = 4;
+    resized();
+    frames.shift()();
+    assert.equal((base + Number.parseFloat(chat.style["--chat-chrome-inset"])) * scale, 54);
   }
 });

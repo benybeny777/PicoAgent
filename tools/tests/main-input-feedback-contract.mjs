@@ -43,7 +43,7 @@ function makeComposer({ value = "下書き", history = ["前の入力", "直前�
   const flashes = [];
   let submitted = 0;
   const composer = createComposer({
-    form, input, preview: make("div"), suggestions: make("div"), quickActions: make("div"), sendButton,
+    form, input, preview: make("div"), suggestions: make("div"), quickActions: make("div"), diagnostics: make("div"), sendButton,
     status: { set() {}, clear() {}, flash: text => flashes.push(text), setBusy() {} },
   });
   composer.onSubmit(() => { submitted += 1; });
@@ -120,7 +120,7 @@ test("音声・提案・再利用で入れた文は、入力履歴の途中で�
     const draft = input.value;
     assert.notEqual(draft, "直前の入力");
     // 書きかけとしてすぐ書き切る（遅延保存を待つ間に閉じても消えない）。
-    assert.equal(window.PicoComposerDraft.readDraft(localStorage.getItem("picoagent.composerDraft.v1")), draft);
+    assert.equal(window.PicoComposerDraft.readDraft(localStorage.getItem("picoagent.composerDraft.v1")).draft, draft);
     input.selectionStart = input.selectionEnd = 0;
     press("ArrowUp");
     input.selectionStart = input.selectionEnd = input.value.length;

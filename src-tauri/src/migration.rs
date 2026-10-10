@@ -10,7 +10,7 @@ const LEGACY_IDENTIFIERS: [&str; 2] = ["com.picoagent.app", "com.coda.app"];
 pub fn migrate_identity_dirs(app: &AppHandle, current_config_dir: &Path) -> anyhow::Result<()> {
     std::fs::create_dir_all(current_config_dir)?;
     // 開発ビルドは空の専用領域から始め、通常版の旧識別子フォルダやWebView領域を移さない。
-    if crate::app_paths::dev_data_root().is_some() {
+    if cfg!(debug_assertions) {
         return Ok(());
     }
     let mut sources = BTreeSet::new();

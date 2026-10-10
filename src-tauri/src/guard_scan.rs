@@ -114,13 +114,13 @@ fn load_skill_sources() -> Vec<Source> {
     out
 }
 
-/// `ui/*.js` 一式（webview フロントの自前ソース）。
+/// `ui/**/*.js` 一式（webview フロントの自前ソース）。
 ///
 /// 名前を1つずつ書き並べた一覧で検査していたため、`layout-editor.js` /
 /// `top-menu.js` / `mesh-rig.js` / `character-preview.js` が誰にも見られていなかった。
 /// **ガードの穴はガードが無いのと同じ**なので、フロントの走査範囲もここで決める。
 /// `ui/vendor/` は取得した第三者ランタイム（自前のコードではない）なので、
-/// 直下だけを見て入れ子は追わない。
+/// 除外する。自前の入れ子モジュールも同じ走査で検査する。
 pub fn ui_sources() -> &'static [Source] {
     static SOURCES: OnceLock<Vec<Source>> = OnceLock::new();
     SOURCES.get_or_init(load_ui_sources)
@@ -130,23 +130,7 @@ fn load_ui_sources() -> Vec<Source> {
     let root = repo_root();
     let dir = root.join("ui");
     let mut out = Vec::new();
-    for entry in sorted_entries(&dir) {
-        let path = entry.path();
-        if path.extension().is_none_or(|e| e != "js") {
-            continue;
-        }
-        let text = std::fs::read_to_string(&path).unwrap_or_else(|error| {
-            panic!("UIソースを読み込めません: {} ({error})", path.display())
-        });
-        out.push(Source {
-            name: path
-                .file_name()
-                .map(|v| v.to_string_lossy().to_string())
-                .unwrap_or_default(),
-            path: path.strip_prefix(&root).unwrap_or(&path).to_path_buf(),
-            text,
-        });
-    }
+    collect_matching(&root, &dir, &mut out, "js", &[dir.join("vendor")]);
     assert!(
         out.len() > 8,
         "UIソースの読み込みに失敗している可能性: {}",
@@ -174,8 +158,33 @@ fn load_backend_sources() -> Vec<Source> {
 }
 
 fn collect_rs(root: &Path, dir: &Path, out: &mut Vec<Source>) {
+    collect_matching(root, dir, out, "rs", &[]);
+}
+
+/// ビルド・配布CLIも必要なガードから同じ正本を参照する。
+pub fn xtask_sources() -> &'static [Source] {
+    static SOURCES: OnceLock<Vec<Source>> = OnceLock::new();
+    SOURCES.get_or_init(|| {
+        let root = repo_root();
+        let mut out = Vec::new();
+        collect_rs(&root, &root.join("xtask/src"), &mut out);
+        assert!(out.len() > 5, "xtaskのソース走査が不完全です");
+        out
+    })
+}
+
+fn collect_matching(
+    root: &Path,
+    dir: &Path,
+    out: &mut Vec<Source>,
+    extension: &str,
+    excluded: &[PathBuf],
+) {
     for entry in sorted_entries(dir) {
         let path = entry.path();
+        if excluded.contains(&path) {
+            continue;
+        }
         let kind = entry.file_type().unwrap_or_else(|error| {
             panic!(
                 "検査対象の種類を取得できません: {} ({error})",
@@ -183,8 +192,8 @@ fn collect_rs(root: &Path, dir: &Path, out: &mut Vec<Source>) {
             )
         });
         if kind.is_dir() {
-            collect_rs(root, &path, out);
-        } else if path.extension().is_some_and(|e| e == "rs") {
+            collect_matching(root, &path, out, extension, excluded);
+        } else if path.extension().is_some_and(|e| e == extension) {
             let text = std::fs::read_to_string(&path).unwrap_or_else(|error| {
                 panic!("検査対象を読み込めません: {} ({error})", path.display())
             });
@@ -212,6 +221,79 @@ fn sorted_entries(dir: &Path) -> Vec<std::fs::DirEntry> {
 /// メタガード: 各ガードが走査範囲を自前で決めていないこと。
 #[cfg(test)]
 mod guard {
+    fn ungrounded_comments(text: &str) -> Vec<usize> {
+        let policy: serde_json::Value =
+            serde_json::from_str(include_str!("../../tools/contracts/fallback-policy.json"))
+                .unwrap();
+        let marker = policy["marker"].as_str().unwrap();
+        let opening = policy["basisOpen"].as_str().unwrap();
+        let closing = policy["basisClose"].as_str().unwrap();
+        let prefixes = policy["authorityPrefixes"].as_array().unwrap();
+        let has_basis = |line: &str| {
+            line.split_once(opening)
+                .and_then(|(_, tail)| tail.split_once(closing))
+                .is_some_and(|(basis, _)| {
+                    prefixes.iter().any(|prefix| {
+                        let prefix = prefix.as_str().unwrap();
+                        let Some(tail) = basis.strip_prefix(prefix) else {
+                            return false;
+                        };
+                        prefix != policy["numberedAuthorityPrefix"].as_str().unwrap()
+                            || tail
+                                .chars()
+                                .next()
+                                .is_some_and(|character| character.is_ascii_digit())
+                    })
+                })
+        };
+        text.lines()
+            .enumerate()
+            .filter_map(|(index, line)| {
+                (line
+                    .split_once("//")
+                    .is_some_and(|(_, comment)| comment.contains(marker) && !has_basis(comment)))
+                .then_some(index + 1)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn フォールバックの許可には共通方針の根拠を必須にする() {
+        let sources = super::all_sources();
+        let errors: Vec<_> = sources
+            .into_iter()
+            .chain(super::xtask_sources())
+            .chain(super::ui_sources())
+            .flat_map(|source| {
+                ungrounded_comments(source.body())
+                    .into_iter()
+                    .map(|line| format!("{}:{line}", source.path.display()))
+            })
+            .collect();
+        assert!(errors.is_empty(), "根拠のない許可コメント: {errors:?}");
+        assert_eq!(
+            ungrounded_comments("// フォールバック許可: 便利なので続ける"),
+            [1]
+        );
+        assert!(ungrounded_comments(
+            "// フォールバック許可: 利用者が採用した候補（根拠: PR #467）"
+        )
+        .is_empty());
+    }
+
+    #[test]
+    fn 共通走査は画面の入れ子と開発ツールを含み第三者資産を除く() {
+        assert!(super::ui_sources()
+            .iter()
+            .any(|source| source.path.ends_with("ui/app/main.js")));
+        assert!(super::ui_sources()
+            .iter()
+            .all(|source| !source.path.starts_with("ui/vendor")));
+        assert!(super::xtask_sources()
+            .iter()
+            .any(|source| source.path.ends_with("xtask/src/cli.rs")));
+    }
+
     #[test]
     fn 同じ実行内の走査はソース本文を共有する() {
         let first = super::all_sources();

@@ -7,18 +7,16 @@ mod alarm;
 mod api_server;
 mod app_paths;
 mod boot_screen;
-#[cfg(test)]
-mod bundle_scope;
 mod character_learning;
 mod character_maker;
 mod character_pack;
+mod character_voice;
 mod commands;
 mod components;
 mod config;
+mod conversation_turn;
 mod daily;
 mod diagnostics;
-#[cfg(test)]
-mod doc_sync;
 mod downloaded_characters;
 mod durable_jobs;
 mod emotion;
@@ -27,10 +25,9 @@ mod engine_backend;
 mod game;
 mod generation_backend;
 mod gpu;
-#[cfg(test)]
-mod guard_scan;
 mod history;
 mod hotkey;
+mod installer;
 mod layout;
 mod license;
 mod log_paths;
@@ -41,11 +38,13 @@ mod memory_embedding_install;
 mod menu;
 mod message;
 mod migration;
+mod notice;
 mod permissions;
 mod project_rules;
 mod providers;
 mod relationship;
 mod relationship_preset;
+mod renderer_setting;
 mod scene;
 mod scheduler;
 mod secret;
@@ -57,12 +56,11 @@ mod text;
 mod tools;
 mod topic_guard;
 mod tracer;
-#[cfg(test)]
-mod ui_contract;
 mod usage;
 mod user_characters;
 mod user_skills;
 mod window_surface;
+mod workflow_migration;
 
 use tauri::{Manager, PhysicalPosition, RunEvent};
 
@@ -141,6 +139,7 @@ pub fn run() {
             commands::pet_complete_onboarding,
             commands::pet_show_onboarding,
             commands::settings_components_status,
+            commands::settings_detect_cli,
             commands::settings_generation_environment,
             commands::settings_components_install,
             commands::settings_components_remove,
@@ -209,6 +208,7 @@ pub fn run() {
             commands::pet_reset_layout,
             commands::pet_save_scene,
             commands::pet_save_ui_pref,
+            commands::pet_set_character_renderer,
             menu::pet_menu,
             menu::pet_layout_menu,
             menu::pet_character_menu,
@@ -217,7 +217,13 @@ pub fn run() {
             menu::handle_event(app, event.id().as_ref());
         })
         .setup(|app| {
-            let managed_data = app_paths::data_dir(app.handle());
+            let managed_data = app_paths::resolve_data_dir(app.handle()).map_err(std::io::Error::other)?;
+            if !app.manage(app_paths::ManagedDataDir(managed_data.clone())) {
+                return Err(std::io::Error::other("管理保存先は既に初期化されています").into());
+            }
+            // 設定・取得・プロバイダが通信する前に標準HTTPを確定する。
+            tools::http::init().map_err(std::io::Error::other)?;
+            installer::http::init().map_err(std::io::Error::other)?;
             std::fs::create_dir_all(&managed_data)?;
             log_paths::allow_asset_scope(app.handle());
             if let Err(error) = migration::migrate_identity_dirs(app.handle(), &managed_data) {
@@ -272,6 +278,14 @@ pub fn run() {
                         "設定の保存先を取得できないため、設定を保存しない読み取り専用状態で起動します: {error}"
                     )),
                 ),
+            }
+            let scheduler_migration_ready = workflow_migration::prepare(app.handle(), &state.config);
+            for invalid in state.config.invalid_int_settings() {
+                if let (Some(key), Some(message)) = (invalid["key"].as_str(), invalid["message"].as_str()) {
+                    notice::emit(app.handle(), notice::Notice::background_failure(
+                        &format!("numeric-setting:{key}"), "数値設定を確認してください", message,
+                    ));
+                }
             }
             // 削除した失敗版を選択したままの旧設定は、2Dむぎへ一度だけ移す。
             // 保存に失敗しても起動は続ける（読み取り専用起動・空き容量不足でも画面は出す）。
@@ -343,7 +357,7 @@ pub fn run() {
             *state.memory_context.lock().unwrap() = memory::context(app.handle(), &state.config);
             // 履歴はキャラクター別。選択中キャラを文脈の持ち主として記録しておく。
             let character_id = state.config.get("PICOAGENT_CHARACTER", "mugi");
-            *state.character_id.lock().unwrap() = character_id.clone();
+            state.character.lock().unwrap().id = character_id.clone();
             let relationship_mode = state.config.get("PICOAGENT_COMPANION_MODE", "both");
             match relationship::load(app.handle(), &character_id, &relationship_mode) {
                 Ok(relationship) => {
@@ -459,7 +473,7 @@ pub fn run() {
             // フロントの準備完了を見張り、時間内に来なければキャラクター付きの案内画面へ切り替える。
             boot_screen::watch(app.handle().clone());
             durable_jobs::start(app.handle().clone());
-            scheduler::start(app.handle().clone());
+            scheduler::start(app.handle().clone(), scheduler_migration_ready);
             // ローカル API サーバ（既定無効。PICOAGENT_API_ENABLED=true で 127.0.0.1 に開く）。
             api_server::start(app.handle().clone());
             // 外部 MCP サーバ（設定 PICOAGENT_MCP_SERVERS があれば起動してツールを動的登録）。
@@ -1015,6 +1029,15 @@ fn save_window_layout_on_exit(app_handle: &tauri::AppHandle) {
         log_paths::append_app_log(app_handle, &error);
     }
 }
+
+#[cfg(test)]
+mod bundle_scope;
+#[cfg(test)]
+mod doc_sync;
+#[cfg(test)]
+mod guard_scan;
+#[cfg(test)]
+mod ui_contract;
 
 #[cfg(test)]
 mod window_layout_tests {

@@ -1,7 +1,8 @@
 // manifest.js - キャラクターの一覧と定義（character.json）を読み、描画器へ渡す「パック」にまとめる。
 
 import * as bridge from "../app/bridge.js";
-import { errorDetail, fetchJson, logApp } from "../app/util.js";
+import * as uiStore from "../app/ui-store.js";
+import { fetchJson } from "../app/util.js";
 
 const MANIFEST_CACHE_KEY = "2026-07-03-live2d-jp-voice-v1";
 
@@ -19,23 +20,6 @@ export function loadCatalog() {
   return catalogPromise;
 }
 
-/** 利用者が追加したキャラ（app_data_dir 配下）を同梱一覧と同じ形へそろえる。 */
-async function userEntries() {
-  try {
-    const result = await bridge.userCharacters();
-    return (result?.characters || []).map(entry => ({
-      id: entry.id,
-      name: entry.name,
-      description: entry.description || "",
-      root: bridge.assetUrl(entry.path),
-    }));
-  } catch (error) {
-    // フォールバック許可: 追加キャラを取れなくても同梱キャラだけで動かす（記録は残す）。
-    logApp("error", "追加キャラクターの一覧を取得できませんでした", errorDetail(error));
-    return [];
-  }
-}
-
 /** 同梱と追加を突き合わせた一覧。同じ id なら同梱側を優先する（追加分が同梱キャラを乗っ取らない）。 */
 export async function listCharacters() {
   const catalog = await loadCatalog();
@@ -45,20 +29,30 @@ export async function listCharacters() {
     description: entry.description || "",
     root: `assets/characters/${String(entry.manifest).replace(/\/character\.json$/, "")}`,
   }));
-  const known = new Set(bundled.map(entry => entry.id));
-  const all = bundled.concat((await userEntries()).filter(entry => !known.has(entry.id)));
-  return { entries: all, defaultId: catalog?.default };
+  const users = await window.PicoUI.loadUserCharacters(bridge.userCharacters, bridge.assetUrl, bundled);
+  return {
+    entries: bundled.concat(users.entries), defaultId: catalog?.default,
+    userCharactersError: users.error, userCharactersRoot: users.root,
+  };
 }
 
 /** 保存された見た目の違い（variant）の選択。キャラごとに WebView の localStorage へ覚える。 */
+function variantChoice(characterId) {
+  const result = uiStore.read(`picoagent.variant.${characterId}`);
+  if (!result.ok) throw new Error(`見た目の選択を読めません: ${result.reason}`);
+  if (result.value === null) return { id: "default", saved: false };
+  if (typeof result.value !== "string" || !result.value.trim()) throw new Error("保存した見た目の選択の形式が壊れています");
+  return { id: result.value, saved: true };
+}
+
 export function savedVariant(characterId) {
-  try { return localStorage.getItem(`picoagent.variant.${characterId}`) || "default"; }
-  catch { return "default"; } // フォールバック許可: 保存領域を読めない環境では既定の見た目で表示する。
+  return variantChoice(characterId).id;
 }
 
 export function rememberVariant(characterId, variantId) {
-  try { localStorage.setItem(`picoagent.variant.${characterId}`, variantId); }
-  catch (error) { logApp("warn", "見た目の選択を保存できませんでした", errorDetail(error)); }
+  if (typeof variantId !== "string" || !variantId.trim()) throw new Error("保存する見た目の選択が空です");
+  const result = uiStore.write(`picoagent.variant.${characterId}`, variantId);
+  if (!result.ok) throw new Error(`見た目の選択を保存できません: ${result.reason}`);
 }
 
 export function personaText(manifest, override) {
@@ -74,22 +68,35 @@ export function personaText(manifest, override) {
   ].filter(Boolean).join("\n");
 }
 
+/** 通常2Dの画像構造を、表示ホストと設定画面で同じ規則へそろえる。 */
+export function imageAnimationsOf(manifest, variant = null) {
+  return variant?.animations || manifest.animations
+    || ((variant?.meshRig || manifest.meshRig) ? { idle: { framePaths: ["preview.png"], frames: 1, fps: 1 } } : {});
+}
+
 const hasLive2d = config => Boolean(config?.model || config?.models?.length);
 
 /**
  * 描画器へ渡すパック。見た目の違い（variant）をここで解決し、描画器は選ばれた定義だけを見る。
  * `variant.live2d === false` なら、キャラ本体が Live2D でもフレーム表示へ戻す。
  */
-export async function loadPack(characterId, { sdkPreference = "auto" } = {}) {
-  const { entries, defaultId } = await listCharacters();
-  const entry = entries.find(item => item.id === characterId)
-    || entries.find(item => item.id === defaultId)
-    || entries[0];
-  if (!entry) throw new Error("利用できるキャラクターがありません");
+export async function loadPack(characterId, { sdkPreference = "auto", onUserCharacters } = {}) {
+  const { entries, userCharactersError, userCharactersRoot } = await listCharacters();
+  onUserCharacters?.({ error: userCharactersError, root: userCharactersRoot });
+  const entry = entries.find(item => item.id === characterId);
+  if (!entry) {
+    if (userCharactersError) throw new Error(`追加キャラ一覧を読めないため「${characterId}」を表示できません: ${window.PicoUI.errorMessage(userCharactersError)}`);
+    throw new Error(`キャラクター「${characterId}」が一覧にありません`);
+  }
   const manifest = await fetchJson(`${entry.root}/character.json?v=${MANIFEST_CACHE_KEY}`, "キャラクター定義");
-  manifest.id ||= entry.id;
+  if (manifest.id == null || manifest.id === "") manifest.id = entry.id;
+  else if (manifest.id !== entry.id) {
+    throw new Error(`キャラクター定義のID「${manifest.id}」が選択ID「${entry.id}」と一致しません`);
+  }
   const variants = Array.isArray(manifest.variants) ? manifest.variants : [];
-  const variant = variants.find(item => item.id === savedVariant(manifest.id)) || variants[0] || null;
+  const choice = variantChoice(manifest.id);
+  const variant = variants.find(item => item.id === choice.id) || (!choice.saved ? variants[0] || null : null);
+  if (choice.saved && !variant) throw new Error("保存したスタイルがこのキャラクターの定義にありません。選択を確認してください");
   let root = entry.root;
   if (variant?.root) root = `${entry.root}/${String(variant.root).replace(/^\/+|\/+$/g, "")}`;
   const live2d = variant?.live2d === false ? null : (variant?.live2d || manifest.live2d || null);
@@ -101,8 +108,7 @@ export async function loadPack(characterId, { sdkPreference = "auto" } = {}) {
     variants,
     variantId: variant?.id || "default",
     assetVersion: String(manifest.assetVersion || ""),
-    animations: variant?.animations || manifest.animations
-      || (manifest.meshRig ? { idle: { framePaths: ["preview.png"], frames: 1, fps: 1 } } : {}),
+    animations: imageAnimationsOf(manifest, variant),
     runtimeLayers: variant?.runtimeLayers || manifest.runtimeLayers || {},
     springPhysics: variant?.springPhysics ?? manifest.springPhysics ?? null,
     secondaryMotion: variant?.secondaryMotion ?? manifest.secondaryMotion ?? null,

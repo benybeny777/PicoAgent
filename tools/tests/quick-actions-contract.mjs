@@ -19,7 +19,7 @@ const [composer, main, html, shim, lib, commands] = await Promise.all([
 ]);
 const labels = items => items.map(item => item.label);
 
-test("設定を確認できないときは連携の要らない既定ボタンだけを出す", () => {
+test("未設定と確認したキーの連携ボタンを出さない", () => {
   assert.deepEqual(labels(quick.visibleQuickActions(quick.DEFAULT_QUICK_ACTIONS, {})), [
     "👀 画面を見る",
     "📋 クリップボード要約",
@@ -85,4 +85,15 @@ test("設定の保存直後にも、自分のクイック操作と既定ボタ�
   assert.match(body, /if \(ui\.quickActions != null\) composer\.setQuickActions\(ui\.quickActions\);/);
   assert.match(body, /composer\.refreshDefaultQuickActions\(\);/);
   assert.match(commands, /ui\["quickActions"\] = json!\(state\.config\.get\("PICOAGENT_QUICK_ACTIONS", ""\)\);/);
+});
+
+test("狭幅で省略するのは通常一覧だけで診断と質問選択肢を残す", async () => {
+  const css = await read("ui/components/chat.css");
+  assert.doesNotMatch(css, /@container \(max-width: 260px\)\s*\{\s*\.quick-actions\s*\{/);
+  assert.match(css, /\.quick-actions\[data-state="ready"\] \{ display: none;/);
+  for (const state of ["loading", "error", "choices"]) assert.ok(css.includes(`.quick-actions[data-state="${state}"]`));
+  assert.match(css, /\.composer-diagnostics:has\([^}]*overflow-y: auto;/);
+  assert.doesNotMatch(css, /\.chat:has\([^{]*\{[^}]*overflow-y: auto;/);
+  assert.match(css, /grid-template-rows: minmax\(0, 1fr\) auto auto;/);
+  assert.match(css, /padding: calc\(var\(--chat-chrome-base-padding\) \+ var\(--chat-chrome-inset, 0px\)\) 14px 4px;/);
 });

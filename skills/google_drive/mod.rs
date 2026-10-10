@@ -1,7 +1,5 @@
 // skills/google_drive/mod.rs - Google Drive の検索・テキストファイル作成スキル。
 
-use std::time::Duration;
-
 use async_trait::async_trait;
 use serde_json::{json, Value};
 
@@ -15,14 +13,6 @@ const MAX_NAME_CHARS: usize = 300;
 const MAX_TEXT_BYTES: usize = 128 * 1024;
 
 pub struct GoogleDriveTool;
-
-fn timeout_secs(cfg: &Config) -> u64 {
-    cfg.get("PICOAGENT_GOOGLE_DRIVE_TIMEOUT_SECS", "20")
-        .parse::<u64>()
-        .ok()
-        .filter(|value| (3..=60).contains(value))
-        .unwrap_or(20)
-}
 
 #[async_trait]
 impl Tool for GoogleDriveTool {
@@ -66,12 +56,7 @@ impl Tool for GoogleDriveTool {
                 "password",
                 "ya29...",
             ),
-            Field::new(
-                "PICOAGENT_GOOGLE_DRIVE_TIMEOUT_SECS",
-                "Google Drive API 待ち時間（秒、3〜60）",
-                "text",
-                "20",
-            ),
+            Field::int(&crate::config::ints::GOOGLE_DRIVE_TIMEOUT_SECS),
         ]
     }
 
@@ -85,7 +70,9 @@ impl Tool for GoogleDriveTool {
             );
         }
         let client = match reqwest::Client::builder()
-            .timeout(Duration::from_secs(timeout_secs(cfg)))
+            .timeout(crate::tool_try!(
+                cfg.duration_secs(&crate::config::ints::GOOGLE_DRIVE_TIMEOUT_SECS)
+            ))
             .user_agent("PicoAgent/1.0 (Google Drive tool)")
             .build()
         {
@@ -115,15 +102,13 @@ impl Tool for GoogleDriveTool {
                     Err(error) => {
                         return format!(
                             "エラー: Google Drive API への接続に失敗しました: {}",
-                            error
+                            error.without_url()
                         )
                     }
                 };
-                let status = response.status();
-                let body = crate::tool_response_text!(response);
-                if !status.is_success() {
-                    return format!("エラー: Google Drive API が HTTP {} を返しました。", status);
-                }
+                let body = crate::tool_try!(
+                    crate::tools::http::service_body(cfg, "Google Drive API", Ok(response)).await
+                );
                 let parsed: Value = crate::tool_response_json!(&body);
                 let mut out = String::from("Drive検索結果:\n");
                 for file in parsed
@@ -165,17 +150,11 @@ impl Tool for GoogleDriveTool {
                     Err(error) => {
                         return format!(
                             "エラー: Google Drive API への接続に失敗しました: {}",
-                            error
+                            error.without_url()
                         )
                     }
                 };
-                let status = response.status();
-                let body = crate::tool_response_text!(response);
-                if status.is_success() {
-                    body
-                } else {
-                    format!("エラー: Google Drive API が HTTP {} を返しました。", status)
-                }
+                crate::tools::http::service_reply(cfg, Ok(response), "Google Drive API").await
             }
             "create_text" => {
                 let Some(name) = args
@@ -232,15 +211,13 @@ impl Tool for GoogleDriveTool {
                     Err(error) => {
                         return format!(
                             "エラー: Google Drive API への接続に失敗しました: {}",
-                            error
+                            error.without_url()
                         )
                     }
                 };
-                let status = response.status();
-                let text = crate::tool_response_text!(response);
-                if !status.is_success() {
-                    return format!("エラー: Google Drive API が HTTP {} を返しました。", status);
-                }
+                let text = crate::tool_try!(
+                    crate::tools::http::service_body(cfg, "Google Drive API", Ok(response)).await
+                );
                 let parsed: Value = crate::tool_response_json!(&text);
                 format!(
                     "OK: Drive ファイルを作成しました。id={}",

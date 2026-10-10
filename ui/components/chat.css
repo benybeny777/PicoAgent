@@ -2,11 +2,12 @@
    見せ方は data-variant（bubble / column）で切り替える。形式名では分岐しない。 */
 .chat {
   --chat-font-size: 14px;
+  --chat-chrome-base-padding: 12px;
   --status-font-size: 11px;
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
-  padding: calc(12px + var(--chat-chrome-inset, 0px)) 14px 12px;
+  padding: calc(var(--chat-chrome-base-padding) + var(--chat-chrome-inset, 0px)) 14px 12px;
   border-radius: var(--radius-xl);
   background: var(--surface);
   border: 1px solid var(--panel-border);
@@ -233,6 +234,49 @@ body.is-editing .font-size-panel { display: none; }
   font-size: 11px;
   white-space: nowrap;
 }
+/* 診断と質問選択肢は入力と送信から独立した共通領域で辿れるようにする。 */
+.composer-diagnostics { display: contents; }
+.composer-diagnostics:has(.draft-recovery:not([hidden]), .quick-actions[data-state="loading"], .quick-actions[data-state="error"], .quick-actions[data-state="choices"]) {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 0;
+  max-height: 64px;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+.quick-actions[data-state="loading"],
+.quick-actions[data-state="error"],
+.quick-actions[data-state="choices"] { flex-wrap: wrap; flex: 0 0 auto; min-width: 0; overflow: visible; }
+.quick-actions > .hint { flex: 1 1 100%; min-width: 0; overflow-wrap: anywhere; }
+.quick-actions[data-state="choices"] button { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+.draft-recovery { flex: 0 0 auto; overflow-wrap: anywhere; }
+.draft-recovery > span { display: block; }
+.draft-recovery button { max-width: 100%; white-space: normal; }
+/* 最小高さでは履歴と返答が診断へ高さを譲り、入力・送信・状態・窓操作を固定する。 */
+@media (max-height: 360px) {
+  .chat:has(.composer-diagnostics .draft-recovery:not([hidden]), .composer-diagnostics .quick-actions[data-state="loading"], .composer-diagnostics .quick-actions[data-state="error"], .composer-diagnostics .quick-actions[data-state="choices"]) {
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    gap: 2px;
+    --chat-chrome-base-padding: 4px;
+    padding: calc(var(--chat-chrome-base-padding) + var(--chat-chrome-inset, 0px)) 14px 4px;
+    overflow: hidden;
+  }
+  .chat:has(.composer-diagnostics .draft-recovery:not([hidden]), .composer-diagnostics .quick-actions:not([data-state="ready"])) > .reply-actions { grid-row: 1; }
+  .chat:has(.composer-diagnostics .draft-recovery:not([hidden]), .composer-diagnostics .quick-actions:not([data-state="ready"])) > .composer {
+    grid-row: 2;
+    display: grid;
+    grid-template-rows: minmax(0, 1fr) auto auto;
+    min-height: 0;
+    gap: 2px;
+  }
+  .chat:has(.composer-diagnostics .draft-recovery:not([hidden]), .composer-diagnostics .quick-actions:not([data-state="ready"])) .composer-diagnostics { grid-row: 1; max-height: none; }
+  .chat:has(.composer-diagnostics .draft-recovery:not([hidden]), .composer-diagnostics .quick-actions:not([data-state="ready"])) .composer textarea { grid-row: 2; max-height: max(44px, 2.3em); }
+  .chat:has(.composer-diagnostics .draft-recovery:not([hidden]), .composer-diagnostics .quick-actions:not([data-state="ready"])) .composer-actions { grid-row: 3; }
+  .chat:has(.composer-diagnostics .draft-recovery:not([hidden]), .composer-diagnostics .quick-actions:not([data-state="ready"])) > .status { grid-row: 3; max-height: 1.6em; overflow: auto; }
+  .chat:has(.composer-diagnostics .draft-recovery:not([hidden]), .composer-diagnostics .quick-actions:not([data-state="ready"])) > :is(.history-tools, .history-log, .reply-home) { display: none; }
+}
 .quick-actions button:not(:disabled):hover, .attachment-suggestions button:hover { color: var(--text); border-color: var(--accent); }
 .image-preview { display: flex; flex-wrap: wrap; gap: 6px; }
 .image-thumb-wrap, .file-chip { position: relative; display: flex; align-items: center; gap: 6px; }
@@ -256,7 +300,7 @@ body.is-editing .font-size-panel { display: none; }
 
 /* 狭い窓では優先度の低い順に畳む（履歴検索 → クイック操作 → 回答本文の高さ）。 */
 @container (max-width: 260px) {
-  .quick-actions { display: none; }
+  .quick-actions[data-state="ready"] { display: none; }
   .history-tools .chip { display: none; }
   .voice-loop-button { display: none; }
   .composer-actions button { padding: 0 10px; }
@@ -396,3 +440,9 @@ body.is-editing-all .chat:hover .source-grip, body.is-editing-all .source-grip:f
 .source-grip[data-corner="bottom-right"] { bottom: 2px; right: 2px; cursor: se-resize; rotate: 90deg; }
 .source-grip[data-corner="bottom-left"] { bottom: 2px; left: 2px; cursor: sw-resize; rotate: 180deg; }
 .chat.expanded .source-grip { display: none; }
+
+/* 数量設定の診断は利用者の文字サイズと独立した確定表示にする。 */
+.chat.quantity-invalid > :not(.quantity-diagnostic), .quantity-hidden { visibility: hidden; pointer-events: none; }
+.quantity-diagnostic { position: absolute; inset: 8px; z-index: 20; background: var(--surface); color: var(--text); padding: 12px; font: 14px/1.6 sans-serif; overflow: auto; }
+
+.quantity-diagnostic:not([hidden]) { display: flex; flex-direction: column; justify-content: center; align-items: flex-start; }

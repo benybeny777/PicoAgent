@@ -8,35 +8,13 @@ use serde_json::{json, Value};
 use super::{Tool, ToolReg};
 use crate::config::Config;
 use crate::message::Field;
+use crate::tools::datetime_words::parse_days;
 
 const FRANKFURTER_BASE: &str = "https://api.frankfurter.app";
 
 pub struct CurrencyRatesTool;
 
-fn parse_days(text: &str) -> Option<i64> {
-    let chars: Vec<char> = text.chars().collect();
-    for (index, character) in chars.iter().enumerate() {
-        if character.is_ascii_digit() {
-            continue;
-        }
-        let unit_month = *character == 'ヶ' || *character == 'か' || *character == '月';
-        if !unit_month && *character != '日' {
-            continue;
-        }
-        let mut cursor = index;
-        let mut number = String::new();
-        while cursor > 0 && chars[cursor - 1].is_ascii_digit() {
-            number.insert(0, chars[cursor - 1]);
-            cursor -= 1;
-        }
-        if let Ok(number) = number.parse::<i64>() {
-            return Some(if unit_month { number * 30 } else { number }.clamp(2, 365));
-        }
-    }
-    None
-}
-
-fn direct_query(text: &str) -> Option<Value> {
+fn direct_query(text: &str) -> Result<Option<Value>, String> {
     let lower = text.to_lowercase();
     const NON_JPY: &[(&str, &str)] = &[
         ("豪ドル", "AUD"),
@@ -70,7 +48,7 @@ fn direct_query(text: &str) -> Option<Value> {
         .iter()
         .any(|word| lower.contains(word));
     if !(strong || base.is_some() || (has_jpy && (chart || lower.contains("換算")))) {
-        return None;
+        return Ok(None);
     }
 
     let mut args = serde_json::Map::new();
@@ -82,28 +60,11 @@ fn direct_query(text: &str) -> Option<Value> {
     }
     if chart {
         args.insert("chart".to_string(), json!(true));
-        if let Some(days) = parse_days(text) {
+        if let Some(days) = parse_days(text)? {
             args.insert("days".to_string(), json!(days));
         }
     }
-    Some(Value::Object(args))
-}
-
-// 値の並びを Unicode ブロックのスパークライン（簡易チャート）にする。
-fn sparkline(values: &[f64]) -> String {
-    const BARS: [char; 8] = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
-    let min = values.iter().cloned().fold(f64::INFINITY, f64::min);
-    let max = values.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-    if max.partial_cmp(&min) != Some(std::cmp::Ordering::Greater) {
-        return BARS[0].to_string().repeat(values.len());
-    }
-    values
-        .iter()
-        .map(|&v| {
-            let idx = (((v - min) / (max - min)) * 7.0).round() as usize;
-            BARS[idx.min(7)]
-        })
-        .collect()
+    Ok(Some(Value::Object(args)))
 }
 
 #[async_trait]
@@ -121,7 +82,10 @@ impl Tool for CurrencyRatesTool {
     }
 
     fn intent_invocation(&self, text: &str) -> Option<crate::tools::IntentInvocation> {
-        direct_query(text).map(crate::tools::IntentInvocation::direct)
+        match direct_query(text) {
+            Ok(args) => args.map(crate::tools::IntentInvocation::direct),
+            Err(reason) => Some(crate::tools::IntentInvocation::invalid(reason)),
+        }
     }
 
     fn label(&self) -> &'static str {
@@ -160,12 +124,7 @@ impl Tool for CurrencyRatesTool {
                 "text",
                 "JPY",
             ),
-            Field::new(
-                "PICOAGENT_CURRENCY_TIMEOUT_SECS",
-                "為替API待ち時間（秒、3〜60）",
-                "text",
-                "15",
-            ),
+            Field::int(&crate::config::ints::CURRENCY_TIMEOUT_SECS),
         ]
     }
 
@@ -191,12 +150,7 @@ impl Tool for CurrencyRatesTool {
                     .to_ascii_uppercase()
             });
         let amount = args.get("amount").and_then(Value::as_f64).unwrap_or(1.0);
-        let timeout = cfg
-            .get("PICOAGENT_CURRENCY_TIMEOUT_SECS", "15")
-            .parse::<u64>()
-            .ok()
-            .filter(|value| (3..=60).contains(value))
-            .unwrap_or(15);
+        let timeout = crate::tool_try!(cfg.int(&crate::config::ints::CURRENCY_TIMEOUT_SECS)) as u64;
         let client = match reqwest::Client::builder()
             .timeout(Duration::from_secs(timeout))
             .user_agent("PicoAgent/1.0 (Currency tool)")
@@ -221,7 +175,7 @@ impl Tool for CurrencyRatesTool {
                 .find(|s| !s.is_empty())
                 .unwrap_or("JPY")
                 .to_string();
-            return currency_chart(&client, &base, &symbol, days).await;
+            return currency_chart(cfg, &client, &base, &symbol, days).await;
         }
 
         let response = match client
@@ -235,12 +189,20 @@ impl Tool for CurrencyRatesTool {
             .await
         {
             Ok(response) => response,
-            Err(error) => return format!("エラー: 為替APIへの接続に失敗しました: {}", error),
+            Err(error) => {
+                return format!(
+                    "エラー: 為替APIへの接続に失敗しました: {}",
+                    error.without_url()
+                )
+            }
         };
         let status = response.status();
         let body = crate::tool_response_text!(response);
         if !status.is_success() {
-            return format!("エラー: 為替APIが HTTP {} を返しました。", status);
+            return format!(
+                "エラー: {}",
+                crate::tools::http::safe_service_error(cfg, "為替API", status, &body)
+            );
         }
         let data: Value = crate::tool_response_json!(&body);
         let date = data.get("date").and_then(Value::as_str).unwrap_or("");
@@ -261,7 +223,13 @@ impl Tool for CurrencyRatesTool {
 }
 
 // Frankfurter の時系列を取得し、推移をスパークラインで返す。
-async fn currency_chart(client: &reqwest::Client, base: &str, symbol: &str, days: i64) -> String {
+async fn currency_chart(
+    cfg: &Config,
+    client: &reqwest::Client,
+    base: &str,
+    symbol: &str,
+    days: i64,
+) -> String {
     use chrono::{Duration as ChronoDuration, Local};
     let end = Local::now().date_naive();
     let start = end - ChronoDuration::days(days);
@@ -273,13 +241,15 @@ async fn currency_chart(client: &reqwest::Client, base: &str, symbol: &str, days
         .await
     {
         Ok(response) => response,
-        Err(error) => return format!("エラー: 為替APIへの接続に失敗しました: {}", error),
+        Err(error) => {
+            return format!(
+                "エラー: 為替APIへの接続に失敗しました: {}",
+                error.without_url()
+            )
+        }
     };
     if !response.status().is_success() {
-        return format!(
-            "エラー: 為替APIが HTTP {} を返しました。",
-            response.status()
-        );
+        return crate::tools::http::service_reply(cfg, Ok(response), "為替API").await;
     }
     let data: Value = match response.json().await {
         Ok(data) => data,
@@ -317,7 +287,7 @@ async fn currency_chart(client: &reqwest::Client, base: &str, symbol: &str, days
         days,
         series.first().map(|(d, _)| d.as_str()).unwrap_or(""),
         series.last().map(|(d, _)| d.as_str()).unwrap_or(""),
-        sparkline(&values),
+        match crate::text::sparkline(&values) { Ok(chart) => chart, Err(reason) => return format!("エラー: {reason}"), },
         first,
         last,
         min,

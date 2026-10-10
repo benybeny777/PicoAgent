@@ -119,23 +119,6 @@ impl Project {
     }
 }
 
-fn slug(value: &str) -> String {
-    value
-        .chars()
-        .map(|c| {
-            if c.is_alphanumeric() {
-                c.to_ascii_lowercase()
-            } else {
-                '-'
-            }
-        })
-        .collect::<String>()
-        .split('-')
-        .filter(|part| !part.is_empty())
-        .collect::<Vec<_>>()
-        .join("-")
-}
-
 /// 選択中のプロジェクトID。未設定なら `default`。
 pub fn active_project(cfg: &Config) -> String {
     let active = cfg.get(ACTIVE_KEY, "");
@@ -187,7 +170,7 @@ fn target_id(cfg: &Config, args: &Value) -> String {
         .and_then(Value::as_str)
         .map(str::trim)
         .filter(|project| !project.is_empty())
-        .map(slug)
+        .map(|value| crate::text::slug(value, "", usize::MAX, crate::text::SlugPolicy::Unicode))
         .filter(|project| !project.is_empty())
         .unwrap_or_else(|| active_project(cfg))
 }
@@ -433,13 +416,12 @@ fn render_projects(projects: &[Project], active: &str) -> String {
 }
 
 /// system 文脈へ差し込む「いまのプロジェクト」まとめ。空文字なら差し込まない。
-pub fn project_context(cfg: &Config) -> String {
+pub fn project_context(cfg: &Config) -> Result<String, String> {
     let active = active_project(cfg);
-    // フォールバック許可: 文脈生成は読み取り専用の付加情報なので、
-    // 読めなければ差し込まずに会話を続ける（保存は一切しないのでデータは消えない）。
-    let projects = load(cfg).unwrap_or_default();
+    let projects =
+        load(cfg).map_err(|error| format!("プロジェクト文脈を読み取れません: {error}"))?;
     let Some(project) = projects.into_iter().find(|project| project.id == active) else {
-        return String::new();
+        return Ok(String::new());
     };
     let today = today();
     let mut open: Vec<Task> = project
@@ -450,7 +432,7 @@ pub fn project_context(cfg: &Config) -> String {
         .collect();
     sort_tasks(&mut open);
     if open.is_empty() && project.notes.is_empty() {
-        return String::new();
+        return Ok(String::new());
     }
 
     let mut out = format!(
@@ -487,7 +469,7 @@ pub fn project_context(cfg: &Config) -> String {
     out.push_str(
         "\n（保存済みの台帳から自動で添えた情報。変更するときは project スキルを呼ぶこと）",
     );
-    text::preview(&out, MAX_CONTEXT_CHARS)
+    Ok(text::preview(&out, MAX_CONTEXT_CHARS))
 }
 
 pub struct ProjectTool;
@@ -1018,11 +1000,23 @@ inventory::submit! { ToolReg { make: || Box::new(ProjectTool) } }
 #[cfg(test)]
 mod tests {
     use super::{
-        due_arg, is_overdue, next_note_id, next_task_id, slug, sort_tasks, tags_arg, today,
-        Project, Task,
+        due_arg, is_overdue, next_note_id, next_task_id, sort_tasks, tags_arg, today, Project, Task,
     };
     use crate::config::Config;
     use serde_json::json;
+
+    #[test]
+    fn 壊れた台帳をプロジェクトなしへ降格せず原本を保持する() {
+        let cfg = Config::new();
+        for raw in ["{破損", "{}", "[null]"] {
+            cfg.set(super::KEY, raw);
+            let error = super::project_context(&cfg).unwrap_err();
+            assert!(error.contains("プロジェクト文脈を読み取れません"));
+            assert_eq!(cfg.get(super::KEY, ""), raw);
+        }
+        cfg.set(super::KEY, "[]");
+        assert_eq!(super::project_context(&cfg).unwrap(), "");
+    }
 
     fn task(id: &str, due: &str, priority: &str, status: &str) -> Task {
         Task {
@@ -1038,10 +1032,32 @@ mod tests {
     /// 記号・空白はハイフンへ畳み、日本語はそのまま使える（英数字扱いのため）。
     #[test]
     fn 識別子は記号をハイフンに畳む() {
-        assert_eq!(slug("Video Project"), "video-project");
-        assert_eq!(slug("a__b"), "a-b");
-        assert_eq!(slug("動画 制作"), "動画-制作");
-        assert_eq!(slug("///"), "");
+        assert_eq!(
+            crate::text::slug(
+                "Video Project",
+                "",
+                usize::MAX,
+                crate::text::SlugPolicy::Unicode
+            ),
+            "video-project"
+        );
+        assert_eq!(
+            crate::text::slug("a__b", "", usize::MAX, crate::text::SlugPolicy::Unicode),
+            "a-b"
+        );
+        assert_eq!(
+            crate::text::slug(
+                "動画 制作",
+                "",
+                usize::MAX,
+                crate::text::SlugPolicy::Unicode
+            ),
+            "動画-制作"
+        );
+        assert_eq!(
+            crate::text::slug("///", "", usize::MAX, crate::text::SlugPolicy::Unicode),
+            ""
+        );
     }
 
     #[test]

@@ -6,6 +6,7 @@ use serde_json::{json, Value};
 use super::{Tool, ToolReg};
 use crate::config::Config;
 use crate::daily::{self, DailyEvent};
+use crate::tools::datetime_words::number_before;
 
 pub struct ReminderTool;
 
@@ -15,28 +16,15 @@ fn render_local_action(user_text: &str, tool_result: &str) -> String {
     crate::tools::render_intent_prompt(LOCAL_ACTION_PROMPT, user_text, tool_result)
 }
 
-fn number_before(text: &str, marker: &str) -> Option<i64> {
-    let marker_index = text.find(marker)?;
-    let prefix = &text[..marker_index];
-    let digits: String = prefix
-        .chars()
-        .rev()
-        .take_while(|character| character.is_ascii_digit())
-        .collect::<String>()
-        .chars()
-        .rev()
-        .collect();
-    digits.parse::<i64>().ok()
-}
-
-fn relative_minutes(text: &str) -> Option<i64> {
-    if let Some(minutes) = number_before(text, "分後") {
-        return Some(minutes.clamp(1, 24 * 60));
+fn relative_minutes(text: &str) -> Result<Option<i64>, String> {
+    if let Some(minutes) = number_before(text, "分後")? {
+        return Ok(Some(minutes.clamp(1, 24 * 60)));
     }
-    if let Some(hours) = number_before(text, "時間後") {
-        return Some((hours * 60).clamp(1, 24 * 60));
+    if let Some(hours) = number_before(text, "時間後")? {
+        let minutes = hours.checked_mul(60).ok_or("時間を分へ換算できません")?;
+        return Ok(Some(minutes.clamp(1, 24 * 60)));
     }
-    None
+    Ok(None)
 }
 
 fn str_arg(args: &Value, key: &str) -> String {
@@ -98,7 +86,11 @@ impl Tool for ReminderTool {
         if !self.matches_intent(text) {
             return None;
         }
-        if let Some(minutes) = relative_minutes(text) {
+        let parsed = match relative_minutes(text) {
+            Ok(parsed) => parsed,
+            Err(reason) => return Some(crate::tools::IntentInvocation::invalid(reason)),
+        };
+        if let Some(minutes) = parsed {
             return Some(crate::tools::IntentInvocation::direct(json!({
                 "action": "add",
                 "minutes_from_now": minutes,
@@ -199,3 +191,20 @@ impl Tool for ReminderTool {
 }
 
 inventory::submit! { ToolReg { make: || Box::new(ReminderTool) } }
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn 相対時刻の換算上限は既存範囲を保ちoverflowは拒否する() {
+        for (text, expected) in [
+            ("0分後", Some(1)),
+            ("2時間後", Some(120)),
+            ("30時間後", Some(1440)),
+            ("明日の朝", None),
+        ] {
+            assert_eq!(super::relative_minutes(text).unwrap(), expected);
+        }
+        assert!(super::relative_minutes("9223372036854775807時間後").is_err());
+        assert!(super::relative_minutes("9999999999999999999999分後").is_err());
+    }
+}

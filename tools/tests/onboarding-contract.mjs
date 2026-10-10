@@ -6,6 +6,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+import { installFakeDom } from "./lib/fake-dom.mjs";
 
 const base = new URL("../../", import.meta.url);
 const read = name => readFile(new URL(name, base), "utf8");
@@ -79,11 +80,25 @@ test("取得進捗は専用画面を作らず状態行（起動中は起動画�
   assert.match(onboarding, /オフラインのため音声読み上げの準備を見送りました/);
 });
 
-test("読み上げ音量の既定は実装・設定画面・文書で35に揃える", () => {
-  // 画面側の初期値だけ 1（=100%）だと、設定を読む前に鳴る音が最大音量になる。
-  assert.match(voice, /let volume = 0\.35;/);
-  assert.doesNotMatch(commands, /PICOAGENT_TTS_VOLUME", "50"/);
-  assert.equal(commands.match(/PICOAGENT_TTS_VOLUME", "35"/g)?.length, 2);
+test("読み上げ音量は共通既定35を受け取るまで消音し不正時も合成しない", async () => {
+  installFakeDom();
+  const { createVoice } = await import("../../ui/app/voice.js");
+  const timed = [];
+  const runtime = createVoice({ motion: { setSpeaking() {} }, lipSync: { detach() {} }, pager: { cancel() {}, timed: text => timed.push(text) }, status: { clear() {} }, onCancelVisible() {} });
+  assert.equal(runtime.volume, 0);
+  assert.equal(runtime.gain(), 0);
+  await runtime.speak("設定読込前");
+  assert.deepEqual(timed, ["設定読込前"]);
+  runtime.setVolume(35);
+  assert.equal(runtime.gain(), 0, "正常検査完了前の値だけで音声を再開しない");
+  runtime.setVolumeError(null);
+  assert.equal(runtime.volume, 0.35);
+  assert.ok(Math.abs(runtime.gain() - 0.1225) < 1e-12);
+  runtime.setVolumeError("音量が範囲外です");
+  assert.equal(runtime.gain(), 0);
+  assert.throws(() => runtime.setVolume("不正"), /整数/);
+  assert.match(await read("src-tauri/src/numeric_settings.rs"), /TTS_VOLUME: \([^\n]*Some\(35\), 0, 100/);
+  assert.match(main, /"PICOAGENT_TTS_VOLUME", "voiceVolume"[\s\S]*?voice\.setVolumeError/);
   assert.match(settings, /PICOAGENT_TTS_VOLUME[^)]*初期値35[^)]*"35"[^)]*"35"/);
   assert.match(settingsDoc, /\| `PICOAGENT_TTS_VOLUME` \| `35` \|/);
 });

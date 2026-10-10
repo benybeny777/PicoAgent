@@ -2,8 +2,6 @@
 //
 // 任意のURL取得は prompt injection の入口になり得るため、結果は外部データとして扱う。
 
-use std::time::Duration;
-
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use url::Url;
@@ -13,7 +11,6 @@ use crate::config::Config;
 use crate::message::Field;
 
 const MAX_RESPONSE_BYTES: usize = 64 * 1024;
-const MAX_REDIRECTS: usize = 5;
 
 pub struct WebFetchTool;
 
@@ -154,21 +151,6 @@ fn select_link(text: &str, earlier_assistant_texts: &[&str]) -> Option<(String, 
     (links.len() == 1 && refers_to_previous_answer(text)).then(|| links[0].clone())
 }
 
-fn allowed_domain(cfg: &Config, url: &Url) -> bool {
-    let allowed = cfg.get("PICOAGENT_WEB_FETCH_ALLOWED_DOMAINS", "");
-    if allowed.trim().is_empty() {
-        return true;
-    }
-    let Some(host) = url.host_str() else {
-        return false;
-    };
-    allowed
-        .split(',')
-        .map(str::trim)
-        .filter(|entry| !entry.is_empty())
-        .any(|entry| host == entry || host.ends_with(&format!(".{}", entry)))
-}
-
 #[async_trait]
 impl Tool for WebFetchTool {
     fn name(&self) -> &'static str {
@@ -226,12 +208,7 @@ impl Tool for WebFetchTool {
                 "textarea",
                 "example.com,docs.example.com",
             ),
-            Field::new(
-                "PICOAGENT_WEB_FETCH_TIMEOUT_SECS",
-                "web_fetch の待ち時間（秒、3〜60）",
-                "text",
-                "20",
-            ),
+            Field::int(&crate::config::ints::WEB_FETCH_TIMEOUT_SECS),
         ]
     }
 
@@ -250,96 +227,42 @@ impl Tool for WebFetchTool {
             Ok(_) => return "エラー: url は http または https を指定してください。".to_string(),
             Err(error) => return format!("エラー: url の解析に失敗しました: {}", error),
         };
-        if !allowed_domain(cfg, &url) {
+        let domains = cfg.get("PICOAGENT_WEB_FETCH_ALLOWED_DOMAINS", "");
+        let policy = if domains.trim().is_empty() {
+            crate::tools::http::UrlPolicy::PublicWeb
+        } else {
+            crate::tools::http::UrlPolicy::domains(&domains)
+        };
+        let mut request = crate::tools::http::GuardedRequest::get(
+            url,
+            policy,
+            crate::tool_try!(cfg.duration_secs(&crate::config::ints::WEB_FETCH_TIMEOUT_SECS)),
+            MAX_RESPONSE_BYTES,
+            "PicoAgent/1.0 (Web fetch tool)",
+        );
+        request.allow_truncation = true;
+        let response = match crate::tools::http::fetch_guarded(request).await {
+            Ok(response) => response,
+            Err(error) => return format!("エラー: {error}"),
+        };
+        if !response.status.is_success() {
             return format!(
-                "エラー: 許可されていないドメインです: {}",
-                url.host_str().unwrap_or("")
+                "エラー: {}",
+                crate::tools::http::safe_service_error(
+                    cfg,
+                    "URL取得",
+                    response.status,
+                    &String::from_utf8_lossy(&response.body)
+                )
             );
         }
-        let timeout_secs = cfg
-            .get("PICOAGENT_WEB_FETCH_TIMEOUT_SECS", "20")
-            .parse::<u64>()
-            .ok()
-            .filter(|value| (3..=60).contains(value))
-            .unwrap_or(20);
-        let mut current = url;
-        let mut redirects = 0usize;
-        let response = loop {
-            let addresses = match crate::tools::http::public_http_addresses(&current).await {
-                Ok(addresses) => addresses,
-                Err(error) => return format!("エラー: URL取得先を拒否しました: {error}"),
-            };
-            if !allowed_domain(cfg, &current) {
-                return format!(
-                    "エラー: 許可されていないドメインです: {}",
-                    current.host_str().unwrap_or("")
-                );
-            }
-            let host = current.host_str().unwrap_or_default();
-            let client = match reqwest::Client::builder()
-                .timeout(Duration::from_secs(timeout_secs))
-                .user_agent("PicoAgent/1.0 (Web fetch tool)")
-                .redirect(reqwest::redirect::Policy::none())
-                .resolve_to_addrs(host, &addresses)
-                .build()
-            {
-                Ok(client) => client,
-                Err(error) => return format!("エラー: URL取得の準備に失敗しました: {error}"),
-            };
-            let response = match client.get(current.clone()).send().await {
-                Ok(response) => response,
-                Err(error) => return format!("エラー: URL取得に失敗しました: {error}"),
-            };
-            if !response.status().is_redirection() {
-                break response;
-            }
-            if current.cannot_be_a_base() {
-                return "エラー: リダイレクト元URLを解釈できません。".to_string();
-            }
-            let Some(location) = response.headers().get(reqwest::header::LOCATION) else {
-                return "エラー: リダイレクト先がありません。".to_string();
-            };
-            let location = match location.to_str() {
-                Ok(location) => location,
-                Err(_) => return "エラー: リダイレクト先が不正です。".to_string(),
-            };
-            current = match current.join(location) {
-                Ok(next) => next,
-                Err(error) => return format!("エラー: リダイレクト先を解析できません: {error}"),
-            };
-            redirects += 1;
-            if redirects > MAX_REDIRECTS {
-                return format!("エラー: リダイレクトが{MAX_REDIRECTS}回を超えました。");
-            }
-        };
-        let status = response.status();
-        if !status.is_success() {
-            return format!("エラー: URL が HTTP {} を返しました。", status);
-        }
-        let mut response = response;
-        let mut bytes = Vec::new();
-        let mut truncated = false;
-        loop {
-            match response.chunk().await {
-                Ok(Some(chunk)) => {
-                    if bytes.len().saturating_add(chunk.len()) > MAX_RESPONSE_BYTES {
-                        let remaining = MAX_RESPONSE_BYTES.saturating_sub(bytes.len());
-                        bytes.extend_from_slice(&chunk[..remaining]);
-                        truncated = true;
-                        break;
-                    }
-                    bytes.extend_from_slice(&chunk);
-                }
-                Ok(None) => break,
-                Err(error) => return format!("エラー: 本文の読み取りに失敗しました: {error}"),
-            }
-        }
-        let text = String::from_utf8_lossy(&bytes);
-        let suffix = if truncated {
-            format!("\n…（{} バイトで打ち切り）", MAX_RESPONSE_BYTES)
+        let suffix = if response.truncated {
+            "\n…（上限0.066 MBで打ち切り）"
         } else {
-            String::new()
+            ""
         };
+        let current = response.url;
+        let text = String::from_utf8_lossy(&response.body);
         let heading = source_title
             .map(|title| format!("参照見出し: {title}\n"))
             .unwrap_or_default();
