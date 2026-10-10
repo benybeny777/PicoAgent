@@ -10,7 +10,7 @@ use std::time::Duration;
 use chrono::{DateTime, Datelike, Local, NaiveDateTime, TimeZone, Timelike};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Manager};
 
 use crate::config::Config;
 
@@ -19,9 +19,6 @@ pub const CONFIG_KEY: &str = "PICOAGENT_SCHEDULED_TASKS";
 pub const STATE_KEY: &str = "PICOAGENT_SCHEDULED_TASK_STATE";
 pub const TOOL_ALLOWLIST_KEY: &str = "PICOAGENT_SCHEDULED_TOOL_ALLOWLIST";
 const DEFAULT_TOOL_ALLOWLIST: &str = "time,weather,web_fetch";
-const DEFAULT_ALLOWLIST: &str = "git status,git diff,npm test,cargo test";
-const MAX_ARGS: usize = 32;
-const MAX_ARG_CHARS: usize = 500;
 const MAX_OUTPUT_BYTES: usize = 16 * 1024;
 const MAX_RUN_HISTORY: usize = 100;
 const MAX_CATCH_UP_MINUTES: i64 = 24 * 60;
@@ -260,10 +257,15 @@ fn load_run_history_unlocked(app: &AppHandle) -> anyhow::Result<Vec<ScheduledRun
     };
     match serde_json::from_str(&text) {
         Ok(records) => Ok(records),
-        // フォールバック許可: 実行履歴の破損でアプリ本体やスケジューラを止めない。
+        // フォールバック許可: PR #463 採用案3。退避と通知に成功した領域だけ新規状態で続ける。
         // 次の保存で上書きして履歴を失わないよう、破損ファイルは退避してから続ける。
         Err(error) => {
-            let saved = crate::store::quarantine_corrupt(&path).ok_or_else(|| {
+            let saved = crate::store::quarantine_and_notify(
+                app,
+                &path,
+                crate::store::QuarantineArea::SchedulerHistory,
+            )
+            .ok_or_else(|| {
                 anyhow::anyhow!(
                     "壊れたスケジュール実行履歴を退避できません。上書きを中止しました: {error}"
                 )
@@ -359,23 +361,12 @@ fn append_run_history(
 }
 
 fn emit_run_notice(app: &AppHandle, record: &ScheduledRunRecord) {
-    if let Err(error) = app.emit(
-        "pet:notice",
-        json!({
-            "kind": "schedule",
-            "title": record.title,
-            "body": record.body,
-            "ok": record.ok,
-            "taskId": record.task_id,
-            "runId": record.id,
-            "at": record.at,
-        }),
-    ) {
-        crate::log_paths::append_app_log(
-            app,
-            &format!("スケジュール実行結果を画面へ通知できません: {error}"),
-        );
-    }
+    crate::notice::emit(
+        app,
+        crate::notice::Notice::info("schedule", &record.title, &record.body, record.ok)
+            .detail("taskId", json!(record.task_id))
+            .detail("runId", json!(record.id)),
+    );
 }
 
 fn bounded_cwd(cfg: &Config, cwd: &str) -> Result<PathBuf, String> {
@@ -385,51 +376,6 @@ fn bounded_cwd(cfg: &Config, cwd: &str) -> Result<PathBuf, String> {
 
 fn is_protected_edit_path(path: &Path) -> bool {
     crate::permissions::is_system_protected(path)
-}
-
-fn command_tokens(program: &str, args: &[String]) -> Vec<String> {
-    let mut tokens = Vec::with_capacity(args.len() + 1);
-    tokens.push(program.to_string());
-    tokens.extend(args.iter().cloned());
-    tokens
-}
-
-fn allowlist_entries(cfg: &Config) -> Vec<Vec<String>> {
-    cfg.get("PICOAGENT_COMMAND_ALLOWLIST", DEFAULT_ALLOWLIST)
-        .split(',')
-        .filter_map(|entry| {
-            let tokens: Vec<String> = entry
-                .split_whitespace()
-                .filter(|token| !token.is_empty())
-                .map(ToString::to_string)
-                .collect();
-            if tokens.is_empty() {
-                None
-            } else {
-                Some(tokens)
-            }
-        })
-        .collect()
-}
-
-fn allowed(cfg: &Config, program: &str, args: &[String]) -> bool {
-    let tokens = command_tokens(program, args);
-    allowlist_entries(cfg).iter().any(|entry| entry == &tokens)
-}
-
-fn validate_args(args: &[String]) -> Result<(), String> {
-    if args.len() > MAX_ARGS {
-        return Err(format!("args は {} 個以内で指定してください。", MAX_ARGS));
-    }
-    for arg in args {
-        if arg.chars().count() > MAX_ARG_CHARS {
-            return Err(format!(
-                "各 arg は {} 文字以内で指定してください。",
-                MAX_ARG_CHARS
-            ));
-        }
-    }
-    Ok(())
 }
 
 pub fn validate_task(cfg: &Config, task: &ScheduledTask) -> Result<(), String> {
@@ -448,18 +394,7 @@ pub fn validate_task(cfg: &Config, task: &ScheduledTask) -> Result<(), String> {
             if task.program.trim().is_empty() {
                 return Err("program が指定されていません。".to_string());
             }
-            validate_args(&task.args)?;
-            // 物理削除は run_command と同じ規則で拒否する（allowlist を通っても実行しない）。
-            if crate::tools::process::is_physical_delete(&task.program, &task.args) {
-                return Err(crate::tools::process::physical_delete_error());
-            }
-            if !allowed(cfg, &task.program, &task.args) {
-                return Err(format!(
-                    "許可されていないコマンドです: {} {}",
-                    task.program,
-                    task.args.join(" ")
-                ));
-            }
+            crate::tools::process::command_policy::check(cfg, &task.program, &task.args)?;
         }
         "tool" => {
             if task.tool_name.trim().is_empty() {
@@ -754,14 +689,12 @@ fn enqueue_due_tasks(
 }
 
 fn notify_scheduler_state(app: &AppHandle, error: Option<&str>) {
-    use std::sync::atomic::AtomicBool;
-    static FAILED: AtomicBool = AtomicBool::new(false);
+    static FAILED: crate::notice::FailureLatch = crate::notice::FailureLatch::new();
     notify_scheduler_background_state(app, "scheduler-state", error, &FAILED);
 }
 
 fn notify_scheduler_history_state(app: &AppHandle, error: Option<&str>) {
-    use std::sync::atomic::AtomicBool;
-    static FAILED: AtomicBool = AtomicBool::new(false);
+    static FAILED: crate::notice::FailureLatch = crate::notice::FailureLatch::new();
     notify_scheduler_background_state(app, "scheduler-history", error, &FAILED);
 }
 
@@ -769,30 +702,15 @@ fn notify_scheduler_background_state(
     app: &AppHandle,
     key: &str,
     error: Option<&str>,
-    previous: &std::sync::atomic::AtomicBool,
+    previous: &crate::notice::FailureLatch,
 ) {
-    use std::sync::atomic::Ordering;
-    let failed = error.is_some();
-    if let Some(body) = error {
-        crate::log_paths::append_app_log(app, body);
-    }
-    if previous.swap(failed, Ordering::Relaxed) == failed {
-        return;
-    }
-    let body = error.unwrap_or("スケジュールの状態保存が復旧しました");
-    if let Err(error) = app.emit(
-        "pet:notice",
-        json!({
-        "kind": "background_failure", "key": key,
-        "title": "スケジュール実行", "body": body, "ok": !failed,
-            "at": Local::now().to_rfc3339(),
-        }),
-    ) {
-        crate::log_paths::append_app_log(
-            app,
-            &format!("スケジュールの状態を通知できません: {error}"),
-        );
-    }
+    previous.report(
+        app,
+        key,
+        "スケジュール実行",
+        error.map_or(Ok(()), |error| Err(error.to_string())),
+        "スケジュールの状態保存が復旧しました",
+    );
 }
 
 fn take_due_tasks_at(cfg: &Config, now: DateTime<Local>) -> anyhow::Result<Vec<ScheduledTask>> {

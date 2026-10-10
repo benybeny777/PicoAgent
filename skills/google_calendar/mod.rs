@@ -151,7 +151,7 @@ impl Tool for GoogleCalendarTool {
                     Err(error) => {
                         return format!(
                             "エラー: Google Calendar API への接続に失敗しました: {}",
-                            error
+                            error.without_url()
                         )
                     }
                 };
@@ -159,8 +159,13 @@ impl Tool for GoogleCalendarTool {
                 let body = crate::tool_response_text!(response);
                 if !status.is_success() {
                     return format!(
-                        "エラー: Google Calendar API が HTTP {} を返しました。",
-                        status
+                        "エラー: {}",
+                        crate::tools::http::safe_service_error(
+                            cfg,
+                            "Google Calendar API",
+                            status,
+                            &body
+                        )
                     );
                 }
                 let parsed: Value = crate::tool_response_json!(&body);
@@ -239,7 +244,7 @@ impl Tool for GoogleCalendarTool {
                     Err(error) => {
                         return format!(
                             "エラー: Google Calendar API への接続に失敗しました: {}",
-                            error
+                            error.without_url()
                         )
                     }
                 };
@@ -247,8 +252,13 @@ impl Tool for GoogleCalendarTool {
                 let body = crate::tool_response_text!(response);
                 if !status.is_success() {
                     return format!(
-                        "エラー: Google Calendar API が HTTP {} を返しました。",
-                        status
+                        "エラー: {}",
+                        crate::tools::http::safe_service_error(
+                            cfg,
+                            "Google Calendar API",
+                            status,
+                            &body
+                        )
                     );
                 }
                 let parsed: Value = crate::tool_response_json!(&body);

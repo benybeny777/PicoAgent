@@ -62,7 +62,7 @@ test("モデル一覧の取得前に切替先AIのモデルを保存収集へ確
   ]);
   ctx.cloneSettings = value => JSON.parse(JSON.stringify(value));
   vm.runInContext(`const savedSnapshot = {}; const providerDraftValues = {};
-    const characterOverrides = {}, characterVoiceOverrides = {}, characterLive2dSdkOverrides = {}, characterStreamProfiles = {};
+    const characterOverrides = {}, characterVoiceOverrides = {}, characterLive2dSdkOverrides = {}, characterRendererOverrides = {}, characterStreamProfiles = {};
     const alarmEditorState = null, scheduleEditorState = null;`, ctx);
   vm.runInContext(settings.slice(settings.indexOf("function collect()"), settings.indexOf("// 再起動の確認画面")), ctx);
   vm.runInContext(settings.slice(settings.indexOf("function providerDefaultModel("), settings.indexOf("async function loadModels(")), ctx);

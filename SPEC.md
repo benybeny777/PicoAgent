@@ -246,6 +246,14 @@ inventory::submit! { ProviderReg { make: || Box::new(MyProvider) } }
 
 ### AivisSpeech Engine 連携（`aivis.rs` / `pet_speak`）
 
+キャラの既定声の正本は、同梱・利用者追加とも `character.json` の `voice` とする。実際に読み込めたキャラのID・人格・挨拶と同じ登録でmanifestの声をバックエンドへ渡し、キャラIDと声を同時に更新する。Rust側へキャラ別の声定数表を複製しない。
+
+声は① `PICOAGENT_TTS_CHARACTER_OVERRIDES` の選択中キャラの上書き、②読み込んだmanifestの `voice`、③ `voice` を持たないキャラだけ `PICOAGENT_TTS_SPEAKER` の全体設定、の順に決める。③は声の指定がないキャラへの利用者指定であり、読込・解決失敗の代替には使わない。上書きを空欄へ戻すとパック既定声へ戻る。学習済み声の採用は従来どおり①へ入り、既存のmanifest声値や保存済み上書きを変更しない。
+
+`voice` は `provider=aivis` と声の指定を検証し、UUIDの形式不正・未対応provider・解決不能を理由付きで返す。`speakerUuid` があれば `/speakers` で解決したstyle IDだけを使い、失敗時にmanifestの数値IDや全体の声へ切り替えない。`styleName` が指定されていて一致しない場合は、利用可能なスタイル名を含むエラーにする。スタイル名未指定時だけ、その話者の先頭スタイルを使う。`styleId` だけの指定はその数値IDを使う。
+
+声の準備・解決・読み上げに失敗した場合は発声せず、画面へキャラ・指定した声と理由を通知する。原因ごとに1回だけ知らせ、復旧後の失敗は再通知する。別の声で話して成功扱いにせず、切替途中の旧キャラの声も新しいキャラへ持ち越さない。利用者は設定「キャラの音声」で指定を確認し、必要なモデルの導入・修復後に再試行する。
+
 `PICOAGENT_TTS_ENABLED` が有効なら、回答を AivisSpeech Engine の `/audio_query` → `/synthesis` へ渡して WAV を作り、フロントで再生する。`/synthesis` へ渡す `volumeScale` は0.72以下に制限して約3dBの余裕を残す（0dBでのクリップ防止）。音声再生中だけ会話アニメーションを保つ。起動時・キャラ変更時の挨拶（`greeting`）も同じ経路で読み上げる。
 
 - **接続先**: 既定は PicoAgent 管理下の Aivis だけを使い、`http://127.0.0.1:<PICOAGENT_TTS_PORT>`（既定 `11436`）へつなぐ。同じポートの管理外プロセスを暗黙に再利用しない。`PICOAGENT_TTS_ENDPOINT` にこのPC上のHTTP URLを明示したときだけ、別途起動した VOICEVOX 互換 API へつなぎ、そのプロセスやモデルには触れない。デバイス・内蔵ポート・speaker ID は通常UIに出さない内部設定。`pet_speak` 時点で `/version` が未応答なら ready まで待つ。
@@ -259,8 +267,8 @@ inventory::submit! { ProviderReg { make: || Box::new(MyProvider) } }
   - 非 Windows ではコピー・展開後と起動直前に `run` の実行権限を補正する（`.app` 配下など chmod できないものは spawn の結果で判定）。配布物では `tauri.conf.json` の `bundle.resources` で `resources/bundled/**/*` を同梱する。
 - **保存先の正本**: 配置名・管理ファイル名は `crates/picoagent-core/src/paths.rs` に集約する。アプリは `app_paths` を通してOS・Tauriの保存先へ接続し、開発ツールも同じ配置定義を使う。各機能は `DataPath` を指定し、設定・履歴・モデル・WebView・子プロセスのプロファイルを独自の固定パスへ保存しない。
 - **専用プロファイル**: Aivis 子プロセスの `USERPROFILE` / `HOME` / `APPDATA` / `LOCALAPPDATA` を `PicoAgent/aivis-userdata/profile/` へ向け、モデル・辞書・キャッシュを利用者データ内へ閉じ込める。LibreOffice は `PicoAgent/office-profile/`、生成用 Python・ComfyUI は `PicoAgent/generation-runtime-data/`、ブラウザ操作は `PicoAgent/browser-profile/` だけを使う。これらはすべて `app_paths::data_dir()` 配下とし、開発版では `PicoAgent-Dev/`、別識別子の検証版ではその根の `instances/<識別子>/` へ分離する。通常版のプロファイルは読み込まない。
-- **話者**: 選択中キャラの `PICOAGENT_TTS_CHARACTER_OVERRIDES[characterId].speaker` を優先し、無ければ `default_character_tts_voice` のキャラ別既定声、対象外キャラだけ共通の `PICOAGENT_TTS_SPEAKER` を使う。組み込みキャラは、むぎ=`まお・あまあま`、りん=`るな・ノーマル`、まい=`まい・ノーマル`、あおい=`まお・おちつき`、ひより=`まお・ふつー`、はる=`花音・ノーマル`、イプシロン=`コハク・せつなめ`、まお=`まお・おちつき`、ライス=`阿井田 茂・Calm`、わんこ=`TANAKA・Happy`。
-  - `pet_prepare_voice_model` と `pet_speak` は、話者 UUID が `/speakers` に無ければモデル UUID の AIVMX を `/aivm_models/install` で導入し、`/speakers` から話者 UUID＋スタイル名で**実 style ID を実行時に解決**する（global style ID は導入時に決まるためハードコードせず、`styleId` 定数は解決失敗時の予備）。利用者が明示した speaker はそのまま使う。
+- **話者**: 上記の声の優先順と解決規則を、`pet_prepare_voice_model` と `pet_speak` の両方に適用する。各キャラの既定話者・スタイル・モデルUUIDは `characters/<id>/character.json` の `voice` を参照し、ここへキャラ別の表を複製しない。
+  - 話者 UUID が `/speakers` に無ければ指定モデル UUID の AIVMX を `/aivm_models/install` で導入し、話者 UUID＋スタイル名で**実 style ID を実行時に解決**する。global style ID は導入時に決まるため声定数で代用しない。導入・話者・指定スタイルの解決失敗は理由付きのエラーとし、発声せず通知する。UUIDを使わず明示した数値IDはその指定を使う。
 - アプリが起動した子プロセスだけを `RunEvent::Exit` で止め、利用者が手動起動していた Aivis には触らない。
 
 ### ログ
@@ -277,6 +285,7 @@ inventory::submit! { ProviderReg { make: || Box::new(MyProvider) } }
 
 - 実行ファイルとモデルはリポジトリに含めない。開発版は `cargo xtask setup whisper` で `src-tauri/resources/bundled/whisper/` に、軽量販売版は公式 Release と公式モデル配布から利用者データ側へ取得する。
 - `PICOAGENT_TRANSCRIBE_PROGRAM` / `PICOAGENT_TRANSCRIBE_MODEL` が設定されていれば手動導入物を最優先し、空のときだけ同梱物を使う。
+- `meeting_recorder` と `whisper_transcribe` は `tools::whisper` で実行ファイル・モデルを共通解決する。既定モデルは `crates/picoagent-core/src/paths.rs` の固定 `models/ggml-small.bin` で、取得・管理・実行が同じ定義を使う。別の `WHISPER_MODEL` で導入したモデルを使うときは `PICOAGENT_TRANSCRIBE_MODEL` に明示する。任意の `.bin` を名前順で選ばず、欠損は修復エラーにする。
 - 文字起こしごとに1回だけ起動し、完了・失敗・タイムアウト（`PICOAGENT_TRANSCRIBE_TIMEOUT_SECS`）で終える。標準入力は使わない。
 - `diarize=true` のときだけ `PICOAGENT_TRANSCRIBE_DIARIZE_ARGS`（既定は tinydiarize の `-tdrz`）を足す。精度とマーカー形式はローカル実装とモデルに依存する。
 - 設定画面から消せるのは利用者データ側の管理領域だけで、手動導入物や開発用同梱物は消さない。
@@ -421,7 +430,17 @@ PicoAgent 自身と Git 管理するベンダの JavaScript は `eval()`／`Func
 
 ### 同梱ツール
 
-同梱 OSS CLI（Pandoc / ripgrep / ffmpeg / qpdf / Poppler / ImageMagick）は、`tools::fetch_all` を `cargo xtask setup tools` または製品 `build` の前処理から実行して `src-tauri/resources/bundled/tools/` へ取得する（`cargo xtask dev` は取得しない。再取得は `TOOLS_FORCE=1`、対象を絞るなら `PICOAGENT_SETUP_TOOLS=pandoc,ripgrep`）。各スキルは `PICOAGENT_*_PATH` の明示設定 → 同梱 → PATH の順に実行ファイルを解決する。
+同梱 OSS CLI（Pandoc / ripgrep / ffmpeg / qpdf / Poppler / ImageMagick）は、明示した `cargo xtask setup tools` で `src-tauri/resources/bundled/tools/` へ取得する（通常の `dev` / `build` は取得しない。再取得は `TOOLS_FORCE=1`、対象を絞るなら `PICOAGENT_SETUP_TOOLS=pandoc,ripgrep`）。実行ファイルは `tools::resolve_cli_path` で明示設定、未設定の場合だけPicoAgent管理下の同梱物を使う。設定にコマンド名だけ（例 `ffmpeg`）を入れた場合に限り、共通探索でその名前を解決する（macOSではPATHの後に既存Homebrew配置 `/opt/homebrew/bin`・`/usr/local/bin` も確認）。明示指定先や優先する管理配置が欠けた場合は別配置へ降格せず修復を案内し、未導入は導入方法を返す。ImageMagick v6の `convert` / `identify` は明示指定時だけ使う。
+
+PR #472の利用者決定により、既定のPATH探索とripgrep欠損時の内蔵検索を撤去する。設定されていない別ツールの実行や、正規表現検索を固定文字列検索へ変える方式は、許可・検索結果が変わるため採用しない。旧版でPATHに頼っていた環境は対応する設定へパスまたはコマンド名を明示する。
+
+外部URLの取得（`web_fetch` / `rss_feed` / `http_api`）は `tools::http::fetch_guarded` を通す。初回と全リダイレクト先のHTTP(S) URL、公開IP、用途別の許可ドメインを確認し、検査したDNS解決先へ接続を固定する。私有・ループバック等の非公開IP、HTTPSからHTTPへの降格を拒否する。全工程に時間・本文量・リダイレクト回数の上限を設ける。`web_fetch` は先頭約0.066MBを取得し、超過時は打切りを明記する。完全本文が必要なAPI・RSSの上限超過はエラーにする。異なるオリジンへ移るときはAuthorization、Cookie、Proxy-Authorization、X-API-Keyと呼出側が指定した秘密ヘッダを除く。303（HEADを除く）とPOSTの301/302は本文を捨てGETへ変え、307/308はメソッドと本文を保つ。
+
+この取得経路は `no_proxy()` で直接接続し、環境のプロキシを使わない。プロキシ側の再名前解決ではDNS固定を保証できないため、プロキシ必須環境ではこの3スキルの取得は利用できない。社内IP許可は追加しない。他の標準的な外向きHTTPは共有クライアントを使う。
+
+外部API応答は `tools::http::service_reply` / `service_body` で共通処理する。成功は上限内の本文、失敗はサービス名・HTTP状態コードと本文先頭200文字までの理由を返す。設定・環境の既知の秘密値は切詰め前に伏せ、接続エラーへURLを含めない。本文読取失敗や不正UTF-8を空本文へ降格させない。
+
+チャットの `run_command` と予約実行は `tools::process::command_policy::check` で同じ許可判定を使う。引数の個数・長さ・NULと物理削除禁止も共通化し、承認前後に検査する。許可リストへの登録や「今回だけ」の承認でも物理削除を許可しない。`doc_search` の内容検索もripgrepの欠損・実行失敗では停止するが、正常に0一致となった場合のファイル名検索は通常の検索として維持する。
 
 外部サービス連携の共通の安全策: 秘密値（token・API key・webhook・app password）は設定から都度読み、出力しない。本文・件数・サイズに上限を持ち、timeout を付ける。以下の表では個別の事項だけを書く。
 
@@ -436,7 +455,7 @@ PicoAgent 自身と Git 管理するベンダの JavaScript は `eval()`／`Func
 | `news_scrape` | Google News / Yahoo!ニュースのHTMLから最新の見出し候補を取得。一般ニュースの要約で先に使う | 対象ドメインを限定、HTML 1MB上限、件数上限、User-Agent 指定 |
 | `rss_feed` | RSS/Atom の最新記事取得 | 各リダイレクト先を含む公開HTTP(S)宛先検査、DNS解決先固定、最大5回、1MB上限 |
 | `web_search` | 検索結果のタイトル・URL・概要。事実確認・最新情報・明示依頼では回答前に先回り実行 | 検索語500文字、1〜8件、待ち時間3〜60秒、応答32KB |
-| `web_fetch` | 指定URLの本文取得 | http/https のみ、許可ドメイン設定、応答64KB。取得内容は信頼できない外部データとして扱う |
+| `web_fetch` | 指定URLの本文取得 | 各リダイレクト先を含む公開HTTP(S)宛先検査、DNS解決先固定、許可ドメイン設定、最大5回、先頭約0.066MB（超過時は打切りを明記）。取得内容は信頼できない外部データとして扱う |
 | `browser_control` | 実ブラウザ（Chrome / Edge）を CDP で操作してページを読む（JS 描画・ログインが要るページ向け） | 既定無効。CDP は127.0.0.1限定かつ自分が起動した子だけを操作、http/https のみ、許可ドメインは入力時・リダイレクト後・再読込時に検査、専用プロファイル、読み取り専用（open / read / pages / close）。内容は `check_injection` を通す |
 | `research_report` | 複数観点のWeb検索を束ねて出典付きMarkdownレポートを作る。`save=true` または `save_path` 指定で保存し、そのときは既定で `.brief.md`、`.dashboard.html`、`.slides.md`、`.sources.csv`、`.sources.json` も作る | 検索待ち3〜60秒、観点最大6件、各5件、レポート96KB、保存は共通許可ルート配下の `.md` のみ |
 | `clipboard_text` | クリップボードのテキストを要約・返信文・TODO化の素材として返す | `arboard` で OS API を直接使う。`PICOAGENT_CLIPBOARD_MAX_CHARS` で制限 |
@@ -450,7 +469,7 @@ PicoAgent 自身と Git 管理するベンダの JavaScript は `eval()`／`Func
 | `read_file` | 行番号つきで読む（`offset` / `limit`） | ファイル4MB・既定800行（最大2000）・1行800文字・出力128KB。続きの `offset` を案内する |
 | `view_image` | 画像をモデルへ見せる（png / jpg / gif / webp / bmp、最大3枚） | 1枚4MB。ツール結果には画像を載せず、`agent.rs` が画像付き user メッセージを差し込む（OpenAI 互換は `image_url`、Ollama は `images`、Anthropic は image ブロック）。非対応モデルでは無視される旨を結果に書く |
 | `glob_files` | glob パターン（`**/*.rs` など）でパス一覧（既定は更新の新しい順） | シンボリックリンク／ジャンクションを辿らない。深さ12・走査20,000件・表示既定100件（最大500）。`node_modules` / `target` / `.git` など生成物と隠しフォルダを除く |
-| `grep_search` | 正規表現で内容検索し、一致行・一致ファイル・件数を返す（`output_mode`） | 同梱 ripgrep → PATH。無ければ内蔵走査（固定文字列一致）に落ち、その旨を先頭に書く。1ファイル2MB・深さ12・走査5,000件・1行400文字・表示既定60行（最大300）、30秒 |
+| `grep_search` | 正規表現で内容検索し、一致行・一致ファイル・件数を返す（`output_mode`） | 明示設定または同梱ripgrepが必要。未導入・実行失敗は理由を返し、内蔵検索へ切り替えない。1ファイル約2.1MB・深さ12・1行400文字・表示既定60行（最大300）、30秒 |
 | `workspace_files` | 一覧、読込、書込、追記、フォルダ作成、情報取得、直前変更の取り消し | 変更はプロセス内で直列化。`write` / `append` は `preview=true` で無変更確認でき、成功した直近20件を1件1MBまでメモリに持つ。`undo` は実行時点の許可を再検証してから戻し、新規ファイルはゴミ箱へ移す。再起動後は取り消せない |
 | `edit_file` | 既存ファイルの一部を厳密一致で置換（`edits` で複数箇所） | 既存ファイルのみ、512KB、1回20件。一致0件と（`replace_all` なしの）複数一致はエラーで、1件でも失敗したら全件書かない。`preview=true` 可。ロックと取り消し履歴は `workspace_files` と共有 |
 | `notebook_edit` | Jupyter ノートブック（.ipynb）をセル単位で読み・差し替え・挿入・削除 | `.ipynb` のみ、8MB・1セル128KB・500セル。書き換えたコードセルの `outputs` / `execution_count` を消す。`delete` は `confirm=true`。実行はしない。取り消し履歴は `workspace_files` と共有 |
@@ -527,7 +546,7 @@ PicoAgent 自身と Git 管理するベンダの JavaScript は `eval()`／`Func
 | `github_issue` / `notion` / `jira` / `linear` / `trello` / `todoist` | Issue 一覧・作成 / ページ検索・DBページ作成 / 課題検索・作成 / Issue 一覧・作成 / カード一覧・作成 / タスク一覧・作成・完了 | GitHub の作成は token 必須 |
 | `discord_send_message` | Webhook で送信 | 本文2000文字 |
 | `x_twitter` / `mastodon` / `bluesky` / `reddit` / `linkedin` / `misskey` | 投稿・検索・タイムライン等 | X 280文字、Bluesky 300文字（identifier/app password でセッション作成）、Reddit は User-Agent 設定 |
-| `http_api` | 個別スキルのない SaaS や Webhook への汎用 HTTP 呼び出し | 許可ドメイン必須、任意 Bearer/API key |
+| `http_api` | 個別スキルのない SaaS や Webhook への汎用 HTTP 呼び出し | 全リダイレクト先で許可ドメイン・公開IPを検査、DNS解決先固定、任意 Bearer/API key。要求JSON・テキスト本文は約0.13MB、応答本文は約0.066MBまで。超過はエラー |
 | `subagent` | 単独委譲と、複数AIの `consensus`（同じ質問を統合）/ `collaborate`（割り振って統合）/ `divide`（個別に返す） | `agents` ごとに provider / model / 任意の focus（2〜8件）。まとめ役 judge も別指定でき、`persona` に選択中キャラの人格を渡すと本人の口調で返す。候補は宣言順に並べる。local 候補は直列、その他は最大同時数まで並行。AppHandle は渡さず、`AGENT_DEPTH` と最大深さ（既定2）で再帰を制限。`agent::cancel_flag()` の中断は分担計画・統合の通信中にも効く（`agent::cancel_while` に一本化）。計画と統合には直前の会話文脈を渡し、失敗・JSON不正・件数不一致では重複実行へ逃げず理由を返して止める |
 | `chitchat` | アイドル時の自発雑談の指示文を返す内部スキル（`agent_callable=false`） | `pet_idle_chatter` 経由で使う（詳細は[自発雑談](#自発雑談)） |
 
@@ -582,6 +601,8 @@ PicoAgent 自身と Git 管理するベンダの JavaScript は `eval()`／`Func
   - 「診断情報を書き出す」（`settings_export_diagnostics`）は、版・OS・選択中のAI・設定・当日 `app.log` の末尾200行を1つのテキストにまとめて `PicoAgent/log/diagnostics.<日付>.<時刻>.txt` へ保存し、パスを返す（日付を `.` 区切りにするのは `log_paths::prune_old_logs()` の7日保持へ乗せるため）。**`password` 型のキーと `secret::is_secret_key()` に当たるキーは値を出さず「（設定済み）」「（未設定）」だけにし、ログ中の秘密値も伏せる**。本文は `diagnostics::build_report()` が正本で、単体テストで固定する。自動送信と会話履歴の同梱はしない。**起動失敗の案内画面（`boot_screen`）のログ末尾も `commands::redacted_log_tail()` で同じく伏せる。**
 
 ### 反映のタイミング
+
+追加キャラ一覧はメイン画面と設定画面で取得・形の正規化を共通化し、取得失敗や不正応答を空一覧へ置き換えない。設定画面は保存中・編集中のキャラIDと未保存の草稿を保持し、一覧取得の失敗理由と再取得操作を出す。キャラの選択・人格・声・SDK・描画方式など関連する編集を停止するが、他設定は保存できる。その保存で `PICOAGENT_CHARACTER` やキャラ別草稿を既定値へ書き換えない。取得成功で実際の不在を確認した場合だけ、削除済みキャラの既存移行を適用する。
 
 保存は `config.set_all()` で行い、「軽い設定は即反映」「重い設定は再初期化して反映」に分ける。
 
@@ -645,9 +666,15 @@ JSON-RPC 2.0、プロトコルバージョン `2024-11-05`。
 - 旧リグの任意 `anchors` は、原画SHAを照合した DINO/SAM 解析から生成して `facialLandmarksSource` へ出自を記録する。測定した口以外を開口差分へ含めない。
 - 透明余白ではなく `contentBox` を基準に3%の上端安全余白を付け、原画寸法の違うキャラを切り替えても表示寸法を変えない。
 - `prefers-reduced-motion` ではメッシュを出したまま受動的な呼吸・揺れ・待機動作を初期姿勢へ固定し、口・表情・まばたきだけを更新する。ウィンドウ非表示と仮眠では描画 ticker を止める。Live2D 定義と併存する場合は Live2D を優先する。
-- WebGL または資産読込の失敗時だけ、通常2Dの描画器（`runtimeLayers` の差分画像、無ければ `animations.idle`、それも無ければ `preview.png`）へ切り替えて表示を続ける。
+- WebGL・資産読込の失敗時も、別の描画方式へ自動で切り替えない。キャラなしの診断画面に描画方式と失敗理由を残し、再試行する。画像構造に対応するキャラだけ、利用者が明示的に「2Dの絵で表示する」を選べる。画像ファイルの存在・読込成功までは保証せず、明示2Dの読込に失敗した場合も診断へ戻す。
 
 #### 構図と解像度
+
+描画方式は登録表の順に `supports(pack)` を調べ、真になる最優先の1つだけに決める。その初期化失敗を理由に下位方式を試さない。Live2D内部の複数SDKモデルの定義順による選択は維持する。古い読込世代の成功・失敗で最新の表示、診断、再試行操作を上書きしない。パック内のIDが一覧の選択IDと異なる場合は、別キャラの人格・設定を適用せず理由付きエラーにする。IDが省略された場合だけ一覧IDを補う。
+
+利用者が選んだ2D表示は `PICOAGENT_RENDERER_OVERRIDES` に `{ "<キャラID>": "image" }` として永続化する。既定は `{}` で、通常描画へ戻すときはそのIDだけを削除し、他キャラの指定を保持する。メインの診断操作は `pet_set_character_renderer(characterId, renderer)`（`image` または `null`）で指定キャラだけを保存し、成功後に再読込する。失敗した保存を表示切替の成功として扱わない。
+
+設定「キャラ選択」では通常描画／2Dの選択と上書き状態を表示する。変更は未保存差分へ反映し、設定の保存・未保存変更のリセットと同期する。画像構造非対応のキャラへ2Dを指定しない。明示2Dは画像方式で対応する表現に限られ、Live2D・MMD・メッシュ固有の骨・物理・視線等の表現を引き継ぐものではない。
 
 - 描画方式（通常2D・メッシュ・Live2D・MMD）は `ui/character/<方式>.js` の描画器が担い、共通の `CharacterRenderer`（`load` / `naturalBounds` / `framingRects` / `resize(cssW, cssH, dpr)` / `setFraming` / `setState` / `dispose`）を実装して `ui/character/index.js` の登録表へ載せる。方式名による中央の分岐を書かない。
 - **キャンバスの寸法はキャラのソース矩形そのもの。** 描画器は与えられた矩形いっぱいに、構図の切り出し範囲を縦横比を保って収め（下端中央基準）、矩形の外へ描くことが無い＝キャラが切れない。キャラを拡大すると描画バッファ（CSS寸法×DPR、1辺4096pxまで）も大きくなり、低解像度の描画をCSSで引き伸ばさない。
@@ -724,7 +751,7 @@ JSON-RPC 2.0、プロトコルバージョン `2024-11-05`。
 
 #### 起動と表示の確定
 
-- フロントが起動画面を組み立てるまではネイティブ窓を隠し、その後は進捗と状態を表示する。起動中は仮画像、別キャラ、読込途中の canvas を隠す。選択キャラ・背景・必要なAIと音声の準備後、`pet_finish_boot` で保存したサイズと位置を戻し、フロントの最終DOMと描画バッファを確定してから `pet_reveal_main` で通常画面へ切り替える。キャラ読込失敗時はキャラなしの診断画面にし、フロント全体の停止時は文字だけの診断ページを出す。
+- フロントが起動画面を組み立てるまではネイティブ窓を隠し、その後は進捗と状態を表示する。起動中は仮画像、別キャラ、読込途中の canvas を隠す。選択キャラ・背景・必要なAIと音声の準備後、`pet_finish_boot` で保存したサイズと位置を戻し、フロントの最終DOMと描画バッファを確定してから `pet_reveal_main` で通常画面へ切り替える。キャラ読込失敗時はキャラなしの診断画面にし、フロント全体の停止時は文字だけの診断ページを出す。会話履歴・入力履歴・直前回答は描画の成否から独立して一度だけ復元し、キャラの再試行・明示2Dで復旧したらキャラ由来の診断だけを解除する。
 - 呼び出しホットキーと多重起動（`window_surface::surface_main_window`）は準備中でも起動画面を前面へ出す。ただし `pet_frontend_ready` より前は白い窓になるので出さず、続く場合は停止監視が診断ページへ切り替える。停止監視（`boot_screen::watch`）は `pet_frontend_ready` のたびに張り直し、世代の古い監視は何もしない。設定反映後の再初期化は、`pet:reload` の前に `mark_reloading` で前回の状態を消して読込開始の監視を張り、メイン窓もいったん隠して起動画面を作り直す。
 - キャラ切替中は描画を隠し、描画器と人格・音声・背景が揃ってから表示する。連続切替では最新の要求だけを反映し、古い読込の成功・失敗・挨拶で新しいキャラを上書きしない。失敗時はキャラなしの診断を表示し、同じキャラの再選択でも読込をやり直す。
 
@@ -800,6 +827,8 @@ JSON-RPC 2.0、プロトコルバージョン `2024-11-05`。
 
 通知一覧の遅い取得結果は新着通知へ統合し、未読状態を保持する。一覧を消した後に古い取得結果で復活させない。通知の音声準備中に入力欄を開いた場合は通知を待機列へ戻す。キャラ切替・リセット前の独り言の遅い応答は表示しない。記録カードは取得中でも閉じ直せ、古い取得で再表示やフォーカス移動を起こさない。削除失敗時は操作表示を戻して理由を出す。
 
+背景の保存・移行・更新確認の失敗は、原因ごとに一度だけ理由を画面へ知らせ、実際に処理が成功したら復旧を知らせる。長期メモリの読込・保存失敗時は覚えた文脈へ更新せず会話を継続する。候補なし・記憶機能無効のターンは復旧と扱わない。長期メモリ・使用量・会話履歴・スケジュール実行履歴・永続ジョブ・関係性の破損退避は退避先を通知し、退避失敗時は空データの書き戻しを止める。APIキー保護の失敗は平文が残ることと設定の保存し直しを案内する。更新確認はオフラインでは通知せず通信・解析エラーだけを通知する。起動時通知は購読完了まで待機し、画面再読込時は未復旧の失敗を再表示する。通知の形式・ローカル時刻・送信・状態遷移は `notice.rs` を正本にする。
+
 スケジュール実行履歴と永続ジョブ一覧を取得できない場合、不正な応答を空一覧へ置き換えず既存通知を保持する。理由を原因ごとに一度だけ画面へ知らせ、取得が復旧したら次の失敗を再通知できる状態へ戻す。消去前の古い取得失敗は通知しない。
 
 読み上げの再生失敗は状態行へ表示する。音声の区間が終わったら次の合成待ち中の口パクを止め、読み上げ無効へ切り替えた場合は進行中の再生と一時URLを解放する。
@@ -832,7 +861,7 @@ JSON-RPC 2.0、プロトコルバージョン `2024-11-05`。
 - **許可（`permissions.rs`）**: 許可判定を通ったパスは専用型 **`SafePath`** で表し、生成経路を `resolve()` / `SafePath::join()` / `SafePath::sibling()` に限る（内部 `PathBuf` は非公開。派生パスも再検証する）。ファイル操作は `SafePath` だけを受ける `permissions::fs` を使い、アプリ内部が決めたパスだけ `SafePath::app_owned` を使う。**スキル側での許可判定の再実装は禁止**で、`permissions::guard` が `skills/**/mod.rs` を走査して自前判定（`fn bounded_path(base:` 等）と `resolve` を通さないパス引数を検出する（例外は独自の追加制約を持つ `run_command` / `code_runner` / `trash_file`）。
   - **正本キーは `PICOAGENT_ALLOWED_ROOT`（主ルート、既定はホーム）／`PICOAGENT_ALLOWED_PATHS`（追加許可ルート）／`PICOAGENT_DENIED_PATHS`（追加拒否）**で、設定「安全・許可」で編集する。`C:\Windows` / `C:\Program Files` / `C:\Program Files (x86)` は常に拒否する（`is_system_protected`）。既存の最深祖先を実体化し、シンボリックリンクやジャンクション経由のルート外到達も拒否する。
   - 対象: `read_file` / `workspace_files` / `trash_file` / `ms_office` / `document_convert` / `pdf_tools` / `image_tools` / `research_report` / `spark_workspace` / `genspark_suite` / `artifact_pipeline` / `ai_drive` / `meeting_recorder` / `whisper_transcribe` / `run_command` / `code_runner` / `scheduler` とドロップファイルの読込。
-- **コマンド実行の承認（`run_command`）**: `PICOAGENT_COMMAND_ENABLED=true` が必要。コマンドが `PICOAGENT_COMMAND_ALLOWLIST` に無い、または `cwd` が許可ルート外なら、チャットへ確認を返す。「許可」で保留中の1件だけ実行し、「永続許可」でコマンド prefix を `PICOAGENT_COMMAND_ALLOWLIST` へ、必要なら cwd を `PICOAGENT_ALLOWED_PATHS` へ保存してから実行する。「キャンセル」で破棄する。`C:\Windows` と `C:\Program Files*` 配下はチャットで許可されても実行先や編集先にしない（`workspace_files` の `write` / `append` / `mkdir` も同じ）。
+- **コマンド実行の承認（`run_command`）**: `PICOAGENT_COMMAND_ENABLED=true` が必要。コマンドが `PICOAGENT_COMMAND_ALLOWLIST` に完全一致しない、または `cwd` が許可ルート外なら、チャットへ確認を返す。「許可」で保留中の1件だけ実行し、「永続許可」で引数を含むコマンド全体を `PICOAGENT_COMMAND_ALLOWLIST` へ、必要なら cwd を `PICOAGENT_ALLOWED_PATHS` へ保存してから実行する。「キャンセル」で破棄する。`git diff` の許可に後続引数は含まれず、`git diff --stat` は別登録が必要。`C:\Windows` と `C:\Program Files*` 配下はチャットで許可されても実行先や編集先にしない（`workspace_files` の `write` / `append` / `mkdir` も同じ）。
 - **ユーザーへの確認（`ask_user`）**: `run_command` の承認カードと同じマーカー方式で、`agent.rs` がループを止め、`commands.rs` が質問と `choices` を返す（クイック操作欄が選択肢ボタンになる）。保留中の質問は `AppState.pending_question` が1件だけ持ち、次の発話で必ず解除する。
 - **自力実行（`code_runner`）**: cwd 検査と文字列 denylist ではスクリプト内部のルート外アクセスや難読化された物理削除を防げないため、OSレベルの隔離実行を用意するまで `agent_callable=false` でモデルへ公開しない。
 - **プロジェクト文脈**: `pet_send` のたびに `project::project_context()` が選択中プロジェクトの未完了課題（上位5件）と直近の記録（4件）を1,200文字までにまとめ、`apply_project_context()` が system の `[プロジェクト文脈]`〜`[/プロジェクト文脈]` ブロックを**入れ替える**。台帳が読めないときは差し込まずに続ける。

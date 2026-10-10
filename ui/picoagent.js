@@ -132,6 +132,7 @@ window.picoagent = {
   // 配置編集（OBS風）の位置・倍率を設定へ保存する（確定時だけ呼ぶ）。
   saveScene: (scenes) => call("pet_save_scene", { scenes }),
   saveUiPref: (key, value) => call("pet_save_ui_pref", { key, value }),
+  setCharacterRenderer: (characterId, renderer) => call("pet_set_character_renderer", { characterId, renderer }),
   // ウィンドウとフキダシの位置・サイズを既定へ戻す。
   resetLayout: () => call("pet_reset_layout"),
   aivisStatus: () => call("aivis_status"),
@@ -186,7 +187,7 @@ window.picoagent = {
     try { return await getCurrentWindow().startResizeDragging(direction); }
     catch (error) { logInvokeError("startResizeDragging", error); throw error; }
   },
-  setCharacterProfile: (characterId, profile, greeting) => call("pet_set_character_profile", { characterId, profile, greeting }),
+  setCharacterProfile: (characterId, profile, greeting, voice) => call("pet_set_character_profile", { characterId, profile, greeting, voice }),
   relationshipState: () => call("pet_relationship_state"),
   relationshipEvent: (kind, detail = "") => call("pet_relationship_event", { kind, detail }),
   pinRelationshipMoment: (momentId, pinned) => call("pet_relationship_pin_moment", { momentId, pinned }),

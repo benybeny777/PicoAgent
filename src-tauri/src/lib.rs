@@ -12,6 +12,7 @@ mod bundle_scope;
 mod character_learning;
 mod character_maker;
 mod character_pack;
+mod character_voice;
 mod commands;
 mod components;
 mod config;
@@ -41,11 +42,13 @@ mod memory_embedding_install;
 mod menu;
 mod message;
 mod migration;
+mod notice;
 mod permissions;
 mod project_rules;
 mod providers;
 mod relationship;
 mod relationship_preset;
+mod renderer_setting;
 mod scene;
 mod scheduler;
 mod secret;
@@ -209,6 +212,7 @@ pub fn run() {
             commands::pet_reset_layout,
             commands::pet_save_scene,
             commands::pet_save_ui_pref,
+            commands::pet_set_character_renderer,
             menu::pet_menu,
             menu::pet_layout_menu,
             menu::pet_character_menu,
@@ -343,7 +347,7 @@ pub fn run() {
             *state.memory_context.lock().unwrap() = memory::context(app.handle(), &state.config);
             // 履歴はキャラクター別。選択中キャラを文脈の持ち主として記録しておく。
             let character_id = state.config.get("PICOAGENT_CHARACTER", "mugi");
-            *state.character_id.lock().unwrap() = character_id.clone();
+            state.character.lock().unwrap().id = character_id.clone();
             let relationship_mode = state.config.get("PICOAGENT_COMPANION_MODE", "both");
             match relationship::load(app.handle(), &character_id, &relationship_mode) {
                 Ok(relationship) => {

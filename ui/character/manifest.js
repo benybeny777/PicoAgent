@@ -19,23 +19,6 @@ export function loadCatalog() {
   return catalogPromise;
 }
 
-/** 利用者が追加したキャラ（app_data_dir 配下）を同梱一覧と同じ形へそろえる。 */
-async function userEntries() {
-  try {
-    const result = await bridge.userCharacters();
-    return (result?.characters || []).map(entry => ({
-      id: entry.id,
-      name: entry.name,
-      description: entry.description || "",
-      root: bridge.assetUrl(entry.path),
-    }));
-  } catch (error) {
-    // フォールバック許可: 追加キャラを取れなくても同梱キャラだけで動かす（記録は残す）。
-    logApp("error", "追加キャラクターの一覧を取得できませんでした", errorDetail(error));
-    return [];
-  }
-}
-
 /** 同梱と追加を突き合わせた一覧。同じ id なら同梱側を優先する（追加分が同梱キャラを乗っ取らない）。 */
 export async function listCharacters() {
   const catalog = await loadCatalog();
@@ -45,9 +28,11 @@ export async function listCharacters() {
     description: entry.description || "",
     root: `assets/characters/${String(entry.manifest).replace(/\/character\.json$/, "")}`,
   }));
-  const known = new Set(bundled.map(entry => entry.id));
-  const all = bundled.concat((await userEntries()).filter(entry => !known.has(entry.id)));
-  return { entries: all, defaultId: catalog?.default };
+  const users = await window.PicoUI.loadUserCharacters(bridge.userCharacters, bridge.assetUrl, bundled);
+  return {
+    entries: bundled.concat(users.entries), defaultId: catalog?.default,
+    userCharactersError: users.error, userCharactersRoot: users.root,
+  };
 }
 
 /** 保存された見た目の違い（variant）の選択。キャラごとに WebView の localStorage へ覚える。 */
@@ -74,20 +59,31 @@ export function personaText(manifest, override) {
   ].filter(Boolean).join("\n");
 }
 
+/** 通常2Dの画像構造を、表示ホストと設定画面で同じ規則へそろえる。 */
+export function imageAnimationsOf(manifest, variant = null) {
+  return variant?.animations || manifest.animations
+    || ((variant?.meshRig || manifest.meshRig) ? { idle: { framePaths: ["preview.png"], frames: 1, fps: 1 } } : {});
+}
+
 const hasLive2d = config => Boolean(config?.model || config?.models?.length);
 
 /**
  * 描画器へ渡すパック。見た目の違い（variant）をここで解決し、描画器は選ばれた定義だけを見る。
  * `variant.live2d === false` なら、キャラ本体が Live2D でもフレーム表示へ戻す。
  */
-export async function loadPack(characterId, { sdkPreference = "auto" } = {}) {
-  const { entries, defaultId } = await listCharacters();
-  const entry = entries.find(item => item.id === characterId)
-    || entries.find(item => item.id === defaultId)
-    || entries[0];
-  if (!entry) throw new Error("利用できるキャラクターがありません");
+export async function loadPack(characterId, { sdkPreference = "auto", onUserCharacters } = {}) {
+  const { entries, userCharactersError, userCharactersRoot } = await listCharacters();
+  onUserCharacters?.({ error: userCharactersError, root: userCharactersRoot });
+  const entry = entries.find(item => item.id === characterId);
+  if (!entry) {
+    if (userCharactersError) throw new Error(`追加キャラ一覧を読めないため「${characterId}」を表示できません: ${window.PicoUI.errorMessage(userCharactersError)}`);
+    throw new Error(`キャラクター「${characterId}」が一覧にありません`);
+  }
   const manifest = await fetchJson(`${entry.root}/character.json?v=${MANIFEST_CACHE_KEY}`, "キャラクター定義");
-  manifest.id ||= entry.id;
+  if (manifest.id == null || manifest.id === "") manifest.id = entry.id;
+  else if (manifest.id !== entry.id) {
+    throw new Error(`キャラクター定義のID「${manifest.id}」が選択ID「${entry.id}」と一致しません`);
+  }
   const variants = Array.isArray(manifest.variants) ? manifest.variants : [];
   const variant = variants.find(item => item.id === savedVariant(manifest.id)) || variants[0] || null;
   let root = entry.root;
@@ -101,8 +97,7 @@ export async function loadPack(characterId, { sdkPreference = "auto" } = {}) {
     variants,
     variantId: variant?.id || "default",
     assetVersion: String(manifest.assetVersion || ""),
-    animations: variant?.animations || manifest.animations
-      || (manifest.meshRig ? { idle: { framePaths: ["preview.png"], frames: 1, fps: 1 } } : {}),
+    animations: imageAnimationsOf(manifest, variant),
     runtimeLayers: variant?.runtimeLayers || manifest.runtimeLayers || {},
     springPhysics: variant?.springPhysics ?? manifest.springPhysics ?? null,
     secondaryMotion: variant?.secondaryMotion ?? manifest.secondaryMotion ?? null,

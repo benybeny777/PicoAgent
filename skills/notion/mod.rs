@@ -114,14 +114,15 @@ impl Tool for NotionTool {
                 {
                     Ok(response) => response,
                     Err(error) => {
-                        return format!("エラー: Notion API への接続に失敗しました: {}", error)
+                        return format!(
+                            "エラー: Notion API への接続に失敗しました: {}",
+                            error.without_url()
+                        )
                     }
                 };
-                let status = response.status();
-                let body = crate::tool_response_text!(response);
-                if !status.is_success() {
-                    return format!("エラー: Notion API が HTTP {} を返しました。", status);
-                }
+                let body = crate::tool_try!(
+                    crate::tools::http::service_body(cfg, "Notion API", Ok(response)).await
+                );
                 let parsed: Value = crate::tool_response_json!(&body);
                 let mut out = String::from("Notion検索結果:\n");
                 for item in parsed
@@ -197,14 +198,15 @@ impl Tool for NotionTool {
                 {
                     Ok(response) => response,
                     Err(error) => {
-                        return format!("エラー: Notion API への接続に失敗しました: {}", error)
+                        return format!(
+                            "エラー: Notion API への接続に失敗しました: {}",
+                            error.without_url()
+                        )
                     }
                 };
-                let status = response.status();
-                let body = crate::tool_response_text!(response);
-                if !status.is_success() {
-                    return format!("エラー: Notion API が HTTP {} を返しました。", status);
-                }
+                let body = crate::tool_try!(
+                    crate::tools::http::service_body(cfg, "Notion API", Ok(response)).await
+                );
                 let parsed: Value = crate::tool_response_json!(&body);
                 format!(
                     "OK: Notionページを作成しました。{}",

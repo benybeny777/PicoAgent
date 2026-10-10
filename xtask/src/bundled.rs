@@ -524,7 +524,7 @@ fn whisper_model_file() -> String {
 
 fn whisper_small_asset(url: String) -> ReleaseAsset {
     ReleaseAsset {
-        name: "ggml-small.bin".to_string(),
+        name: picoagent_core::paths::WHISPER_DEFAULT_MODEL.to_string(),
         url,
         size: WHISPER_SMALL_SIZE,
         sha256: WHISPER_SMALL_SHA256.to_string(),
