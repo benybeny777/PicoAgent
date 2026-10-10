@@ -131,6 +131,7 @@ export function createEditor({ layer, toolbar, stageElement, stage, host, toast,
     drag.element.addEventListener("pointermove", onDragMove);
     drag.element.addEventListener("pointerup", onDragEnd);
     drag.element.addEventListener("pointercancel", onDragEnd);
+    host.setDragging(true);
     render();
   }
 
@@ -170,6 +171,7 @@ export function createEditor({ layer, toolbar, stageElement, stage, host, toast,
     if (!drag || event.pointerId !== drag.pointerId) return;
     const current = drag;
     drag = null;
+    host.setDragging(false);
     current.element.removeEventListener("pointermove", onDragMove);
     current.element.removeEventListener("pointerup", onDragEnd);
     current.element.removeEventListener("pointercancel", onDragEnd);
@@ -314,6 +316,7 @@ export function createEditor({ layer, toolbar, stageElement, stage, host, toast,
       if (drag) {
         const current = drag;
         drag = null;
+        host.setDragging(false);
         current.element.removeEventListener("pointermove", onDragMove);
         current.element.removeEventListener("pointerup", onDragEnd);
         current.element.removeEventListener("pointercancel", onDragEnd);
@@ -345,6 +348,7 @@ export function createEditor({ layer, toolbar, stageElement, stage, host, toast,
         grip.addEventListener("pointermove", onDragMove);
         grip.addEventListener("pointerup", onDragEnd);
         grip.addEventListener("pointercancel", onDragEnd);
+        host.setDragging(true);
       });
       stage.events.on("layout", () => {
         const placement = stage.placementOf(name);

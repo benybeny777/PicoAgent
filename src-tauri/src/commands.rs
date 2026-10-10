@@ -2329,8 +2329,7 @@ pub async fn pet_send(
 fn current_time_context() -> String {
     use chrono::{Datelike, Local, Timelike};
     let now = Local::now();
-    let weekday =
-        ["月", "火", "水", "木", "金", "土", "日"][now.weekday().num_days_from_monday() as usize];
+    let weekday = crate::text::weekday_ja(now.weekday());
     let hour = now.hour();
     let part = match hour {
         5..=10 => "朝",
@@ -2757,6 +2756,9 @@ fn speech_text(text: &str) -> String {
         .map(str::trim)
         .take_while(|line| !line.starts_with("参考:") && !line.starts_with("参考："))
         .filter(|line| !line.is_empty())
+        // Markdown の表は欄を横に読むと意味が通らない（天気の日別予報など）。表の中身は画面で見せる。
+        .filter(|line| !is_markdown_table_row(line))
+        .map(|line| line.trim_start_matches('#').trim_start())
         .filter(|line| !line.starts_with("http://") && !line.starts_with("https://"))
         .filter(|line| !looks_like_rss_speech_dump_line(line))
         .filter(|line| !is_bracketed_note_line(line))
@@ -2769,7 +2771,12 @@ fn speech_text(text: &str) -> String {
         })
         .collect::<Vec<_>>()
         .join(" ");
-    spoken.split_whitespace().collect::<Vec<_>>().join(" ")
+    // 太字の記号は声にしない（「アスタリスク」と読まれる合成エンジンがある）。
+    spoken
+        .replace("**", "")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn remove_bare_urls(text: &str) -> String {
@@ -2819,6 +2826,11 @@ fn looks_like_rss_speech_dump_line(line: &str) -> bool {
 }
 
 // 読み上げ不要な装飾文字（罫線・ブロック＝スパークライン、各種記号・絵文字、異体字セレクタ）。
+/// Markdown の表の1行（見出し・区切り・本文）か。
+fn is_markdown_table_row(line: &str) -> bool {
+    line.len() >= 2 && line.starts_with('|') && line.ends_with('|')
+}
+
 fn is_chart_or_emoji(c: char) -> bool {
     matches!(c as u32,
         0x2580..=0x259F   // 罫線・ブロック要素（▁▂▃▅▇ など）
@@ -2930,25 +2942,18 @@ pub async fn pet_speak(
         // speaker_uuid があれば実 style ID を `/speakers` から解決する（取り違え防止）。
         // UUID指定の解決失敗では合成へ進まない。
         let speaker = resolve_tts_speaker(&endpoint, &voice).await?;
-        let client = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(180))
-            .build()
-            .map_err(|error| {
-                log_command_error(
-                    &app,
-                    "Aivis HTTP クライアント作成に失敗しました",
-                    error.without_url(),
-                )
-            })?;
         let query_url = format!("{endpoint}/audio_query");
         let query = crate::tools::http::service_response(
             &state.config,
             "Aivis の音声クエリ作成",
-            client
-                .post(&query_url)
-                .query(&[("text", text.as_str()), ("speaker", speaker.as_str())])
-                .send()
-                .await,
+            crate::tools::http::service(
+                reqwest::Method::POST,
+                query_url,
+                std::time::Duration::from_secs(180),
+            )?
+            .query(&[("text", text.as_str()), ("speaker", speaker.as_str())])
+            .send()
+            .await,
         )
         .await
         .map_err(|error| log_command_error(&app, "Aivis の音声クエリ作成に失敗しました", error))?;
@@ -2964,12 +2969,15 @@ pub async fn pet_speak(
         let wav = crate::tools::http::service_response(
             &state.config,
             "Aivis の音声合成",
-            client
-                .post(&synthesis_url)
-                .query(&[("speaker", speaker.as_str())])
-                .json(&audio_query)
-                .send()
-                .await,
+            crate::tools::http::service(
+                reqwest::Method::POST,
+                synthesis_url,
+                std::time::Duration::from_secs(180),
+            )?
+            .query(&[("speaker", speaker.as_str())])
+            .json(&audio_query)
+            .send()
+            .await,
         )
         .await
         .map_err(|error| log_command_error(&app, "Aivis の音声合成に失敗しました", error))?;
@@ -4538,13 +4546,12 @@ impl Drop for UpdateDownloadCleanup {
 }
 
 async fn fetch_update_feed() -> Result<Option<Value>, String> {
-    let client = reqwest::Client::builder()
-        .connect_timeout(std::time::Duration::from_secs(5))
-        .read_timeout(std::time::Duration::from_secs(10))
-        .user_agent("PicoAgent-UpdateCheck")
-        .build()
-        .map_err(|error| error.to_string())?;
-    let mut response = match client.get(UPDATE_FEED_URL).send().await {
+    let mut response = match crate::tools::http::update_feed_client()?
+        .get(UPDATE_FEED_URL)
+        .header(reqwest::header::USER_AGENT, "PicoAgent-UpdateCheck")
+        .send()
+        .await
+    {
         Ok(response) => response,
         Err(error) if error.is_connect() || error.is_timeout() => return Ok(None),
         Err(error) => return Err(format!("更新情報を取得できません: {error}")),
@@ -4716,13 +4723,12 @@ pub async fn settings_install_update(app: AppHandle) -> Result<Value, String> {
         partial: partial.clone(),
         armed: true,
     };
-    let client = reqwest::Client::builder()
-        .connect_timeout(std::time::Duration::from_secs(10))
-        .read_timeout(std::time::Duration::from_secs(120))
-        .user_agent("PicoAgent-Updater")
-        .build()
-        .map_err(|error| error.to_string())?;
-    let mut response = match client.get(url).send().await {
+    let mut response = match crate::tools::http::client()?
+        .get(url)
+        .header(reqwest::header::USER_AGENT, "PicoAgent-Updater")
+        .send()
+        .await
+    {
         Ok(response) => response
             .error_for_status()
             .map_err(|error| format!("更新の取得を開始できません: {error}"))?,
@@ -6509,6 +6515,17 @@ mod tests {
         assert_eq!(speech_text(text), "明日は晴れです。");
         // 括弧のあとに本文が続く行は読み上げる。
         assert_eq!(speech_text("【重要】明日は雨です"), "【重要】明日は雨です");
+    }
+
+    #[test]
+    fn 読み上げではmarkdownの表と記号を声にしない() {
+        let text = "**☀️ 横浜市の天気：快晴**\nいまは 21°C\n\n| 日付 | 天気 |\n| --- | --- |\n| 10/10（土） | ☀️ 快晴 |\n\n### まとめ\n傘はいらないよ。";
+        assert_eq!(
+            speech_text(text),
+            "横浜市の天気：快晴 いまは 21°C まとめ 傘はいらないよ。"
+        );
+        // 縦棒を含むだけの文は表として外さない。
+        assert_eq!(speech_text("A|Bの比較です。"), "A|Bの比較です。");
     }
 
     #[test]

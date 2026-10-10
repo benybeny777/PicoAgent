@@ -102,19 +102,7 @@ impl Tool for MicrosoftGraphTool {
             );
         }
         let timeout = crate::tool_try!(cfg.int(&crate::config::ints::MS_GRAPH_TIMEOUT_SECS)) as u64;
-        let client = match reqwest::Client::builder()
-            .timeout(Duration::from_secs(timeout))
-            .user_agent("PicoAgent/1.0 (Microsoft Graph tool)")
-            .build()
-        {
-            Ok(client) => client,
-            Err(error) => {
-                return format!(
-                    "エラー: Microsoft Graph API の準備に失敗しました: {}",
-                    error
-                )
-            }
-        };
+        let request_timeout = Duration::from_secs(timeout);
         match args.get("action").and_then(Value::as_str).unwrap_or("") {
             "send_mail" => {
                 let subject = args.get("subject").and_then(Value::as_str).unwrap_or("");
@@ -133,8 +121,7 @@ impl Tool for MicrosoftGraphTool {
                     "saveToSentItems": true
                 });
                 crate::tools::http::service_reply(cfg,
-                    client
-                        .post(format!("{}/me/sendMail", GRAPH_BASE))
+                    crate::tool_try!(crate::tools::http::service(reqwest::Method::POST, format!("{}/me/sendMail", GRAPH_BASE), request_timeout))
                         .bearer_auth(token)
                         .json(&payload)
                         .send()
@@ -145,8 +132,7 @@ impl Tool for MicrosoftGraphTool {
             }
             "list_events" => {
                 crate::tools::http::service_reply(cfg,
-                    client
-                        .get(format!("{}/me/events", GRAPH_BASE))
+                    crate::tool_try!(crate::tools::http::service(reqwest::Method::GET, format!("{}/me/events", GRAPH_BASE), request_timeout))
                         .bearer_auth(token)
                         .query(&[("$top", "10"), ("$orderby", "start/dateTime")])
                         .send()
@@ -173,8 +159,7 @@ impl Tool for MicrosoftGraphTool {
                     "end": { "dateTime": end, "timeZone": timezone }
                 });
                 crate::tools::http::service_reply(cfg,
-                    client
-                        .post(format!("{}/me/events", GRAPH_BASE))
+                    crate::tool_try!(crate::tools::http::service(reqwest::Method::POST, format!("{}/me/events", GRAPH_BASE), request_timeout))
                         .bearer_auth(token)
                         .json(&payload)
                         .send()
@@ -203,8 +188,7 @@ impl Tool for MicrosoftGraphTool {
                 }
                 let body = args.get("body").and_then(Value::as_str).unwrap_or("");
                 crate::tools::http::service_reply(cfg,
-                    client
-                        .post(format!("{}/teams/{}/channels/{}/messages", GRAPH_BASE, team_id, channel_id))
+                    crate::tool_try!(crate::tools::http::service(reqwest::Method::POST, format!("{}/teams/{}/channels/{}/messages", GRAPH_BASE, team_id, channel_id), request_timeout))
                         .bearer_auth(token)
                         .json(&json!({ "body": { "contentType": "text", "content": body } }))
                         .send()

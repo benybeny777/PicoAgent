@@ -5,6 +5,7 @@
 
 import { el, loadScriptOnce } from "../app/util.js";
 import { defaultFramingFor } from "./framing.js";
+import { createFrameGate } from "./frame-budget.js";
 
 export class MmdRenderer {
   static kind = "mmd";
@@ -16,6 +17,8 @@ export class MmdRenderer {
     this.canvas = el("canvas", { className: "character-canvas", id: "mmdCanvas" }, [], { "aria-hidden": "true" });
     this.element = this.canvas;
     this.reducedMotion = reducedMotion;
+    this.active = true;
+    this.frameBudget = 0;
     this.framing = "bust";
     this.abort = new AbortController();
   }
@@ -31,11 +34,13 @@ export class MmdRenderer {
       config: { ...pack.mmd, bodyProportion: pack.bodyProportion },
       interactive: false,
       signal: this.abort.signal,
+      frameGate: createFrameGate(),
     });
     this.controller.setMotionEnabled(!this.reducedMotion && !document.hidden);
     this.controller.setMouthLevel(0);
     this.pose = pack.mmd.defaultPose === "original" ? "original" : "natural";
     this.controller.setPose(this.pose);
+    this.controller.setFrameBudget?.(this.active ? this.frameBudget : 0);
   }
 
   /** 3D は構図ごとの縦横比をカメラが吸収する。既定の比率（幅/高さ）だけを返す。 */
@@ -68,12 +73,18 @@ export class MmdRenderer {
     this.controller?.setPose(this.pose);
   }
   setActive(active) {
-    this.controller?.setMotionEnabled(Boolean(active) && !this.reducedMotion);
+    this.active = Boolean(active);
+    this.controller?.setMotionEnabled(this.active && !this.reducedMotion);
+    this.controller?.setFrameBudget?.(this.active ? this.frameBudget : 0);
     if (!active) this.controller?.setMouthLevel(0);
   }
   setReducedMotion(reduced) {
     this.reducedMotion = Boolean(reduced);
-    this.controller?.setMotionEnabled(!this.reducedMotion && !document.hidden);
+    this.controller?.setMotionEnabled(this.active && !this.reducedMotion && !document.hidden);
+  }
+  setFrameBudget(fps) {
+    this.frameBudget = fps;
+    this.controller?.setFrameBudget?.(this.active ? fps : 0);
   }
   /** 表示直前に1回描き切る（未描画の canvas のまま窓を出さない）。 */
   capturePreview() { this.controller?.capturePreview(); }

@@ -31,7 +31,7 @@
 PicoAgent は Tauri 製のデスクトップペット型 AI エージェントです。
 
 - **ローカルファースト**: 既定の叩く AI は同梱のローカル推論エンジン（llama-server + GGUF）。初回のモデル取得後はオフラインで動きます。読み上げ（Aivis）や文字起こし（Whisper）もローカルです。
-- **スキル（コネクタ）駆動**: 天気・Web検索からGmail・Slack・GitHub、Office文書編集、PDF、画像・動画生成、PC操作、コマンド実行まで75種のスキルを内蔵。話しかけると必要なスキルを自動で選んで実行します。
+- **スキル（コネクタ）駆動**: 天気・Web検索からGmail・Slack・GitHub、Office文書編集、PDF、画像・動画生成、PC操作、コマンド実行まで74種のスキルを内蔵。話しかけると必要なスキルを自動で選んで実行します。
 - **キャラクターと暮らす**: クリックで話しかけ、なでると喜び、放っておくと居眠りします（寝姿の原画があるキャラクター）。Live2D にも対応。
 - **外から叩ける**: Ollama 風のローカル HTTP API と最小 CLI で、スクリプトや他ツールからもエージェントを呼べます。
 
@@ -294,7 +294,7 @@ cargo xtask setup tools     # 精度向上用 OSS CLI（Pandoc/ripgrep/ffmpeg/qp
 | スキル | 頼み方の例 |
 |---|---|
 | 調査レポート | 「AIスライド生成サービスを出典付きで調査してレポートに」 |
-| 資料ワークスペース | 「Gensparkみたいに資料一式を作って」（brief/deck/sheet/共有HTML…） |
+| 資料ワークスペース | 「Gensparkみたいに資料一式を作って」（`genspark_suite`のlight。brief/deck/sheet/共有HTML…）。「Genspark風の機能を全部やって」はfullで生成 |
 | Genspark風全部 | 「Genspark風の機能を全部やって」（Deep Research 等 10 系統） |
 | サブエージェント | 「競合3社をそれぞれ調べて」（分担して並行調査） |
 

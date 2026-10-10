@@ -88,23 +88,19 @@ impl Tool for TrelloTool {
             );
         }
         let timeout = crate::tool_try!(cfg.int(&crate::config::ints::TRELLO_TIMEOUT_SECS)) as u64;
-        let client = match reqwest::Client::builder()
-            .timeout(Duration::from_secs(timeout))
-            .user_agent("PicoAgent/1.0 (Trello tool)")
-            .build()
-        {
-            Ok(client) => client,
-            Err(error) => return format!("エラー: Trello API の準備に失敗しました: {}", error),
-        };
+        let request_timeout = Duration::from_secs(timeout);
         match args.get("action").and_then(Value::as_str).unwrap_or("") {
             "list_cards" => {
                 crate::tools::http::service_reply(
                     cfg,
-                    client
-                        .get(format!("{}/lists/{}/cards", TRELLO_BASE, list_id))
-                        .query(&[("key", key), ("token", token)])
-                        .send()
-                        .await,
+                    crate::tool_try!(crate::tools::http::service(
+                        reqwest::Method::GET,
+                        format!("{}/lists/{}/cards", TRELLO_BASE, list_id),
+                        request_timeout
+                    ))
+                    .query(&[("key", key), ("token", token)])
+                    .send()
+                    .await,
                     "Trello API",
                 )
                 .await
@@ -121,17 +117,20 @@ impl Tool for TrelloTool {
                 let desc = args.get("desc").and_then(Value::as_str).unwrap_or("");
                 crate::tools::http::service_reply(
                     cfg,
-                    client
-                        .post(format!("{}/cards", TRELLO_BASE))
-                        .query(&[
-                            ("key", key.as_str()),
-                            ("token", token.as_str()),
-                            ("idList", list_id.as_str()),
-                            ("name", name),
-                            ("desc", desc),
-                        ])
-                        .send()
-                        .await,
+                    crate::tool_try!(crate::tools::http::service(
+                        reqwest::Method::POST,
+                        format!("{}/cards", TRELLO_BASE),
+                        request_timeout
+                    ))
+                    .query(&[
+                        ("key", key.as_str()),
+                        ("token", token.as_str()),
+                        ("idList", list_id.as_str()),
+                        ("name", name),
+                        ("desc", desc),
+                    ])
+                    .send()
+                    .await,
                     "Trello API",
                 )
                 .await

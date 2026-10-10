@@ -1,17 +1,317 @@
-// text.rs - 文字列を安全に切り詰めるための共通層。
+// text.rs - 文字列を安全に切り詰めるための共通層と、スキル出力で共有する小さな表示整形。
 //
 // Rust の文字列は UTF-8 バイト列で、`&s[..120]` のようなバイト位置での切り出しは
 // **その位置が文字の途中だと panic する**。日本語は 1 文字 3 バイトなので、固定長で
 // 切ると高い確率で境界を外す。ログ・プレビュー・出力の打ち切りは全体を通して
 // ここの関数を使うこと（直接のバイト添字による切り出しは `text::guard` が検出する）。
 
-// 実装は非公開の内部共通crateであるpicoagent-coreへ置き、既存のアプリ内パスを保つ。
+// UTF-8処理は非公開の内部共通crateであるpicoagent-coreへ置き、既存のアプリ内パスを保つ。
 pub use picoagent_core::text::{command_output, preview, truncate_bytes, Utf8Stream};
+
+/// 名前の文字種と、既存の入力・出力上限を保つ生成方針。
+#[derive(Clone, Copy)]
+pub enum SlugPolicy {
+    AsciiOutput,
+    AsciiInput,
+    AsciiWordsInput,
+    Unicode,
+}
+
+pub fn slug(text: &str, fallback: &str, max_chars: usize, policy: SlugPolicy) -> String {
+    let limit_input = matches!(policy, SlugPolicy::AsciiInput | SlugPolicy::AsciiWordsInput);
+    let mut out = String::new();
+    for ch in text
+        .chars()
+        .take(if limit_input { max_chars } else { usize::MAX })
+    {
+        let accepted = if matches!(policy, SlugPolicy::Unicode) {
+            ch.is_alphanumeric()
+        } else {
+            ch.is_ascii_alphanumeric()
+        };
+        if accepted {
+            out.push(ch.to_ascii_lowercase());
+        } else if (!matches!(policy, SlugPolicy::AsciiWordsInput)
+            || ch.is_whitespace()
+            || "-_.".contains(ch))
+            && !out.is_empty()
+            && !out.ends_with('-')
+        {
+            out.push('-');
+        }
+    }
+    while out.ends_with('-') {
+        out.pop();
+    }
+    if out.is_empty() {
+        fallback.to_string()
+    } else if limit_input {
+        out
+    } else {
+        out.chars().take(max_chars).collect()
+    }
+}
+
+fn escape_markup(text: &str, xml: bool, strip_controls: bool) -> String {
+    let mut out = String::with_capacity(text.len());
+    for ch in text.chars() {
+        match ch {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str(if xml { "&apos;" } else { "&#39;" }),
+            '\t' | '\n' | '\r' => out.push(ch),
+            _ if !strip_controls || ch >= '\u{20}' => out.push(ch),
+            _ => {}
+        }
+    }
+    out
+}
+
+pub fn html_escape(text: &str) -> String {
+    escape_markup(text, false, false)
+}
+/// XMLと同じ入力制限を持つ成果物HTMLでは制御文字も除く。
+pub fn html_escape_clean(text: &str) -> String {
+    escape_markup(text, false, true)
+}
+pub fn xml_escape(text: &str) -> String {
+    escape_markup(text, true, false)
+}
+pub fn xml_escape_clean(text: &str) -> String {
+    escape_markup(text, true, true)
+}
+
+/// 曜日の1文字表記（「月」〜「日」）。日付の横に添える表示と会話文脈で共通に使う。
+pub fn weekday_ja(day: chrono::Weekday) -> &'static str {
+    ["月", "火", "水", "木", "金", "土", "日"][day.num_days_from_monday() as usize]
+}
+
+/// 数値列を Unicode ブロック文字の簡易チャート（スパークライン）にする。
+/// 全部同じ値なら中段の高さで横一直線にする（最下段だと「急落」に見える）。
+pub fn sparkline(values: &[f64]) -> Result<String, String> {
+    if values.iter().any(|value| !value.is_finite()) {
+        return Err("グラフの数値に有限でない値があります".to_string());
+    }
+    const BARS: [char; 8] = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
+    let min = values.iter().copied().fold(f64::INFINITY, f64::min);
+    let max = values.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+    if max.partial_cmp(&min) != Some(std::cmp::Ordering::Greater) {
+        return Ok(BARS[3].to_string().repeat(values.len()));
+    }
+    // 正負の最大値の差もoverflowさせないよう、同じ尺度へ正規化する。
+    let difference = max - min;
+    let scale = if difference.is_finite() {
+        1.0
+    } else {
+        min.abs().max(max.abs())
+    };
+    let low = min / scale;
+    let span = if difference.is_finite() {
+        difference
+    } else {
+        max / scale - low
+    };
+    Ok(values
+        .iter()
+        .map(|&v| BARS[((((v / scale - low) / span) * 7.0).round() as usize).min(7)])
+        .collect())
+}
 
 /// 固定長のバイト添字による文字列の切り出しが残っていないかを走査するガード。
 #[cfg(test)]
 mod guard {
     use crate::guard_scan;
+
+    /// 行頭の関数宣言だけを読む。呼出やコメント・文字列中の例示は宣言にしない。
+    fn function_header(line: &str) -> Option<&str> {
+        let mut rest = line.trim_start();
+        if let Some(after) = rest.strip_prefix("pub") {
+            if let Some(scope) = after.strip_prefix('(') {
+                let close = scope.find(')')?;
+                rest = scope[close + 1..].trim_start();
+            } else if after.starts_with(char::is_whitespace) {
+                rest = after.trim_start();
+            } else {
+                return None;
+            }
+        }
+        if let Some(after) = rest.strip_prefix("async") {
+            if !after.starts_with(char::is_whitespace) {
+                return None;
+            }
+            rest = after.trim_start();
+        }
+        rest = rest.strip_prefix("fn")?;
+        if !rest.starts_with(char::is_whitespace) {
+            return None;
+        }
+        rest = rest.trim_start();
+        let first = rest.chars().next()?;
+        if !(first.is_alphabetic() || first == '_') {
+            return None;
+        }
+        let end = rest
+            .char_indices()
+            .find(|(_, ch)| !(ch.is_alphanumeric() || *ch == '_'))
+            .map_or(rest.len(), |(index, _)| index);
+        let tail = rest[end..].trim_start();
+        (tail.starts_with('(') || tail.starts_with('<')).then_some(&rest[..end])
+    }
+
+    fn function_headers(body: &str) -> Vec<(usize, &str)> {
+        let mut result = Vec::new();
+        let mut offset = 0;
+        for line in body.split_inclusive('\n') {
+            if let Some(name) = function_header(line) {
+                result.push((offset, name));
+            }
+            offset += line.len();
+        }
+        result
+    }
+
+    #[test]
+    fn 関数宣言は公開範囲と非同期とgenericを読み無関係な文字列を除く() {
+        for (line, expected) in [
+            ("fn first() {}", "first"),
+            ("  pub(crate) async fn load<T>(", "load"),
+            ("pub fn generic <T>(", "generic"),
+            ("pub(super) fn 内部()", "内部"),
+            ("pub(in crate::module) fn scoped()", "scoped"),
+        ] {
+            assert_eq!(function_header(line), Some(expected));
+        }
+        for line in [
+            "// fn fake()",
+            "let text = \"fn fake()\";",
+            "\"fn fake()\"",
+            "fnname()",
+            "pubfn name()",
+            "async fnname()",
+            "pub(crate fn wrong()",
+            "fn 123()",
+            "fn macro!()",
+        ] {
+            assert_eq!(function_header(line), None, "{line}");
+        }
+        let source = "// fn fake()\r\nfn one<T>() {}\r\n  pub async fn two() {}\n";
+        let headers = function_headers(source);
+        assert_eq!(
+            headers.iter().map(|(_, name)| *name).collect::<Vec<_>>(),
+            ["one", "two"]
+        );
+        for (offset, name) in headers {
+            assert!(source[offset..]
+                .trim_start()
+                .contains(&format!("fn {name}")));
+        }
+    }
+
+    #[test]
+    fn 小道具の定義は責務の持ち主以外へ複写しない() {
+        let owners = [
+            ("slug", "src-tauri/src/text.rs"),
+            ("html_escape", "src-tauri/src/text.rs"),
+            ("xml_escape", "src-tauri/src/text.rs"),
+            ("sparkline", "src-tauri/src/text.rs"),
+            ("direct_url", "src-tauri/src/tools/search_url.rs"),
+            ("parse_days", "src-tauri/src/tools/datetime_words.rs"),
+            ("number_before", "src-tauri/src/tools/datetime_words.rs"),
+            (
+                "ensure_executable",
+                "crates/picoagent-core/src/permissions.rs",
+            ),
+            ("sha256_reader", "crates/picoagent-core/src/hash.rs"),
+            ("sha256_file", "src-tauri/src/installer/fs.rs"),
+            ("file_sha256", "xtask/src/util.rs"),
+            // 比較側は用途固有の理由を持ち、ファイルSHA計算を独自に再実装しない。
+            ("verify_sha256", ""),
+        ];
+        let mut offenders = Vec::new();
+        for source in guard_scan::all_sources()
+            .into_iter()
+            .chain(guard_scan::xtask_sources())
+        {
+            let definitions = function_headers(source.body());
+            for (name, owner) in owners {
+                if definitions.iter().any(|(_, defined)| *defined == name)
+                    && source.path != std::path::Path::new(owner)
+                {
+                    offenders.push(format!("{}: {name}", source.path.display()));
+                }
+            }
+        }
+        assert!(
+            offenders.is_empty(),
+            "共通小道具の写しがあります: {offenders:?}"
+        );
+    }
+
+    #[test]
+    fn hashと実行属性の手順は共通所有者と用途固有の処理だけに置く() {
+        // 関数名を変えて写した計算も検知する。複合版ID・受信中hash・メモリhashは別責務。
+        let exceptions = [
+            (
+                "crates/picoagent-core/src/hash.rs",
+                "sha256_reader",
+                "共通の読取ストリーム",
+            ),
+            (
+                "xtask/src/assets.rs",
+                "character_content_version",
+                "パスと正規化manifestを含む複合版ID",
+            ),
+            (
+                "src-tauri/src/installer/download.rs",
+                "receive_fixed",
+                "受信と同時に検証し再読取しない",
+            ),
+            (
+                "src-tauri/src/commands.rs",
+                "run_agent_and_persist",
+                "CLI用のメモリ人格識別子",
+            ),
+        ];
+        let mut violations = Vec::new();
+        for source in guard_scan::all_sources()
+            .into_iter()
+            .chain(guard_scan::xtask_sources())
+        {
+            let body = source.body();
+            let functions = function_headers(body);
+            for (index, function) in functions.iter().enumerate() {
+                let start = function.0;
+                let end = functions.get(index + 1).map_or(body.len(), |next| next.0);
+                let section = &body[start..end];
+                let name = function.1;
+                if section.contains("Sha256::new()")
+                    && !exceptions.iter().any(|(path, allowed, reason)| {
+                        source.path == std::path::Path::new(path)
+                            && name == *allowed
+                            && !reason.is_empty()
+                    })
+                {
+                    violations.push(format!("{}: {name}のSHA計算", source.path.display()));
+                }
+                if (section.contains(".set_mode(") || section.contains("set_permissions("))
+                    && !(source.path
+                        == std::path::Path::new("crates/picoagent-core/src/permissions.rs")
+                        && name == "ensure_executable"
+                        || source.path == std::path::Path::new("src-tauri/src/installer/fs.rs")
+                            && name == "set_safe_permissions")
+                {
+                    // 展開側の0644/0755への正確な安全属性は、既存属性へ実行bitを足す責務とは異なる。
+                    violations.push(format!("{}: {name}の属性変更", source.path.display()));
+                }
+            }
+        }
+        assert!(
+            violations.is_empty(),
+            "共通hash・実行属性の手順を複写しています: {violations:?}"
+        );
+    }
 
     /// `[..120]` `[0..2]` `[4..]` のように**数値リテラル**で切り出している箇所を探す。
     /// 変数添字（`&chunk[..n]` など、バイト列の読み込み量で切る用途）は対象外。
@@ -119,11 +419,91 @@ mod guard {
             "ストリーミング受信は text::Utf8Stream を使ってください（チャンク境界で日本語が化けます）: {offenders:?}"
         );
     }
+
+    /// スパークラインは `text::sparkline` を正本にする。天気・為替・市場指数へ同じ関数が
+    /// 3つ複写され、横一直線の扱いだけが食い違っていた。
+    #[test]
+    fn スパークラインを各所で複写しない() {
+        let offenders: Vec<String> = guard_scan::all_sources()
+            .iter()
+            .filter(|source| source.name != "text.rs" && source.body().contains("'▁', '▂'"))
+            .map(|source| source.path.display().to_string())
+            .collect();
+        assert!(
+            offenders.is_empty(),
+            "スパークラインは crate::text::sparkline を使ってください: {offenders:?}"
+        );
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::{preview, truncate_bytes};
+
+    #[test]
+    fn スパークラインは最小を最下段に最大を最上段に置く() {
+        for (values, expected) in [
+            (&[1.0, 2.0, 8.0][..], "▁▂█"),
+            (&[5.0, 5.0][..], "▄▄"),
+            (&[][..], ""),
+            (&[-f64::MAX, 0.0, f64::MAX][..], "▁▅█"),
+            (&[0.0, f64::MIN_POSITIVE][..], "▁█"),
+        ] {
+            assert_eq!(super::sparkline(values).unwrap(), expected);
+        }
+        for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            assert!(super::sparkline(&[1.0, value]).is_err());
+        }
+    }
+
+    #[test]
+    fn 各生成物の名前方針と上限を一つの表で保持する() {
+        use super::SlugPolicy::*;
+        for (input, fallback, limit, policy, expected) in [
+            (
+                "AI Suite / 日本語",
+                "genspark-suite",
+                64,
+                AsciiOutput,
+                "ai-suite",
+            ),
+            (
+                "日本語",
+                "spark-workspace",
+                64,
+                AsciiOutput,
+                "spark-workspace",
+            ),
+            ("ABC 日本語 DEF", "project", 40, AsciiInput, "abc-def"),
+            ("日ABC DEF", "project", 4, AsciiInput, "abc"),
+            ("日ABC DEF", "research-report", 4, AsciiWordsInput, "abc"),
+            ("AB日本CD", "research-report", 48, AsciiWordsInput, "abcd"),
+            ("動画 制作", "", usize::MAX, Unicode, "動画-制作"),
+            ("///", "", usize::MAX, Unicode, ""),
+            ("AB CDEF", "", 3, AsciiOutput, "ab-"),
+        ] {
+            assert_eq!(super::slug(input, fallback, limit, policy), expected);
+        }
+    }
+
+    #[test]
+    fn マークアップを一度だけescapeし形式固有の制御文字制約を保つ() {
+        let input = "<&>\"'日本語\u{0}\n";
+        assert_eq!(
+            super::html_escape(input),
+            "&lt;&amp;&gt;&quot;&#39;日本語\u{0}\n"
+        );
+        assert_eq!(
+            super::html_escape_clean(input),
+            "&lt;&amp;&gt;&quot;&#39;日本語\n"
+        );
+        assert_eq!(
+            super::xml_escape_clean(input),
+            "&lt;&amp;&gt;&quot;&apos;日本語\n"
+        );
+        assert_eq!(super::html_escape("&amp;"), "&amp;amp;");
+        assert_eq!(super::xml_escape("A\u{0}B"), "A\u{0}B");
+    }
 
     #[test]
     fn 日本語を文字数で切り詰める() {

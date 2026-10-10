@@ -4,10 +4,10 @@
 
 use std::time::Duration;
 
+use crate::tools::search_url::direct_url;
 use async_trait::async_trait;
 use scraper::{Html, Selector};
 use serde_json::{json, Value};
-use url::Url;
 
 use super::{Tool, ToolReg};
 use crate::config::Config;
@@ -211,20 +211,6 @@ fn search_query_in_conversation(text: &str, earlier_user_texts: &[&str]) -> Stri
     combined.chars().take(MAX_QUERY_CHARS).collect()
 }
 
-fn direct_url(href: &str) -> String {
-    let absolute = if href.starts_with("//") {
-        format!("https:{}", href)
-    } else {
-        href.to_string()
-    };
-    if let Ok(parsed) = Url::parse(&absolute) {
-        if let Some((_, destination)) = parsed.query_pairs().find(|(key, _)| key == "uddg") {
-            return destination.into_owned();
-        }
-    }
-    absolute
-}
-
 fn trim_to_bytes(text: &mut String, max_bytes: usize) {
     if text.len() <= max_bytes {
         return;
@@ -385,15 +371,16 @@ impl Tool for WebSearchTool {
         let timeout_secs =
             crate::tool_try!(cfg.int(&crate::config::ints::WEB_SEARCH_TIMEOUT_SECS)) as u64;
 
-        let client = match reqwest::Client::builder()
-            .timeout(Duration::from_secs(timeout_secs as u64))
-            .user_agent("PicoAgent/1.0 (Web search tool)")
-            .build()
+        let request_timeout = Duration::from_secs(timeout_secs as u64);
+        let response = match crate::tool_try!(crate::tools::http::service(
+            reqwest::Method::GET,
+            SEARCH_URL,
+            request_timeout
+        ))
+        .query(&[("q", query)])
+        .send()
+        .await
         {
-            Ok(client) => client,
-            Err(error) => return format!("エラー: Web検索の準備に失敗しました: {}", error),
-        };
-        let response = match client.get(SEARCH_URL).query(&[("q", query)]).send().await {
             Ok(response) => response,
             Err(error) => {
                 return format!(

@@ -10,6 +10,10 @@
 - 引数名は JavaScript 側の名前（camelCase）で書く。Tauri が Rust の snake_case へ変換する。
 - 戻り値の `Value` は JSON オブジェクト。キーは下の各行に書いたものが最低限の約束で、増やすのは互換、消す・意味を変えるのは非互換として扱う。
 
+## キャラ描画器の契約
+
+`ui/character/index.js`のホストが可視・準備・居眠り・発話・動作・ドラッグ・動きを減らす状態を集約し、全方式へ `setActive(bool)` と `setFrameBudget(fps)` を渡す。フレーム方針はSPECと `frame-budget.js` を正本とし、方式別の上限表を持たない。0ではループを止め、同じ状態の再適用で再登録しない。停止中も最後のcanvasを保ち、明示resize・準備・previewだけ一回描ける。通常移動はホストの `withDragging(operation)` が完了・拒否後に状態を回収し、配置編集はpointerup・pointercancel・編集終了で解除する。
+
 ## command
 
 ### メイン画面

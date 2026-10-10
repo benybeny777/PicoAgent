@@ -39,14 +39,8 @@ fn one_path(cfg: &Config, args: &Value, key: &str) -> Result<SafePath, String> {
     crate::permissions::resolve(cfg, raw)
 }
 
-/// OOXML 内のテキストは XML エスケープされて格納されるため、検索・置換文字列も同じ形へ揃える。
-fn xml_escape(text: &str) -> String {
-    text.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
-        .replace('\'', "&apos;")
-}
+// OOXMLの検索・置換も、共通のXML表記へ揃える。
+use crate::text::xml_escape;
 
 /// OOXML（docx/xlsx/pptx）を ZIP として開き、XML エントリ内の文字列を置換して書き出す。
 /// XML 以外のエントリ（画像など）はそのままコピーする。置換した総数を返す。

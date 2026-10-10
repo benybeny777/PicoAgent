@@ -9,11 +9,11 @@ function reportFailure(message, error) {
   toast(`${message}: ${preview(errorMessage(error), 80)}`, "error");
 }
 
-function beginWindowDrag(event) {
+function beginWindowDrag(event, host) {
   if (event.button !== 0) return;
   if (event.target instanceof Element && event.target.closest("button,input,textarea,select,a,[contenteditable]")) return;
   event.preventDefault();
-  bridge.startWindowDrag().catch(error => {
+  host.withDragging(() => bridge.startWindowDrag()).catch(error => {
     logApp("warn", "ウィンドウの移動を開始できませんでした", errorDetail(error));
     toast("画面を移動できませんでした。右クリックの「今の画面位置・サイズを戻す」も試してください", "error");
   });
@@ -41,7 +41,7 @@ const HIDE_DELAY_MS = 450;
 // 起動直後は在りかが分かるよう、しばらく出しておく。
 const INTRO_MS = 2600;
 
-export function createWindowChrome({ menu, appElement, bootScreen, stageElement, onEditLayout, onGame, listCharacters, onPinnedChange }) {
+export function createWindowChrome({ menu, appElement, bootScreen, stageElement, host, onEditLayout, onGame, listCharacters, onPinnedChange }) {
   const layoutButton = el("button", { type: "button", textContent: "表示", title: "画面レイアウトを切り替え" }, [], { "aria-haspopup": "menu" });
   const editButton = el("button", { type: "button", textContent: "配置", title: "OBS風に画面を編集" }, [], { "aria-pressed": "false" });
   const characterButton = el("button", { type: "button", textContent: "キャラ選択", title: "キャラクターを切り替え" }, [], { "aria-haspopup": "menu" });
@@ -59,10 +59,10 @@ export function createWindowChrome({ menu, appElement, bootScreen, stageElement,
   );
 
   // `data-tauri-drag-region` だけに頼ると、透明 WebView ではドラッグ開始が届かないことがあるので明示的に渡す。
-  menu.addEventListener("pointerdown", beginWindowDrag);
-  bootScreen?.addEventListener("pointerdown", beginWindowDrag);
+  menu.addEventListener("pointerdown", event => beginWindowDrag(event, host));
+  bootScreen?.addEventListener("pointerdown", event => beginWindowDrag(event, host));
   stageElement.addEventListener("pointerdown", event => {
-    if (event.target === stageElement || event.target?.classList?.contains("scene")) beginWindowDrag(event);
+    if (event.target === stageElement || event.target?.classList?.contains("scene")) beginWindowDrag(event, host);
   });
 
   menuButton(layoutButton, (x, y) => bridge.layoutMenu(x, y));

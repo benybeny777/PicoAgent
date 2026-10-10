@@ -175,11 +175,11 @@ Claude Code / Codex CLI を非対話（`claude -p` / `codex exec`）で呼び、
 - **Web検索**は事実確認・最新情報・定義などを要するときだけ（`should_web_search`：明示依頼、または「最新/ニュース/価格/誰/いつ/とは…」等のマーカー）。明示依頼には、Webを指す語（「webで/ネットで/ウェブで/インターネット/ググ」）と調べる動作（「検索/調べ/しらべ/探」）が揃う言い回しも含める。依頼の言い回しを除くと話題が残らない場合は、`Tool::intent_invocation_in_conversation()` へ渡る直前の利用者発話（新しい順に最大3件）から話題を最大2件補う（補い方は `web_search` 側が持つ）。
 - 雑談・感想・相談（「むぎかわいい」「ありがとう」「自己紹介して」等）と短い挨拶では検索せず、キャラ本人として返す。小型モデルが実行していない作業を「今から調べる」と約束しないよう、`agent::prompt::base` で毎回禁止する。
 - 一般ニュースの要約依頼（「今日のニュース」「ニュース教えて」「今日の出来事」、「ニューす」等の表記ゆれを含む）は、Google News / Yahoo!ニュースのHTMLを対象にした `news_scrape` を先に実行し、見出しベースで要約させる。
-- 天気（`is_weather_query` → `weather`）、為替（`currency_query` が通貨を読めたとき → `currency_rates`）、市場指数（`market_query` → `market_indices`）は**先に実行して整形済み出力（天気アイコン・スパークライン等）をそのまま返す**（小型モデルがチャートを再現できないため）。為替は文中の通貨と「推移/チャート」「N日」から `base`/`symbols`/`chart`/`days` を組み立てる。スキル直行応答も assistant 発話として履歴へ保存する。
+- 天気（`is_weather_query` → `weather`）、為替（`currency_query` が通貨を読めたとき → `currency_rates`）、市場指数（`market_query` → `market_indices`）は**先に実行して整形済み出力（天気の見出し＋日別予報表、為替・指数のスパークライン等）をそのまま返す**（小型モデルがチャートを再現できないため）。為替は文中の通貨と「推移/チャート」「N日」から `base`/`symbols`/`chart`/`days` を組み立てる。スキル直行応答も assistant 発話として履歴へ保存する。
 - 代表的なリマインダー・集中タイマー・見守り・できたことメモ、クリップボード要約、おでかけ前チェック、出典付き調査レポートもスキルを先に実行する。その他のローカル操作系の依頼では、明示的な検索依頼がない限り事前検索を省き、スキル利用を優先させる指示を足す。
 - 検索結果は外部の信頼できない参考データとして区切って付け、結果内の指示に従わないよう明記する。検索失敗もモデルへ渡して利用者へ明示させる。
 - **出典**: 参照元は Markdown リンクで回答させ、フキダシは Markdown リンクと通常URLを安全なDOMリンクへ変換する。事前検索後の回答に参照元が1件も無い場合だけ、取得した見出し付きリンクを最大5件 `参考:` として末尾へ添える（未使用URLを全件足さない）。ニュース取得後に本文の無い約束だけの返答（80文字以下で、URLも取得済み見出しも含まない）が返ったら、取得済みリンクを最大5件返す。
-- **読み上げ除外**: URL は `speech_text` とフロントの読み上げ前処理で除外する。`speech_text` は RSSダンプ行、スパークラインのブロック文字、絵文字も除く。
+- **読み上げ除外**: URL は `speech_text` とフロントの読み上げ前処理で除外する。`speech_text` は RSSダンプ行、スパークラインのブロック文字、絵文字、Markdownの表の行、見出し・太字の記号も除く。フロントの読み上げ前処理（`sanitizeSpeechText`）も表の行を字幕・読み上げから外す。
 - **見出しの深掘り**: 直前の回答のニュース見出しを名前または「2番目」のような番号で指して詳しく尋ねたら、一覧を取り直さずその見出しのURL本文を `web_fetch` で取得して答える。見出しが複数あるときに「このニュース」だけでは対象を決めず、モデルへ委ねる。見出しが1件でも、直前の回答を指す語（「この」「さっき」「記事」など）があるときだけ引き継ぐ。記事本文は信頼できない外部資料として分け、記事中の指示に従わない。
 
 ---
@@ -345,7 +345,7 @@ inventory::submit! { ToolReg { make: || Box::new(MyTool) } }
   - 並び順（収まらない場合に何を先に積むか）は「一致あり → `intent_priority()` → 一致語の長さ → 名前」。一致判定に使う過去発話の件数は `PICOAGENT_TOOL_CONTEXT_TURNS`（既定5、`0` ですべて）。候補判定の語彙は各 `Tool::intent_keywords()`、優先度は `intent_priority()` が正本。`tools::all()` はスキル名順で、リンク順に依存しない。
   - 定義は説明も引数の説明も削らない（削ると引数を組み立てられない）。全定義は約48,000文字あるので、ローカルではコンテキスト長の35%（1トークン約3文字換算、下限4,000文字）を予算として並び順に積む。クラウドは全件渡す。定義1件の文字数は起動後に1度だけ数える。`dispatch` は全スキルを呼べるので、内部スキルや明示呼び出しは影響を受けない。
 - **先回り実行**: 各 `Tool::intent_invocation()` が引数と `IntentHandling` を返す。`Direct` は整形済み出力をそのまま返し、`Material` は結果を内部資料としてモデルへ差し込む。`agent.rs` は登録済みスキルを同じ優先順で走査して最初の一致を実行するだけで、スキル名・引数・分岐順を持たない（`run_command`／`ask_user`／`view_image` の制御マーカー解釈だけはループ本体の責務）。資料差し込みの長文プロンプトは `skills/<スキル名>/prompts/*.md` を `include_str!` で同梱する（ニュース要約、クリップボード、Web検索、時刻未指定リマインダー）。中央ルート表が空であること、`agent.rs` にスキル名と長文プロンプトが無いこと、代表発話の割当先・引数・直接返却／資料差し込みの別を設計ガードで検査する。
-- **HTTP**: 標準的な外向きHTTPは `tools::http::client()` の接続プールを共有し、待ち時間は `tools::http::timeout()` で範囲を揃える。共有クライアントは接続確立に10秒の上限を持つ（本文には掛からないのでストリーミングを妨げない）。モデル一覧のような短い問い合わせは `tools::http::metadata_timeout()`（`PICOAGENT_HTTP_METADATA_TIMEOUT_SECS`。設定「AIモデル」→「使うAI」→「AIの詳細設定」）で全体にも上限を付ける。専用構築が必要なコネクタの個別builderは、要求全体timeout、または接続timeout＋無通信timeoutを必須とし、設計ガードが全スキル・バックエンドを検査する。
+- **HTTP**: 外部APIとローカルエンジンへの要求は `tools::http::service(method, url, timeout)` の接続プールを共有し、各設定・処理の要求全体期限を必ず要求へ付ける。このAPI用profileには別の接続・無通信期限を加えず、従来の長時間処理期限を保持する。モデル・プロバイダ等の標準profile `tools::http::client()` は接続10秒・無通信120秒、更新確認profileは接続5秒・無通信10秒を維持する。全profileを起動時に一度初期化し、未初期化・生成失敗は通信前に理由を返す。共通User-Agentは `PicoAgent/<版>`、Discord・Reddit・市場取得・更新処理の固有UAは要求単位で指定し、認証値を共有clientへ保存しない。設定の範囲は `Config::int` / `duration_key`、モデル情報全体期限は `metadata_timeout` が担当する。個別builderは検査済DNS固定の安全取得とHTTPS配布専用の共有所有者だけに置き、設計ガードで全スキル・バックエンドを検査する。
 - `build.rs` は `skills/` 配下を再帰的に `cargo:rerun-if-changed` へ登録するので、補助ファイルの変更もビルドに反映される。
 
 #### 利用者追加のMarkdownスキル
@@ -381,7 +381,7 @@ LLMによる候補生成・隔離検証・版管理を加える未実装の設�
 | **Action**（メッセージ送信） | write | 9 | `gmail` `slack` `discord` `x_twitter` `mastodon` `misskey` `bluesky` `reddit` `linkedin` |
 | **Action**（SaaS の読み書き） | write | 13 | `github` `jira` `linear` `notion` `todoist` `trello` `google_calendar` `google_docs` `google_sheets` `google_drive` `google_tasks` `microsoft_graph` `ai_drive` |
 | **Action**（ファイル生成・変換） | write | 9 | `ms_office` `document_convert` `pdf_tools` `image_tools` `image_generate` `comfyui` `meeting_recorder` `whisper_transcribe` `notebook_edit` |
-| **Action**（資料一式の生成） | write | 3 | `genspark_suite` `spark_workspace` `artifact_pipeline` |
+| **Action**（資料一式の生成） | write | 3 | `genspark_suite` `artifact_pipeline` |
 | **Action**（汎用の出入り口） | write | 3 | `http_api` `workspace_files` `edit_file` |
 | **Destructive / 高リスク** | destructive | 7 | `trash_file` `run_command` `command_job` `code_runner` `app_control` `desktop_control` `game_play` |
 | **State**（アプリ内の永続状態） | write | 9 | `alarm` `reminder` `focus_timer` `task_scheduler` `praise_log` `todo_plan` `project` `user_skill` `job_center` |
@@ -422,7 +422,7 @@ PicoAgent 自身と Git 管理するベンダの JavaScript は `eval()`／`Func
   - 「一時フォルダへ展開/複製 → 検証 → `rename` で確定」の順で、検証を通らないものを導入先へ残さない。zip は `enclosed_name()` で zip slip を拒否し、件数・総量・1ファイルサイズを展開しながら検査する。
   - GUI生成・導入・削除は同じ `user-characters` 状態ロックで直列化する。
   - 異常終了で残った途中データ（`.installing-*` / `.updating-*`）は一覧取得と更新の前に片付け、更新中の退避先 `.update-backup-*` は元の場所が空いていれば戻し、新版があれば消す。新版を配置できた後に旧版の掃除だけ失敗しても更新は成功として扱う。
-- **ID**: **英数字・ハイフン・アンダースコアだけの64文字以内**。判定は `character_pack::is_valid_id()` の1箇所で、導入・削除・構図保存・配信設定・関係性はすべてこれを通す。同梱キャラと**同じidのパックは導入を拒否する**（一覧は同梱側を優先するため選べなくなる）。判定は配信物 `assets/characters/index.json` を `asset_resolver` から読み、読めない構成では設定画面の事前検査に任せる。
+- **ID**: **英数字・ハイフン・アンダースコアだけの64文字以内**。判定は `character_pack::is_valid_id()` の1箇所で、導入・削除・構図保存・配信設定・関係性はすべてこれを通す。同梱キャラと**同じidのパックは導入を拒否する**（一覧は同梱側を優先するため選べなくなる）。判定は配信物 `assets/characters/index.json` を `asset_resolver` から読み、欠損・読込失敗・不正JSONなら理由を返して取り込みを止める。Live2D・MMD・完成済み画像パックは入力検査・ロック・staging・確定・失敗回収を共通処理で行い、失敗時は既存パックを保持する。
 - **名前変更**: 追加キャラの表示名だけを変えられる（`settings_character_rename`）。内部IDとフォルダ名は変えない。自動生成した挨拶・人格の定型文だけを新しい名前へ追従させ、利用者が書いた文には触れない。再保存はキーの並びを保つ（`serde_json` の `preserve_order`）。
 - **削除**: OS のゴミ箱へ移す。保存中の選択キャラを消すときは先に `PICOAGENT_CHARACTER` を既定へ戻し、ゴミ箱移動が失敗したら、自分が設定した既定値のままである場合だけ元へ戻す。成功応答は実際の保存中キャラを返す。設定画面は削除中の変更と保存を止め、キャラ切替キューの完了を待って一覧・選択欄・人格欄・保存スナップショットを更新する。設定・会話履歴は消さない。
 - **一覧**: フロントが同梱の `index.json` と `pet_user_characters` の追加分を突き合わせ、同じ id は同梱側を優先する。
@@ -462,7 +462,7 @@ PR #472の利用者決定により、既定のPATH探索とripgrep欠損時の�
 | name | 機能 | 安全策 |
 |---|---|---|
 | `get_time` | 現在の日付・時刻・日本語の曜日（任意で IANA タイムゾーン、`chrono-tz`）。ローカルの現在日時だけを尋ねる質問は検索より優先する。期間・予定・地域指定・複合依頼は通常のツール選択へ渡す | 副作用なし |
-| `weather` | Open-Meteo による現在天気・日別予報を天気アイコン＋気温スパークライン（時間別/日別）で表示。保存地点を優先し、未設定時だけHTTPSのIP位置情報から現在地を概算。「天気サイトを探して」はWeb検索へ譲る | APIキー不要、自動位置は無効化可 |
+| `weather` | Open-Meteo による現在天気・日別予報を、太字の見出し（アイコン・地点・天気）→いまの気温など→今日の最高/最低と降水確率→日別のMarkdown表（「10/12（日）」形式）で表示。保存地点を優先し、未設定時だけHTTPSのIP位置情報から現在地を概算。「天気サイトを探して」はWeb検索へ譲る | APIキー不要、自動位置は無効化可 |
 | `currency_rates` | Frankfurter API による為替レート・換算・推移スパークライン（`chart=true` / `days`） | APIキー不要 |
 | `market_indices` | Yahoo Finance chart API による日経平均・TOPIX・NYダウ・NASDAQ・S&P500 と推移スパークライン | APIキー不要、User-Agent 指定 |
 | `news_scrape` | Google News / Yahoo!ニュースのHTMLから最新の見出し候補を取得。一般ニュースの要約で先に使う | 対象ドメインを限定、HTML 1MB上限、件数上限、User-Agent 指定 |
@@ -538,8 +538,9 @@ PR #472の利用者決定により、既定のPATH探索とripgrep欠損時の�
 
 | name | 機能 | 安全策 |
 |---|---|---|
-| `spark_workspace` | brief、deck、sheet、共有HTML、実行計画、プロンプト集、チェックリストの資料一式 | 保存は共通許可ルート配下、入力24,000文字、外部通信なし |
-| `genspark_suite` | Deep Research、AI Slides、AI Sheets、AI Docs、Sparkpage、Autopilot、AI Drive、Meeting Notes、Multi-Agent、AI Browser計画の10系統を同じフォルダに生成 | 保存は共通許可ルート配下、入力32,000文字、外部通信なし |
+| `genspark_suite` | `mode=full`（省略時）は10系統の資料、`mode=light`はbrief、deck、sheet、共有HTML、実行計画、プロンプト集、チェックリストを生成 | 保存は共通許可ルート配下、full入力32,000文字・light入力24,000文字、外部通信なし。既存の生成先とファイル名はモードごとに保持 |
+
+旧`spark_workspace`は`genspark_suite`のlightへ統合する。保存済み予約は起動時に原子的に移行し、`project`を`topic`へ移す。未知フィールド・タスクID・実行状態は保持する。旧許可は`genspark_suite:light`だけに移し、fullの権限を追加しない。引数が競合する場合や保存に失敗した場合は元設定を保持して理由を通知する。環境変数だけの旧許可は自動書換えせず、設定の明示修正を求める。
 | `artifact_pipeline` | 調査または指定本文から HTML、編集可能な DOCX/XLSX/PPTX、PDF を一式生成し、任意で AI Drive 転送へつなぐ | 永続ジョブで実行。Office形式は最小OOXMLを直接生成、PDFはLibreOffice必須、クラウド送信は事前確認必須 |
 | `ai_drive` | 共通許可ルート内の `PicoAgent-AI-Drive` をローカル正本にし、Google Drive／OneDrive／macOS の iCloud Drive と明示的に送受信 | 1ファイル50MB。Google／OneDriveは送信直前に10MBずつ読み直して送り、再試行時は新しいアップロードセッションを作る。iCloudはOS同期フォルダへ原子的保存。送信前確認、セッションURL非永続化、401は認証待ち、削除は伝播しない |
 | `job_center` | AI Drive転送と成果物生成の永続ジョブの一覧・表示・再試行・キャンセル | `app_data_dir/durable-jobs.json` をロック＋原子的保存。起動時に実行中を待機へ戻して再開。画面の `pet_durable_jobs` / `pet_durable_job_retry` / `pet_durable_job_cancel` も同じ正本を使う |
@@ -690,7 +691,8 @@ JSON-RPC 2.0、プロトコルバージョン `2024-11-05`。
 
 設定「キャラ選択」では通常描画／2Dの選択と上書き状態を表示する。変更は未保存差分へ反映し、設定の保存・未保存変更のリセットと同期する。画像構造非対応のキャラへ2Dを指定しない。明示2Dは画像方式で対応する表現に限られ、Live2D・MMD・メッシュ固有の骨・物理・視線等の表現を引き継ぐものではない。
 
-- 描画方式（通常2D・メッシュ・Live2D・MMD）は `ui/character/<方式>.js` の描画器が担い、共通の `CharacterRenderer`（`load` / `naturalBounds` / `framingRects` / `resize(cssW, cssH, dpr)` / `setFraming` / `setState` / `dispose`）を実装して `ui/character/index.js` の登録表へ載せる。方式名による中央の分岐を書かない。
+- 描画方式（通常2D・メッシュ・Live2D・MMD）は `ui/character/<方式>.js` の描画器が担い、共通の `CharacterRenderer`（`load` / `element` / `framingRect` / `defaultFraming` / `sourcePixelsPerUnit` / `resize(cssW, cssH, dpr)` / `setFraming` / `setMotion` / `setMouth` / `setSpeaking` / `setGaze` / `setSleeping` / `setActive` / `setFrameBudget` / `setReducedMotion` / `dispose`）を実装して `ui/character/index.js` の登録表へ載せる。方式名による中央の分岐を書かない。
+- **描画上限**: `ui/character/frame-budget.js`を正本とし、停止0、待機30、発話・モーション・ドラッグ中60fps、動きを減らす場合30fpsに揃える。停止が他の状態より優先する。全描画器は `setFrameBudget(fps)` を受け取り、停止中は既存canvasを保持し、準備・resize・previewの明示操作だけ一回描く。PIXIは0を無制限設定へ渡さずtickerを停止する。画像の口・表情・視線・まばたきも同じ描画上限へまとめ、停止期間を復帰後の物理更新へ加算しない。144Hz以上の画面でも上限60fpsとするため、上限なしと比べ滑らかさの上限は下がる。
 - **キャンバスの寸法はキャラのソース矩形そのもの。** 描画器は与えられた矩形いっぱいに、構図の切り出し範囲を縦横比を保って収め（下端中央基準）、矩形の外へ描くことが無い＝キャラが切れない。キャラを拡大すると描画バッファ（CSS寸法×DPR、1辺4096pxまで）も大きくなり、低解像度の描画をCSSで引き伸ばさない。
 - **構図**（`full` 全身 / `upper` 上半身 / `bust` 胸上）は描画範囲の切り出しで、倍率ではない。各描画器がモデルの可視範囲（透明余白を除いた範囲）から切り出し矩形を返す。既定は、`sourceFraming=native-bust` の画像系が `full`、低頭身（`bodyProportion=compact`）の画像系が `upper`、その他の画像系が `bust`、Live2D が `upper`（下記）、MMD が `bust`。`stream` は `streamFraming` があればそれを優先する。構図を切り替えるとソース矩形の高さを保ち、幅を構図の縦横比へ合わせる。
 - 通常2D・メッシュの低頭身キャラは、胸上でも頭頂から高さの76%を切り出して胸元を含める。描画器は `bodyProportion` を共通の構図計算へ渡す。ペット・ミニでも同じ胸上範囲を使い、形式別の倍率は設けない。
@@ -900,7 +902,7 @@ JSON-RPC 2.0、プロトコルバージョン `2024-11-05`。
 - **共通ファイル走査（`tools/walk.rs`）**: `glob_files`・`grep_search`・最新音声探索は許可済み`SafePath`からだけ走査する。深さ12・最大2万件で打ち切り、権限・リンク・読込失敗等の省略件数と理由例（最大3件）、上限による不完全さを返す。検索は取得できた結果に診断を添え、最新音声の確定には完全な走査を要求する。
 - **許可（`permissions.rs`）**: 許可判定を通ったパスは専用型 **`SafePath`** で表し、生成経路を `resolve()` / `SafePath::join()` / `SafePath::sibling()` に限る（内部 `PathBuf` は非公開。派生パスも再検証する）。ファイル操作は `SafePath` だけを受ける `permissions::fs` を使い、アプリ内部が決めたパスだけ `SafePath::app_owned` を使う。**スキル側での許可判定の再実装は禁止**で、`permissions::guard` が `skills/**/mod.rs` を走査して自前判定（`fn bounded_path(base:` 等）と `resolve` を通さないパス引数を検出する（例外は独自の追加制約を持つ `run_command` / `code_runner` / `trash_file`）。
   - **正本キーは `PICOAGENT_ALLOWED_ROOT`（主ルート、既定はホーム）／`PICOAGENT_ALLOWED_PATHS`（追加許可ルート）／`PICOAGENT_DENIED_PATHS`（追加拒否）**で、設定「安全・許可」で編集する。`C:\Windows` / `C:\Program Files` / `C:\Program Files (x86)` は常に拒否する（`is_system_protected`）。既存の最深祖先を実体化し、シンボリックリンクやジャンクション経由のルート外到達も拒否する。
-  - 対象: `read_file` / `workspace_files` / `trash_file` / `ms_office` / `document_convert` / `pdf_tools` / `image_tools` / `research_report` / `spark_workspace` / `genspark_suite` / `artifact_pipeline` / `ai_drive` / `meeting_recorder` / `whisper_transcribe` / `run_command` / `code_runner` / `scheduler` とドロップファイルの読込。
+  - 対象: `read_file` / `workspace_files` / `trash_file` / `ms_office` / `document_convert` / `pdf_tools` / `image_tools` / `research_report` / `genspark_suite` / `artifact_pipeline` / `ai_drive` / `meeting_recorder` / `whisper_transcribe` / `run_command` / `code_runner` / `scheduler` とドロップファイルの読込。
 - **コマンド実行の承認（`run_command`）**: `PICOAGENT_COMMAND_ENABLED=true` が必要。コマンドが `PICOAGENT_COMMAND_ALLOWLIST` に完全一致しない、または `cwd` が許可ルート外なら、チャットへ確認を返す。「許可」で保留中の1件だけ実行し、「永続許可」で引数を含むコマンド全体を `PICOAGENT_COMMAND_ALLOWLIST` へ、必要なら cwd を `PICOAGENT_ALLOWED_PATHS` へ保存してから実行する。「キャンセル」で破棄する。`git diff` の許可に後続引数は含まれず、`git diff --stat` は別登録が必要。`C:\Windows` と `C:\Program Files*` 配下はチャットで許可されても実行先や編集先にしない（`workspace_files` の `write` / `append` / `mkdir` も同じ）。
 - **ユーザーへの確認（`ask_user`）**: `run_command` の承認カードと同じマーカー方式で、`agent.rs` がループを止め、`commands.rs` が質問と `choices` を返す（クイック操作欄が選択肢ボタンになる）。保留中の質問は `AppState.pending_question` が1件だけ持ち、次の発話で必ず解除する。
 - **自力実行（`code_runner`）**: cwd 検査と文字列 denylist ではスクリプト内部のルート外アクセスや難読化された物理削除を防げないため、OSレベルの隔離実行を用意するまで `agent_callable=false` でモデルへ公開しない。
@@ -927,7 +929,7 @@ JSON-RPC 2.0、プロトコルバージョン `2024-11-05`。
 - **容量**: 4,000ファイル・合計約262MB。単一ファイルは約42MB、MMD の TGA／BMP／SPH／SPA だけ128MBまで。参照画像は各辺8192px以下、RGBA展開量の合計512MB以下（GPU全使用量の上限ではない）。
 - **manifest**: `mmd: {schemaVersion: 1, model: "mmd/<相対PMXパス>"}`。`defaultPose` は `natural` または `original`、`naturalPose` は骨名からXYZ回転角（度）への写像。`poses.<状態名>` は自然姿勢へ加算する骨回転、`expressions.<状態名>.morphs` はモーフ名から0〜1のウェイト、`autoBlink` はその表情中の自動まばたき可否。完全一致する状態設定を優先し、未設定の `success`／`pleased`／`shy` は `happy`、`concern`／`failed`／`error` は `sad`、`searching`／`working`／`listening` は `thinking` で代用する。無い骨・モーフは無視し、PMX を書き換えない。人格・挨拶・表示切替・構図は通常2D／Live2Dと同じ経路で扱う。
 - **動き**: 骨と表情は状態切替時に補間し、まばたきモーフも同じ補間を通す。状態設定が無い場合の自動まばたきは、笑い目モーフで目を閉じる表情のときだけ止める。笑顔は口角モーフがあれば開眼のまま口角を上げ、笑い目だけなら中間の半目にせず定義された閉じた笑い目を使う。口モーフは音声連動の口パクが持つ。表示確定と撮影（`capturePreview`）は補間を待たず、目標姿勢・目標表情・開眼で描く。
-- **描画**: ローカル配置の Babylon.js と babylon-mmd を使い、透過 canvas を既存の表示領域へつないで全7表示形式の構図を当てる。画素密度で再描画し、低解像度 canvas を引き伸ばさない。CSP の画像経路にローカル復号用 blob を許す。対象は自然な待機姿勢と上半身・首の控えめな待機動作、原姿勢への切替、まばたき、表情モーフ、音量連動の口モーフ。腕の補正は実行時の骨姿勢だけに当てる。最大30fpsで、非表示ページでは休止する（達成速度の保証ではない）。モデル切替時に音声解析・描画ループ・GPU資源を回収する。
+- **描画**: ローカル配置の Babylon.js と babylon-mmd を使い、透過 canvas を既存の表示領域へつないで全7表示形式の構図を当てる。画素密度で再描画し、低解像度 canvas を引き伸ばさない。CSP の画像経路にローカル復号用 blob を許す。対象は自然な待機姿勢と上半身・首の控えめな待機動作、原姿勢への切替、まばたき、表情モーフ、音量連動の口モーフ。腕の補正は実行時の骨姿勢だけに当てる。共通方針により待機30fps、発話・モーション・ドラッグ中60fps、非表示・表示準備中・居眠りは描画ループを停止する（達成速度の保証ではない）。モデル切替時に音声解析・描画ループ・GPU資源を回収する。
 - **失敗時**: キャラ読込失敗時は起動の読み上げを止め、設定へ進める代替画面に理由を残す。音声の人格IDは保存中の選択ではなく、実際に表示できたキャラに揃える。設定保存は最新のキャラ選択を優先し、遅れて完了した読込で旧キャラへ戻さない。
 - **対象外**: 剛体物理、VMDモーション編集、音声モデルの学習・導入。ランタイムの取得は明示的な開発用準備工程だけで、通常起動やキャラ表示で外部CDNへ接続しない。
 

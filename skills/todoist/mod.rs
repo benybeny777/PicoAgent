@@ -75,19 +75,15 @@ impl Tool for TodoistTool {
             );
         }
         let timeout = crate::tool_try!(cfg.int(&crate::config::ints::TODOIST_TIMEOUT_SECS)) as u64;
-        let client = match reqwest::Client::builder()
-            .timeout(Duration::from_secs(timeout))
-            .user_agent("PicoAgent/1.0 (Todoist tool)")
-            .build()
-        {
-            Ok(client) => client,
-            Err(error) => return format!("エラー: Todoist API の準備に失敗しました: {}", error),
-        };
+        let request_timeout = Duration::from_secs(timeout);
         match args.get("action").and_then(Value::as_str).unwrap_or("") {
             "list" => {
-                let mut request = client
-                    .get(format!("{}/tasks", TODOIST_BASE))
-                    .bearer_auth(token);
+                let mut request = crate::tool_try!(crate::tools::http::service(
+                    reqwest::Method::GET,
+                    format!("{}/tasks", TODOIST_BASE),
+                    request_timeout
+                ))
+                .bearer_auth(token);
                 let project_id = args
                     .get("project_id")
                     .and_then(Value::as_str)
@@ -134,12 +130,15 @@ impl Tool for TodoistTool {
                 }
                 crate::tools::http::service_reply(
                     cfg,
-                    client
-                        .post(format!("{}/tasks", TODOIST_BASE))
-                        .bearer_auth(token)
-                        .json(&payload)
-                        .send()
-                        .await,
+                    crate::tool_try!(crate::tools::http::service(
+                        reqwest::Method::POST,
+                        format!("{}/tasks", TODOIST_BASE),
+                        request_timeout
+                    ))
+                    .bearer_auth(token)
+                    .json(&payload)
+                    .send()
+                    .await,
                     "Todoist API",
                 )
                 .await
@@ -155,11 +154,14 @@ impl Tool for TodoistTool {
                 };
                 crate::tools::http::service_reply(
                     cfg,
-                    client
-                        .post(format!("{}/tasks/{}/close", TODOIST_BASE, task_id))
-                        .bearer_auth(token)
-                        .send()
-                        .await,
+                    crate::tool_try!(crate::tools::http::service(
+                        reqwest::Method::POST,
+                        format!("{}/tasks/{}/close", TODOIST_BASE, task_id),
+                        request_timeout
+                    ))
+                    .bearer_auth(token)
+                    .send()
+                    .await,
                     "Todoist API",
                 )
                 .await

@@ -133,6 +133,7 @@ const game = createGame({ voice, stage });
 bridge.on("pet:game-open", () => game.open());
 
 const chrome = createWindowChrome({
+  host,
   menu: document.getElementById("topWindowMenu"),
   appElement: app,
   bootScreen: document.getElementById("bootScreen"),

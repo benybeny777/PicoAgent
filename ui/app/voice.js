@@ -20,6 +20,8 @@ export function sanitizeSpeechText(text) {
     .filter(line => line && line.replace(/^[-*・\s:：]+$/, ""))
     .filter(line => !/^フィード[:：]/.test(line))
     .filter(line => !/^-\s+\d{4}-\d{2}-\d{2}/.test(line))
+    // Markdown の表（天気の日別予報など）は画面で見せ、字幕・読み上げには載せない。
+    .filter(line => !/^\|.*\|$/.test(line))
     .join("\n")
     .trim();
 }

@@ -131,7 +131,7 @@ fn modify_payload(operation: &str, label_ids: Vec<String>) -> Result<Value, Stri
 }
 
 async fn list_message_ids(
-    client: &reqwest::Client,
+    request_timeout: std::time::Duration,
     cfg: &Config,
     token: &str,
     q: &str,
@@ -150,15 +150,16 @@ async fn list_message_ids(
         if let Some(token) = page_token.as_deref() {
             query.push(("pageToken", token));
         }
-        let response = client
-            .get(format!("{}/users/me/messages", gmail_base(cfg)))
-            .bearer_auth(token)
-            .query(&query)
-            .send()
-            .await
-            .map_err(|error| {
-                format!("Gmail API への接続に失敗しました: {}", error.without_url())
-            })?;
+        let response = crate::tools::http::service(
+            reqwest::Method::GET,
+            format!("{}/users/me/messages", gmail_base(cfg)),
+            request_timeout,
+        )?
+        .bearer_auth(token)
+        .query(&query)
+        .send()
+        .await
+        .map_err(|error| format!("Gmail API への接続に失敗しました: {}", error.without_url()))?;
         let body = crate::tools::http::service_body(cfg, "Gmail API", Ok(response)).await?;
         let parsed: Value = crate::tools::http::response_json(&body)?;
         let page_ids: Vec<String> = parsed
@@ -189,13 +190,12 @@ async fn list_message_ids(
 
 async fn post_gmail_json(
     cfg: &Config,
-    client: &reqwest::Client,
+    request_timeout: std::time::Duration,
     token: &str,
     url: String,
     payload: &Value,
 ) -> Result<Value, String> {
-    let response = client
-        .post(url)
+    let response = crate::tools::http::service(reqwest::Method::POST, url, request_timeout)?
         .bearer_auth(token)
         .json(payload)
         .send()
@@ -206,24 +206,21 @@ async fn post_gmail_json(
 }
 
 async fn trash_messages(
-    client: &reqwest::Client,
+    request_timeout: std::time::Duration,
     cfg: &Config,
     token: &str,
     ids: &[String],
 ) -> Result<(), String> {
     for id in ids {
-        let response = client
-            .post(format!(
-                "{}/users/me/messages/{}/trash",
-                gmail_base(cfg),
-                id
-            ))
-            .bearer_auth(token)
-            .send()
-            .await
-            .map_err(|error| {
-                format!("Gmail API への接続に失敗しました: {}", error.without_url())
-            })?;
+        let response = crate::tools::http::service(
+            reqwest::Method::POST,
+            format!("{}/users/me/messages/{}/trash", gmail_base(cfg), id),
+            request_timeout,
+        )?
+        .bearer_auth(token)
+        .send()
+        .await
+        .map_err(|error| format!("Gmail API への接続に失敗しました: {}", error.without_url()))?;
         crate::tools::http::service_body(cfg, "Gmail API", Ok(response)).await?;
     }
     Ok(())
@@ -453,20 +450,16 @@ impl Tool for GmailTool {
             .or_else(|| args.get("mode").and_then(Value::as_str))
             .unwrap_or("draft")
             .trim();
-        let client = match reqwest::Client::builder()
-            .timeout(Duration::from_secs(timeout_secs))
-            .user_agent("PicoAgent/1.0 (Gmail tool)")
-            .build()
-        {
-            Ok(client) => client,
-            Err(error) => return format!("エラー: Gmail API の準備に失敗しました: {}", error),
-        };
+        let request_timeout = Duration::from_secs(timeout_secs);
         if action == "labels" {
-            let response = match client
-                .get(format!("{}/users/me/labels", gmail_base(cfg)))
-                .bearer_auth(&token)
-                .send()
-                .await
+            let response = match crate::tool_try!(crate::tools::http::service(
+                reqwest::Method::GET,
+                format!("{}/users/me/labels", gmail_base(cfg)),
+                request_timeout
+            ))
+            .bearer_auth(&token)
+            .send()
+            .await
             {
                 Ok(response) => response,
                 Err(error) => {
@@ -520,7 +513,7 @@ impl Tool for GmailTool {
                         ids.join(",")
                     );
                 }
-                if let Err(error) = trash_messages(&client, cfg, &token, &ids).await {
+                if let Err(error) = trash_messages(request_timeout, cfg, &token, &ids).await {
                     return format!("エラー: {}", error);
                 }
                 return format!("OK: Gmail の {} 件をゴミ箱へ移動しました。", ids.len());
@@ -531,7 +524,9 @@ impl Tool for GmailTool {
             };
             if ids.len() == 1 {
                 let url = format!("{}/users/me/messages/{}/modify", gmail_base(cfg), ids[0]);
-                if let Err(error) = post_gmail_json(cfg, &client, &token, url, &payload).await {
+                if let Err(error) =
+                    post_gmail_json(cfg, request_timeout, &token, url, &payload).await
+                {
                     return format!("エラー: {}", error);
                 }
                 return format!("OK: Gmail の 1 件を {} で整理しました。", operation);
@@ -543,7 +538,9 @@ impl Tool for GmailTool {
                     "addLabelIds": payload.get("addLabelIds").cloned().unwrap_or_else(|| json!([])),
                     "removeLabelIds": payload.get("removeLabelIds").cloned().unwrap_or_else(|| json!([]))
                 });
-                if let Err(error) = post_gmail_json(cfg, &client, &token, url, &payload).await {
+                if let Err(error) =
+                    post_gmail_json(cfg, request_timeout, &token, url, &payload).await
+                {
                     return format!("エラー: {}", error);
                 }
                 return format!("OK: Gmail の {} 件を {} で整理しました。", count, operation);
@@ -559,7 +556,7 @@ impl Tool for GmailTool {
                 _ => return "エラー: operation が指定されていません。".to_string(),
             };
             let limit = requested_cleanup_limit(&args, cleanup_limit);
-            let ids = match list_message_ids(&client, cfg, &token, q, limit).await {
+            let ids = match list_message_ids(request_timeout, cfg, &token, q, limit).await {
                 Ok(ids) => ids,
                 Err(error) => return format!("エラー: {}", error),
             };
@@ -581,7 +578,7 @@ impl Tool for GmailTool {
                 );
             }
             if operation == "trash" {
-                if let Err(error) = trash_messages(&client, cfg, &token, &ids).await {
+                if let Err(error) = trash_messages(request_timeout, cfg, &token, &ids).await {
                     return format!("エラー: {}", error);
                 }
                 return format!(
@@ -604,7 +601,7 @@ impl Tool for GmailTool {
                 "addLabelIds": label_payload.get("addLabelIds").cloned().unwrap_or_else(|| json!([])),
                 "removeLabelIds": label_payload.get("removeLabelIds").cloned().unwrap_or_else(|| json!([]))
             });
-            if let Err(error) = post_gmail_json(cfg, &client, &token, url, &payload).await {
+            if let Err(error) = post_gmail_json(cfg, request_timeout, &token, url, &payload).await {
                 return format!("エラー: {}", error);
             }
             let count = payload
@@ -631,12 +628,15 @@ impl Tool for GmailTool {
             }
             let max_results = bounded_max_results(&args, 5, 10);
             let max_results_text = max_results.to_string();
-            let response = match client
-                .get(format!("{}/users/me/messages", gmail_base(cfg)))
-                .bearer_auth(&token)
-                .query(&[("q", q), ("maxResults", max_results_text.as_str())])
-                .send()
-                .await
+            let response = match crate::tool_try!(crate::tools::http::service(
+                reqwest::Method::GET,
+                format!("{}/users/me/messages", gmail_base(cfg)),
+                request_timeout
+            ))
+            .bearer_auth(&token)
+            .query(&[("q", q), ("maxResults", max_results_text.as_str())])
+            .send()
+            .await
             {
                 Ok(response) => response,
                 Err(error) => {
@@ -663,17 +663,20 @@ impl Tool for GmailTool {
                 let Some(id) = item.get("id").and_then(Value::as_str) else {
                     continue;
                 };
-                let detail = match client
-                    .get(format!("{}/users/me/messages/{}", gmail_base(cfg), id))
-                    .bearer_auth(&token)
-                    .query(&[
-                        ("format", "metadata"),
-                        ("metadataHeaders", "From"),
-                        ("metadataHeaders", "Subject"),
-                        ("metadataHeaders", "Date"),
-                    ])
-                    .send()
-                    .await
+                let detail = match crate::tool_try!(crate::tools::http::service(
+                    reqwest::Method::GET,
+                    format!("{}/users/me/messages/{}", gmail_base(cfg), id),
+                    request_timeout
+                ))
+                .bearer_auth(&token)
+                .query(&[
+                    ("format", "metadata"),
+                    ("metadataHeaders", "From"),
+                    ("metadataHeaders", "Subject"),
+                    ("metadataHeaders", "Date"),
+                ])
+                .send()
+                .await
                 {
                     Ok(response) => response,
                     Err(error) => {
@@ -708,12 +711,15 @@ impl Tool for GmailTool {
                 Some(id) if !id.is_empty() => id,
                 _ => return "エラー: id が指定されていません。".to_string(),
             };
-            let response = match client
-                .get(format!("{}/users/me/messages/{}", gmail_base(cfg), id))
-                .bearer_auth(&token)
-                .query(&[("format", "full")])
-                .send()
-                .await
+            let response = match crate::tool_try!(crate::tools::http::service(
+                reqwest::Method::GET,
+                format!("{}/users/me/messages/{}", gmail_base(cfg), id),
+                request_timeout
+            ))
+            .bearer_auth(&token)
+            .query(&[("format", "full")])
+            .send()
+            .await
             {
                 Ok(response) => response,
                 Err(error) => {
@@ -767,12 +773,15 @@ impl Tool for GmailTool {
             ),
             _ => return "エラー: action は list / get / labels / modify / cleanup / draft / send を指定してください。".to_string(),
         };
-        let response = match client
-            .post(url)
-            .bearer_auth(token)
-            .json(&payload)
-            .send()
-            .await
+        let response = match crate::tool_try!(crate::tools::http::service(
+            reqwest::Method::POST,
+            url,
+            request_timeout
+        ))
+        .bearer_auth(token)
+        .json(&payload)
+        .send()
+        .await
         {
             Ok(response) => response,
             Err(error) => {

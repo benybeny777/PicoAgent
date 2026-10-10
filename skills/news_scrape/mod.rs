@@ -215,20 +215,20 @@ impl Tool for NewsScrapeTool {
             .unwrap_or(configured_items);
         let timeout_secs =
             crate::tool_try!(cfg.int(&crate::config::ints::NEWS_SCRAPE_TIMEOUT_SECS)) as u64;
-        let client = match reqwest::Client::builder()
-            .timeout(Duration::from_secs(timeout_secs as u64))
-            .user_agent("PicoAgent/1.0 (news scrape tool)")
-            .build()
-        {
-            Ok(client) => client,
-            Err(error) => return format!("エラー: ニュース取得の準備に失敗しました: {error}"),
-        };
+        let request_timeout = Duration::from_secs(timeout_secs as u64);
 
         let mut output = String::from("ニュースHTML取得結果\n");
         let mut total = 0usize;
         for source in SOURCES {
             output.push_str(&format!("\n情報源: {}\n", source.name));
-            let response = match client.get(source.url).send().await {
+            let response = match crate::tool_try!(crate::tools::http::service(
+                reqwest::Method::GET,
+                source.url,
+                request_timeout
+            ))
+            .send()
+            .await
+            {
                 Ok(response) => response,
                 Err(error) => {
                     output.push_str(&format!("- エラー: 接続に失敗しました: {error}\n"));

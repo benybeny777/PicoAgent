@@ -82,6 +82,8 @@ test("描画バッファの1辺は上限を超えない（密度の側を下げ�
 test("メッシュは枠の大きさでキャンバスを作り直し、切り出し矩形を下端中央へ収める", () => {
   const meshRig = readFileSync(new URL("../../ui/mesh-rig.js", import.meta.url), "utf8");
   const root = { devicePixelRatio: 1, addEventListener() {}, removeEventListener() {} };
+  root.performance = { now: () => 0 };
+  runInNewContext(readFileSync(new URL("../../ui/frame-scheduler.js", import.meta.url), "utf8"), { window: root });
   runInNewContext(meshRig.replace("Object.freeze({ create })", "Object.freeze({ create, MeshRigController })"),
     { window: root, performance: { now: () => 0 } });
   const transforms = {};

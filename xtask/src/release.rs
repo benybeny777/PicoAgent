@@ -6,9 +6,8 @@ use std::path::Path;
 
 use anyhow::{bail, Context, Result};
 use serde_json::Value;
-use sha2::{Digest, Sha256};
 
-use crate::util::{log, repo_root, write_atomic};
+use crate::util::{file_sha256, log, repo_root, write_atomic};
 
 const REQUIRED_DOCUMENTS: [&str; 5] = [
     "docs/EULA-DRAFT.md",
@@ -216,22 +215,6 @@ fn empty_feed(version: &str) -> Value {
             "linux-x64": { "url": "", "size": 0, "sha256": "" }
         }
     })
-}
-
-fn file_sha256(path: &Path) -> Result<String> {
-    let mut file = fs::File::open(path)?;
-    let mut digest = Sha256::new();
-    // Windowsの既定スレッドスタックと同じ1MiBをローカル配列にすると、
-    // 実配布物のハッシュ計算へ入る前にスタックオーバーフローする。
-    let mut buffer = vec![0_u8; 1024 * 1024];
-    loop {
-        let count = file.read(&mut buffer)?;
-        if count == 0 {
-            break;
-        }
-        digest.update(&buffer[..count]);
-    }
-    Ok(hex::encode(digest.finalize()))
 }
 
 fn verify_windows_pe(path: &Path) -> Result<()> {

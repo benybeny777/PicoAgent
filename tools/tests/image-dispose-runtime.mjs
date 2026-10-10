@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import { runInNewContext } from "node:vm";
+import { createFrameGate } from "../../ui/character/frame-budget.js";
 
 function fixture(immediate = false) {
   const images = [];
@@ -17,6 +18,7 @@ function fixture(immediate = false) {
   const source = readFileSync(new URL("../../ui/character/image.js", import.meta.url), "utf8")
     .replace(/^import[\s\S]*?;\r?\n/gm, "").replace("export class ImageRenderer", "class ImageRenderer");
   const Renderer = runInNewContext(`${source}\nImageRenderer`, {
+    createFrameGate,
     Image, HTMLImageElement: Image, AbortController, queueMicrotask, performance,
     setTimeout: callback => { const id = ++sequence; timers.set(id, callback); return id; },
     clearTimeout: id => timers.delete(id),

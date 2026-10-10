@@ -6,22 +6,9 @@ use serde_json::{json, Value};
 use super::{Tool, ToolReg};
 use crate::config::Config;
 use crate::daily::{self, DailyEvent};
+use crate::tools::datetime_words::number_before;
 
 pub struct FocusTimerTool;
-
-fn number_before(text: &str, marker: &str) -> Option<i64> {
-    let marker_index = text.find(marker)?;
-    let prefix = &text[..marker_index];
-    let digits: String = prefix
-        .chars()
-        .rev()
-        .take_while(|character| character.is_ascii_digit())
-        .collect::<String>()
-        .chars()
-        .rev()
-        .collect();
-    digits.parse::<i64>().ok()
-}
 
 fn str_arg(args: &Value, key: &str) -> String {
     args.get(key)
@@ -82,16 +69,14 @@ impl Tool for FocusTimerTool {
         if !self.matches_intent(text) {
             return None;
         }
+        let parsed = match number_before(text, "分") {
+            Ok(parsed) => parsed,
+            Err(reason) => return Some(crate::tools::IntentInvocation::invalid(reason)),
+        };
         let (action, minutes) = if text.contains("見守") {
-            (
-                "watch",
-                number_before(text, "分").unwrap_or(60).clamp(5, 240),
-            )
+            ("watch", parsed.unwrap_or(60).clamp(5, 240))
         } else {
-            (
-                "start",
-                number_before(text, "分").unwrap_or(25).clamp(1, 240),
-            )
+            ("start", parsed.unwrap_or(25).clamp(1, 240))
         };
         Some(crate::tools::IntentInvocation::direct(json!({
             "action": action,

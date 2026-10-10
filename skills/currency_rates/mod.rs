@@ -8,35 +8,13 @@ use serde_json::{json, Value};
 use super::{Tool, ToolReg};
 use crate::config::Config;
 use crate::message::Field;
+use crate::tools::datetime_words::parse_days;
 
 const FRANKFURTER_BASE: &str = "https://api.frankfurter.app";
 
 pub struct CurrencyRatesTool;
 
-fn parse_days(text: &str) -> Option<i64> {
-    let chars: Vec<char> = text.chars().collect();
-    for (index, character) in chars.iter().enumerate() {
-        if character.is_ascii_digit() {
-            continue;
-        }
-        let unit_month = *character == 'ヶ' || *character == 'か' || *character == '月';
-        if !unit_month && *character != '日' {
-            continue;
-        }
-        let mut cursor = index;
-        let mut number = String::new();
-        while cursor > 0 && chars[cursor - 1].is_ascii_digit() {
-            number.insert(0, chars[cursor - 1]);
-            cursor -= 1;
-        }
-        if let Ok(number) = number.parse::<i64>() {
-            return Some(if unit_month { number * 30 } else { number }.clamp(2, 365));
-        }
-    }
-    None
-}
-
-fn direct_query(text: &str) -> Option<Value> {
+fn direct_query(text: &str) -> Result<Option<Value>, String> {
     let lower = text.to_lowercase();
     const NON_JPY: &[(&str, &str)] = &[
         ("豪ドル", "AUD"),
@@ -70,7 +48,7 @@ fn direct_query(text: &str) -> Option<Value> {
         .iter()
         .any(|word| lower.contains(word));
     if !(strong || base.is_some() || (has_jpy && (chart || lower.contains("換算")))) {
-        return None;
+        return Ok(None);
     }
 
     let mut args = serde_json::Map::new();
@@ -82,28 +60,11 @@ fn direct_query(text: &str) -> Option<Value> {
     }
     if chart {
         args.insert("chart".to_string(), json!(true));
-        if let Some(days) = parse_days(text) {
+        if let Some(days) = parse_days(text)? {
             args.insert("days".to_string(), json!(days));
         }
     }
-    Some(Value::Object(args))
-}
-
-// 値の並びを Unicode ブロックのスパークライン（簡易チャート）にする。
-fn sparkline(values: &[f64]) -> String {
-    const BARS: [char; 8] = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
-    let min = values.iter().cloned().fold(f64::INFINITY, f64::min);
-    let max = values.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-    if max.partial_cmp(&min) != Some(std::cmp::Ordering::Greater) {
-        return BARS[0].to_string().repeat(values.len());
-    }
-    values
-        .iter()
-        .map(|&v| {
-            let idx = (((v - min) / (max - min)) * 7.0).round() as usize;
-            BARS[idx.min(7)]
-        })
-        .collect()
+    Ok(Some(Value::Object(args)))
 }
 
 #[async_trait]
@@ -121,7 +82,10 @@ impl Tool for CurrencyRatesTool {
     }
 
     fn intent_invocation(&self, text: &str) -> Option<crate::tools::IntentInvocation> {
-        direct_query(text).map(crate::tools::IntentInvocation::direct)
+        match direct_query(text) {
+            Ok(args) => args.map(crate::tools::IntentInvocation::direct),
+            Err(reason) => Some(crate::tools::IntentInvocation::invalid(reason)),
+        }
     }
 
     fn label(&self) -> &'static str {
@@ -187,14 +151,7 @@ impl Tool for CurrencyRatesTool {
             });
         let amount = args.get("amount").and_then(Value::as_f64).unwrap_or(1.0);
         let timeout = crate::tool_try!(cfg.int(&crate::config::ints::CURRENCY_TIMEOUT_SECS)) as u64;
-        let client = match reqwest::Client::builder()
-            .timeout(Duration::from_secs(timeout))
-            .user_agent("PicoAgent/1.0 (Currency tool)")
-            .build()
-        {
-            Ok(client) => client,
-            Err(error) => return format!("エラー: 為替APIの準備に失敗しました: {}", error),
-        };
+        let request_timeout = Duration::from_secs(timeout);
 
         // チャート（推移）要求なら時系列を取得してスパークラインで返す。
         let want_chart = args.get("chart").and_then(Value::as_bool).unwrap_or(false)
@@ -211,18 +168,21 @@ impl Tool for CurrencyRatesTool {
                 .find(|s| !s.is_empty())
                 .unwrap_or("JPY")
                 .to_string();
-            return currency_chart(cfg, &client, &base, &symbol, days).await;
+            return currency_chart(cfg, request_timeout, &base, &symbol, days).await;
         }
 
-        let response = match client
-            .get(format!("{}/latest", FRANKFURTER_BASE))
-            .query(&[
-                ("from", base.as_str()),
-                ("to", symbols.as_str()),
-                ("amount", &amount.to_string()),
-            ])
-            .send()
-            .await
+        let response = match crate::tool_try!(crate::tools::http::service(
+            reqwest::Method::GET,
+            format!("{}/latest", FRANKFURTER_BASE),
+            request_timeout
+        ))
+        .query(&[
+            ("from", base.as_str()),
+            ("to", symbols.as_str()),
+            ("amount", &amount.to_string()),
+        ])
+        .send()
+        .await
         {
             Ok(response) => response,
             Err(error) => {
@@ -261,7 +221,7 @@ impl Tool for CurrencyRatesTool {
 // Frankfurter の時系列を取得し、推移をスパークラインで返す。
 async fn currency_chart(
     cfg: &Config,
-    client: &reqwest::Client,
+    request_timeout: std::time::Duration,
     base: &str,
     symbol: &str,
     days: i64,
@@ -270,11 +230,14 @@ async fn currency_chart(
     let end = Local::now().date_naive();
     let start = end - ChronoDuration::days(days);
     let url = format!("{FRANKFURTER_BASE}/{start}..{end}");
-    let response = match client
-        .get(&url)
-        .query(&[("from", base), ("to", symbol)])
-        .send()
-        .await
+    let response = match crate::tool_try!(crate::tools::http::service(
+        reqwest::Method::GET,
+        &url,
+        request_timeout
+    ))
+    .query(&[("from", base), ("to", symbol)])
+    .send()
+    .await
     {
         Ok(response) => response,
         Err(error) => {
@@ -323,7 +286,7 @@ async fn currency_chart(
         days,
         series.first().map(|(d, _)| d.as_str()).unwrap_or(""),
         series.last().map(|(d, _)| d.as_str()).unwrap_or(""),
-        sparkline(&values),
+        match crate::text::sparkline(&values) { Ok(chart) => chart, Err(reason) => return format!("エラー: {reason}"), },
         first,
         last,
         min,
