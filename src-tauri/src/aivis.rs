@@ -9,9 +9,7 @@ use std::sync::Mutex;
 use std::time::Duration;
 
 use serde_json::Value;
-use sha2::{Digest, Sha256};
 use tauri::Manager;
-use tokio::io::AsyncWriteExt;
 
 use crate::commands::AppState;
 
@@ -33,6 +31,26 @@ struct AivisInstallCleanup {
 
 impl Drop for AivisInstallCleanup {
     fn drop(&mut self) {
+        if self
+            .path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.starts_with(".installing-aivis-"))
+        {
+            if let Some(parent) = self.path.parent() {
+                match crate::installer::swap::has_pending(parent, "aivis") {
+                    Ok(false) => {}
+                    Ok(true) => return,
+                    Err(error) => {
+                        crate::log_paths::append_app_log(
+                            &self.app,
+                            &format!("Aivis復旧記録を確認できないため準備先を保持します: {error}"),
+                        );
+                        return;
+                    }
+                }
+            }
+        }
         // 正常・失敗・中断時のPicoAgent管理下一時物だけを掃除する。
         if let Err(error) = std::fs::remove_dir_all(&self.path) {
             if error.kind() != std::io::ErrorKind::NotFound {
@@ -560,186 +578,326 @@ fn release_asset_pattern() -> &'static str {
     }
 }
 
-async fn aivis_release_asset_url(
-    target_version: &str,
-) -> anyhow::Result<(String, String, u64, String)> {
-    let release_api = format!(
-        "https://api.github.com/repos/Aivis-Project/AivisSpeech-Engine/releases/tags/{target_version}"
+#[derive(Clone)]
+struct ReleasePart {
+    name: String,
+    url: String,
+    size: u64,
+    sha256: String,
+}
+
+fn release_parts(data: &Value, prefix: &str) -> anyhow::Result<Vec<ReleasePart>> {
+    let assets = data
+        .get("assets")
+        .and_then(Value::as_array)
+        .ok_or_else(|| anyhow::anyhow!("Aivis配布物一覧がありません"))?;
+    let first: Vec<_> = assets
+        .iter()
+        .filter_map(|asset| asset.get("name").and_then(Value::as_str))
+        .filter(|name| name.starts_with(prefix) && name.ends_with(".7z.001"))
+        .collect();
+    anyhow::ensure!(first.len() == 1, "Aivis配布物の先頭を一意に確定できません");
+    let stem = first[0]
+        .strip_suffix("001")
+        .ok_or_else(|| anyhow::anyhow!("分割名が不正です"))?;
+    let mut indexed = Vec::new();
+    for asset in assets {
+        let Some(name) = asset.get("name").and_then(Value::as_str) else {
+            continue;
+        };
+        let Some(suffix) = name.strip_prefix(stem) else {
+            continue;
+        };
+        anyhow::ensure!(
+            !name.contains(['/', '\\', ':']) && !name.chars().any(char::is_control),
+            "Aivis配布名が不正です"
+        );
+        anyhow::ensure!(
+            suffix.len() == 3 && suffix.bytes().all(|x| x.is_ascii_digit()),
+            "Aivis分割番号が不正です"
+        );
+        let index: usize = suffix.parse()?;
+        let size = asset
+            .get("size")
+            .and_then(Value::as_u64)
+            .filter(|x| *x > 0 && *x <= 2 * 1024 * 1024 * 1024)
+            .ok_or_else(|| anyhow::anyhow!("Aivis分割サイズが不正です"))?;
+        let hash = asset
+            .get("digest")
+            .and_then(Value::as_str)
+            .and_then(|x| x.strip_prefix("sha256:"))
+            .filter(|x| x.len() == 64 && x.bytes().all(|b| b.is_ascii_hexdigit()))
+            .ok_or_else(|| anyhow::anyhow!("Aivis公式配布のSHA-256がありません"))?;
+        indexed.push((
+            index,
+            ReleasePart {
+                name: name.to_owned(),
+                url: asset
+                    .get("browser_download_url")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| anyhow::anyhow!("Aivis取得URLがありません"))?
+                    .to_owned(),
+                size,
+                sha256: hash.to_ascii_lowercase(),
+            },
+        ));
+    }
+    indexed.sort_by_key(|x| x.0);
+    anyhow::ensure!(
+        !indexed.is_empty()
+            && indexed.len() <= 16
+            && indexed.iter().enumerate().all(|(i, x)| x.0 == i + 1),
+        "Aivis分割配布物が欠損または重複しています"
     );
-    let data: serde_json::Value = reqwest::Client::builder()
-        .timeout(Duration::from_secs(30))
-        .user_agent("PicoAgent/1.0 (Aivis runtime installer)")
-        .build()?
-        .get(release_api)
+    anyhow::ensure!(
+        indexed
+            .iter()
+            .try_fold(0_u64, |sum, x| sum.checked_add(x.1.size))
+            .is_some_and(|x| x <= 8_000_000_000),
+        "Aivis配布物の総量が上限を超えています"
+    );
+    Ok(indexed.into_iter().map(|x| x.1).collect())
+}
+
+async fn aivis_release_parts(target_version: &str) -> anyhow::Result<Vec<ReleasePart>> {
+    let prefix = release_asset_pattern();
+    anyhow::ensure!(
+        !prefix.is_empty(),
+        "このOS/CPU向けのAivis配布物を自動選択できません"
+    );
+    let url = format!("https://api.github.com/repos/Aivis-Project/AivisSpeech-Engine/releases/tags/{target_version}");
+    let data: Value = crate::installer::http::client()
+        .map_err(anyhow::Error::msg)?
+        .get(url)
         .send()
         .await?
         .error_for_status()?
         .json()
         .await?;
-    let prefix = release_asset_pattern();
-    if prefix.is_empty() {
-        anyhow::bail!("このOS/CPU向けの Aivis 配布物を自動選択できません。");
-    }
-    let Some(asset) = data
-        .get("assets")
-        .and_then(serde_json::Value::as_array)
-        .and_then(|assets| {
-            assets.iter().find(|asset| {
-                asset
-                    .get("name")
-                    .and_then(serde_json::Value::as_str)
-                    .map(|name| name.starts_with(prefix) && name.ends_with(".7z.001"))
-                    .unwrap_or(false)
-            })
-        })
-    else {
-        anyhow::bail!("Aivis {target_version} の自動取得対象アセットが見つかりません。");
-    };
-    let name = asset
-        .get("name")
-        .and_then(serde_json::Value::as_str)
-        .ok_or_else(|| anyhow::anyhow!("Aivis アセット名を読めません。"))?
-        .to_string();
-    let url = asset
-        .get("browser_download_url")
-        .and_then(serde_json::Value::as_str)
-        .ok_or_else(|| anyhow::anyhow!("Aivis ダウンロードURLを読めません。"))?
-        .to_string();
-    let size = asset
-        .get("size")
-        .and_then(serde_json::Value::as_u64)
-        .filter(|size| *size > 0 && *size <= 2 * 1024 * 1024 * 1024)
-        .ok_or_else(|| anyhow::anyhow!("Aivis アセットサイズが不正です。"))?;
-    let digest = asset
-        .get("digest")
-        .and_then(serde_json::Value::as_str)
-        .and_then(|value| value.strip_prefix("sha256:"))
-        .filter(|value| value.len() == 64)
-        .ok_or_else(|| anyhow::anyhow!("Aivis 公式ReleaseにSHA-256 digestがありません。"))?
-        .to_ascii_lowercase();
-    Ok((name, url, size, digest))
+    release_parts(&data, prefix)
 }
 
-async fn download_aivis_archive(url: &str, dest: &Path, expected_size: u64) -> anyhow::Result<()> {
-    if let Some(parent) = dest.parent() {
-        tokio::fs::create_dir_all(parent).await?;
+fn aivis_limits() -> crate::installer::Limits {
+    crate::installer::Limits {
+        max_entries: 20_000,
+        max_total_bytes: 8_000_000_000,
+        max_file_bytes: 4_000_000_000,
+        file_limit: None,
     }
-    let mut response = reqwest::Client::builder()
-        .connect_timeout(Duration::from_secs(30))
-        .read_timeout(Duration::from_secs(120))
-        .user_agent("PicoAgent/1.0 (Aivis runtime installer)")
-        .build()?
-        .get(url)
-        .send()
-        .await?
-        .error_for_status()?;
-    let tmp = dest.with_extension("part");
-    let mut file = tokio::fs::File::create(&tmp).await?;
-    let mut downloaded = 0_u64;
-    while let Some(chunk) = response.chunk().await? {
-        downloaded = downloaded.saturating_add(chunk.len() as u64);
+}
+
+fn extraction_tool() -> anyhow::Result<(PathBuf, bool)> {
+    #[cfg(windows)]
+    {
+        let root = std::env::var_os("SystemRoot")
+            .ok_or_else(|| anyhow::anyhow!("Windowsシステムディレクトリを取得できません"))?;
+        let path = PathBuf::from(root).join("System32/tar.exe");
         anyhow::ensure!(
-            downloaded <= expected_size,
-            "Aivis の取得サイズが予定を超えています。"
+            path.is_file(),
+            "Windows標準のtar.exeがありません。Aivisの取得は開始していません"
         );
-        file.write_all(&chunk).await?;
+        Ok((path, true))
     }
-    file.flush().await?;
-    drop(file);
-    anyhow::ensure!(
-        downloaded == expected_size,
-        "Aivis の取得サイズが予定と一致しません。"
-    );
-    tokio::fs::rename(tmp, dest).await?;
-    Ok(())
+    #[cfg(not(windows))]
+    {
+        // フォールバック許可: 取得前に7z/7zaの一つを確定し、失敗後に切り替えない（根拠: PR #472の利用者決定）。
+        let path = ["7z", "7za"]
+            .into_iter()
+            .find_map(crate::tools::process::resolve_executable)
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "Aivis展開用7-Zipがありません。p7zipを導入してください。取得は開始していません"
+                )
+            })?;
+        Ok((path, false))
+    }
 }
 
-fn verify_archive_sha256(path: &Path, expected: &str) -> anyhow::Result<()> {
-    let mut file = std::fs::File::open(path)?;
-    let mut digest = Sha256::new();
-    let mut buffer = vec![0_u8; 1024 * 1024];
-    loop {
-        let count = std::io::Read::read(&mut file, &mut buffer)?;
-        if count == 0 {
-            break;
-        }
-        digest.update(&buffer[..count]);
-    }
-    anyhow::ensure!(
-        hex::encode(digest.finalize()) == expected,
-        "Aivis 公式配布のSHA-256が一致しません。"
-    );
-    Ok(())
-}
-
-fn extract_archive(archive: &Path, out_dir: &Path) -> anyhow::Result<()> {
-    std::fs::create_dir_all(out_dir)?;
-    let mut command = if let Some(path) = crate::tools::process::resolve_executable("7z") {
-        let mut cmd = crate::tools::process::command_sync(&path);
-        cmd.args([
-            "x",
-            archive.to_string_lossy().as_ref(),
-            &format!("-o{}", out_dir.display()),
-            "-y",
-        ]);
-        cmd
-    } else if let Some(path) = crate::tools::process::resolve_executable("7za") {
-        let mut cmd = crate::tools::process::command_sync(&path);
-        cmd.args([
-            "x",
-            archive.to_string_lossy().as_ref(),
-            &format!("-o{}", out_dir.display()),
-            "-y",
-        ]);
-        cmd
-    } else {
-        let mut cmd = crate::tools::process::command_sync("tar");
-        cmd.args(["-xf", archive.to_string_lossy().as_ref(), "-C"]);
-        cmd.arg(out_dir);
-        cmd
-    };
-    command
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
-    let status = command.status()?;
-    if !status.success() {
-        anyhow::bail!(
-            "Aivis アーカイブの展開に失敗しました。7-Zip/7za または tar を利用できる環境が必要です。macOS で .7z.001 を展開する場合は p7zip を導入してください。"
-        );
-    }
-    Ok(())
-}
-
-fn find_run_file(dir: &Path) -> Option<PathBuf> {
-    let exe = if cfg!(windows) { "run.exe" } else { "run" };
-    let entries = std::fs::read_dir(dir).ok()?;
-    for entry in entries.filter_map(Result::ok) {
-        let path = entry.path();
-        if path.is_dir() {
-            if let Some(found) = find_run_file(&path) {
-                return Some(found);
+fn parse_7z_entries(text: &str) -> anyhow::Result<Vec<(String, bool, u64)>> {
+    let mut entries = Vec::new();
+    let mut fields = std::collections::HashMap::new();
+    for line in text.lines().chain(std::iter::once("")) {
+        if line.is_empty() {
+            if fields.is_empty() {
+                continue;
             }
-        } else if path.file_name().and_then(|name| name.to_str()) == Some(exe) {
-            return Some(path);
+            let path: &str = fields
+                .get("Path")
+                .copied()
+                .ok_or_else(|| anyhow::anyhow!("Aivis一覧にPathがありません"))?;
+            let size: u64 = fields
+                .get("Size")
+                .copied()
+                .ok_or_else(|| anyhow::anyhow!("Aivis一覧にSizeがありません"))?
+                .parse()?;
+            let attributes = fields
+                .get("Attributes")
+                .copied()
+                .ok_or_else(|| anyhow::anyhow!("Aivis一覧に属性がありません"))?;
+            let directory = fields
+                .get("Folder")
+                .copied()
+                .map(|value| value == "+")
+                .unwrap_or_else(|| attributes.starts_with('D'));
+            anyhow::ensure!(
+                !fields.contains_key("Symbolic Link") && !fields.contains_key("Hard Link"),
+                "Aivis書庫にリンクがあります"
+            );
+            for token in attributes.split_whitespace() {
+                if token.len() >= 10 && token.chars().all(|c| "-drwxstSTlbcps".contains(c)) {
+                    anyhow::ensure!(
+                        token.starts_with('-') || token.starts_with('d'),
+                        "Aivis書庫にリンクまたは特殊ファイルがあります"
+                    );
+                }
+            }
+            anyhow::ensure!(!directory || size == 0, "Aivisフォルダのサイズが不正です");
+            entries.push((path.to_owned(), directory, size));
+            fields.clear();
+            continue;
         }
+        let (key, value) = line
+            .split_once(" = ")
+            .ok_or_else(|| anyhow::anyhow!("Aivis一覧に読めない続行行があります"))?;
+        anyhow::ensure!(
+            !value.chars().any(char::is_control)
+                && [
+                    "Path",
+                    "Size",
+                    "Packed Size",
+                    "Modified",
+                    "Created",
+                    "Accessed",
+                    "Attributes",
+                    "Encrypted",
+                    "Comment",
+                    "CRC",
+                    "Method",
+                    "Characteristics",
+                    "Host OS",
+                    "Version",
+                    "Volume Index",
+                    "Offset",
+                    "Block",
+                    "Folder",
+                    "Symbolic Link",
+                    "Hard Link"
+                ]
+                .contains(&key),
+            "Aivis一覧の項目が不正です"
+        );
+        anyhow::ensure!(
+            fields.insert(key, value).is_none(),
+            "Aivis一覧の項目が重複しています"
+        );
     }
-    None
+    anyhow::ensure!(!entries.is_empty(), "Aivis書庫が空です");
+    crate::installer::archive::validate_external_entries(&entries, aivis_limits())?;
+    Ok(entries)
 }
 
-fn copy_dir_all(src: &Path, dest: &Path) -> anyhow::Result<()> {
-    std::fs::create_dir_all(dest)?;
-    for entry in std::fs::read_dir(src)? {
-        let entry = entry?;
-        let from = entry.path();
-        let to = dest.join(entry.file_name());
-        if from.is_dir() {
-            copy_dir_all(&from, &to)?;
-        } else {
-            std::fs::copy(&from, &to)?;
+async fn extraction_output(
+    tool: &Path,
+    args: &[&std::ffi::OsStr],
+) -> anyhow::Result<std::process::Output> {
+    let mut command = crate::tools::process::command(tool);
+    command.args(args);
+    let output = crate::tools::process::output(command, 900, "Aivis展開")
+        .await
+        .map_err(anyhow::Error::msg)?;
+    anyhow::ensure!(
+        output.status.success(),
+        "Aivis展開ツールが失敗しました: {}",
+        String::from_utf8_lossy(&output.stderr)
+            .chars()
+            .take(2000)
+            .collect::<String>()
+    );
+    anyhow::ensure!(
+        output.stdout.len() < 1024 * 1024,
+        "Aivis配布物の一覧が検査上限を超えています"
+    );
+    Ok(output)
+}
+
+async fn extract_archive(
+    archive: &Path,
+    out_dir: &Path,
+    tool: &Path,
+    tar: bool,
+) -> anyhow::Result<()> {
+    use std::ffi::OsStr;
+    if tar {
+        let listing = extraction_output(tool, &[OsStr::new("-tf"), archive.as_os_str()]).await?;
+        let names = std::str::from_utf8(&listing.stdout)?
+            .lines()
+            .collect::<Vec<_>>();
+        let listing = extraction_output(tool, &[OsStr::new("-tvf"), archive.as_os_str()]).await?;
+        let verbose = std::str::from_utf8(&listing.stdout)?
+            .lines()
+            .collect::<Vec<_>>();
+        anyhow::ensure!(
+            verbose.len() == names.len() && !names.is_empty(),
+            "Aivis一覧の照合に失敗しました"
+        );
+        let mut entries = Vec::new();
+        for (name, line) in names.into_iter().zip(verbose) {
+            anyhow::ensure!(
+                line.starts_with('-') || line.starts_with('d'),
+                "Aivis書庫のリンクや特殊ファイルは展開できません"
+            );
+            let size: u64 = line
+                .split_whitespace()
+                .nth(4)
+                .ok_or_else(|| anyhow::anyhow!("Aivis一覧のサイズがありません"))?
+                .parse()?;
+            entries.push((name.to_owned(), line.starts_with('d'), size));
         }
+        crate::installer::archive::validate_external_entries(&entries, aivis_limits())?;
+        std::fs::create_dir_all(out_dir)?;
+        extraction_output(
+            tool,
+            &[
+                OsStr::new("-xf"),
+                archive.as_os_str(),
+                OsStr::new("-C"),
+                out_dir.as_os_str(),
+            ],
+        )
+        .await?;
+    } else {
+        let listing = extraction_output(
+            tool,
+            &[
+                OsStr::new("l"),
+                OsStr::new("-slt"),
+                OsStr::new("-ba"),
+                archive.as_os_str(),
+            ],
+        )
+        .await?;
+        parse_7z_entries(std::str::from_utf8(&listing.stdout)?)?;
+        std::fs::create_dir_all(out_dir)?;
+        let output_arg = format!("-o{}", out_dir.display());
+        extraction_output(
+            tool,
+            &[
+                OsStr::new("x"),
+                archive.as_os_str(),
+                OsStr::new(&output_arg),
+                OsStr::new("-y"),
+            ],
+        )
+        .await?;
     }
     Ok(())
+}
+
+fn find_run_file(dir: &Path) -> anyhow::Result<Option<PathBuf>> {
+    crate::installer::fs::find_file(dir, if cfg!(windows) { "run.exe" } else { "run" }, 32)
+}
+fn copy_dir_all(src: &Path, dest: &Path) -> anyhow::Result<()> {
+    crate::installer::fs::copy_dir(src, dest, aivis_limits())
 }
 
 fn install_stage_path(install: &Path) -> PathBuf {
@@ -747,42 +905,15 @@ fn install_stage_path(install: &Path) -> PathBuf {
     install.with_file_name(format!(".installing-aivis-{}-{nonce}", std::process::id()))
 }
 
-fn replace_install_tree(stage: &Path, install: &Path) -> anyhow::Result<()> {
-    let _guard = match AIVIS_INSTALL_FS_LOCK.lock() {
-        Ok(guard) => guard,
-        Err(poisoned) => poisoned.into_inner(),
-    };
-    if let Some(parent) = install.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    if install.exists() {
-        let nonce = AIVIS_INSTALL_NONCE.fetch_add(1, Ordering::Relaxed);
-        let backup =
-            install.with_file_name(format!(".backup-aivis-{}-{nonce}", std::process::id()));
-        if backup.exists() {
-            std::fs::remove_dir_all(&backup)?;
-        }
-        std::fs::rename(install, &backup)?;
-        if let Err(error) = std::fs::rename(stage, install) {
-            if let Err(restore_error) = std::fs::rename(&backup, install) {
-                anyhow::bail!(
-                    "Aivisの入れ替えと旧版復元に失敗しました: 入れ替え={error} / 復元={restore_error}"
-                );
-            }
-            return Err(error.into());
-        }
-        // 新版はもう配置済みなので、旧版を消せなくても入れ替えは成功として扱う
-        // （残った退避先は次回の `recover_interrupted_install` が消す）。
-        if let Err(error) = std::fs::remove_dir_all(&backup) {
-            crate::log_paths::log_detached(&format!(
-                "入れ替え前の Aivis を削除できません（次回の起動時に消します）: {} ({error})",
-                backup.display()
-            ));
-        }
-    } else {
-        std::fs::rename(stage, install)?;
-    }
-    Ok(())
+fn replace_install_tree(
+    app: &tauri::AppHandle,
+    stage: &Path,
+    install: &Path,
+) -> anyhow::Result<()> {
+    crate::installer::swap::complete(
+        app,
+        crate::installer::swap::replace(stage, install, "aivis"),
+    )
 }
 
 /// 前回の入れ替えが途中で落ちた残り（`.installing-aivis-<pid>-<n>` / `.backup-aivis-<pid>-<n>`）を片付ける。
@@ -790,19 +921,34 @@ fn replace_install_tree(stage: &Path, install: &Path) -> anyhow::Result<()> {
 /// 名前にプロセスIDを含むため、次の起動は同じ名前を見ない。拾わないと約0.8GBの旧版が残り続け、
 /// 配置前に落ちた場合は Aivis が消えたように見えて取り直しになる。PicoAgent は同時に1つしか
 /// 動かないので、別プロセスIDのものは終了済みとして扱える。
-fn recover_interrupted_install(app: &tauri::AppHandle) {
-    let Ok(install) = install_dir(app) else {
-        return;
-    };
-    let Some(parent) = install.parent() else {
-        return;
-    };
+fn recover_interrupted_install(app: &tauri::AppHandle) -> anyhow::Result<()> {
+    let install = install_dir(app)?;
+    let parent = install
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("Aivis配置の親がありません"))?;
+    if !parent.try_exists()? {
+        return Ok(());
+    }
+    std::fs::read_dir(parent)?;
     let _guard = match AIVIS_INSTALL_FS_LOCK.lock() {
         Ok(guard) => guard,
         Err(poisoned) => poisoned.into_inner(),
     };
-    for (name, action) in interrupted_install_actions(parent, &install, std::process::id()) {
+    for (name, action) in interrupted_install_actions(parent, &install, std::process::id())? {
+        let suffix = name
+            .strip_prefix(".installing-aivis-")
+            .or_else(|| name.strip_prefix(".backup-aivis-"))
+            .ok_or_else(|| anyhow::anyhow!("Aivis復旧名が不正です"))?;
+        let pid: u32 = suffix
+            .split('-')
+            .next()
+            .ok_or_else(|| anyhow::anyhow!("Aivis復旧PIDがありません"))?
+            .parse()?;
+        if crate::installer::swap::process_alive(pid)? {
+            continue;
+        }
         let path = parent.join(&name);
+        crate::installer::fs::checked_directory(&path)?;
         let (action, result) = apply_interrupted_install_action(&path, &install, action);
         let verb = match action {
             InterruptedAction::Remove => "片付けました",
@@ -813,12 +959,14 @@ fn recover_interrupted_install(app: &tauri::AppHandle) {
                 app,
                 &format!("中断した Aivis の入れ替えの残りを{verb}: {name}"),
             ),
-            Err(error) => append_log_best_effort(
-                app,
-                &format!("中断した Aivis の入れ替えの残りを処理できません: {name} ({error})"),
-            ),
+            Err(error) => {
+                return Err(anyhow::anyhow!(
+                    "中断したAivis配置を復旧できません: {name} ({error})"
+                ))
+            }
         }
     }
+    Ok(())
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
@@ -852,12 +1000,18 @@ fn interrupted_install_actions(
     parent: &Path,
     install: &Path,
     current_pid: u32,
-) -> Vec<(String, InterruptedAction)> {
-    let Ok(entries) = std::fs::read_dir(parent) else {
-        return Vec::new();
+) -> anyhow::Result<Vec<(String, InterruptedAction)>> {
+    let entries = match std::fs::read_dir(parent) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => return Err(error.into()),
     };
+    let entries = entries.collect::<std::io::Result<Vec<_>>>()?;
+    for entry in &entries {
+        entry.file_type()?;
+    }
     let mut names: Vec<String> = entries
-        .flatten()
+        .into_iter()
         .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_dir()))
         .filter_map(|entry| entry.file_name().to_str().map(str::to_string))
         .filter(|name| {
@@ -875,7 +1029,7 @@ fn interrupted_install_actions(
         .collect();
     names.sort();
     let installed = install.exists();
-    names
+    Ok(names
         .into_iter()
         .map(|name| {
             if name.starts_with(".backup-aivis-") && !installed {
@@ -884,7 +1038,7 @@ fn interrupted_install_actions(
                 (name, InterruptedAction::Remove)
             }
         })
-        .collect()
+        .collect())
 }
 
 fn stage_and_replace(app: &tauri::AppHandle, source: &Path, install: &Path) -> anyhow::Result<()> {
@@ -897,11 +1051,11 @@ fn stage_and_replace(app: &tauri::AppHandle, source: &Path, install: &Path) -> a
         path: stage.clone(),
     };
     copy_dir_all(source, &stage)?;
-    let run = find_run_file(&stage)
+    let run = find_run_file(&stage)?
         .ok_or_else(|| anyhow::anyhow!("準備した Aivis に run 実行ファイルが見つかりません。"))?;
     validate_runtime_files(&run)?;
     ensure_executable(&run)?;
-    replace_install_tree(&stage, install)
+    replace_install_tree(app, &stage, install)
 }
 
 fn copy_resource_to_install(app: &tauri::AppHandle) -> anyhow::Result<Option<PathBuf>> {
@@ -943,7 +1097,8 @@ async fn ensure_installed_ready(
     app: &tauri::AppHandle,
     force_repair: bool,
 ) -> anyhow::Result<PathBuf> {
-    recover_interrupted_install(app);
+    crate::installer::swap::recover(&crate::app_paths::bundled_dir(app))?;
+    recover_interrupted_install(app)?;
     if !force_repair {
         if let Some(path) = runtime_engine_path(app) {
             if let Some(resource) = resource_engine_path(app) {
@@ -966,10 +1121,10 @@ async fn ensure_installed_ready(
         "Aivis が見つからないため、公式リリースから自動取得します。",
     )?;
     let target_version = crate::components::managed_target_version(app, "aivis")?;
-    let (asset_name, asset_url, asset_size, asset_sha256) =
-        aivis_release_asset_url(&target_version).await?;
+    let (tool, tar) = extraction_tool()?;
+    let parts = aivis_release_parts(&target_version).await?;
     let nonce = AIVIS_INSTALL_NONCE.fetch_add(1, Ordering::Relaxed);
-    let work = std::env::temp_dir().join(format!(
+    let work = crate::app_paths::bundled_dir(app).join(format!(
         "picoagent-aivis-runtime-{}-{nonce}",
         std::process::id()
     ));
@@ -986,23 +1141,37 @@ async fn ensure_installed_ready(
         app: app.clone(),
         path: work.clone(),
     };
-    let archive = work.join(&asset_name);
-    append_log(app, &format!("Aivis ダウンロード開始: {asset_name}"))?;
-    download_aivis_archive(&asset_url, &archive, asset_size).await?;
-    let archive_for_verify = archive.clone();
-    tokio::task::spawn_blocking(move || verify_archive_sha256(&archive_for_verify, &asset_sha256))
-        .await??;
+    let archive = work.join("verified-runtime.7z");
+    for part in &parts {
+        let path = work.join(&part.name);
+        append_log(app, &format!("Aivis ダウンロード開始: {}", part.name))?;
+        crate::installer::download::fetch_fixed(
+            crate::installer::download::FetchSpec {
+                url: &part.url,
+                destination: &path,
+                expected_size: Some(part.size),
+                max_size: part.size,
+                sha256: Some(&part.sha256),
+            },
+            &mut |_, _| {},
+        )
+        .await?;
+    }
+    // 検査済みの分割を順番通りに連結する。Windows標準tarは分割先頭単体を読めない。
+    let mut joined = std::fs::File::create(&archive)?;
+    for part in &parts {
+        std::io::copy(
+            &mut std::fs::File::open(work.join(&part.name))?,
+            &mut joined,
+        )?;
+    }
+    joined.flush()?;
+    drop(joined);
     append_log(app, "Aivis ダウンロード完了。展開します。")?;
-
     let extract_dir = work.join("extract");
-    let archive_for_extract = archive.clone();
-    let extract_for_extract = extract_dir.clone();
-    tokio::task::spawn_blocking(move || {
-        extract_archive(&archive_for_extract, &extract_for_extract)
-    })
-    .await??;
-    let run_path = find_run_file(&extract_dir)
-        .ok_or_else(|| anyhow::anyhow!("展開した Aivis に run 実行ファイルが見つかりません。"))?;
+    extract_archive(&archive, &extract_dir, &tool, tar).await?;
+    let run_path = find_run_file(&extract_dir)?
+        .ok_or_else(|| anyhow::anyhow!("展開したAivisに実行ファイルがありません"))?;
     let root = run_path
         .parent()
         .ok_or_else(|| anyhow::anyhow!("Aivis 実行ファイルの親ディレクトリを取得できません。"))?
@@ -1475,6 +1644,42 @@ fn terminate_managed_child(app: &tauri::AppHandle) {
 #[cfg(test)]
 mod tests {
     #[test]
+    fn 分割配布の全番号とサイズとハッシュを取得前に確定する() {
+        let prefix = "AivisSpeech-Engine-Windows-x64-";
+        let asset = |index: usize| serde_json::json!({"name":format!("{prefix}1.0.7z.{index:03}"),"size":12,"digest":format!("sha256:{}","a".repeat(64)),"browser_download_url":"https://example.invalid/a"});
+        let parts =
+            super::release_parts(&serde_json::json!({"assets":[asset(2),asset(1)]}), prefix)
+                .unwrap();
+        assert!(parts[0].name.ends_with("001"));
+        assert!(parts[1].name.ends_with("002"));
+        for assets in [
+            vec![asset(1), asset(3)],
+            vec![asset(1), asset(1)],
+            vec![
+                asset(1),
+                serde_json::json!({"name":format!("{prefix}1.0.7z.002"),"size":12}),
+            ],
+        ] {
+            assert!(super::release_parts(&serde_json::json!({"assets":assets}), prefix).is_err());
+        }
+    }
+    #[test]
+    fn 展開一覧の続行やリンクと正規化後重複を拒否する() {
+        let valid = "Path = runtime/file\nSize = 3\nAttributes = A\n\n";
+        assert!(super::parse_7z_entries(valid).is_ok());
+        for invalid in [
+            "Path = runtime/file\n/../../outside\nSize = 3\nAttributes = A",
+            "Path = runtime/file\nSize = 3\nAttributes = A\nSymbolic Link = outside",
+            "Path = runtime/file\nSize = 3\nSize = 3\nAttributes = A",
+        ] {
+            assert!(super::parse_7z_entries(invalid).is_err());
+        }
+        assert!(super::parse_7z_entries(
+            &(valid.to_owned() + "Path = runtime/./file\nSize = 3\nAttributes = A\n")
+        )
+        .is_err());
+    }
+    #[test]
     fn 音声ポート不正値は移行や既定ポート接続へ進めない() {
         let cfg = crate::config::Config::new();
         for value in ["65536", "bad", "1.5", "-1"] {
@@ -1537,10 +1742,7 @@ mod tests {
         assert!(super::resolve_style_id_in(&[], "speaker", None).is_err());
     }
 
-    use super::{
-        interrupted_install_actions, replace_install_tree, validate_external_endpoint,
-        InterruptedAction,
-    };
+    use super::{interrupted_install_actions, validate_external_endpoint, InterruptedAction};
     // 実行ファイルと管理情報の判定は全OS共通。Python DLLだけWindows版の配置を検査する。
     use super::find_runtime;
     #[cfg(windows)]
@@ -1611,7 +1813,7 @@ mod tests {
             std::fs::create_dir_all(parent.join(name)).unwrap();
         }
 
-        let actions = interrupted_install_actions(&parent, &install, 999);
+        let actions = interrupted_install_actions(&parent, &install, 999).unwrap();
         assert_eq!(
             actions,
             vec![
@@ -1628,7 +1830,7 @@ mod tests {
         );
 
         std::fs::create_dir_all(&install).unwrap();
-        let actions = interrupted_install_actions(&parent, &install, 999);
+        let actions = interrupted_install_actions(&parent, &install, 999).unwrap();
         assert!(
             actions
                 .iter()
@@ -1656,7 +1858,7 @@ mod tests {
         for name in names {
             std::fs::create_dir_all(parent.join(name)).unwrap();
         }
-        let actions = interrupted_install_actions(&parent, &install, 999);
+        let actions = interrupted_install_actions(&parent, &install, 999).unwrap();
         assert_eq!(actions.len(), 2);
         for (name, planned) in &actions {
             let path = parent.join(name);
@@ -1705,7 +1907,7 @@ mod tests {
             std::fs::create_dir_all(parent.join(name)).unwrap();
         }
         assert_eq!(
-            interrupted_install_actions(&parent, &parent.join("aivis"), 999),
+            interrupted_install_actions(&parent, &parent.join("aivis"), 999).unwrap(),
             vec![(
                 ".backup-aivis-111-999".to_string(),
                 InterruptedAction::Restore
@@ -1748,13 +1950,16 @@ mod tests {
         std::fs::create_dir_all(&install).unwrap();
         std::fs::write(install.join("version.txt"), b"old").unwrap();
 
-        assert!(replace_install_tree(&root.join("missing-stage"), &install).is_err());
+        assert!(
+            crate::installer::swap::replace(&root.join("missing-stage"), &install, "aivis")
+                .is_err()
+        );
         assert_eq!(std::fs::read(install.join("version.txt")).unwrap(), b"old");
 
         let stage = root.join("stage");
         std::fs::create_dir_all(&stage).unwrap();
         std::fs::write(stage.join("version.txt"), b"new").unwrap();
-        replace_install_tree(&stage, &install).unwrap();
+        crate::installer::swap::replace(&stage, &install, "aivis").unwrap();
         assert_eq!(std::fs::read(install.join("version.txt")).unwrap(), b"new");
         std::fs::remove_dir_all(root).unwrap();
     }

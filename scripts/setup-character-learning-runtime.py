@@ -19,6 +19,7 @@ import uuid
 import zipfile
 from pathlib import Path, PurePosixPath
 from urllib.request import Request, urlopen
+from voice_training_common import atomic_move
 
 OFFICIAL_RELEASE = "2.7.0"
 OFFICIAL_COMMIT = "d8148f3090ee5038ca7b4e4b327116c64467f952"
@@ -354,7 +355,7 @@ def atomic_json(path: Path, value: dict):
         json.dump(value, handle, ensure_ascii=False, indent=2)
         handle.flush()
         os.fsync(handle.fileno())
-    os.replace(temporary, path)
+    atomic_move(temporary, path, cleanup_file=True)
 
 
 def api(url: str):
@@ -676,7 +677,7 @@ def recover_unrecorded_root(root: Path):
     stage = root.with_name(".installing-" + root.name + "-" + uuid.uuid4().hex)
     if stage.exists() or stage.parent.resolve() != root.parent:
         raise ValueError("診断stageの境界を確認できません")
-    root.rename(stage)
+    atomic_move(root, stage, replace=False)
     atomic_json(stage / "failure.json", {"state": "failed", "message": "導入記録の確定前に中断", "retry": "所有確認済みの未確定rootを診断stageへ退避し、新規stageで再試行"})
 
 
@@ -710,14 +711,14 @@ def install(root: Path, shared: Path, ffmpeg: Path, uv: Path, status: Path, conf
     try:
         populate(stage, shared, uv, ffmpeg, gpu)
         # relocatablevenvでも実CLIとcacheの移動後解決を確認してからinstalledを記録する。
-        stage.rename(root)
+        atomic_move(stage, root, replace=False)
         final_env = os.environ | environment(root, gpu)
         try:
             probe_deno(root, final_env, root / "setup.log")
             run([str(root / ".venv/Scripts/aivmlib.exe"), "--help"], root, final_env, root / "setup.log")
             run([str(root / ".venv/Scripts/python.exe"), "-c", PROBE], root, final_env, root / "setup.log")
         except BaseException:
-            root.rename(stage)
+            atomic_move(root, stage, replace=False)
             raise
         record = {"schemaVersion": 1, "state": "installed", "source": {"repository": FORK, "commit": COMMIT, "tree": TREE, "officialRelease": OFFICIAL_RELEASE, "officialCommit": OFFICIAL_COMMIT, "reason": FORK_REASON},
                   "tools": {"deno": {"version": DENO_VERSION, "path": str(root / "tools/deno/deno.exe"), "archiveSha256": DENO_SHA256, "archiveSize": DENO_SIZE}},

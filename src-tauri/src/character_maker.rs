@@ -186,7 +186,7 @@ fn paths(app: &AppHandle) -> Result<(PipelineContext, MakerConfig)> {
     let mut config = MakerConfig::managed(managed, crate::components::shared_python_dir(app));
     // 専用VRAM16GB未満・共有メモリ・VRAM不明では、ComfyUIを省メモリ設定で起動する。
     // MPS（Apple Silicon）は専用VRAM判定を流用せず、検証済みの起動設定だけを使う。
-    let installed = crate::components::installed_generation_runtime(app);
+    let installed = crate::components::installed_generation_runtime(app)?;
     let backend = installed.as_ref().map(|runtime| runtime.backend);
     let device =
         crate::generation_backend::generation_device(&crate::gpu::devices(), installed.as_ref());

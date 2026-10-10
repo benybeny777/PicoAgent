@@ -11,6 +11,7 @@ import subprocess
 import sys
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
+from voice_training_common import atomic_move
 
 MAX_BYTES = 500_000_000
 MAX_SECONDS = 7200
@@ -108,7 +109,7 @@ def atomic_text(path, text):
     # 再開時は既存ファイルとの一致で完了工程を再利用するため、欠けたファイルは永久に再開を止める。
     temporary = path.with_suffix(path.suffix + '.incoming')
     temporary.write_text(text, encoding='utf-8')
-    temporary.replace(path)
+    atomic_move(temporary, path, cleanup_file=True)
 
 
 def atomic_json(path, value):
@@ -413,7 +414,7 @@ class Worker:
                     else:
                         temporary=destination.with_suffix('.incoming.wav')
                         sf.write(temporary, samples, 48000, subtype='PCM_16')
-                        temporary.replace(destination)
+                        atomic_move(temporary, destination)
                     lines.append(f'{name}|{self.dataset}|JP|{row["text"]}')
             if not lines:
                 raise ValueError('2〜12秒の学習候補区間がありません')

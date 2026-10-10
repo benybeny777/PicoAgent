@@ -6,12 +6,10 @@
 
 use std::cmp::Ordering;
 use std::collections::HashMap;
-use std::io::{Read, Write};
 use std::path::{Component, Path, PathBuf};
 use std::sync::OnceLock;
 
 use anyhow::{Context, Result};
-use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tauri::{AppHandle, Emitter};
@@ -30,8 +28,6 @@ const COMPONENT_IDS: [&str; 9] = [
     "office",
     "tools",
 ];
-const WHISPER_RELEASE_API: &str =
-    "https://api.github.com/repos/ggml-org/whisper.cpp/releases/latest";
 const WHISPER_MODEL_URL: &str =
     "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-small.bin";
 const WHISPER_MODEL_SHA256: &str =
@@ -369,119 +365,167 @@ pub(crate) async fn generation_selection() -> crate::generation_backend::Backend
     crate::generation_backend::select(&devices, nvidia_cuda_ready().await)
 }
 
-/// 導入済みの生成ランタイムの素性。記録が無い、または壊れている場合は`None`。
+/// 不在と破損を分ける導入記録。用途ごとの必須項目は各判定で検査する。
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct InstallRecord {
+    version: Option<String>,
+    runtime: Option<crate::generation_backend::InstalledRuntime>,
+    model: Option<String>,
+    files: Option<Vec<String>>,
+    comfy_commit: Option<String>,
+    lock_sha256: Option<String>,
+    binary_release: Option<String>,
+    source_commit: Option<String>,
+}
+
+fn read_record_file(root: &Path, name: &str) -> Result<Option<InstallRecord>> {
+    let path = root.join(name);
+    let text = match std::fs::read_to_string(&path) {
+        Ok(text) => text,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => {
+            return Err(error).with_context(|| format!("導入記録を読めません: {}", path.display()))
+        }
+    };
+    let record: InstallRecord = serde_json::from_str(&text).map_err(|_| {
+        anyhow::anyhow!("導入記録のJSONまたは項目の型が不正です: {}", path.display())
+    })?;
+    if let Some(version) = &record.version {
+        anyhow::ensure!(
+            !version.trim().is_empty(),
+            "導入記録の版が空です: {}",
+            path.display()
+        );
+    }
+    Ok(Some(record))
+}
+
+fn read_install_record(root: &Path) -> Result<Option<InstallRecord>> {
+    read_record_file(root, "install.json")
+}
+
+fn recorded_runtime(
+    record: Option<&InstallRecord>,
+) -> Result<Option<crate::generation_backend::InstalledRuntime>> {
+    record
+        .map(|record| {
+            record
+                .runtime
+                .clone()
+                .context("導入記録に生成ランタイムの素性がありません")
+        })
+        .transpose()
+}
+
+/// 導入記録の読取不能・破損はGPU検査を素通しせず呼出元へ返す。
 pub(crate) fn installed_generation_runtime(
     app: &AppHandle,
-) -> Option<crate::generation_backend::InstalledRuntime> {
-    let text =
-        std::fs::read_to_string(installed_dir(app, "character-maker").join("install.json")).ok()?;
-    let value = serde_json::from_str::<serde_json::Value>(&text).ok()?;
-    serde_json::from_value(value.get("runtime")?.clone()).ok()
+) -> Result<Option<crate::generation_backend::InstalledRuntime>> {
+    recorded_runtime(read_install_record(&installed_dir(app, "character-maker"))?.as_ref())
 }
 
-/// `AppHandle`を受け取れないスキルから使う、導入済みランタイムの読み取り。
 pub(crate) fn installed_generation_runtime_for_app(
-) -> Option<crate::generation_backend::InstalledRuntime> {
-    installed_generation_runtime(crate::durable_jobs::app_handle()?)
+) -> Result<Option<crate::generation_backend::InstalledRuntime>> {
+    installed_generation_runtime(
+        crate::durable_jobs::app_handle().context("アプリの生成環境を確認できません")?,
+    )
 }
 
-/// `AppHandle`を受け取れないスキルから使う、導入済みランタイムの照合。
-pub(crate) fn generation_runtime_mismatch_for_app() -> Option<String> {
-    generation_runtime_mismatch(crate::durable_jobs::app_handle()?)
+pub(crate) fn generation_runtime_mismatch_for_app() -> Result<Option<String>> {
+    generation_runtime_mismatch(
+        crate::durable_jobs::app_handle().context("アプリの生成環境を確認できません")?,
+    )
 }
 
-/// 導入済みランタイムをいまのGPUで使い続けてよいか。使えない場合は日本語の理由を返す。
-pub(crate) fn generation_runtime_mismatch(app: &AppHandle) -> Option<String> {
-    let installed = installed_generation_runtime(app)?;
-    let devices = crate::gpu::devices();
-    if installed.matches_present_gpu(&devices) {
+fn runtime_mismatch(
+    installed: Option<&crate::generation_backend::InstalledRuntime>,
+) -> Option<String> {
+    let installed = installed?;
+    if installed.matches_present_gpu(&crate::gpu::devices()) {
         return None;
     }
-    Some(format!(
-        "導入済みの生成ランタイムは{}（{}）向けですが、いまのPCでは{}を確認できません。設定の「追加機能・更新」から入れ直してください。",
-        installed.gpu_vendor,
-        installed.backend.label(),
-        installed.gpu_vendor
+    Some(format!("導入済みの生成ランタイムは{}（{}）向けですが、いまのPCでは{}を確認できません。設定の「追加機能・更新」から入れ直してください。", installed.gpu_vendor, installed.backend.label(), installed.gpu_vendor))
+}
+
+pub(crate) fn generation_runtime_mismatch(app: &AppHandle) -> Result<Option<String>> {
+    Ok(runtime_mismatch(
+        installed_generation_runtime(app)?.as_ref(),
     ))
 }
 
-fn installed_component_version(id: &str, root: &Path) -> Result<Option<String>> {
-    let manifest_name = match id {
-        "aivis" => "engine_manifest.json",
-        "character-maker" | "video-wan" | "video-ltx" | "image-krea2" | "video-ltx25" => {
-            "install.json"
-        }
-        _ => return Ok(None),
-    };
-    let path = root.join(manifest_name);
-    if !path.is_file() {
-        return Ok(None);
+fn component_record(id: &str, root: &Path) -> Result<Option<InstallRecord>> {
+    match id {
+        "aivis" => read_record_file(root, "engine_manifest.json"),
+        "character-maker" | "whisper" | "video-wan" | "video-ltx" | "image-krea2"
+        | "video-ltx25" => read_install_record(root),
+        _ => Ok(None),
     }
-    let text = std::fs::read_to_string(&path)
-        .with_context(|| format!("{} を読めません", path.display()))?;
-    let value = serde_json::from_str::<serde_json::Value>(&text)
-        .with_context(|| format!("{} が不正なJSONです", path.display()))?;
-    Ok(value
-        .get("version")
-        .and_then(serde_json::Value::as_str)
-        .map(str::trim)
-        .filter(|version| !version.is_empty())
-        .map(ToString::to_string))
 }
 
-fn managed_media_ready(id: &str, root: &Path) -> bool {
+fn record_version(record: Option<&InstallRecord>) -> Result<Option<String>> {
+    record
+        .map(|record| record.version.clone().context("導入記録に版がありません"))
+        .transpose()
+}
+
+fn media_record_ready(id: &str, root: &Path, record: Option<&InstallRecord>) -> Result<bool> {
     let expected_model = match id {
         "video-wan" => "wan-2.2-5b",
         "video-ltx" => "ltx-0.9.8-2b-fp8",
         "image-krea2" => "krea-2-turbo-nvfp4",
         "video-ltx25" => "ltx-2.5-nvfp4",
-        _ => return false,
+        _ => return Ok(false),
     };
-    let marker = root.join("install.json");
-    let Ok(text) = std::fs::read_to_string(&marker) else {
-        return false;
+    let Some(record) = record else {
+        return Ok(false);
     };
-    let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) else {
-        return false;
-    };
-    if value.get("model").and_then(serde_json::Value::as_str) != Some(expected_model) {
-        return false;
+    let model = record
+        .model
+        .as_deref()
+        .context("導入記録にモデルがありません")?;
+    let files = record
+        .files
+        .as_ref()
+        .context("導入記録にモデルのファイル一覧がありません")?;
+    anyhow::ensure!(!files.is_empty(), "導入記録のモデルファイル一覧が空です");
+    for file in files {
+        let path = Path::new(file);
+        anyhow::ensure!(
+            !file.is_empty()
+                && path
+                    .components()
+                    .all(|part| matches!(part, Component::Normal(_))),
+            "導入記録のモデルパスが不正です"
+        );
     }
-    let Some(files) = value.get("files").and_then(serde_json::Value::as_array) else {
-        return false;
-    };
-    !files.is_empty()
-        && files.iter().all(|entry| {
-            let Some(relative) = entry.as_str().map(Path::new) else {
-                return false;
-            };
-            relative
-                .components()
-                .all(|part| matches!(part, Component::Normal(_)))
-                && root.join(relative).is_file()
-        })
+    Ok(model == expected_model && files.iter().all(|file| root.join(file).is_file()))
 }
 
-/// モデルだけを導入済みと誤認しない。専用環境の固定版と実行入口も必要とする。
-fn modern_media_runtime_ready(root: &Path) -> bool {
-    if !python_executable(&root.join("venv")).is_file() || !root.join("ComfyUI/main.py").is_file() {
-        return false;
-    }
-    let Ok(text) = std::fs::read_to_string(root.join("install.json")) else {
-        return false;
+fn modern_record_ready(root: &Path, record: Option<&InstallRecord>) -> Result<bool> {
+    let Some(record) = record else {
+        return Ok(false);
     };
-    let Ok(marker) = serde_json::from_str::<serde_json::Value>(&text) else {
-        return false;
-    };
+    let version = record
+        .version
+        .as_deref()
+        .context("導入記録に生成環境の版がありません")?;
+    let commit = record
+        .comfy_commit
+        .as_deref()
+        .context("導入記録にComfyUIの固定版がありません")?;
+    let lock = record
+        .lock_sha256
+        .as_deref()
+        .context("導入記録に依存ロックの検証値がありません")?;
     let lock_hash = hex::encode(Sha256::digest(include_bytes!(
         "../../character-maker/sidecar/requirements-media.lock"
     )));
-    marker.get("version").and_then(serde_json::Value::as_str) == Some("2026-09-21")
-        && marker
-            .get("comfyCommit")
-            .and_then(serde_json::Value::as_str)
-            == Some("b0b743566f65daafc423b4fea8a2fbda94b3384a")
-        && marker.get("lockSha256").and_then(serde_json::Value::as_str) == Some(lock_hash.as_str())
+    Ok(version == "2026-09-21"
+        && commit == "b0b743566f65daafc423b4fea8a2fbda94b3384a"
+        && lock == lock_hash
+        && python_executable(&root.join("venv")).is_file()
+        && root.join("ComfyUI/main.py").is_file())
 }
 
 fn numeric_version(value: &str) -> Option<Vec<u64>> {
@@ -529,6 +573,8 @@ fn external_ready(id: &str) -> bool {
 
 pub fn statuses(app: &AppHandle) -> Result<Vec<ComponentStatus>> {
     let manifest = manifest(app)?;
+    let modern_root = installed_dir(app, "media-runtime");
+    let modern_record = read_install_record(&modern_root);
     COMPONENT_IDS
         .into_iter()
         .map(|id| -> Result<ComponentStatus> {
@@ -540,55 +586,81 @@ pub fn statuses(app: &AppHandle) -> Result<Vec<ComponentStatus>> {
                 .with_context(|| format!("{id} の取得元情報がありません"))?
                 .clone();
             let installed_root = installed_dir(app, id);
-            // GPUを交換した後は、導入済みでも不一致バックエンドを再利用させない。
-            let runtime_mismatch = if id == "character-maker" {
-                generation_runtime_mismatch(app)
-            } else {
-                None
-            };
-            let installed = if id == "character-maker" {
-                runtime_mismatch.is_none()
-                    && installed_root.join("install.json").is_file()
-                    && python_executable(&shared_python_dir(app)).is_file()
-                    && installed_root.join("ComfyUI/main.py").is_file()
-            } else if matches!(
-                id,
-                "video-wan" | "video-ltx" | "image-krea2" | "video-ltx25"
-            ) {
-                managed_media_ready(id, &installed_root)
-                    && (!crate::generation_backend::is_nvfp4_component(id)
-                        || modern_media_runtime_ready(&installed_dir(app, "media-runtime")))
-            } else {
-                installed_root.is_dir()
-            };
             let packaged_root = packaged_dir(app, id);
             let packaged = packaged_root.is_some();
             let system = external_ready(id);
-            let version_root = if installed {
-                Some(installed_dir(app, id))
+            // 管理配置に記録の異常があるとき、同梱配置へ切り替えて理由を隠さない。
+            let version_root = if installed_root.is_dir() {
+                Some(installed_root.clone())
             } else {
-                packaged_root
+                packaged_root.clone()
             };
-            let (installed_version, mut version_error) = match version_root
-                .as_deref()
-                .map(|root| installed_component_version(id, root))
-                .transpose()
-            {
-                Ok(version) => (version.flatten(), None),
-                Err(error) => {
-                    crate::log_paths::append_app_log(
-                        app,
-                        &format!("{label}の導入済み版を確認できません: {error:#}"),
+            let inspected = (|| -> Result<(bool, Option<String>, Option<String>)> {
+                let record = version_root
+                    .as_deref()
+                    .map(|root| component_record(id, root))
+                    .transpose()?
+                    .flatten();
+                let version = record_version(record.as_ref())?;
+                if id == "whisper" && version_root.is_some() {
+                    let marker = record
+                        .as_ref()
+                        .context("Whisperの固定版導入記録がありません")?;
+                    let binary = marker
+                        .binary_release
+                        .as_deref()
+                        .context("Whisperの導入記録に配布版がありません")?;
+                    let commit = marker
+                        .source_commit
+                        .as_deref()
+                        .context("Whisperの導入記録にソース版がありません")?;
+                    anyhow::ensure!(
+                        !binary.is_empty()
+                            && commit.len() == 40
+                            && commit.chars().all(|char| char.is_ascii_hexdigit()),
+                        "Whisperの固定版導入記録が不正です"
                     );
-                    (
-                        None,
-                        Some(
-                            "導入済み版を確認できません。修復すると推奨版を取得します。"
-                                .to_string(),
-                        ),
-                    )
                 }
+
+                let mismatch = if id == "character-maker" {
+                    runtime_mismatch(recorded_runtime(record.as_ref())?.as_ref())
+                } else {
+                    None
+                };
+                let installed = if id == "character-maker" {
+                    mismatch.is_none()
+                        && record.is_some()
+                        && python_executable(&shared_python_dir(app)).is_file()
+                        && installed_root.join("ComfyUI/main.py").is_file()
+                } else if matches!(
+                    id,
+                    "video-wan" | "video-ltx" | "image-krea2" | "video-ltx25"
+                ) {
+                    media_record_ready(id, &installed_root, record.as_ref())?
+                        && (!crate::generation_backend::is_nvfp4_component(id)
+                            || modern_record_ready(
+                                &modern_root,
+                                modern_record
+                                    .as_ref()
+                                    .map_err(|error| anyhow::anyhow!("{error:#}"))?
+                                    .as_ref(),
+                            )?)
+                } else {
+                    installed_root.is_dir()
+                };
+                Ok((installed, version, mismatch))
+            })();
+            let (installed, installed_version, mut version_error) = match inspected {
+                Ok(state) => state,
+                Err(error) => (
+                    false,
+                    None,
+                    Some(format!(
+                        "導入記録を確認できません: {error:#}。設定の修復操作で入れ直してください"
+                    )),
+                ),
             };
+            let valid_configuration = version_error.is_none();
             let target_version = info.target_version.clone();
             let version_ordering = installed_version
                 .as_deref()
@@ -609,15 +681,12 @@ pub fn statuses(app: &AppHandle) -> Result<Vec<ComponentStatus>> {
                     "導入済み版の表記を比較できません。修復すると推奨版を取得します。".to_string(),
                 );
             }
-            if let Some(reason) = runtime_mismatch {
-                version_error = Some(reason);
-            }
             Ok(ComponentStatus {
                 id,
                 label,
                 description,
                 size_label,
-                ready: installed || packaged || system,
+                ready: valid_configuration && (installed || packaged || system),
                 source: if installed {
                     "installed"
                 } else if packaged {
@@ -629,10 +698,7 @@ pub fn statuses(app: &AppHandle) -> Result<Vec<ComponentStatus>> {
                 },
                 available: true,
                 // 専用runtimeが欠損していても、残った管理モデルの削除は許可する。
-                removable: (installed
-                    || (crate::generation_backend::is_nvfp4_component(id)
-                        && installed_root.is_dir()))
-                    && info.install_mode == "managed",
+                removable: installed_root.is_dir() && info.install_mode == "managed",
                 install_mode: info.install_mode,
                 installed_version,
                 target_version,
@@ -843,123 +909,360 @@ fn uv_asset() -> Option<UvAsset> {
 }
 
 /// 記憶検索の導入用uvを公式固定資産から取得し、サイズとSHA-256を検証する。
-pub(crate) async fn acquire_embedding_uv(app: &AppHandle) -> Result<PathBuf> {
+async fn acquire_uv(app: &AppHandle, cache: &Path, id: &str) -> Result<PathBuf> {
     let asset = uv_asset().context("この環境向けのPython管理ツール配布がありません")?;
-    let root = crate::app_paths::bundled_dir(app).join("embedding-install-tools");
-    std::fs::create_dir_all(&root)?;
-    let archive = root.join(asset.cache_name);
+    std::fs::create_dir_all(cache)?;
+    let archive = cache.join(asset.cache_name);
     download_to(
         app,
-        crate::tools::http::client().map_err(anyhow::Error::msg)?,
         DownloadSpec {
-            id: "embedding-memory",
+            id,
             url: asset.url,
             destination: &archive,
             expected_size: asset.size,
             max_size: 30_000_000,
-            message: "記憶検索のPython管理ツールを取得中…",
+            sha256: Some(asset.sha256),
+            message: "Python管理ツールを取得中…",
         },
     )
     .await?;
-    verify_sha256(&archive, asset.sha256)?;
-    let unpack = root.join("uv");
-    if unpack.exists() {
-        std::fs::remove_dir_all(&unpack)?;
-    }
-    let kind = asset.archive;
-    tokio::task::spawn_blocking(move || match kind {
-        UvArchive::Zip => extract_zip(&archive, &unpack),
-        UvArchive::TarGz => extract_tar_gz(&archive, &unpack),
+    let unpack = cache.join("uv");
+    let extract = unpack.clone();
+    tokio::task::spawn_blocking(move || match asset.archive {
+        UvArchive::Zip => extract_zip(&archive, &extract),
+        UvArchive::TarGz => extract_tar_gz(&archive, &extract),
     })
     .await??;
-    find_named_file(&root.join("uv"), asset.executable, 0).context("Python管理ツールがありません")
+    find_named_file(&unpack, asset.executable, 0)?.context("Python管理ツールがありません")
 }
 
-/// 呼出元がCOMPONENT_OPERATION_LOCKを保持し、画像モデルを取得せず共通Pythonだけ導入する。
+pub(crate) async fn acquire_embedding_uv(app: &AppHandle) -> Result<PathBuf> {
+    acquire_uv(
+        app,
+        &crate::app_paths::bundled_dir(app).join("embedding-install-tools"),
+        "embedding-memory",
+    )
+    .await
+}
+
+fn base_python_name(windows: bool) -> &'static str {
+    if windows {
+        "python.exe"
+    } else {
+        "python3.12"
+    }
+}
+
+const MANAGED_PYTHON_FIND_ARGS: &[&str] = &[
+    "python",
+    "find",
+    "--managed-python",
+    "--no-python-downloads",
+    "3.12.13",
+];
+
+fn managed_python_path(store: &Path, windows: bool, output: &str) -> Result<PathBuf> {
+    let line = output.strip_suffix('\n').unwrap_or(output);
+    let line = line.strip_suffix('\r').unwrap_or(line);
+    anyhow::ensure!(
+        !line.is_empty() && !line.contains(['\r', '\n', '\0']),
+        "uvのPython応答は絶対パス一行が必要です"
+    );
+    let path = PathBuf::from(line);
+    anyhow::ensure!(
+        path.is_absolute()
+            && path.file_name().and_then(|x| x.to_str()) == Some(base_python_name(windows)),
+        "uvのPython応答が対象OSの管理実行ファイルではありません"
+    );
+    let root = crate::installer::fs::checked_directory(store)?;
+    let resolved = path
+        .canonicalize()
+        .context("uvの管理Python実体を確認できません")?;
+    anyhow::ensure!(
+        resolved.starts_with(&root),
+        "uvのPython応答が管理領域外です"
+    );
+    let metadata = std::fs::symlink_metadata(&resolved)?;
+    anyhow::ensure!(
+        metadata.is_file() && !metadata.file_type().is_symlink(),
+        "uvの管理Pythonが通常ファイルではありません"
+    );
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        anyhow::ensure!(
+            metadata.file_attributes() & 0x400 == 0,
+            "uvの管理Python実体がリンクです"
+        );
+    }
+    Ok(resolved)
+}
+
+async fn install_base_python_using(
+    store: &Path,
+    windows: bool,
+    install: impl std::future::Future<Output = Result<()>>,
+    find: impl std::future::Future<Output = Result<String>>,
+) -> Result<PathBuf> {
+    install.await?;
+    managed_python_path(store, windows, &find.await?)
+}
+
+fn managed_python_query(uv: &Path, store: &Path) -> Result<tokio::process::Command> {
+    let mut command = crate::tools::process::command(uv);
+    command.args(MANAGED_PYTHON_FIND_ARGS);
+    configure_component_environment(&mut command, uv)?;
+    command.env("UV_PYTHON_INSTALL_DIR", store);
+    Ok(command)
+}
+
+async fn install_base_python(uv: &Path, store: &Path, label: &str) -> Result<PathBuf> {
+    install_base_python_using(
+        store,
+        cfg!(windows),
+        async {
+            run_labeled_command(
+                uv,
+                &[
+                    "python",
+                    "install",
+                    "3.12.13",
+                    "--no-bin",
+                    "--no-registry",
+                    "--install-dir",
+                    &store.to_string_lossy(),
+                ],
+                label,
+            )
+            .await
+        },
+        async { find_managed_python_output(uv, store, label).await },
+    )
+    .await
+}
+
+async fn find_managed_python_output(uv: &Path, store: &Path, label: &str) -> Result<String> {
+    let command = managed_python_query(uv, store)?;
+    let output = checked_component_output(command, uv, label).await?;
+    String::from_utf8(output.stdout).context("uvのPython応答がUTF-8ではありません")
+}
+
+fn venv_args(base: &Path, destination: &Path) -> Vec<String> {
+    [
+        "venv".to_owned(),
+        destination.to_string_lossy().into_owned(),
+        "--python".to_owned(),
+        base.to_string_lossy().into_owned(),
+        "--allow-existing".to_owned(),
+        "--relocatable".to_owned(),
+    ]
+    .into()
+}
+async fn create_venv(uv: &Path, base: &Path, destination: &Path, label: &str) -> Result<()> {
+    let args = venv_args(base, destination);
+    run_labeled_command(
+        uv,
+        &args.iter().map(String::as_str).collect::<Vec<_>>(),
+        label,
+    )
+    .await
+}
+
+// uv所有の基底runtimeへ向くPythonリンクだけを管理stage内の相対リンクへする。
+// 共通fsのリンク拒否は緩めず、他の仮想環境リンク・特殊型を公開前に拒否する。
+fn normalize_python_links(stage: &Path) -> Result<()> {
+    let root = crate::installer::fs::checked_directory(stage)?;
+    let runtime = crate::installer::fs::checked_directory(&root.join("runtime"))?;
+    let mut directories = vec![root.clone()];
+    let mut links = Vec::new();
+    let mut count = 0usize;
+    while let Some(directory) = directories.pop() {
+        for entry in std::fs::read_dir(directory)? {
+            let path = entry?.path();
+            count += 1;
+            anyhow::ensure!(
+                count <= MAX_FILES,
+                "Python仮想環境の項目数が導入上限を超えています"
+            );
+            let metadata = std::fs::symlink_metadata(&path)?;
+            #[cfg(windows)]
+            {
+                use std::os::windows::fs::MetadataExt;
+                anyhow::ensure!(
+                    metadata.file_attributes() & 0x400 == 0,
+                    "Python仮想環境に対応外のリンクがあります: {}",
+                    path.display()
+                );
+            }
+            if metadata.file_type().is_symlink() {
+                let target = path
+                    .canonicalize()
+                    .context("Python実行リンクの実体を確認できません")?;
+                if path == root.join("lib64") {
+                    anyhow::ensure!(
+                        std::fs::read_link(&path)? == Path::new("lib")
+                            && target == root.join("lib").canonicalize()?
+                            && target.starts_with(&root)
+                            && target.is_dir(),
+                        "Pythonのlib64リンクは管理内のlibへの相対リンクが必要です"
+                    );
+                } else {
+                    anyhow::ensure!(
+                        path.parent() == Some(root.join("bin").as_path())
+                            && path.file_name().and_then(|x| x.to_str()).is_some_and(|x| [
+                                "python",
+                                "python3",
+                                "python3.12"
+                            ]
+                            .contains(&x)),
+                        "Python仮想環境に対応外のリンクがあります: {}",
+                        path.display()
+                    );
+                    anyhow::ensure!(
+                        target.starts_with(&runtime) && target.is_file(),
+                        "Python実行リンクが管理runtime外または通常ファイル以外です: {}",
+                        path.display()
+                    );
+                    links.push((
+                        path,
+                        Path::new("../runtime").join(target.strip_prefix(&runtime)?),
+                    ));
+                }
+            } else if metadata.is_dir() {
+                if path != runtime {
+                    directories.push(path);
+                }
+            } else {
+                anyhow::ensure!(
+                    metadata.is_file(),
+                    "Python仮想環境に特殊ファイルがあります: {}",
+                    path.display()
+                );
+            }
+        }
+    }
+    #[cfg(unix)]
+    for (path, target) in links {
+        std::fs::remove_file(&path)?;
+        std::os::unix::fs::symlink(target, path)?;
+    }
+    #[cfg(not(unix))]
+    anyhow::ensure!(
+        links.is_empty(),
+        "このOSのPythonリンク配置には対応していません"
+    );
+
+    Ok(())
+}
+
+async fn prepare_shared_python(uv: &Path, stage: &Path, label: &str) -> Result<PathBuf> {
+    let base = install_base_python(uv, &stage.join("runtime"), label).await?;
+    create_venv(uv, &base, stage, label).await?;
+    normalize_python_links(stage)?;
+    let python = python_executable(stage);
+    verify_shared_python(&python, label).await?;
+    Ok(python)
+}
+
+async fn verify_shared_python(python: &Path, label: &str) -> Result<()> {
+    run_labeled_command(
+        python,
+        &["-c", "import sys; assert sys.version_info[:3] == (3,12,13)"],
+        label,
+    )
+    .await
+}
+
+async fn finalize_python_using(
+    root: &Path,
+    configure: impl std::future::Future<Output = Result<()>>,
+    verify: impl std::future::Future<Output = Result<()>>,
+) -> Result<()> {
+    configure.await?;
+    normalize_python_links(root)?;
+    verify.await
+}
+
+// uvのrelocatableはpyvenv.cfgのhomeを相対化しない。最終配置で公式設定を再生成する。
+async fn finalize_shared_python(uv: &Path, root: &Path, label: &str) -> Result<()> {
+    let python = python_executable(root);
+    finalize_python_using(
+        root,
+        async {
+            let store = root.join("runtime");
+            let output = find_managed_python_output(uv, &store, label).await?;
+            let base = managed_python_path(&store, cfg!(windows), &output)?;
+            create_venv(uv, &base, root, label).await
+        },
+        verify_shared_python(&python, label),
+    )
+    .await
+}
+
+/// 呼出元がCOMPONENT_OPERATION_LOCKを保持する。共通Pythonも検証後だけ配置する。
 pub(crate) async fn ensure_shared_python(app: &AppHandle, uv: &Path) -> Result<PathBuf> {
     let root = shared_python_dir(app);
     let python = python_executable(&root);
     if python.is_file() {
+        verify_shared_python(&python, "共通Python確認").await?;
         return Ok(python);
     }
-    std::fs::create_dir_all(&root)?;
-    let runtime = root.join("runtime");
-    run_labeled_command(
-        uv,
-        &[
-            "python",
-            "install",
-            "3.12.13",
-            "--no-bin",
-            "--no-registry",
-            "--install-dir",
-            &runtime.to_string_lossy(),
-        ],
-        "記憶検索の共通Python導入",
-    )
-    .await?;
-    let base = find_named_file(
-        &runtime,
-        if cfg!(windows) {
-            "python.exe"
-        } else {
-            "python3.12"
-        },
-        0,
-    )
-    .context("共通Python 3.12.13が見つかりません")?;
-    let venv = crate::app_paths::bundled_dir(app).join("embedding-install-tools/python-venv");
-    if venv.exists() {
-        std::fs::remove_dir_all(&venv)?;
+    let stage = root.with_file_name(format!(".installing-python-{}", std::process::id()));
+    if stage.exists() {
+        std::fs::remove_dir_all(&stage)?;
     }
-    run_labeled_command(
-        uv,
-        &[
-            "venv",
-            &venv.to_string_lossy(),
-            "--python",
-            &base.to_string_lossy(),
-            "--relocatable",
-        ],
-        "記憶検索の共通Python導入",
-    )
-    .await?;
-    copy_dir_all(&venv, &root)?;
-    run_labeled_command(
-        &python,
-        &["-c", "import sys; assert sys.version_info[:2] == (3,12)"],
-        "記憶検索の共通Python導入",
-    )
-    .await?;
+    prepare_shared_python(uv, &stage, "共通Python導入").await?;
+    crate::installer::swap::complete(
+        app,
+        crate::installer::swap::replace_with_validation(
+            &stage,
+            &root,
+            "python",
+            finalize_shared_python(uv, &root, "共通Python配置確認"),
+        )
+        .await,
+    )?;
     Ok(python)
 }
 
-/// tar.gzをOS標準のtarで展開する（macOS）。
-///
-/// 展開先を作ってから`-C`で中へ入れ、書庫の外へは出させない。
+fn extract_options() -> crate::installer::archive::ExtractOptions {
+    use crate::installer::archive::{ExtractOptions, Mode, NameEncoding, Permissions};
+    ExtractOptions {
+        mode: Mode::Fresh,
+        name_encoding: NameEncoding::Utf8,
+        permissions: Permissions::Executable,
+    }
+}
+
 fn extract_tar_gz(archive: &Path, destination: &Path) -> Result<()> {
-    std::fs::create_dir_all(destination)?;
-    let mut command = crate::tools::process::command_sync("tar");
-    let output = command
-        .arg("-xzf")
-        .arg(archive)
-        .arg("-C")
-        .arg(destination)
-        .output()?;
-    // このファイルはストリーミング受信も行うため、`text::guard`が禁じる
-    // 逐次デコードなしの置換変換を使わずにエラー本文を取り出す。
-    let stderr = String::from_utf8(output.stderr).unwrap_or_else(|error| {
+    crate::installer::archive::extract_tar_gz(
+        archive,
+        destination,
+        component_limits(),
+        extract_options(),
+    )
+}
+
+async fn verify_generation_python(
+    python: &Path,
+    assets: &Path,
+    backend: crate::generation_backend::GenerationBackend,
+) -> Result<()> {
+    run_component_command(
+        python,
+        &[
+            &assets.join("sidecar/verify_backend.py").to_string_lossy(),
+            "--backend",
+            backend.id(),
+        ],
+    )
+    .await
+    .with_context(|| {
         format!(
-            "標準エラーがUTF-8ではありません（{}バイト）",
-            error.as_bytes().len()
+            "{}版PyTorchが配置先の実GPUで動作しません。新版は有効にしていません",
+            backend.label()
         )
-    });
-    anyhow::ensure!(
-        output.status.success(),
-        "書庫を展開できません: {}",
-        stderr.trim()
-    );
-    Ok(())
+    })
 }
 
 async fn install_character_maker(app: &AppHandle) -> Result<()> {
@@ -1000,15 +1303,9 @@ async fn install_character_maker(app: &AppHandle) -> Result<()> {
 
     // uvは同じ0.12.23をOS別の公式アセットで取る。サイズとSHA-256は公式の
     // `<資産名>.sha256`と照合済み（全4資産: 2026-10-08）。
-    let uv_asset = uv_asset().context("この環境向けのPython管理ツール配布がありません")?;
     const COMFY_URL: &str =
         "https://github.com/Comfy-Org/ComfyUI/archive/12d5279438bfefc058a269eae805ceab6047777f.zip";
     const COMFY_SHA: &str = "a3c51a42bc7568d4b57267af3a1aa86a6cb379a199f95a90e8e3679c52651241";
-    let client = reqwest::Client::builder()
-        .connect_timeout(std::time::Duration::from_secs(30))
-        .read_timeout(std::time::Duration::from_secs(120))
-        .user_agent("PicoAgent/1.0 character maker installer")
-        .build()?;
     let cache = crate::app_paths::cache_dir(app).join("character-maker-installer");
     let stage = installed_dir(app, "character-maker").with_file_name(format!(
         ".installing-character-maker-{}",
@@ -1021,70 +1318,11 @@ async fn install_character_maker(app: &AppHandle) -> Result<()> {
     tokio::fs::create_dir_all(&cache).await?;
     tokio::fs::create_dir_all(&stage).await?;
     let result = async {
-        let uv_zip = cache.join(uv_asset.cache_name);
-        download_to(
-            app,
-            &client,
-            DownloadSpec {
-                id: "character-maker",
-                url: uv_asset.url,
-                destination: &uv_zip,
-                expected_size: uv_asset.size,
-                max_size: 30_000_000,
-                message: "Python管理ツールを取得中…",
-            },
-        )
-        .await?;
-        verify_sha256(&uv_zip, uv_asset.sha256)?;
-        let uv_dir = cache.join("uv");
-        cleanup_dir(app, "uv展開途中フォルダ", &uv_dir).await;
-        let uv_zip_copy = uv_zip.clone();
-        let uv_dir_copy = uv_dir.clone();
-        let archive_kind = uv_asset.archive;
-        tokio::task::spawn_blocking(move || match archive_kind {
-            UvArchive::Zip => extract_zip(&uv_zip_copy, &uv_dir_copy),
-            UvArchive::TarGz => extract_tar_gz(&uv_zip_copy, &uv_dir_copy),
-        })
-        .await??;
-        let uv = find_named_file(&uv_dir, uv_asset.executable, 0)
-            .with_context(|| format!("{}が配布物にありません", uv_asset.executable))?;
-        // uvの仮想環境は基準Pythonを参照する。キャッシュへ置くと起動時清掃で壊れるため、
-        // 基準Pythonとvenvを同じ管理対象世代へまとめて原子的に公開する。
-        let python_store = python_stage.join("runtime");
-        run_component_command(
-            &uv,
-            &[
-                "python",
-                "install",
-                "3.12.13",
-                "--no-bin",
-                "--no-registry",
-                "--install-dir",
-                &python_store.to_string_lossy(),
-            ],
-        )
-        .await?;
-        let base_python = find_named_file(&python_store, "python.exe", 0)
-            .context("Python 3.12.13を導入できません")?;
-        let venv_stage = cache.join("python-venv");
-        cleanup_dir(app, "共通Python仮想環境の作成途中フォルダ", &venv_stage).await;
-        run_component_command(
-            &uv,
-            &[
-                "venv",
-                &venv_stage.to_string_lossy(),
-                "--python",
-                &base_python.to_string_lossy(),
-                "--relocatable",
-            ],
-        )
-        .await?;
-        let python_stage_copy = python_stage.clone();
-        let venv_stage_copy = venv_stage.clone();
-        tokio::task::spawn_blocking(move || copy_dir_all(&venv_stage_copy, &python_stage_copy))
-            .await??;
+        let uv = acquire_uv(app, &cache, "character-maker").await?;
+        // 基準Pythonもvenvも同じ管理世代へ置き、モデル取得前に実行を検証する。
         let python = python_stage.clone();
-        let staged_python = python_executable(&python);
+        let staged_python =
+            prepare_shared_python(&uv, &python, "キャラ作成の共通Python導入").await?;
         // 実GPUに必要なバックエンドのwheelだけを入れる。CUDA版とROCm版を同じ環境へ同時に導入しない。
         let mut sync = vec![
             "pip".to_string(),
@@ -1113,43 +1351,29 @@ async fn install_character_maker(app: &AppHandle) -> Result<()> {
             0,
             0,
         );
-        run_component_command(
-            &staged_python,
-            &[
-                &assets.join("sidecar/verify_backend.py").to_string_lossy(),
-                "--backend",
-                backend.id(),
-            ],
-        )
-        .await
-        .with_context(|| {
-            format!(
-                "{}版PyTorchが実GPUで動作しません。何も有効にしていません",
-                backend.label()
-            )
-        })?;
+        verify_generation_python(&staged_python, &assets, backend).await?;
         let comfy_zip = cache.join("comfy.zip.part");
         download_to(
             app,
-            &client,
             DownloadSpec {
                 id: "character-maker",
                 url: COMFY_URL,
                 destination: &comfy_zip,
                 expected_size: 12_698_942,
                 max_size: 30_000_000,
+                sha256: Some(COMFY_SHA),
                 message: "ComfyUI v0.34.0を取得中…",
             },
         )
         .await?;
-        verify_sha256(&comfy_zip, COMFY_SHA)?;
+
         let comfy_unpack = cache.join("comfy");
         cleanup_dir(app, "ComfyUI展開途中フォルダ", &comfy_unpack).await;
         let archive = comfy_zip.clone();
         let unpack = comfy_unpack.clone();
         tokio::task::spawn_blocking(move || extract_zip(&archive, &unpack)).await??;
         let main =
-            find_named_file(&comfy_unpack, "main.py", 0).context("ComfyUI main.pyがありません")?;
+            find_named_file(&comfy_unpack, "main.py", 0)?.context("ComfyUI main.pyがありません")?;
         let comfy_root = main
             .parent()
             .context("ComfyUIの親フォルダがありません")?
@@ -1186,34 +1410,57 @@ async fn install_character_maker(app: &AppHandle) -> Result<()> {
                 "runtime": crate::generation_backend::InstalledRuntime::of(&selected),
             }),
         )?;
+        let final_python = python_executable(&shared_python_dir(app));
         replace_installed_pair(
+            app,
             (&python_stage, &shared_python_dir(app), "python"),
             (
                 &stage,
                 &installed_dir(app, "character-maker"),
                 "character-maker",
             ),
-        )?;
-        cleanup_file(app, "uv取得ファイル", &uv_zip).await;
+            async {
+                finalize_shared_python(
+                    &uv,
+                    &shared_python_dir(app),
+                    "キャラ作成の共通Python配置確認",
+                )
+                .await?;
+                verify_generation_python(&final_python, &assets, backend).await
+            },
+        )
+        .await?;
+        cleanup_file(
+            app,
+            "uv取得ファイル",
+            &cache.join(
+                uv_asset()
+                    .context("Python管理ツールが未対応です")?
+                    .cache_name,
+            ),
+        )
+        .await;
         cleanup_file(app, "ComfyUI取得ファイル", &comfy_zip).await;
-        cleanup_dir(app, "uv展開フォルダ", &uv_dir).await;
+        cleanup_dir(app, "uv展開フォルダ", &cache.join("uv")).await;
         cleanup_dir(app, "ComfyUI展開フォルダ", &comfy_unpack).await;
-        cleanup_dir(app, "共通Python仮想環境の作成途中フォルダ", &venv_stage).await;
+        cleanup_dir(
+            app,
+            "旧方式の共通Python仮想環境キャッシュ",
+            &cache.join("python-venv"),
+        )
+        .await;
         cleanup_dir(app, "モデル取得キャッシュ", &cache.join("model-download")).await;
         Ok::<_, anyhow::Error>(())
     }
     .await;
     if result.is_err()
-        && !["python", "character-maker"].iter().any(|id| {
-            crate::app_paths::bundled_dir(app)
-                .join(format!(".backup-{id}-{}", std::process::id()))
-                .exists()
-        })
+        && !crate::installer::swap::has_pending(&bundled, "python").unwrap_or(true)
+        && !crate::installer::swap::has_pending(&bundled, "character-maker").unwrap_or(true)
     {
-        // 復元も失敗した場合、次回起動で組を戻す判断に必要な途中配置は残す。
         cleanup_dir(app, "キャラ作成導入途中フォルダ", &stage).await;
         cleanup_dir(app, "共通Python導入途中フォルダ", &python_stage).await;
     }
+
     result
 }
 
@@ -1253,29 +1500,7 @@ async fn install_modern_media_runtime(app: &AppHandle, id: &str, model: &str) ->
         ],
     )
     .await?;
-    let uv_asset = uv_asset().context("Python管理ツールが未対応です")?;
-    let archive = cache.join(uv_asset.cache_name);
-    download_to(
-        app,
-        crate::tools::http::client().map_err(anyhow::Error::msg)?,
-        DownloadSpec {
-            id,
-            url: uv_asset.url,
-            destination: &archive,
-            expected_size: uv_asset.size,
-            max_size: 30_000_000,
-            message: "専用生成環境の管理ツールを取得中…",
-        },
-    )
-    .await?;
-    verify_sha256(&archive, uv_asset.sha256)?;
-    let uv_dir = cache.join("uv");
-    cleanup_dir(app, "Python管理ツールの展開途中", &uv_dir).await;
-    let extract_archive = archive.clone();
-    let extract_root = uv_dir.clone();
-    tokio::task::spawn_blocking(move || extract_zip(&extract_archive, &extract_root)).await??;
-    let uv = find_named_file(&uv_dir, uv_asset.executable, 0)
-        .context("Python管理ツールが見つかりません")?;
+    let uv = acquire_uv(app, &cache, id).await?;
     run_component_command(
         &python,
         &[
@@ -1338,7 +1563,7 @@ async fn install_media_model(
     );
     // 導入済みランタイムが今のGPU向けでないまま、動画モデルだけを取得させない。
     if !nvfp4 {
-        if let Some(reason) = generation_runtime_mismatch(app) {
+        if let Some(reason) = generation_runtime_mismatch(app)? {
             anyhow::bail!("{reason}動画モデルは取得していません。");
         }
     }
@@ -1405,7 +1630,7 @@ async fn install_media_model(
         cleanup_dir(app, "動画モデル導入途中フォルダ", &stage).await;
         return Err(error);
     }
-    replace_installed(&stage, &installed_dir(app, id), id)?;
+    replace_installed(app, &stage, &installed_dir(app, id), id)?;
     cleanup_dir(app, "動画モデル取得キャッシュ", &cache).await;
     emit_progress(
         app,
@@ -1438,8 +1663,26 @@ fn stale_install_pid(name: &str, current_pid: &str) -> Option<u32> {
     .and_then(|pid| pid.parse::<u32>().ok())
 }
 
+static INSTALL_RECOVERY_FAILURE: crate::notice::FailureLatch = crate::notice::FailureLatch::new();
+
 async fn cleanup_stale_install_stages(app: &AppHandle) -> Result<()> {
+    let result = recover_stale_install_stages(app).await;
+    INSTALL_RECOVERY_FAILURE.report(
+        app,
+        "component-install-recovery",
+        "追加機能の中断復旧",
+        result
+            .as_ref()
+            .map(|_| ())
+            .map_err(|error| format!("追加機能の中断復旧に失敗しました: {error:#}")),
+        "追加機能の中断復旧が再び利用できます",
+    );
+    result
+}
+
+async fn recover_stale_install_stages(app: &AppHandle) -> Result<()> {
     let bundled = crate::app_paths::bundled_dir(app);
+    crate::installer::swap::recover(&bundled)?;
     let mut entries = match tokio::fs::read_dir(&bundled).await {
         Ok(entries) => entries,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
@@ -1458,7 +1701,9 @@ async fn cleanup_stale_install_stages(app: &AppHandle) -> Result<()> {
             .context("追加機能の名前がありません")?
             .to_string_lossy();
         if let Some((id, pid)) = stale_backup(&name, &current_pid) {
-            if matches!(id.as_str(), "python" | "character-maker") && !process_exists(pid) {
+            if matches!(id.as_str(), "python" | "character-maker")
+                && !crate::tools::process::process_alive(pid)?
+            {
                 recover_installed_pair(&bundled, pid)?;
             }
         }
@@ -1473,14 +1718,16 @@ async fn cleanup_stale_install_stages(app: &AppHandle) -> Result<()> {
             .to_string_lossy()
             .to_string();
         let stale_pid = stale_install_pid(&name, &current_pid);
-        if stale_pid.is_some_and(|pid| !process_exists(pid)) {
-            cleanup_dir(app, "終了済み導入途中フォルダ", &path).await;
-            continue;
+        if let Some(pid) = stale_pid {
+            if !crate::tools::process::process_alive(pid)? {
+                cleanup_dir(app, "終了済み導入途中フォルダ", &path).await;
+                continue;
+            }
         }
         // 入れ替えの途中で落ちた退避先。名前にプロセスIDを含むため、拾わないと
         // 数十GBの旧版が残り続け、配置前に落ちた場合は機能が未導入に見える。
         if let Some((id, pid)) = stale_backup(&name, &current_pid) {
-            if process_exists(pid) {
+            if crate::tools::process::process_alive(pid)? {
                 continue;
             }
             let destination = bundled.join(&id);
@@ -1550,36 +1797,6 @@ fn stale_backup(name: &str, current_pid: &str) -> Option<(String, u32)> {
     Some((id.to_string(), pid.parse().ok()?))
 }
 
-#[cfg(windows)]
-fn process_exists(pid: u32) -> bool {
-    let filter = format!("PID eq {pid}");
-    let Ok(output) = crate::tools::process::command_sync("tasklist.exe")
-        .args(["/FI", &filter, "/FO", "CSV", "/NH"])
-        .output()
-    else {
-        // 判定不能時は削除しない。
-        return true;
-    };
-    let Ok(stdout) = String::from_utf8(output.stdout) else {
-        // 判定不能時は別プロセスの作業中フォルダを消さない。
-        return true;
-    };
-    stdout.contains(&format!("\"{pid}\""))
-}
-
-#[cfg(not(windows))]
-fn process_exists(pid: u32) -> bool {
-    // キャラ作成は Apple Silicon Mac でも導入するため、macOS / Linux でも判定する。
-    // `ps -p` は対象が無いと失敗で終わる。起動自体できない判定不能時は削除しない。
-    match crate::tools::process::command_sync("ps")
-        .args(["-p", &pid.to_string()])
-        .output()
-    {
-        Ok(output) => output.status.success(),
-        Err(_) => true,
-    }
-}
-
 fn configure_component_environment(
     command: &mut tokio::process::Command,
     program: &Path,
@@ -1597,7 +1814,7 @@ fn configure_component_environment(
     }
     let root = program
         .parent()
-        .unwrap_or(Path::new("."))
+        .context("追加機能のプログラムの親フォルダを確認できません")?
         .join("picoagent-runtime-data");
     let home = root.join("home");
     let cache = root.join("cache");
@@ -1633,21 +1850,32 @@ pub(crate) async fn run_labeled_command(program: &Path, args: &[&str], label: &s
     let mut command = crate::tools::process::command(program);
     command.args(args);
     configure_component_environment(&mut command, program)?;
+    checked_component_output(command, program, label).await?;
+    Ok(())
+}
+
+async fn checked_component_output(
+    command: tokio::process::Command,
+    program: &Path,
+    label: &str,
+) -> Result<std::process::Output> {
     let output = crate::tools::process::output(command, 7_200, label)
         .await
         .map_err(anyhow::Error::msg)?;
-    let stderr = String::from_utf8(output.stderr).unwrap_or_else(|error| {
-        format!(
-            "標準エラーがUTF-8ではありません（{}バイト）",
-            error.as_bytes().len()
-        )
-    });
+    let stderr = std::str::from_utf8(&output.stderr)
+        .map(str::to_owned)
+        .unwrap_or_else(|_| {
+            format!(
+                "標準エラーがUTF-8ではありません（{}バイト）",
+                output.stderr.len()
+            )
+        });
     anyhow::ensure!(
         output.status.success(),
         "{} の実行に失敗しました: {stderr}",
         program.display()
     );
-    Ok(())
+    Ok(output)
 }
 
 async fn run_component_command_with_progress(
@@ -1691,136 +1919,146 @@ async fn run_component_command_with_progress(
     Ok(())
 }
 
-#[cfg(windows)]
 fn free_disk_bytes(path: &Path) -> Result<u64> {
-    use std::os::windows::ffi::OsStrExt;
-    use windows_sys::Win32::Storage::FileSystem::GetDiskFreeSpaceExW;
-    let wide = path
-        .as_os_str()
-        .encode_wide()
-        .chain(Some(0))
-        .collect::<Vec<_>>();
-    let mut available = 0_u64;
-    let ok = unsafe {
-        GetDiskFreeSpaceExW(
-            wide.as_ptr(),
-            &mut available,
-            std::ptr::null_mut(),
-            std::ptr::null_mut(),
-        )
-    };
-    anyhow::ensure!(
-        ok != 0,
-        "保存先の空き容量を確認できません: {}",
-        path.display()
-    );
-    Ok(available)
+    crate::installer::disk::available_bytes(path)
 }
 
-#[cfg(not(windows))]
-fn free_disk_bytes(_path: &Path) -> Result<u64> {
-    Ok(0)
+fn whisper_pin() -> Result<picoagent_core::whisper::ReleasePin> {
+    picoagent_core::whisper::ReleasePin::from_manifest(include_str!(
+        "../resources/component-manifest.json"
+    ))
+    .map_err(anyhow::Error::msg)
+}
+
+async fn whisper_tool(program: &Path, args: &[String], seconds: u64) -> Result<String> {
+    let mut command = crate::tools::process::command(program);
+    command.args(args);
+    let output = crate::tools::process::output(command, seconds, "Whisperソースビルド")
+        .await
+        .map_err(anyhow::Error::msg)?;
+    anyhow::ensure!(
+        output.status.success(),
+        "Whisperビルドツールが失敗しました: {}: {}",
+        program.display(),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8(output.stdout).context("Whisperビルドツールの応答がUTF-8ではありません")
+}
+
+async fn build_whisper_source(
+    app: &AppHandle,
+    pin: &picoagent_core::whisper::ReleasePin,
+    cache: &Path,
+    stage: &Path,
+) -> Result<()> {
+    let cmake = crate::tools::process::resolve_executable("cmake").context("Mac版Whisperの導入にはCMakeが必要です。CMakeを明示導入して再試行してください。SDKは自動取得しません")?;
+    let version = whisper_tool(&cmake, &["--version".into()], 30).await?;
+    picoagent_core::whisper::validate_cmake(&version).map_err(anyhow::Error::msg)?;
+    let xcrun = Path::new("/usr/bin/xcrun");
+    let mut paths = Vec::new();
+    for args in picoagent_core::whisper::XCRUN_PROBES {
+        let output = whisper_tool(xcrun, &args.iter().map(|arg| (*arg).to_owned()).collect::<Vec<_>>(), 30).await
+            .context("Mac版WhisperにはC/C++コンパイラとmacOS SDKが必要です。XcodeとMetalビルドツールを明示導入して再試行してください")?;
+        let path = PathBuf::from(output.trim());
+        anyhow::ensure!(
+            path.is_absolute() && path.exists(),
+            "Mac版WhisperのビルドツールまたはSDKの実体がありません"
+        );
+        paths.push(path);
+    }
+    let probe = cache.join("compiler-probe.cpp");
+    crate::store::write_atomic(&probe, picoagent_core::whisper::COMPILER_PROBE.as_bytes())?;
+    let check = whisper_tool(
+        &paths[1],
+        &[
+            "-fsyntax-only".into(),
+            "-isysroot".into(),
+            paths[2].to_string_lossy().into_owned(),
+            probe.to_string_lossy().into_owned(),
+        ],
+        30,
+    )
+    .await;
+    std::fs::remove_file(&probe)?;
+    check.context("Mac版Whisperの取得前コンパイラ・SDK検査に失敗しました。何も取得していません")?;
+    let archive = cache.join("whisper-source.tar.gz");
+    download_to(
+        app,
+        DownloadSpec {
+            id: "whisper",
+            url: &pin.source_url(),
+            destination: &archive,
+            expected_size: pin.source_size,
+            max_size: pin.source_size,
+            sha256: Some(&pin.source_sha256),
+            message: "固定版Whisperの公式ソースを取得中…",
+        },
+    )
+    .await?;
+    let unpacked = cache.join("source");
+    extract_tar_gz(&archive, &unpacked)?;
+    let source = unpacked.join(format!("whisper.cpp-{}", pin.source_commit));
+    anyhow::ensure!(
+        source.join("CMakeLists.txt").is_file(),
+        "Whisper固定ソースのCMake定義がありません"
+    );
+    let build = cache.join("build");
+    whisper_tool(
+        &cmake,
+        &picoagent_core::whisper::configure_args(&source, &build, &paths[0], &paths[1], &paths[2]),
+        120,
+    )
+    .await?;
+    whisper_tool(&cmake, &picoagent_core::whisper::build_args(&build), 900).await?;
+    std::fs::create_dir_all(stage)?;
+    let binary = build.join("bin/whisper-cli");
+    anyhow::ensure!(binary.is_file(), "WhisperソースビルドのCLIがありません");
+    std::fs::copy(binary, stage.join(whisper_exe_name()))?;
+    Ok(())
 }
 
 async fn install_whisper(app: &AppHandle) -> Result<()> {
-    let client = reqwest::Client::builder()
-        .connect_timeout(std::time::Duration::from_secs(30))
-        .read_timeout(std::time::Duration::from_secs(120))
-        .user_agent("PicoAgent/1.0 (official component installer)")
-        .build()?;
-    let release = client
-        .get(WHISPER_RELEASE_API)
-        .send()
-        .await?
-        .error_for_status()?
-        .json::<serde_json::Value>()
-        .await?;
-    let (asset_url, asset_size, asset_sha256) = whisper_asset(&release)?;
-    let cache = crate::app_paths::cache_dir(app).join("component-installer");
+    let pin = whisper_pin()?;
+    let cache = crate::app_paths::cache_dir(app).join("component-installer/whisper");
     tokio::fs::create_dir_all(&cache).await?;
-    let archive = cache.join("whisper.zip.part");
-    let unpacked = cache.join(format!("whisper-unpacked-{}", std::process::id()));
     let stage = installed_dir(app, "whisper")
         .with_file_name(format!(".installing-whisper-{}", std::process::id()));
-    cleanup_file(app, "古いWhisper取得途中ファイル", &archive).await;
-    cleanup_dir(app, "古いWhisper展開途中フォルダ", &unpacked).await;
     cleanup_dir(app, "古いWhisper導入途中フォルダ", &stage).await;
-
     let result = async {
-        download_to(
-            app,
-            &client,
-            DownloadSpec {
-                id: "whisper",
-                url: &asset_url,
-                destination: &archive,
-                expected_size: asset_size,
-                max_size: MAX_DOWNLOAD_BYTES,
-                message: "whisper.cpp公式配布をダウンロード中…",
-            },
-        )
-        .await?;
-        verify_sha256(&archive, &asset_sha256)?;
-        let archive_for_extract = archive.clone();
-        let unpacked_for_extract = unpacked.clone();
-        tokio::task::spawn_blocking(move || {
-            extract_zip(&archive_for_extract, &unpacked_for_extract)
-        })
-        .await??;
-        let executable = find_named_file(&unpacked, whisper_exe_name(), 0)
-            .context("公式whisper.cpp配布にwhisper-cliが見つかりません")?;
-        let binary_root = executable
-            .parent()
-            .context("whisper-cliの親フォルダを取得できません")?
-            .to_path_buf();
-        let stage_for_copy = stage.clone();
-        tokio::task::spawn_blocking(move || copy_dir_all(&binary_root, &stage_for_copy)).await??;
-
-        let model = stage.join("models/ggml-small.bin");
-        if let Some(parent) = model.parent() {
-            tokio::fs::create_dir_all(parent).await?;
+        if picoagent_core::whisper::binary_name(std::env::consts::OS, std::env::consts::ARCH).map_err(anyhow::Error::msg)?.is_none() {
+            build_whisper_source(app, &pin, &cache, &stage).await?;
+        } else {
+            let release = crate::installer::http::client().map_err(anyhow::Error::msg)?.get(pin.release_api()).send().await?.error_for_status()?.json::<serde_json::Value>().await?;
+            pin.validate_release(&release).map_err(anyhow::Error::msg)?;
+            let (asset_url, asset_size, asset_sha256) = whisper_asset(&release)?;
+            let source_name = picoagent_core::whisper::binary_name(std::env::consts::OS, std::env::consts::ARCH).map_err(anyhow::Error::msg)?.context("Whisper公式配布名がありません")?;
+            let archive = cache.join(source_name);
+            download_to(app, DownloadSpec { id: "whisper", url: &asset_url, destination: &archive, expected_size: asset_size,
+                max_size: MAX_DOWNLOAD_BYTES, sha256: Some(&asset_sha256), message: "固定版Whisperの公式配布を取得中…" }).await?;
+            let unpacked = cache.join("binary");
+            if source_name.ends_with(".tar.gz") { extract_tar_gz(&archive, &unpacked)?; } else { extract_zip(&archive, &unpacked)?; }
+            let executable = find_named_file(&unpacked, whisper_exe_name(), 0)?.context("公式Whisper配布にCLIがありません")?;
+            copy_dir_all(executable.parent().context("Whisper CLIの親フォルダがありません")?, &stage)?;
         }
-        download_to(
-            app,
-            &client,
-            DownloadSpec {
-                id: "whisper",
-                url: WHISPER_MODEL_URL,
-                destination: &model,
-                expected_size: 487_601_967,
-                max_size: MAX_DOWNLOAD_BYTES,
-                message: "公式Whisper smallモデルをダウンロード中…",
-            },
-        )
-        .await?;
-        verify_sha256(&model, WHISPER_MODEL_SHA256)?;
-        let config = serde_json::json!({
-            "program": whisper_exe_name(),
-            "model": "models/ggml-small.bin",
-            "args": "-m {model} -f {audio} -otxt -of {output_stem}",
-            "diarizeArgs": "-tdrz"
-        });
-        crate::store::write_atomic(
-            &stage.join("whisper.json"),
-            format!("{}\n", serde_json::to_string_pretty(&config)?).as_bytes(),
-        )?;
-        replace_installed(&stage, &installed_dir(app, "whisper"), "whisper")?;
-        emit_progress(
-            app,
-            "whisper",
-            "ready",
-            "Whisperを公式配布元から導入しました",
-            0,
-            0,
-        );
+        let model = stage.join("models/ggml-small.bin");
+        tokio::fs::create_dir_all(model.parent().context("Whisperモデルの親フォルダがありません")?).await?;
+        download_to(app, DownloadSpec { id: "whisper", url: WHISPER_MODEL_URL, destination: &model, expected_size: 487_601_967,
+            max_size: MAX_DOWNLOAD_BYTES, sha256: Some(WHISPER_MODEL_SHA256), message: "公式Whisper smallモデルを取得中…" }).await?;
+        crate::store::write_json_atomic(&stage.join("whisper.json"), &serde_json::json!({"program": whisper_exe_name(), "model": "models/ggml-small.bin",
+            "args": "-m {model} -f {audio} -otxt -of {output_stem}", "diarizeArgs": "-tdrz"}))?;
+        crate::store::write_json_atomic(&stage.join("install.json"), &serde_json::json!({"version": pin.target_version, "binaryRelease": pin.binary_release, "sourceCommit": pin.source_commit}))?;
+        replace_installed(app, &stage, &installed_dir(app, "whisper"), "whisper")?;
+        cleanup_dir(app, "Whisper取得・ビルドキャッシュ", &cache).await;
+        emit_progress(app, "whisper", "ready", "Whisper固定版を公式配布元から導入しました", 0, 0);
         Ok::<_, anyhow::Error>(())
-    }
-    .await;
-
-    // 成否にかかわらずPicoAgent管理下の作業用ファイルだけを掃除する。
-    cleanup_file(app, "Whisper取得途中ファイル", &archive).await;
-    cleanup_dir(app, "Whisper展開途中フォルダ", &unpacked).await;
-    if result.is_err() {
+    }.await;
+    if result.is_err()
+        && !crate::installer::swap::has_pending(
+            stage.parent().context("Whisper管理領域がありません")?,
+            "whisper",
+        )
+        .unwrap_or(true)
+    {
         cleanup_dir(app, "Whisper導入途中フォルダ", &stage).await;
     }
     result
@@ -1835,13 +2073,9 @@ fn whisper_exe_name() -> &'static str {
 }
 
 fn whisper_asset(release: &serde_json::Value) -> Result<(String, u64, String)> {
-    let suffix = match (std::env::consts::OS, std::env::consts::ARCH) {
-        ("windows", "aarch64") => "whisper-bin-arm64.zip",
-        ("windows", _) => "whisper-bin-x64.zip",
-        ("macos", "aarch64") => "whisper-bin-macos-arm64.zip",
-        ("macos", _) => "whisper-bin-macos-x64.zip",
-        _ => anyhow::bail!("このOS向けのwhisper.cpp公式配布は自動導入できません"),
-    };
+    let suffix = picoagent_core::whisper::binary_name(std::env::consts::OS, std::env::consts::ARCH)
+        .map_err(anyhow::Error::msg)?
+        .context("この環境のWhisperは公式ソースをビルドします")?;
     let asset = release
         .get("assets")
         .and_then(serde_json::Value::as_array)
@@ -1877,248 +2111,83 @@ struct DownloadSpec<'a> {
     destination: &'a Path,
     expected_size: u64,
     max_size: u64,
+    sha256: Option<&'a str>,
     message: &'a str,
 }
 
-async fn download_to(
-    app: &AppHandle,
-    client: &reqwest::Client,
-    spec: DownloadSpec<'_>,
-) -> Result<()> {
-    anyhow::ensure!(
-        spec.url.starts_with("https://"),
-        "HTTPS以外からは取得できません"
-    );
-    anyhow::ensure!(
-        spec.expected_size > 0 && spec.expected_size <= spec.max_size,
-        "取得予定サイズが不正です"
-    );
-    let response = client.get(spec.url).send().await?.error_for_status()?;
-    if let Some(length) = response.content_length() {
-        anyhow::ensure!(
-            length == spec.expected_size,
-            "公式配布のサイズが予定と一致しません"
-        );
-    }
-    let mut stream = response.bytes_stream();
-    let mut file = tokio::fs::File::create(spec.destination).await?;
-    let mut downloaded = 0_u64;
-    use tokio::io::AsyncWriteExt;
-    while let Some(chunk) = stream.next().await {
-        let chunk = chunk?;
-        downloaded = downloaded.saturating_add(chunk.len() as u64);
-        anyhow::ensure!(
-            downloaded <= spec.max_size,
-            "取得サイズが上限を超えています"
-        );
-        file.write_all(&chunk).await?;
-        emit_progress(
-            app,
-            spec.id,
-            "download",
-            spec.message,
-            downloaded,
-            spec.expected_size,
-        );
-    }
-    file.flush().await?;
-    drop(file);
-    anyhow::ensure!(
-        downloaded == spec.expected_size,
-        "公式配布のサイズが予定と一致しません"
-    );
-    Ok(())
+async fn download_to(app: &AppHandle, spec: DownloadSpec<'_>) -> Result<()> {
+    crate::installer::download::fetch_fixed(
+        crate::installer::download::FetchSpec {
+            url: spec.url,
+            destination: spec.destination,
+            expected_size: Some(spec.expected_size),
+            max_size: spec.max_size,
+            sha256: spec.sha256,
+        },
+        &mut |downloaded, total| {
+            emit_progress(app, spec.id, "download", spec.message, downloaded, total)
+        },
+    )
+    .await
 }
 
-fn verify_sha256(path: &Path, expected: &str) -> Result<()> {
-    anyhow::ensure!(expected.len() == 64, "SHA-256が不正です");
-    let mut file = std::fs::File::open(path)?;
-    let mut digest = Sha256::new();
-    let mut buffer = vec![0_u8; 1024 * 1024];
-    loop {
-        let count = file.read(&mut buffer)?;
-        if count == 0 {
-            break;
-        }
-        digest.update(&buffer[..count]);
+fn component_limits() -> crate::installer::Limits {
+    crate::installer::Limits {
+        max_entries: MAX_FILES,
+        max_total_bytes: MAX_EXTRACTED_BYTES,
+        max_file_bytes: MAX_EXTRACTED_BYTES,
+        file_limit: None,
     }
-    let actual = hex::encode(digest.finalize());
-    anyhow::ensure!(
-        actual == expected.to_ascii_lowercase(),
-        "SHA-256が一致しません"
-    );
-    Ok(())
 }
 
 fn extract_zip(archive: &Path, destination: &Path) -> Result<()> {
-    if destination.exists() {
-        std::fs::remove_dir_all(destination)?;
-    }
-    std::fs::create_dir_all(destination)?;
-    let file = std::fs::File::open(archive)?;
-    let mut zip = zip::ZipArchive::new(file)?;
-    anyhow::ensure!(
-        zip.len() <= MAX_FILES,
-        "配布物内のファイル数が上限を超えています"
-    );
-    let mut extracted = 0_u64;
-    for index in 0..zip.len() {
-        let mut entry = zip.by_index(index)?;
-        let relative = entry
-            .enclosed_name()
-            .context("危険なパスを含む配布物です")?
-            .to_path_buf();
-        let output = destination.join(relative);
-        if entry.is_dir() {
-            std::fs::create_dir_all(&output)?;
-            continue;
-        }
-        if let Some(parent) = output.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        let mut target = std::fs::File::create(output)?;
-        let remaining = MAX_EXTRACTED_BYTES.saturating_sub(extracted);
-        let mut limited = std::io::Read::take(&mut entry, remaining.saturating_add(1));
-        let copied = std::io::copy(&mut limited, &mut target)?;
-        anyhow::ensure!(copied <= remaining, "展開サイズが上限を超えています");
-        extracted = extracted.saturating_add(copied);
-        target.flush()?;
-        #[cfg(unix)]
-        if let Some(mode) = entry.unix_mode() {
-            use std::os::unix::fs::PermissionsExt;
-            target.set_permissions(std::fs::Permissions::from_mode(mode))?;
-        }
-    }
-    Ok(())
+    crate::installer::archive::extract_zip(
+        archive,
+        destination,
+        component_limits(),
+        extract_options(),
+    )
 }
 
-fn find_named_file(dir: &Path, name: &str, depth: usize) -> Option<PathBuf> {
-    if depth > 8 {
-        return None;
-    }
-    let entries = std::fs::read_dir(dir).ok()?;
-    let mut subdirs = Vec::new();
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.is_file() && path.file_name().and_then(|item| item.to_str()) == Some(name) {
-            return Some(path);
-        }
-        if path.is_dir() {
-            subdirs.push(path);
-        }
-    }
-    subdirs
-        .into_iter()
-        .find_map(|subdir| find_named_file(&subdir, name, depth + 1))
+fn find_named_file(dir: &Path, name: &str, depth: usize) -> Result<Option<PathBuf>> {
+    crate::installer::fs::find_file(dir, name, 8usize.saturating_sub(depth))
 }
 
 fn copy_dir_all(source: &Path, destination: &Path) -> Result<()> {
-    std::fs::create_dir_all(destination)?;
-    for entry in std::fs::read_dir(source)? {
-        let entry = entry?;
-        let from = entry.path();
-        let to = destination.join(entry.file_name());
-        if from.is_dir() {
-            copy_dir_all(&from, &to)?;
-        } else {
-            std::fs::copy(from, to)?;
-        }
-    }
-    Ok(())
+    crate::installer::fs::copy_dir(source, destination, component_limits())
 }
 
-fn replace_installed(stage: &Path, destination: &Path, id: &str) -> Result<()> {
-    if destination.exists() {
-        let backup = destination.with_file_name(format!(".backup-{id}-{}", std::process::id()));
-        if backup.exists() {
-            std::fs::remove_dir_all(&backup)?;
-        }
-        std::fs::rename(destination, &backup)?;
-        if let Err(error) = std::fs::rename(stage, destination) {
-            if let Err(restore_error) = std::fs::rename(&backup, destination) {
-                anyhow::bail!("追加機能の入れ替えと旧版復元に失敗しました: 入れ替え={error} / 復元={restore_error}");
-            }
-            return Err(error.into());
-        }
-        remove_replaced_backup(&backup);
-    } else {
-        std::fs::rename(stage, destination)?;
-    }
-    Ok(())
+fn replace_installed(app: &AppHandle, stage: &Path, destination: &Path, id: &str) -> Result<()> {
+    crate::installer::swap::complete(app, crate::installer::swap::replace(stage, destination, id))
 }
 
-/// 入れ替え後の旧版を消す。新版はもう配置済みなので、消せなくても導入は成功として扱う
-/// （残った退避先は次回の `cleanup_stale_install_stages` が片付ける）。
-fn remove_replaced_backup(backup: &Path) {
-    if let Err(error) = std::fs::remove_dir_all(backup) {
-        crate::log_paths::log_detached(&format!(
-            "入れ替え前の追加機能を削除できません（次回の起動時に消します）: {} ({error})",
-            backup.display()
-        ));
-    }
-}
-
-fn replace_installed_pair(first: (&Path, &Path, &str), second: (&Path, &Path, &str)) -> Result<()> {
-    let pairs = [first, second];
-    let backups = pairs.map(|(_, destination, id)| {
-        destination.with_file_name(format!(".backup-{id}-{}", std::process::id()))
-    });
-    for backup in &backups {
-        if backup.exists() {
-            std::fs::remove_dir_all(backup)?;
-        }
-    }
-    let mut backed_up = 0_usize;
-    for (index, (_, destination, _)) in pairs.iter().enumerate() {
-        if destination.exists() {
-            if let Err(error) = std::fs::rename(destination, &backups[index]) {
-                for restore in (0..backed_up).rev() {
-                    if backups[restore].exists() {
-                        std::fs::rename(&backups[restore], pairs[restore].1)?;
-                    }
-                }
-                return Err(error.into());
-            }
-        }
-        backed_up = index + 1;
-    }
-    let mut published = 0_usize;
-    for (index, (stage, destination, _)) in pairs.iter().enumerate() {
-        if let Err(error) = std::fs::rename(stage, destination) {
-            let mut restore_errors = Vec::new();
-            for rollback in (0..published).rev() {
-                if let Err(rollback_error) = std::fs::rename(pairs[rollback].1, pairs[rollback].0) {
-                    restore_errors.push(rollback_error.to_string());
-                }
-            }
-            for restore in (0..backed_up).rev() {
-                if backups[restore].exists() {
-                    if let Err(restore_error) = std::fs::rename(&backups[restore], pairs[restore].1)
-                    {
-                        restore_errors.push(restore_error.to_string());
-                    }
-                }
-            }
-            if !restore_errors.is_empty() {
-                anyhow::bail!(
-                    "キャラ作成ランタイムの入れ替えと旧版復元に失敗しました: 入れ替え={error} / 復元={}",
-                    restore_errors.join(" / ")
-                );
-            }
-            return Err(error.into());
-        }
-        published = index + 1;
-    }
-    for backup in backups {
-        if backup.exists() {
-            remove_replaced_backup(&backup);
-        }
-    }
-    Ok(())
+async fn replace_installed_pair(
+    app: &AppHandle,
+    first: (&Path, &Path, &str),
+    second: (&Path, &Path, &str),
+    validate: impl std::future::Future<Output = Result<()>>,
+) -> Result<()> {
+    crate::installer::swap::complete(
+        app,
+        crate::installer::swap::replace_pair_with_validation(first, second, validate).await,
+    )
 }
 
 #[cfg(test)]
 mod tests {
+    use std::io::Write;
+    fn installed_component_version(id: &str, root: &Path) -> Result<Option<String>> {
+        record_version(component_record(id, root)?.as_ref())
+    }
+
+    fn managed_media_ready(id: &str, root: &Path) -> Result<bool> {
+        media_record_ready(id, root, read_install_record(root)?.as_ref())
+    }
+
+    fn modern_media_runtime_ready(root: &Path) -> Result<bool> {
+        modern_record_ready(root, read_install_record(root)?.as_ref())
+    }
+
     use super::*;
 
     fn test_path(name: &str) -> PathBuf {
@@ -2126,7 +2195,7 @@ mod tests {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        std::env::temp_dir().join(format!(
+        std::env::temp_dir().canonicalize().unwrap().join(format!(
             "picoagent-components-{name}-{}-{nonce}",
             std::process::id(),
         ))
@@ -2182,14 +2251,26 @@ mod tests {
 
     #[test]
     fn python環境の配置は共通入口だけで決める() {
-        let components_source = include_str!("components.rs");
+        let components_source = include_str!("components.rs")
+            .split("#[cfg(test)]")
+            .next()
+            .unwrap();
         let maker_source = include_str!("character_maker.rs");
         assert_eq!(components_source.matches(".join(\"python\")").count(), 1);
         assert!(!maker_source.contains(".join(\"python\")"));
         assert!(maker_source.contains("components::shared_python_dir(app)"));
-        assert!(components_source.contains("python_stage.join(\"runtime\")"));
+        assert!(components_source.contains("stage.join(\"runtime\")"));
         assert!(components_source.contains("\"--relocatable\""));
-        assert_eq!(components_source.matches("Python取得キャッシュ").count(), 1);
+        assert_eq!(
+            components_source
+                .matches("async fn install_base_python(")
+                .count(),
+            1
+        );
+        assert_eq!(
+            components_source.matches("async fn create_venv(").count(),
+            1
+        );
     }
 
     #[test]
@@ -2269,16 +2350,6 @@ mod tests {
             }
             std::fs::remove_dir_all(root).unwrap();
         }
-    }
-
-    #[test]
-    fn sha256が一致しないファイルを拒否する() {
-        let path = test_path("sha256");
-        std::fs::write(&path, b"picoagent").unwrap();
-        let correct = hex::encode(Sha256::digest(b"picoagent"));
-        assert!(verify_sha256(&path, &correct).is_ok());
-        assert!(verify_sha256(&path, &"0".repeat(64)).is_err());
-        std::fs::remove_file(path).unwrap();
     }
 
     #[test]
@@ -2366,11 +2437,11 @@ mod tests {
         })
         .to_string();
         std::fs::write(root.join("install.json"), &marker).unwrap();
-        assert!(!super::modern_media_runtime_ready(&root));
+        assert!(!modern_media_runtime_ready(&root).unwrap());
         std::fs::write(&python, b"python").unwrap();
-        assert!(!super::modern_media_runtime_ready(&root));
+        assert!(!modern_media_runtime_ready(&root).unwrap());
         std::fs::write(root.join("ComfyUI/main.py"), b"main").unwrap();
-        assert!(super::modern_media_runtime_ready(&root));
+        assert!(modern_media_runtime_ready(&root).unwrap());
         std::fs::write(
             root.join("install.json"),
             marker.replace(
@@ -2379,12 +2450,12 @@ mod tests {
             ),
         )
         .unwrap();
-        assert!(!super::modern_media_runtime_ready(&root));
+        assert!(!modern_media_runtime_ready(&root).unwrap());
         std::fs::write(root.join("install.json"), b"{}").unwrap();
-        assert!(!super::modern_media_runtime_ready(&root));
+        assert!(modern_media_runtime_ready(&root).is_err());
         std::fs::write(root.join("install.json"), &marker).unwrap();
         std::fs::remove_file(&python).unwrap();
-        assert!(!super::modern_media_runtime_ready(&root));
+        assert!(!modern_media_runtime_ready(&root).unwrap());
         std::fs::remove_dir_all(root).unwrap();
     }
 
@@ -2398,11 +2469,11 @@ mod tests {
             r#"{"version":"wan-2.2-5b","model":"wan-2.2-5b","files":["diffusion_models/model.safetensors"]}"#,
         )
         .unwrap();
-        assert!(super::managed_media_ready("video-wan", &root));
+        assert!(managed_media_ready("video-wan", &root).unwrap());
 
         std::fs::remove_file(root.join("diffusion_models/model.safetensors")).unwrap();
-        assert!(!super::managed_media_ready("video-wan", &root));
-        assert!(!super::managed_media_ready("video-ltx", &root));
+        assert!(!managed_media_ready("video-wan", &root).unwrap());
+        assert!(!managed_media_ready("video-ltx", &root).unwrap());
         std::fs::remove_dir_all(root).unwrap();
     }
 
@@ -2412,11 +2483,356 @@ mod tests {
         std::fs::create_dir_all(&root).unwrap();
         std::fs::write(root.join("engine_manifest.json"), br#"{"version":"1.2.3"}"#).unwrap();
         assert_eq!(
-            super::installed_component_version("aivis", &root)
+            installed_component_version("aivis", &root)
                 .unwrap()
                 .as_deref(),
             Some("1.2.3")
         );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn 導入記録は不在と読取不能と不正型を区別して原本を保持する() {
+        let root = test_path("install-record");
+        std::fs::create_dir_all(&root).unwrap();
+        let marker = root.join("install.json");
+        assert!(read_install_record(&root).unwrap().is_none());
+        for text in [
+            "壊れたJSON",
+            "[]",
+            r#"{"runtime":"秘密の値"}"#,
+            r#"{"files":[7]}"#,
+            r#"{"version":""}"#,
+        ] {
+            std::fs::write(&marker, text).unwrap();
+            let error = read_install_record(&root).unwrap_err();
+            assert!(!format!("{error:#}").contains("秘密の値"));
+            assert_eq!(std::fs::read_to_string(&marker).unwrap(), text);
+        }
+        std::fs::remove_file(&marker).unwrap();
+        std::fs::create_dir(&marker).unwrap();
+        assert!(read_install_record(&root).is_err());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn 素性欠損とモデル不正の導入記録では依存工程へ進まない() {
+        let root = test_path("record-consumer");
+        std::fs::create_dir_all(&root).unwrap();
+        for text in ["{}", r#"{"version":"2026.09.10"}"#, r#"{"runtime":null}"#] {
+            std::fs::write(root.join("install.json"), text).unwrap();
+            let mut downstream = 0;
+            let result = (|| -> Result<()> {
+                let record = read_install_record(&root)?;
+                recorded_runtime(record.as_ref())?;
+                downstream += 1;
+                Ok(())
+            })();
+            assert!(result.is_err());
+            assert_eq!(downstream, 0);
+        }
+        for files in [
+            serde_json::json!([]),
+            serde_json::json!(["../outside"]),
+            serde_json::json!([""]),
+        ] {
+            crate::store::write_json_atomic(
+                &root.join("install.json"),
+                &serde_json::json!({"model":"wan-2.2-5b", "files":files}),
+            )
+            .unwrap();
+            assert!(managed_media_ready("video-wan", &root).is_err());
+        }
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn 管理pythonの問い合わせは指定osと領域だけを採用し失敗後venvへ進まない() {
+        for windows in [false, true] {
+            let root = test_path("base-python");
+            std::fs::create_dir_all(&root).unwrap();
+            let expected = root.join(base_python_name(windows));
+            std::fs::write(&expected, b"python").unwrap();
+            let answer = format!("{}\n", expected.display());
+            assert_eq!(
+                install_base_python_using(&root, windows, async { Ok(()) }, async {
+                    Ok(answer.clone())
+                })
+                .await
+                .unwrap(),
+                expected.canonicalize().unwrap()
+            );
+            for invalid in [
+                String::new(),
+                format!("{answer}{answer}"),
+                format!("{answer}\n"),
+                "python3.12".into(),
+                root.to_string_lossy().into_owned(),
+                root.join(base_python_name(!windows))
+                    .to_string_lossy()
+                    .into_owned(),
+            ] {
+                assert!(managed_python_path(&root, windows, &invalid).is_err());
+            }
+            let outside = test_path("outside-python");
+            std::fs::create_dir_all(&outside).unwrap();
+            let external = outside.join(base_python_name(windows));
+            std::fs::write(&external, b"python").unwrap();
+            assert!(managed_python_path(&root, windows, &external.to_string_lossy()).is_err());
+            #[cfg(unix)]
+            {
+                let alias = root.join("bin");
+                std::fs::create_dir_all(&alias).unwrap();
+                let link = alias.join(base_python_name(windows));
+                std::os::unix::fs::symlink(&expected, &link).unwrap();
+                assert_eq!(
+                    managed_python_path(&root, windows, &link.to_string_lossy()).unwrap(),
+                    expected.canonicalize().unwrap()
+                );
+                std::fs::remove_file(&link).unwrap();
+                std::os::unix::fs::symlink(&external, &link).unwrap();
+                assert!(managed_python_path(&root, windows, &link.to_string_lossy()).is_err());
+            }
+            let finds = std::cell::Cell::new(0);
+            let venvs = std::cell::Cell::new(0);
+            for install_ok in [false, true] {
+                let result = async {
+                    install_base_python_using(
+                        &root,
+                        windows,
+                        async {
+                            anyhow::ensure!(install_ok, "uv導入失敗");
+                            Ok(())
+                        },
+                        async {
+                            finds.set(finds.get() + 1);
+                            anyhow::bail!("uv問い合わせ失敗")
+                        },
+                    )
+                    .await?;
+                    venvs.set(venvs.get() + 1);
+                    Ok::<(), anyhow::Error>(())
+                }
+                .await;
+                assert!(result.is_err());
+            }
+            assert_eq!(finds.get(), 1);
+            assert_eq!(venvs.get(), 0);
+            std::fs::remove_dir_all(root).unwrap();
+            std::fs::remove_dir_all(outside).unwrap();
+        }
+    }
+    #[test]
+    fn 管理python問い合わせは環境管理先と取得禁止argvを固定する() {
+        let root = test_path("uv-query");
+        std::fs::create_dir_all(&root).unwrap();
+        let uv = root.join(if cfg!(windows) { "uv.exe" } else { "uv" });
+        let store = root.join("runtime");
+        let command = managed_python_query(&uv, &store).unwrap();
+        let standard = command.as_std();
+        assert_eq!(
+            standard.get_args().collect::<Vec<_>>(),
+            MANAGED_PYTHON_FIND_ARGS
+                .iter()
+                .map(std::ffi::OsStr::new)
+                .collect::<Vec<_>>()
+        );
+        assert!(
+            standard
+                .get_envs()
+                .any(|(key, value)| key == "UV_PYTHON_INSTALL_DIR"
+                    && value == Some(store.as_os_str()))
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn 仮想環境は管理stageへ直接生成して基底runtimeを保持する() {
+        let stage = Path::new("managed-stage");
+        let base = stage.join("runtime").join(base_python_name(cfg!(windows)));
+        assert_eq!(
+            venv_args(&base, stage),
+            vec![
+                "venv".to_owned(),
+                stage.to_string_lossy().into_owned(),
+                "--python".to_owned(),
+                base.to_string_lossy().into_owned(),
+                "--allow-existing".to_owned(),
+                "--relocatable".to_owned()
+            ]
+        );
+        let source = include_str!("components.rs")
+            .split("#[cfg(test)]")
+            .next()
+            .unwrap();
+        let prepare = source
+            .split("async fn prepare_shared_python(")
+            .nth(1)
+            .unwrap()
+            .split("async fn verify_shared_python")
+            .next()
+            .unwrap();
+        assert!(prepare.contains("create_venv(uv, &base, stage, label).await?"));
+        assert!(!prepare.contains("copy_dir_all"));
+        assert!(
+            prepare.find("normalize_python_links(stage)?").unwrap()
+                < prepare
+                    .find("verify_shared_python(&python, label).await?")
+                    .unwrap()
+        );
+    }
+    #[cfg(unix)]
+    #[test]
+    fn 管理pythonリンクは移動後も同世代runtimeだけを指す() {
+        let root = test_path("python-relative-links");
+        let stage = root.join("stage");
+        let base = stage.join("runtime/bin/python3.12");
+        std::fs::create_dir_all(base.parent().unwrap()).unwrap();
+        std::fs::write(&base, b"python").unwrap();
+        std::fs::create_dir_all(stage.join("bin")).unwrap();
+        for name in ["python", "python3", "python3.12"] {
+            std::os::unix::fs::symlink(&base, stage.join("bin").join(name)).unwrap();
+        }
+        normalize_python_links(&stage).unwrap();
+        let destination = root.join("python");
+        std::fs::rename(&stage, &destination).unwrap();
+        for name in ["python", "python3", "python3.12"] {
+            let link = destination.join("bin").join(name);
+            assert!(!std::fs::read_link(&link).unwrap().is_absolute());
+            assert_eq!(
+                link.canonicalize().unwrap(),
+                destination
+                    .join("runtime/bin/python3.12")
+                    .canonicalize()
+                    .unwrap()
+            );
+        }
+        let outside = root.join("outside");
+        std::fs::write(&outside, b"external").unwrap();
+        std::fs::remove_file(destination.join("bin/python")).unwrap();
+        std::os::unix::fs::symlink(&outside, destination.join("bin/python")).unwrap();
+        assert!(normalize_python_links(&destination).is_err());
+        assert_eq!(std::fs::read(&outside).unwrap(), b"external");
+        std::fs::remove_file(destination.join("bin/python")).unwrap();
+        std::os::unix::fs::symlink(
+            destination.join("runtime/bin/python3.12"),
+            destination.join("bin/other"),
+        )
+        .unwrap();
+        assert!(normalize_python_links(&destination).is_err());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+    #[tokio::test]
+    async fn 最終python設定の再生成は依存を保持し失敗時旧版を復元する() {
+        for (fail, paired) in [(false, false), (true, false), (false, true), (true, true)] {
+            let root = test_path("final-python");
+            let stage = root.join(format!(".installing-python-{}", std::process::id()));
+            let destination = root.join("python");
+            let runtime = stage.join("runtime");
+            std::fs::create_dir_all(&runtime).unwrap();
+            std::fs::write(runtime.join(base_python_name(cfg!(windows))), b"python").unwrap();
+            std::fs::create_dir_all(stage.join("lib/site-packages")).unwrap();
+            std::fs::write(stage.join("lib/site-packages/keep"), b"dependency").unwrap();
+            std::fs::write(stage.join("pyvenv.cfg"), "home = old-stage").unwrap();
+            std::fs::create_dir_all(&destination).unwrap();
+            std::fs::write(destination.join("old"), b"old-python").unwrap();
+            let maker_stage = root.join(format!(
+                ".installing-character-maker-{}",
+                std::process::id()
+            ));
+            let maker = root.join("character-maker");
+            std::fs::create_dir_all(&maker_stage).unwrap();
+            std::fs::write(maker_stage.join("value"), b"new-maker").unwrap();
+            std::fs::create_dir_all(&maker).unwrap();
+            std::fs::write(maker.join("value"), b"old-maker").unwrap();
+            let configured = std::cell::Cell::new(false);
+            let verified = std::cell::Cell::new(false);
+            let validation = finalize_python_using(
+                &destination,
+                async {
+                    assert!(destination.join("runtime").is_dir());
+                    let final_base = destination
+                        .join("runtime")
+                        .join(base_python_name(cfg!(windows)));
+                    let args = venv_args(&final_base, &destination);
+                    assert_eq!(args[1], destination.to_string_lossy().into_owned());
+                    assert_eq!(args[3], final_base.to_string_lossy().into_owned());
+                    assert_eq!(
+                        std::fs::read(destination.join("lib/site-packages/keep"))?,
+                        b"dependency"
+                    );
+                    anyhow::ensure!(!fail, "uv最終配置設定失敗");
+                    std::fs::write(
+                        destination.join("pyvenv.cfg"),
+                        format!("home = {}", final_base.parent().unwrap().display()),
+                    )?;
+                    configured.set(true);
+                    Ok(())
+                },
+                async {
+                    assert!(configured.get());
+                    assert!(std::fs::read_to_string(destination.join("pyvenv.cfg"))?
+                        .contains(&destination.join("runtime").to_string_lossy().to_string()));
+                    assert_eq!(
+                        std::fs::read(destination.join("lib/site-packages/keep"))?,
+                        b"dependency"
+                    );
+                    verified.set(true);
+                    Ok(())
+                },
+            );
+            let result = if paired {
+                crate::installer::swap::replace_pair_with_validation(
+                    (&stage, &destination, "python"),
+                    (&maker_stage, &maker, "character-maker"),
+                    validation,
+                )
+                .await
+            } else {
+                crate::installer::swap::replace_with_validation(
+                    &stage,
+                    &destination,
+                    "python",
+                    validation,
+                )
+                .await
+            };
+            if paired {
+                assert_eq!(
+                    std::fs::read(maker.join("value")).unwrap(),
+                    if fail { b"old-maker" } else { b"new-maker" }
+                );
+            }
+            assert_eq!(result.is_err(), fail, "最終配置の検証結果: {result:?}");
+            assert_eq!(verified.get(), !fail);
+            if fail {
+                assert_eq!(
+                    std::fs::read(destination.join("old")).unwrap(),
+                    b"old-python"
+                );
+            } else {
+                assert!(!destination.join("old").exists());
+            }
+            assert!(!crate::installer::swap::has_pending(&root, "python").unwrap());
+            std::fs::remove_dir_all(root).unwrap();
+        }
+    }
+    #[cfg(unix)]
+    #[test]
+    fn linuxのlib64は管理内libへの正確な相対リンクだけ許可する() {
+        let root = test_path("python-lib64");
+        std::fs::create_dir_all(root.join("runtime")).unwrap();
+        std::fs::create_dir_all(root.join("lib")).unwrap();
+        std::os::unix::fs::symlink("lib", root.join("lib64")).unwrap();
+        normalize_python_links(&root).unwrap();
+        assert_eq!(
+            std::fs::read_link(root.join("lib64")).unwrap(),
+            Path::new("lib")
+        );
+        std::fs::remove_file(root.join("lib64")).unwrap();
+        std::os::unix::fs::symlink(root.join("lib"), root.join("lib64")).unwrap();
+        assert!(normalize_python_links(&root).is_err());
+        std::fs::remove_file(root.join("lib64")).unwrap();
+        std::os::unix::fs::symlink("runtime", root.join("lib64")).unwrap();
+        assert!(normalize_python_links(&root).is_err());
         std::fs::remove_dir_all(root).unwrap();
     }
 }

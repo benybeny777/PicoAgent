@@ -80,7 +80,7 @@ Windows ならリポジトリ直下の **`PicoAgentを起動.bat`** をダブル
 |---|---|
 | 共通 | **Rust 1.88以上（cargo）** / **Tauri CLI**（`cargo install tauri-cli --version '^2'`） / **Git LFS**（clone後に`git lfs pull`） |
 | Windows | WebView2 ランタイム |
-| macOS | Xcode Command Line Tools（`xcode-select --install`）。読み上げも使うなら `brew install p7zip` |
+| macOS | Xcode Command Line Tools（`xcode-select --install`）。Whisperを導入する場合はCMake、読み上げも使うなら `brew install p7zip` |
 | Ubuntu Linux 24.04 x64 | 下記のパッケージ |
 
 <details>
@@ -776,3 +776,5 @@ API の会話はリクエスト内で完結し、デスクトップのキャラ�
 「キャラ作成」から音声・動画ファイルやYouTube URLを渡し、声の学習候補と人格の編集可能な草稿を作れます。声は品質検査と複数文の試聴、人格は根拠の確認後に設定へ反映します。現在の管理導入はNVIDIA GPU搭載のWindows向けで、必要な環境・モデルは明示操作でだけ取得します。手順と対象素材は[利用マニュアル](MANUAL.md#声人格を素材から作るwindows)を参照してください。
 
 この学習機能の文字起こしはGPUが既定です。CPUも手動で選べます。GPU不足や推論失敗をCPUへ自動で切り替えることはありません。
+
+追加機能の導入は、空き容量と導入記録を確認してから取得します。記録の破損・読込不能は「追加機能・更新」へ理由を表示し、設定を変えずに停止します。MacのWhisper CLIは固定した公式ソースをCMakeでビルドするため、Xcode Command Line ToolsとCMakeが必要です。必要ツールがなければ取得前に案内します。

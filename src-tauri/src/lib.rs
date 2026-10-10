@@ -27,6 +27,7 @@ mod generation_backend;
 mod gpu;
 mod history;
 mod hotkey;
+mod installer;
 mod layout;
 mod license;
 mod log_paths;
@@ -221,6 +222,7 @@ pub fn run() {
             }
             // 設定・取得・プロバイダが通信する前に標準HTTPを確定する。
             tools::http::init().map_err(std::io::Error::other)?;
+            installer::http::init().map_err(std::io::Error::other)?;
             std::fs::create_dir_all(&managed_data)?;
             log_paths::allow_asset_scope(app.handle());
             if let Err(error) = migration::migrate_identity_dirs(app.handle(), &managed_data) {
