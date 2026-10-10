@@ -89,23 +89,6 @@ fn direct_query(text: &str) -> Option<Value> {
     Some(Value::Object(args))
 }
 
-// 値の並びを Unicode ブロックのスパークライン（簡易チャート）にする。
-fn sparkline(values: &[f64]) -> String {
-    const BARS: [char; 8] = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
-    let min = values.iter().cloned().fold(f64::INFINITY, f64::min);
-    let max = values.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-    if max.partial_cmp(&min) != Some(std::cmp::Ordering::Greater) {
-        return BARS[0].to_string().repeat(values.len());
-    }
-    values
-        .iter()
-        .map(|&v| {
-            let idx = (((v - min) / (max - min)) * 7.0).round() as usize;
-            BARS[idx.min(7)]
-        })
-        .collect()
-}
-
 #[async_trait]
 impl Tool for CurrencyRatesTool {
     fn name(&self) -> &'static str {
@@ -323,7 +306,7 @@ async fn currency_chart(
         days,
         series.first().map(|(d, _)| d.as_str()).unwrap_or(""),
         series.last().map(|(d, _)| d.as_str()).unwrap_or(""),
-        sparkline(&values),
+        crate::text::sparkline(&values),
         first,
         last,
         min,

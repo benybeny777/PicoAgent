@@ -306,7 +306,6 @@ impl Tool for WeatherTool {
                 ("latitude", lat.to_string()),
                 ("longitude", lon.to_string()),
                 ("current", "temperature_2m,relative_humidity_2m,apparent_temperature,precipitation,weather_code,wind_speed_10m".to_string()),
-                ("hourly", "temperature_2m".to_string()),
                 ("daily", "weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max".to_string()),
                 ("forecast_days", days),
                 ("timezone", "auto".to_string()),
@@ -475,121 +474,127 @@ fn weather_icon(code: i64) -> (&'static str, &'static str) {
     }
 }
 
-// 数値列を Unicode ブロックのスパークラインにする。
-fn sparkline(values: &[f64]) -> String {
-    const BARS: [char; 8] = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
-    let min = values.iter().cloned().fold(f64::INFINITY, f64::min);
-    let max = values.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-    if max.partial_cmp(&min) != Some(std::cmp::Ordering::Greater) {
-        return BARS[3].to_string().repeat(values.len());
+/// 日付（YYYY-MM-DD）を「10/12（日）」の形にする。読めない値は元の文字列のまま出す。
+fn day_label(date: &str) -> String {
+    use chrono::Datelike;
+    match chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d") {
+        Ok(day) => format!(
+            "{}/{}（{}）",
+            day.month(),
+            day.day(),
+            crate::text::weekday_ja(day.weekday())
+        ),
+        Err(_) => date.to_string(),
     }
-    values
-        .iter()
-        .map(|&v| {
-            let idx = (((v - min) / (max - min)) * 7.0).round() as usize;
-            BARS[idx.min(7)]
-        })
-        .collect()
 }
 
+/// 天気の回答を、チャット欄の Markdown で読みやすい形に組み立てる。
+///
+/// 1行に数値を詰め込み、日付を `2026-10-12` のまま並べ、ブロック文字のグラフを添えていた
+/// 旧形式は「見づらい」と指摘された。見出し → いまの様子 → 今日の幅 → 日別の表、の順に
+/// 分け、表は読み上げと字幕から外れる（`speech_text` / `sanitizeSpeechText`）ので、
+/// 声で伝わるのは見出しと上の2行だけになる。
 fn summarize_weather(name: &str, parsed: &Value) -> String {
     let current = parsed.get("current").unwrap_or(&Value::Null);
-    let code = current
-        .get("weather_code")
-        .and_then(Value::as_i64)
-        .unwrap_or(-1);
-    let (icon, label) = weather_icon(code);
-    let num = |v: Option<f64>| {
-        v.map(|x| format!("{x:.0}"))
-            .unwrap_or_else(|| "-".to_string())
+    let daily = parsed.get("daily").unwrap_or(&Value::Null);
+    let num = |v: Option<&Value>| v.and_then(Value::as_f64).map(|x| format!("{x:.0}"));
+    let shown = |v: Option<&Value>| num(v).unwrap_or_else(|| "-".to_string());
+    let series = |key: &str| {
+        daily
+            .get(key)
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default()
     };
-    let mut out = format!("天気: {name} {icon} {label}\n");
-    out.push_str(&format!(
-        "現在 {}°C（体感{}°C）湿度{}% 風{}km/h 降水{}mm\n",
-        num(current.get("temperature_2m").and_then(Value::as_f64)),
-        num(current.get("apparent_temperature").and_then(Value::as_f64)),
+    let (icon, label) = weather_icon(
         current
-            .get("relative_humidity_2m")
-            .and_then(Value::as_u64)
-            .map(|v| v.to_string())
-            .unwrap_or_else(|| "-".to_string()),
-        num(current.get("wind_speed_10m").and_then(Value::as_f64)),
-        num(current.get("precipitation").and_then(Value::as_f64)),
-    ));
-
-    // 今日の気温推移（時間別の先頭24時間）をスパークラインで。
-    if let Some(temps) = parsed
-        .get("hourly")
-        .and_then(|h| h.get("temperature_2m"))
-        .and_then(Value::as_array)
-    {
-        let today: Vec<f64> = temps.iter().take(24).filter_map(Value::as_f64).collect();
-        if today.len() >= 2 {
-            let lo = today.iter().cloned().fold(f64::INFINITY, f64::min);
-            let hi = today.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-            out.push_str(&format!(
-                "今日の気温 {:.0}〜{:.0}°C  {}\n",
-                lo,
-                hi,
-                sparkline(&today)
-            ));
+            .get("weather_code")
+            .and_then(Value::as_i64)
+            .unwrap_or(-1),
+    );
+    let mut out = format!("**{icon} {name}の天気：{label}**\n");
+    // API が返さなかった項目は「-°C」と並べず、行から外す。
+    let mut now = num(current.get("temperature_2m"))
+        .map(|temp| format!("いまは {temp}°C"))
+        .unwrap_or_else(|| "いまは".to_string());
+    if let Some(feel) = num(current.get("apparent_temperature")) {
+        now.push_str(&format!("（体感 {feel}°C）"));
+    }
+    for (key, label, unit) in [
+        ("relative_humidity_2m", "湿度", "%"),
+        ("wind_speed_10m", "風", "km/h"),
+        ("precipitation", "降水", "mm"),
+    ] {
+        if let Some(value) = num(current.get(key)) {
+            now.push_str(&format!("、{label} {value}{unit}"));
         }
     }
+    out.push_str(&now);
+    out.push('\n');
 
-    if let Some(daily) = parsed.get("daily") {
-        let times = daily
-            .get("time")
-            .and_then(Value::as_array)
-            .cloned()
-            .unwrap_or_default();
-        let codes = daily
-            .get("weather_code")
-            .and_then(Value::as_array)
-            .cloned()
-            .unwrap_or_default();
-        let maxes = daily
-            .get("temperature_2m_max")
-            .and_then(Value::as_array)
-            .cloned()
-            .unwrap_or_default();
-        let mins = daily
-            .get("temperature_2m_min")
-            .and_then(Value::as_array)
-            .cloned()
-            .unwrap_or_default();
-        let pops = daily
-            .get("precipitation_probability_max")
-            .and_then(Value::as_array)
-            .cloned()
-            .unwrap_or_default();
-        out.push_str("予報:\n");
-        for index in 0..times.len().min(7) {
-            let (day_icon, day_label) =
+    let times = series("time");
+    let codes = series("weather_code");
+    let maxes = series("temperature_2m_max");
+    let mins = series("temperature_2m_min");
+    let pops = series("precipitation_probability_max");
+    if !times.is_empty() {
+        out.push_str(&format!(
+            "今日は 最高 {}°C / 最低 {}°C、降水確率 {}%\n",
+            shown(maxes.first()),
+            shown(mins.first()),
+            shown(pops.first()),
+        ));
+        out.push_str("\n| 日付 | 天気 | 最高 / 最低 | 降水確率 |\n| --- | --- | --- | --- |\n");
+        for (index, time) in times.iter().take(7).enumerate() {
+            let (day_icon, day_weather) =
                 weather_icon(codes.get(index).and_then(Value::as_i64).unwrap_or(-1));
             out.push_str(&format!(
-                "- {} {day_icon} {day_label} {}/{}°C ☔{}%\n",
-                times.get(index).and_then(Value::as_str).unwrap_or("-"),
-                num(maxes.get(index).and_then(Value::as_f64)),
-                num(mins.get(index).and_then(Value::as_f64)),
-                pops.get(index)
-                    .and_then(Value::as_u64)
-                    .map(|v| v.to_string())
-                    .unwrap_or_else(|| "-".to_string())
+                "| {} | {day_icon} {day_weather} | {}° / {}° | {}% |\n",
+                time.as_str()
+                    .map(day_label)
+                    .unwrap_or_else(|| "-".to_string()),
+                shown(maxes.get(index)),
+                shown(mins.get(index)),
+                shown(pops.get(index)),
             ));
         }
-        // 日別の最高気温の推移をスパークラインで添える。
-        let highs: Vec<f64> = maxes.iter().take(7).filter_map(Value::as_f64).collect();
-        if highs.len() >= 2 {
-            out.push_str(&format!("最高気温の推移 {}\n", sparkline(&highs)));
-        }
     }
-    out
+    out.trim_end().to_string()
 }
 
 inventory::submit! { ToolReg { make: || Box::new(WeatherTool) } }
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn 天気は見出しと今日の幅と日別の表に分けて見せる() {
+        let parsed = serde_json::json!({
+            "current": {"temperature_2m": 21.4, "apparent_temperature": 20.2, "relative_humidity_2m": 60,
+                "precipitation": 0.0, "weather_code": 0, "wind_speed_10m": 9.6},
+            "daily": {"time": ["2026-10-10", "2026-10-11"], "weather_code": [0, 61],
+                "temperature_2m_max": [23.1, 19.8], "temperature_2m_min": [14.2, 15.0],
+                "precipitation_probability_max": [10, 80]}
+        });
+        assert_eq!(
+            super::summarize_weather("横浜市（神奈川県）", &parsed),
+            "**☀️ 横浜市（神奈川県）の天気：快晴**\n\
+             いまは 21°C（体感 20°C）、湿度 60%、風 10km/h、降水 0mm\n\
+             今日は 最高 23°C / 最低 14°C、降水確率 10%\n\
+             \n\
+             | 日付 | 天気 | 最高 / 最低 | 降水確率 |\n\
+             | --- | --- | --- | --- |\n\
+             | 10/10（土） | ☀️ 快晴 | 23° / 14° | 10% |\n\
+             | 10/11（日） | 🌧️ 雨 | 20° / 15° | 80% |"
+        );
+    }
+
+    #[test]
+    fn 予報が無くても現在の天気だけ返す() {
+        let parsed = serde_json::json!({"current": {"weather_code": 3, "temperature_2m": 18.0, "relative_humidity_2m": 60}});
+        let out = super::summarize_weather("札幌市", &parsed);
+        assert_eq!(out, "**☁️ 札幌市の天気：曇り**\nいまは 18°C、湿度 60%");
+    }
+
     #[test]
     fn 都道府県名は県庁所在地へ読み替える() {
         // Open-Meteo の地名検索は都道府県名では候補を1件も返さない。
