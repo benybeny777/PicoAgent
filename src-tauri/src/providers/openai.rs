@@ -171,6 +171,7 @@ fn extract_usage(data: &Value) -> Option<TokenUsage> {
 /// ストリーミング SSE を受信してチャンクを on_chunk に渡し、完全な Message を返す。
 /// OpenAI 互換 API 共通の実装（同梱ローカルエンジン local からも利用する）。
 pub(crate) async fn stream_chat(
+    cfg: &Config,
     url: &str,
     api_key: &str,
     body: Value,
@@ -189,23 +190,14 @@ pub(crate) async fn stream_chat(
     } else {
         request.bearer_auth(api_key)
     };
-    let res = request.send().await?;
+    let res = request
+        .send()
+        .await
+        .map_err(super::http_error::send_error)?;
 
-    if !res.status().is_success() {
-        let status = res.status();
-        let text = crate::tools::http::response_text(res)
-            .await
-            .map_err(anyhow::Error::msg)?;
-        anyhow::bail!(
-            "{}",
-            crate::tools::http::service_error(
-                "OpenAI互換API",
-                "/chat/completions（ストリーミング）",
-                status,
-                &text
-            )
-        );
-    }
+    let res =
+        super::http_error::provider_response(cfg, "OpenAI互換API", "/chat/completions", Ok(res))
+            .await?;
 
     let mut full_content = String::new();
     let mut partial_calls: Vec<PartialToolCall> = Vec::new();
@@ -221,7 +213,7 @@ pub(crate) async fn stream_chat(
                 .await
                 .map_err(|_| anyhow::anyhow!("OpenAI互換APIのストリームが60秒間停止しました"))?;
         let Some(chunk_result) = next else { break };
-        let chunk = chunk_result?;
+        let chunk = chunk_result.map_err(super::http_error::send_error)?;
         received = received.saturating_add(chunk.len());
         anyhow::ensure!(
             received <= MAX_STREAM_BYTES,
@@ -376,13 +368,10 @@ impl Provider for OpenAI {
             .bearer_auth(&key)
             .timeout(crate::tools::http::metadata_timeout(cfg).map_err(anyhow::Error::msg)?)
             .send()
-            .await?;
-        if !res.status().is_success() {
-            return Ok(STATIC_MODELS
-                .iter()
-                .map(|model| model.to_string())
-                .collect());
-        }
+            .await
+            .map_err(super::http_error::send_error)?;
+        let res =
+            super::http_error::provider_response(cfg, "OpenAI互換API", "/models", Ok(res)).await?;
         let text = crate::tools::http::response_text(res)
             .await
             .map_err(anyhow::Error::msg)?;
@@ -405,26 +394,21 @@ impl Provider for OpenAI {
     }
 
     async fn is_up(&self, cfg: &Config) -> Result<bool, String> {
-        Ok({
-            let key = api_key(cfg);
-            if key.is_empty() {
-                return Ok(false);
-            }
-            let url = format!("{}/models", base_url(cfg));
-            let client = reqwest::Client::builder()
-                .timeout(std::time::Duration::from_secs(3))
-                .build();
-            match client {
-                Ok(c) => c
-                    .get(&url)
-                    .bearer_auth(&key)
-                    .send()
-                    .await
-                    .map(|r| r.status().is_success())
-                    .unwrap_or(false),
-                Err(_) => false,
-            }
-        })
+        let key = api_key(cfg);
+        if key.is_empty() {
+            return Ok(false);
+        }
+        let url = format!("{}/models", base_url(cfg));
+        super::http_error::provider_probe(
+            cfg,
+            "OpenAI互換API",
+            "/models",
+            crate::tools::http::client()
+                .get(url)
+                .bearer_auth(key)
+                .timeout(std::time::Duration::from_secs(3)),
+        )
+        .await
     }
 
     async fn chat(
@@ -450,22 +434,15 @@ impl Provider for OpenAI {
             .json(&body)
             .timeout(Duration::from_secs(180))
             .send()
-            .await?;
-        if !res.status().is_success() {
-            let status = res.status();
-            let text = crate::tools::http::response_text(res)
-                .await
-                .map_err(anyhow::Error::msg)?;
-            anyhow::bail!(
-                "{}",
-                crate::tools::http::service_error(
-                    "OpenAI互換API",
-                    "/chat/completions",
-                    status,
-                    &text
-                )
-            );
-        }
+            .await
+            .map_err(super::http_error::send_error)?;
+        let res = super::http_error::provider_response(
+            cfg,
+            "OpenAI互換API",
+            "/chat/completions",
+            Ok(res),
+        )
+        .await?;
         let text = crate::tools::http::response_text(res)
             .await
             .map_err(anyhow::Error::msg)?;
@@ -501,7 +478,7 @@ impl Provider for OpenAI {
             body["tools"] = json!(tools);
         }
         let url = format!("{}/chat/completions", base_url(cfg));
-        stream_chat(&url, &api_key(cfg), body, on_chunk).await
+        stream_chat(cfg, &url, &api_key(cfg), body, on_chunk).await
     }
 
     async fn chat_with_options(
@@ -531,22 +508,15 @@ impl Provider for OpenAI {
             .json(&body)
             .timeout(Duration::from_secs(180))
             .send()
-            .await?;
-        if !res.status().is_success() {
-            let status = res.status();
-            let text = crate::tools::http::response_text(res)
-                .await
-                .map_err(anyhow::Error::msg)?;
-            anyhow::bail!(
-                "{}",
-                crate::tools::http::service_error(
-                    "OpenAI互換API",
-                    "/chat/completions",
-                    status,
-                    &text
-                )
-            );
-        }
+            .await
+            .map_err(super::http_error::send_error)?;
+        let res = super::http_error::provider_response(
+            cfg,
+            "OpenAI互換API",
+            "/chat/completions",
+            Ok(res),
+        )
+        .await?;
         let text = crate::tools::http::response_text(res)
             .await
             .map_err(anyhow::Error::msg)?;

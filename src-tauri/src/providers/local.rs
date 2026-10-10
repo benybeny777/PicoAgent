@@ -73,23 +73,16 @@ async fn send_chat(cfg: &Config, body: &Value) -> anyhow::Result<Message> {
         .post(&url)
         .json(body)
         .send()
-        .await?;
-    if !res.status().is_success() {
-        let status = res.status();
-        let text = crate::tools::http::response_text(res)
-            .await
-            .map_err(anyhow::Error::msg)?;
-        anyhow::bail!(
-            "{}",
-            crate::tools::http::service_error(
-                "ローカルAIエンジン",
-                "/chat/completions",
-                status,
-                &text
-            )
-        );
-    }
-    let data: Value = res.json().await?;
+        .await
+        .map_err(super::http_error::send_error)?;
+    let res = super::http_error::provider_response(
+        cfg,
+        "ローカルAIエンジン",
+        "/chat/completions",
+        Ok(res),
+    )
+    .await?;
+    let data: Value = res.json().await.map_err(super::http_error::send_error)?;
     let message = data
         .get("choices")
         .and_then(Value::as_array)
@@ -511,19 +504,16 @@ impl Provider for Local {
             .map(|preset| preset.id.to_string())
             .chain(std::iter::once("custom".to_string()))
             .collect();
-        let res = match crate::tools::http::client()
+        let res = crate::tools::http::client()
             .get(&url)
             .timeout(std::time::Duration::from_secs(2))
             .send()
             .await
-        {
-            Ok(res) => res,
-            Err(_) => return Ok(local_presets),
-        };
-        if !res.status().is_success() {
-            return Ok(local_presets);
-        }
-        let data: Value = res.json().await?;
+            .map_err(super::http_error::send_error)?;
+        let res =
+            super::http_error::provider_response(cfg, "ローカルAIエンジン", "/models", Ok(res))
+                .await?;
+        let data: Value = res.json().await.map_err(super::http_error::send_error)?;
         let mut out: Vec<String> = data
             .get("data")
             .and_then(|v| v.as_array())
@@ -542,22 +532,16 @@ impl Provider for Local {
     }
 
     async fn is_up(&self, cfg: &Config) -> Result<bool, String> {
-        Ok({
-            // llama-server はモデルロード完了で /health が 200 を返す（ロード中は 503）。
-            let url = format!("http://127.0.0.1:{}/health", port(cfg)?);
-            match reqwest::Client::builder()
-                .timeout(std::time::Duration::from_secs(2))
-                .build()
-            {
-                Ok(c) => c
-                    .get(&url)
-                    .send()
-                    .await
-                    .map(|r| r.status().is_success())
-                    .unwrap_or(false),
-                Err(_) => false,
-            }
-        })
+        let url = format!("http://127.0.0.1:{}/health", port(cfg)?);
+        super::http_error::provider_probe(
+            cfg,
+            "ローカルAIエンジン",
+            "/health",
+            crate::tools::http::client()
+                .get(url)
+                .timeout(std::time::Duration::from_secs(2)),
+        )
+        .await
     }
 
     async fn chat(
@@ -615,13 +599,16 @@ impl Provider for Local {
                 inner(chunk);
             })
         };
-        super::openai::stream_chat(&url, "", make_body(!tools.is_empty()), probe)
+        super::openai::stream_chat(cfg, &url, "", make_body(!tools.is_empty()), probe)
             .await
             .map_err(|error| {
                 if emitted.load(Ordering::Relaxed) {
                     error
                 } else {
-                    anyhow::anyhow!("{error}（ツール定義 {} 件つきの要求で失敗）", tools.len())
+                    error.context(format!(
+                        "ツール定義 {} 件つきの要求で失敗しました",
+                        tools.len()
+                    ))
                 }
             })
     }

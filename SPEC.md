@@ -156,7 +156,7 @@ Claude Code / Codex CLI を非対話（`claude -p` / `codex exec`）で呼び、
 2. `tool_calls` が無ければ、その `content` を最終応答として返す。
 3. `tool_calls` があれば全呼び出しを `futures::future::join_all()` で**並列実行**し、結果を `tool` メッセージとして積んで 1 に戻る。
 4. `max_steps` を超えたら打ち切り、最後の文面を返す。
-5. 各 chat 呼び出しは `chat_with_retry()` で最大3回・指数バックオフ（1秒→2秒）で再試行する（4xx 認証エラーは即中断）。
+5. 各 chat 呼び出しは `chat_with_retry()` で最大3回呼び出す。HTTP失敗は型が保持する状態コードで判定し、408・409・425・429・5xxだけ再試行する。それ以外のHTTP失敗は即中断する。HTTP状態を持たない接続・タイムアウト・転送の失敗も再試行するが、設定や応答形式の不正は繰り返さない。通常の待機は1秒→2秒。`Retry-After` が有効な非負秒またはHTTP日時ならその待機を使い、最大30秒とする。不正なヘッダーは診断に残す。待機・生成中の停止要求は直ちに反映する。
 6. 返ったトークン使用量（`Message.usage`）を `usage::record()` で `app_data_dir/usage.json` に保存する。
 7. ツール実行は `Tracer::start_span()` で計測し、`Tracer::record()` で直近200件を持つ。
 8. ツール出力は `PICOAGENT_TOOL_OUTPUT_MAX_CHARS`（既定 `auto`＝local はコンテキスト長の45%〔1,000〜60,000文字〕、クラウドは24,000文字）で打ち切る。`tools::check_injection()` でプロンプトインジェクションの試行を検査し、検知時は警告付きで包む。**同じ検査を添付ファイルの抽出本文**（`commands.rs` の `mark_untrusted_if_injection`）と**先回り実行が差し込む本文**（`agent.rs` の `mark_untrusted_tool_output`）にも通す。引数 JSON の解析失敗（`_raw`）はツールを呼ばずエラー文字列を返して再試行させる（`dispatch_or_error()`）。
@@ -222,7 +222,9 @@ inventory::submit! { ProviderReg { make: || Box::new(MyProvider) } }
 - キーが未設定のクラウドプロバイダは `is_up()=Ok(false)`。不正な数値設定や確認のタイムアウトは理由つきの`Err`とし、画面の`up:null`と`providerError`で正常な停止状態と区別する。
 - `openai` は `OPENAI_BASE_URL` を変えれば任意の OpenAI 形式ゲートウェイへつながる。`OPENAI_API_KEY` は HTTPS の `api.openai.com:443` にだけ送る。
 - `anthropic` は正規形とツール呼び出しを `tool_use` / `tool_result` content block へ相互変換する。
-- `deepseek` / `gemini` / `xai` / `mistral` / `local` は `openai.rs` の `to_wire`/`from_wire` を再利用する。`PICOAGENT_DEEPSEEK_THINKING` が有効なら V4 系へ `thinking: {type:"enabled"}` を付ける。`gemini` と `local` は tools 付きで失敗したら tools 無しで1度だけ再試行する。
+- `deepseek` / `gemini` / `xai` / `mistral` は共通のOpenAI互換通信を使い、設定キー・接続先・候補・追加リクエスト項目だけを各コネクタの宣言に置く。正規形の変換は `local` も含め `openai.rs` の `to_wire`/`from_wire` を再利用する。`PICOAGENT_DEEPSEEK_THINKING` が有効なら V4 系へ `thinking: {type:"enabled"}` を付ける。`gemini` の失敗後にツールを除いて再送する処理は行わない。`local` も既存実装のとおりツールを除いた再送を行わない。
+- 互換4プロバイダのキー未設定時は、通信せず設定候補として静的モデル一覧を示す（利用者が採用したPR #467の仕様）。キー設定済みの一覧取得失敗・不正JSONは理由つきのエラーとし、静的一覧へ切り替えない。取得成功の空一覧もそのまま返す。
+- HTTP失敗はプロバイダ共通の `ProviderHttpError` にサービス・操作・状態・待機指定・診断本文を保持する。通常生成・ストリーム・JSON生成・モデル一覧・疎通確認で同じ処理を使い、本文取得が失敗してもHTTP状態を失わない。本文中の秘密設定値を除去してから診断を200文字に制限し、通信エラーから接続URLを取り除く。
 - `local` は送信直前に `normalize_for_local` で役割を正規化する（Gemma 等のテンプレートは user 始まりの厳密な交互を要求し、崩れると 400「Conversation roles must alternate」になるため）。system は先頭へ集約し、先頭の純 assistant は除き、連続する同 role の user/assistant は連結する。tool 呼び出しを含むメッセージはそのまま通す。
 
 ### 同梱推論エンジン（`engine.rs`）

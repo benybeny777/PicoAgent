@@ -242,32 +242,46 @@ async fn response_bytes(
 }
 
 /// 応答本文へ反映された設定秘密値も、切り詰める前に伏せる。
-pub fn safe_service_error(
-    cfg: &Config,
-    label: &str,
-    status: reqwest::StatusCode,
-    body: &str,
-) -> String {
+pub fn configured_secret_values(cfg: &Config) -> Vec<String> {
     let mut keys: Vec<String> = cfg.get_all().keys().cloned().collect();
     keys.extend(std::env::vars_os().filter_map(|(key, _)| key.into_string().ok()));
-    let mut secrets: Vec<String> = keys
-        .into_iter()
+    keys.sort();
+    keys.dedup();
+    keys.into_iter()
         .filter(|key| crate::secret::is_secret_key(key))
         .map(|key| cfg.get(&key, ""))
         .filter(|value| !value.is_empty())
-        .collect();
-    secrets.sort_by_key(|value| std::cmp::Reverse(value.len()));
-    secrets.dedup();
+        .collect()
+}
+
+pub fn redact_secret_values(body: &str, secrets: &[&str]) -> String {
     let mut safe = body.to_string();
-    for value in secrets {
-        safe = safe.replace(&value, "[秘密値を省略]");
+    let mut ordered: Vec<&str> = secrets.to_vec();
+    ordered.sort_by_key(|value| std::cmp::Reverse(value.len()));
+    ordered.dedup();
+    for value in ordered {
+        if value.is_empty() {
+            continue;
+        }
+        safe = safe.replace(value, "[秘密値を省略]");
         if let Ok(encoded) = serde_json::to_string(&value) {
             safe = safe.replace(&encoded[1..encoded.len() - 1], "[秘密値を省略]");
         }
         let encoded: String = url::form_urlencoded::byte_serialize(value.as_bytes()).collect();
         safe = safe.replace(&encoded, "[秘密値を省略]");
     }
-    service_error(label, "API", status, &safe)
+    safe
+}
+
+pub fn safe_service_error(
+    cfg: &Config,
+    label: &str,
+    status: reqwest::StatusCode,
+    body: &str,
+) -> String {
+    let secrets = configured_secret_values(cfg);
+    let values: Vec<&str> = secrets.iter().map(String::as_str).collect();
+    service_error(label, "API", status, &redact_secret_values(body, &values))
 }
 
 pub async fn service_reply(

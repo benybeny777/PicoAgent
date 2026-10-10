@@ -126,14 +126,10 @@ impl Provider for Ollama {
             .get(&url)
             .timeout(crate::tools::http::metadata_timeout(cfg).map_err(anyhow::Error::msg)?)
             .send()
-            .await?;
-        if !res.status().is_success() {
-            anyhow::bail!(
-                "Ollamaがモデル一覧を返しませんでした（HTTP {}）。Ollamaが起動しているか、接続先を確認してください。",
-                res.status()
-            );
-        }
-        let data: Value = res.json().await?;
+            .await
+            .map_err(super::http_error::send_error)?;
+        let res = super::http_error::provider_response(cfg, "Ollama", "/api/tags", Ok(res)).await?;
+        let data: Value = res.json().await.map_err(super::http_error::send_error)?;
         Ok(data
             .get("models")
             .and_then(|v| v.as_array())
@@ -146,21 +142,16 @@ impl Provider for Ollama {
     }
 
     async fn is_up(&self, cfg: &Config) -> Result<bool, String> {
-        Ok({
-            let url = format!("{}/api/tags", host(cfg));
-            let client = reqwest::Client::builder()
-                .timeout(std::time::Duration::from_secs(2))
-                .build();
-            match client {
-                Ok(c) => c
-                    .get(&url)
-                    .send()
-                    .await
-                    .map(|r| r.status().is_success())
-                    .unwrap_or(false),
-                Err(_) => false,
-            }
-        })
+        let url = format!("{}/api/tags", host(cfg));
+        super::http_error::provider_probe(
+            cfg,
+            "Ollama",
+            "/api/tags",
+            crate::tools::http::client()
+                .get(url)
+                .timeout(std::time::Duration::from_secs(2)),
+        )
+        .await
     }
 
     async fn chat(
@@ -184,18 +175,10 @@ impl Provider for Ollama {
             .post(&url)
             .json(&body)
             .send()
-            .await?;
-        if !res.status().is_success() {
-            let status = res.status();
-            let text = crate::tools::http::response_text(res)
-                .await
-                .map_err(anyhow::Error::msg)?;
-            anyhow::bail!(
-                "{}",
-                crate::tools::http::service_error("Ollama", "/api/chat", status, &text)
-            );
-        }
-        let data: Value = res.json().await?;
+            .await
+            .map_err(super::http_error::send_error)?;
+        let res = super::http_error::provider_response(cfg, "Ollama", "/api/chat", Ok(res)).await?;
+        let data: Value = res.json().await.map_err(super::http_error::send_error)?;
         let message = data.get("message").cloned().unwrap_or_else(|| json!({}));
         Ok(from_wire(&message))
     }
@@ -226,22 +209,9 @@ impl Provider for Ollama {
             .post(&url)
             .json(&body)
             .send()
-            .await?;
-        if !res.status().is_success() {
-            let status = res.status();
-            let text = crate::tools::http::response_text(res)
-                .await
-                .map_err(anyhow::Error::msg)?;
-            anyhow::bail!(
-                "{}",
-                crate::tools::http::service_error(
-                    "Ollama",
-                    "/api/chat（ストリーミング）",
-                    status,
-                    &text
-                )
-            );
-        }
+            .await
+            .map_err(super::http_error::send_error)?;
+        let res = super::http_error::provider_response(cfg, "Ollama", "/api/chat", Ok(res)).await?;
 
         let mut full_content = String::new();
         let mut tool_calls: Vec<Value> = Vec::new();
@@ -250,7 +220,7 @@ impl Provider for Ollama {
         let mut decoder = crate::text::Utf8Stream::default();
         let mut stream = res.bytes_stream();
         'outer: while let Some(chunk_result) = stream.next().await {
-            let chunk = chunk_result?;
+            let chunk = chunk_result.map_err(super::http_error::send_error)?;
             buf.push_str(&decoder.push(&chunk));
             while let Some(line_end) = buf.find('\n') {
                 let line = buf[..line_end].trim().to_string();

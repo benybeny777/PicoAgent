@@ -12,6 +12,13 @@ use std::sync::{Arc, OnceLock};
 use crate::config::Config;
 use crate::message::{Field, Message};
 
+// コネクタ登録の対象ではない共通部品は、自動走査の外へ置く。
+#[path = "common/compatible.rs"]
+pub(crate) mod compatible;
+#[path = "common/http_error.rs"]
+pub(crate) mod http_error;
+pub use http_error::ProviderHttpError;
+
 #[async_trait]
 pub trait Provider: Send + Sync {
     fn id(&self) -> &'static str;
@@ -106,4 +113,64 @@ fn index() -> &'static HashMap<&'static str, usize> {
 /// id からプロバイダを取得。
 pub fn get(id: &str) -> Option<&'static dyn Provider> {
     index().get(id).map(|idx| all()[*idx].as_ref())
+}
+
+#[cfg(test)]
+mod guard {
+    #[test]
+    fn 互換四社は共通通信を使い個別の再送や通信を重複させない() {
+        let sources = crate::guard_scan::all_sources();
+        for id in ["mistral", "deepseek", "xai", "gemini"] {
+            let path = format!("src-tauri/src/providers/{id}.rs");
+            let source = sources
+                .iter()
+                .find(|source| source.path.to_string_lossy().replace('\\', "/") == path)
+                .expect("プロバイダのソースが走査対象にない");
+            let body = source.body();
+            assert!(
+                body.contains("CompatProvider") && body.contains("inventory::submit!"),
+                "{path}: 共通通信と自動登録を維持する"
+            );
+            for duplicate in [
+                ".send()",
+                ".bearer_auth(",
+                "async fn chat",
+                "async fn list_models",
+                "impl Provider for",
+            ] {
+                assert!(
+                    !body.contains(duplicate),
+                    "{path}: 通信責務を共通層へ集める: {duplicate}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn 再試行はエラー本文の状態らしい数字を判定しない() {
+        let sources = crate::guard_scan::all_sources();
+        let source = sources
+            .iter()
+            .find(|source| {
+                source.path.to_string_lossy().replace('\\', "/") == "src-tauri/src/agent.rs"
+            })
+            .expect("agentが走査対象にない");
+        let retry = source
+            .body()
+            .split("async fn chat_with_retry(")
+            .nth(1)
+            .expect("再試行処理がない")
+            .split("const CANCEL_MESSAGE")
+            .next()
+            .unwrap();
+        for status in ["400", "401", "403", "404", "422"] {
+            assert!(
+                !retry.contains(&format!(".contains(\"{status}\")")),
+                "エラー本文の {status} をHTTP状態として判定している"
+            );
+        }
+        assert!(source
+            .body()
+            .contains("downcast_ref::<crate::providers::ProviderHttpError>"));
+    }
 }
