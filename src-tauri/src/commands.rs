@@ -4470,12 +4470,14 @@ pub fn spawn_update_check(app: AppHandle) {
                     &app,
                     &format!("起動時の更新確認に失敗しました: {error}"),
                 );
+                // 起動ごとに1回だけの確認で「復旧」が無いので、通知一覧へ1件残す種類で送る。
                 crate::notice::emit(
                     &app,
-                    crate::notice::Notice::background_failure(
-                        "update-check",
+                    crate::notice::Notice::info(
+                        "update",
                         "更新確認",
                         format!("起動時の更新確認に失敗しました: {error}"),
+                        false,
                     ),
                 );
                 return;
@@ -4488,12 +4490,14 @@ pub fn spawn_update_check(app: AppHandle) {
                     &app,
                     &format!("更新情報を解析できません: {error}"),
                 );
+                // 起動ごとに1回だけの確認で「復旧」が無いので、通知一覧へ1件残す種類で送る。
                 crate::notice::emit(
                     &app,
-                    crate::notice::Notice::background_failure(
-                        "update-check",
+                    crate::notice::Notice::info(
+                        "update",
                         "更新確認",
                         format!("更新情報を解析できません: {error}"),
+                        false,
                     ),
                 );
                 return;
