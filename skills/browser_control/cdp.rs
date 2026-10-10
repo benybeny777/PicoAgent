@@ -534,7 +534,10 @@ impl PageConn {
 
 #[cfg(test)]
 mod tests {
-    use super::{ensure_running, new_page, resolve_browser, stop, LaunchOptions, PageConn};
+    use super::{
+        ensure_running, ensure_running_prepared, new_page, resolve_browser, stop, LaunchOptions,
+        PageConn,
+    };
 
     /// 既定ポートが他の常駐プロセスとぶつかっていないこと。
     /// 重なると起動順によってどちらかが黙って使えなくなり、原因が非常に分かりにくい。

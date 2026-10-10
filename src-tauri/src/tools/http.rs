@@ -583,7 +583,7 @@ mod guarded_tests {
     use super::*;
 
     #[test]
-    fn API全体期限と標準および更新確認の無通信期限を混ぜない() {
+    fn api全体期限と標準および更新確認の無通信期限を混ぜない() {
         assert_eq!(ClientProfile::Service.stall_limits(), None);
         assert_eq!(ClientProfile::Standard.stall_limits(), Some((10, 120)));
         assert_eq!(ClientProfile::UpdateFeed.stall_limits(), Some((5, 10)));
@@ -1002,7 +1002,7 @@ mod guard {
     }
 
     #[test]
-    fn 個別HTTP構築は専用の責務を持つ共有所有者だけに置く() {
+    fn 個別http構築は専用の責務を持つ共有所有者だけに置く() {
         let violations: Vec<_> = crate::guard_scan::all_sources()
             .into_iter()
             .filter(|source| {

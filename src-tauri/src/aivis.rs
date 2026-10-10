@@ -1625,7 +1625,7 @@ fn terminate_managed_child(app: &tauri::AppHandle) {
 #[cfg(test)]
 mod tests {
     #[tokio::test]
-    async fn 共有要求でも音声一覧のURLとHTTP失敗と不正schemaを保持する() {
+    async fn 共有要求でも音声一覧のurlとhttp失敗と不正schemaを保持する() {
         use crate::providers::compatible::test_server::Server;
         let cases = [
             (
