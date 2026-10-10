@@ -6,6 +6,7 @@
 import * as bridge from "./bridge.js";
 import { createAmbient } from "./ambient.js";
 import { createBoot } from "./boot.js";
+import { createCharacterDiagnostic } from "./character-diagnostic.js";
 import { createContextMenu } from "./context-menu.js";
 import { createEditor } from "./edit.js";
 import { createEngine } from "./engine.js";
@@ -17,7 +18,7 @@ import { createNotices } from "./notice.js";
 import { createOnboarding } from "./onboarding.js";
 import { createRelationship } from "./relationship.js";
 import { createStage } from "./stage.js";
-import { toast, notifyBackgroundFailure } from "./toast.js";
+import { toast, notifyBackgroundFailure, clearBackgroundFailure } from "./toast.js";
 import { copyText, el, errorDetail, errorMessage, fetchJson, isImeComposing, logApp } from "./util.js";
 import { createVoice } from "./voice.js";
 import { createWindowChrome } from "./window-chrome.js";
@@ -138,7 +139,11 @@ const chrome = createWindowChrome({
   stageElement,
   onEditLayout: () => (editor.mode === "all" ? editor.stop() : editor.start("all")),
   onGame: () => game.open(),
-  listCharacters: async () => (await listCharacters()).entries.map(entry => ({ id: entry.id, name: entry.name || entry.id })),
+  listCharacters: async () => {
+    const result = await listCharacters();
+    reportUserCharacters({ error: result.userCharactersError });
+    return result.entries.map(entry => ({ id: entry.id, name: entry.name || entry.id }));
+  },
   onPinnedChange: pinned => {
     bridge.saveUiPref("PICOAGENT_TITLE_BAR_PINNED", pinned).catch(error => {
       logApp("error", "タイトルバーの表示設定を保存できませんでした", errorDetail(error));
@@ -304,10 +309,37 @@ function applyStreamAppearance(info) {
 // ── キャラクター ─────────────────────────────────────────────
 let characterOverrides = {};
 let sdkOverrides = {};
+let rendererOverrides = {};
+let rendererSavePending = false;
+let requestedCharacterId = "";
 let loadedSignature = "";
 let characterName = "キャラクター";
 let characterLoadGeneration = 0;
 let characterLoads = 0;
+
+const characterDiagnostic = createCharacterDiagnostic({
+  container: app,
+  retry: id => {
+    if (!requestedCharacterId) { window.location.reload(); return Promise.resolve(); }
+    loadedSignature = "";
+    return loadCharacter(id, { speakGreeting: false });
+  },
+  useImage: async id => {
+    rendererSavePending = true;
+    try {
+      const result = await bridge.setCharacterRenderer(id, "image");
+      rendererOverrides = result.rendererOverrides;
+      if (result.notificationError) toast(`2D表示は保存しましたが、設定の通知に失敗しました: ${result.notificationError}`, "error");
+    } finally { rendererSavePending = false; }
+    loadedSignature = "";
+    return loadCharacter(id, { speakGreeting: false });
+  },
+});
+function reportUserCharacters({ error }) {
+  if (error) notifyBackgroundFailure("user-characters", `追加キャラクターの一覧を読めません: ${errorMessage(error)}`, error);
+  else clearBackgroundFailure("user-characters");
+}
+host.events.on("userCharacters", reportUserCharacters);
 
 function renderCharacterOptions(pack) {
   const extra = relationship.extra;
@@ -346,20 +378,25 @@ function renderCharacterOptions(pack) {
 
 /** 見た目・人格・Live2D の世代・雰囲気のどれかが変わったときだけ描画を作り直す。 */
 function signatureOf(characterId) {
-  return [characterId, JSON.stringify(characterOverrides[characterId] || ""), sdkOverrides[characterId] || "", localStorageVariant(characterId)].join("\n");
+  return [characterId, JSON.stringify(characterOverrides[characterId] || ""), sdkOverrides[characterId] || "", rendererOverrides[characterId] || "", localStorageVariant(characterId)].join("\n");
 }
 
 async function loadCharacter(characterId, { speakGreeting = true } = {}) {
   const generation = ++characterLoadGeneration;
-  const signature = signatureOf(characterId);
-  if (!characterLoads && signature === loadedSignature) return null;
+  requestedCharacterId = characterId;
   characterLoads++;
   try {
     characterSource.element.style.visibility = "hidden";
     host.setDisplayReady(false);
+    const signature = signatureOf(characterId);
+    if (characterLoads === 1 && signature === loadedSignature) {
+      host.setDisplayReady(true);
+      characterSource.element.style.visibility = "";
+      return null;
+    }
     status.set("選択中のキャラクターを読み込み中…", "character-load");
     voice.stop(); // 切替前のキャラの合成待ち・再生音声を新しい姿へ持ち越さない
-    const loaded = await host.load(characterId, { overrides: characterOverrides, sdkOverrides });
+    const loaded = await host.load(characterId, { overrides: characterOverrides, sdkOverrides, rendererOverrides });
     if (!loaded || generation !== characterLoadGeneration) return null;
     const { pack, greeting } = loaded;
     characterName = pack.name;
@@ -376,6 +413,7 @@ async function loadCharacter(characterId, { speakGreeting = true } = {}) {
     voice.setCharacter(pack);
     if (appearance) applyStreamAppearance(appearance);
     loadedSignature = signature;
+    characterDiagnostic.clear();
     host.setDisplayReady(true);
     characterSource.element.style.visibility = ""; // 起動時の読込失敗後も、有効なキャラへ変更できれば表示を復旧する。
     status.clear("character-load");
@@ -388,6 +426,7 @@ async function loadCharacter(characterId, { speakGreeting = true } = {}) {
     if (generation !== characterLoadGeneration) return null;
     loadedSignature = "";
     characterSource.element.style.visibility = "hidden";
+    characterDiagnostic.show(characterId, error);
     status.set(`キャラクターを読み込めません: ${errorMessage(error)}。設定からキャラを確認してください`, "character-load");
     throw error;
   } finally {
@@ -399,10 +438,6 @@ function localStorageVariant(characterId) {
   try { return localStorage.getItem(`picoagent.variant.${characterId}`) || ""; }
   catch { return ""; } // フォールバック許可: 保存領域を読めない環境では既定の見た目として扱う。
 }
-
-host.events.on("fallback", ({ kind }) => {
-  status.flash(kind === "live2d" ? "Live2D を読み込めないので PNG 表示で続けるね" : "高品質リグを読み込めないので差分絵表示で続けるね", 5000);
-});
 
 // ── 表示形式 ─────────────────────────────────────────────────
 function applyLayout(id) {
@@ -482,8 +517,10 @@ bridge.on("pet:ui", ui => {
   if (ui.layout != null) applyLayout(ui.layout);
   if (ui.characterOverrides) characterOverrides = ui.characterOverrides;
   if (ui.live2dSdkOverrides) sdkOverrides = ui.live2dSdkOverrides;
-  if (ui.characterId) {
-    loadCharacter(ui.characterId).catch(error => {
+  const rendererChanged = ui.rendererOverrides && JSON.stringify(rendererOverrides) !== JSON.stringify(ui.rendererOverrides);
+  if (ui.rendererOverrides) rendererOverrides = ui.rendererOverrides;
+  if (!rendererSavePending && (ui.characterId || rendererChanged)) {
+    loadCharacter(ui.characterId || requestedCharacterId, { speakGreeting: !rendererChanged }).catch(error => {
       logApp("error", "キャラクター変更に失敗しました", errorDetail(error));
       status.flash(`キャラクター変更に失敗: ${errorMessage(error)}`, 8000);
     });
@@ -523,6 +560,7 @@ async function loadSceneDefinitions() {
   applyStreamAppearance(info);
   characterOverrides = info.characterOverrides || {};
   sdkOverrides = info.live2dSdkOverrides || {};
+  rendererOverrides = info.rendererOverrides || {};
   stage.load(definitions, info.scenes || {});
   applyLayout(info.layout);
   // 原本を読めなかった履歴は保存を止めている。黙っていると再起動でその分が消えるので、起動時に知らせる。
@@ -608,6 +646,7 @@ async function loadSceneDefinitions() {
   logApp("error", "起動初期化に失敗しました", errorDetail(error));
   characterSource.element.style.visibility = "hidden";
   host.setDisplayReady(false);
+  characterDiagnostic.show(requestedCharacterId || "キャラクター", error);
   status.setSticky(`起動初期化に失敗: ${errorMessage(error)}`, "error");
   boot.release(status);
 });

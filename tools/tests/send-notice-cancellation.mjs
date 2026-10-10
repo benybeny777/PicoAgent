@@ -107,8 +107,10 @@ test("起動で非表示になったキャラは有効なキャラの読込成�
   const source = uiFile("app/main.js");
   const body = source.slice(source.indexOf("async function loadCharacter("), source.indexOf("function localStorageVariant("));
   const characterSource = { element: { dataset: {}, style: { visibility: "hidden" } } };
+  const diagnostics = [];
   const context = vm.createContext({
-    loadedSignature: "", signatureOf: id => id, characterOverrides: {}, sdkOverrides: {}, characterName: "",
+    loadedSignature: "", signatureOf: id => id, characterOverrides: {}, sdkOverrides: {}, rendererOverrides: {}, requestedCharacterId: "", characterName: "",
+    characterDiagnostic: { clear: () => diagnostics.push(["clear"]), show: (id, error) => diagnostics.push(["show", id, error]) },
     characterLoadGeneration: 0, characterLoads: 0, status: { set() {}, clear() {} }, errorMessage: String,
     voice: { stop() {}, setCharacter() {} }, host: { setDisplayReady() {}, load: async () => ({ pack: { id: "mugi", name: "むぎ", manifest: {} }, greeting: "" }) },
     stage: { setCharacter() {} }, chrome: { setCharacterName() {} }, characterSource,
@@ -119,11 +121,14 @@ test("起動で非表示になったキャラは有効なキャラの読込成�
   await context.load("mugi");
   assert.equal(characterSource.element.style.visibility, "");
   assert.equal(characterSource.element.dataset.characterId, "mugi");
+  assert.equal(diagnostics[0][0], "clear");
   characterSource.element.style.visibility = "hidden";
   context.host.load = async () => { throw new Error("読込失敗"); };
   await assert.rejects(context.load("missing"), /読込失敗/);
   assert.equal(characterSource.element.style.visibility, "hidden");
   assert.equal(characterSource.element.dataset.characterId, "mugi");
+  assert.equal(diagnostics.at(-1)[0], "show");
+  assert.equal(diagnostics.at(-1)[1], "missing");
 });
 
 for (const [label, capture] of [

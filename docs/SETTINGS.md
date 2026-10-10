@@ -62,6 +62,7 @@
 | `PICOAGENT_CHARACTER` | `mugi` | 基本 | 選択中キャラクターのID |
 | `PICOAGENT_CHARACTER_OVERRIDES` | `{}` | 基本 | キャラクターIDごとの人格設定上書き |
 | `PICOAGENT_LIVE2D_SDK_OVERRIDES` | `{}` | 基本 | 複数世代のモデルを持つLive2Dキャラクターについて、キャラクターIDごとに `"4"` / `"5"` を固定する。未指定は `auto` |
+| `PICOAGENT_RENDERER_OVERRIDES` | `{}` | 基本 | キャラIDごとの明示2D指定（`{ "<ID>": "image" }`）。画像構造に対応するキャラだけ選べる。未指定は登録表の最優先対応方式、通常描画へ戻すときはそのIDを削除する。設定「キャラ選択」で通常／2Dを選び保存する。読込失敗時の自動切替には使わない |
 | `PICOAGENT_COMPANION_MODE` | `both` | 基本 | 相棒の用途（`life` / `work` / `both`）。初回案内では質問せず`both`を保存し、設定画面で変更する |
 | `PICOAGENT_RELATIONSHIP_MEMORY_ENABLED` | `true` | 基本 | キャラクター別の関係性と共有作業記録を保存する。OFFでは既存データを消さず、更新とAI文脈への差し込みを止める |
 | `PICOAGENT_ONBOARDING_DONE` | `false` | 基本 | 初回3択案内の完了状態 |

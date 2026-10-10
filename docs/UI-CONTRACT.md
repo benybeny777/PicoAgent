@@ -18,7 +18,7 @@
 |---|---|---|
 | `pet_frontend_ready` | なし | なし。フロントを読み込めた合図。届かないと起動監視が診断ページへ切り替える |
 | `pet_boot_progress` | なし | なし。起動中の生存通知（`pet_init` の `bootProgressIntervalMs` 間隔） |
-| `pet_init` | なし | 起動時の状態一式。`layout`・`scenes`（`PICOAGENT_SCENES` を正規化したもの）・`characterId`・`characterOverrides`・`live2dSdkOverrides`・`history`・`historySaveBlocked`・`providerId`・`up`・`theme`・`uiTheme`・`fontPx`・`voiceVolume`・`ttsEnabled`・`gazeTrackingEnabled`・`quickActions`・`napMinutes`・`stream*`（背景・ディスプレイ・字幕色）・`chatter*`・`onboardingDone`・`relationship`・`bondLabel`・`relationshipMemoryEnabled`・`relationshipError`（読込失敗理由、成功時null）・`bootProgressIntervalMs`・`betaBuild` |
+| `pet_init` | なし | 起動時の状態一式。`layout`・`scenes`（`PICOAGENT_SCENES` を正規化したもの）・`characterId`・`characterOverrides`・`live2dSdkOverrides`・`rendererOverrides`（IDごとの `image` 指定）・`history`・`historySaveBlocked`・`providerId`・`up`・`theme`・`uiTheme`・`fontPx`・`voiceVolume`・`ttsEnabled`・`gazeTrackingEnabled`・`quickActions`・`napMinutes`・`stream*`（背景・ディスプレイ・字幕色）・`chatter*`・`onboardingDone`・`relationship`・`bondLabel`・`relationshipMemoryEnabled`・`relationshipError`（読込失敗理由、成功時null）・`bootProgressIntervalMs`・`betaBuild` |
 | `pet_finish_boot` | なし | なし。保存したウィンドウ寸法・位置を戻す（起動画面から通常画面へ移る直前） |
 | `pet_reveal_main` | なし | なし。窓を表示する唯一の入口 |
 | `pet_send` | `text` | 返答 `{ reply, error?, choices?, quitApp? }`。生成中は `pet:stream_chunk` などのイベントが届く |
@@ -38,7 +38,8 @@
 | `pet_alarms` | なし | `{ alarms: [...] }` |
 | `pet_alarm_wake` | `id` | `{ reply? }` |
 | `pet_set_character_profile` | `characterId`, `profile`, `greeting`, `voice` | 確定したキャラの配信表示 `{ streamBackground, streamBackgroundImage, streamDisplay, streamDisplayImage, streamCaptionColor }` |
-| `pet_user_characters` | なし | `{ characters: [{ id, name, description, path }] }`（利用者が追加したキャラ） |
+| `pet_user_characters` | なし | `{ characters: [{ id, name, description, path }] }`（利用者が追加したキャラ）。メイン・設定画面の共通取得元。取得失敗・不正な形はエラーとして扱い、空一覧へ変えない |
+| `pet_set_character_renderer` | `characterId`, `renderer`（`"image"` または `null`） | `{ rendererOverrides: { "<ID>": "image" }, notificationError? }`。指定IDだけの明示描画選択を保存する。`null` はID削除で通常描画へ戻す。他キャラの指定を保持し、不正値・保存失敗はエラー。保存後の画面通知だけが失敗した場合は保存済みmapと警告を返す |
 | `pet_save_scene` | `scenes` | なし。`PICOAGENT_SCENES` を正規化して保存する。壊れた入力は保存せずエラー |
 | `pet_save_ui_pref` | `key`, `value` | なし。メイン画面で変えた見た目だけを保存する。対象は `PICOAGENT_BUBBLE_FONT_PX`（10〜28の整数文字列）、`PICOAGENT_STREAM_CHAT_FONT_PX`（18〜48）、`PICOAGENT_TITLE_BAR_PINNED`（真偽値）。それ以外のキー・範囲外は保存せずエラー |
 | `pet_menu` | `context`（`{ selection, editable, link, character }` の真偽値）、`x`・`y`（窓内の論理座標） | なし。右クリック位置に統一メニューを出す |
@@ -122,7 +123,7 @@
 
 | イベント | 中身 | 受け手の役割 |
 |---|---|---|
-| `pet:ui` | 変わった設定だけのオブジェクト（`theme`・`uiTheme`・`fontPx`・`voiceVolume`・`ttsEnabled`・`gazeTrackingEnabled`・`characterId`・`characterOverrides`・`live2dSdkOverrides`・`layout`・`stream*`・`chatter*`・`quickActions`・`relationshipMemoryEnabled`） | 設定保存を画面へ反映する |
+| `pet:ui` | 変わった設定だけのオブジェクト（`theme`・`uiTheme`・`fontPx`・`voiceVolume`・`ttsEnabled`・`gazeTrackingEnabled`・`characterId`・`characterOverrides`・`live2dSdkOverrides`・`rendererOverrides`・`layout`・`stream*`・`chatter*`・`quickActions`・`relationshipMemoryEnabled`） | 設定保存を画面へ反映する |
 | `pet:layout` | 形式ID | 表示形式を切り替える（ウィンドウ寸法はバックエンドが当て済み） |
 | `pet:layout-reset` | `{ scenes }` | 位置とサイズのリセット後のシーンへ置き換える |
 | `pet:layout-edit` | `"all"` \| `"character"` | 配置の編集（全ソース）またはキャラの直接調整を始める |

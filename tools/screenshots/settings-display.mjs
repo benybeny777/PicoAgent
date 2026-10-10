@@ -33,6 +33,7 @@ const settingsData = {
     PICOAGENT_MODEL: "lfm25_2_6b",
     PICOAGENT_LOCAL_MODEL_PRESET: "lfm25_2_6b",
     PICOAGENT_CHARACTER: "mugi",
+    PICOAGENT_RENDERER_OVERRIDES: {},
     PICOAGENT_LAYOUT: "stream",
     PICOAGENT_THEME: "dark",
     PICOAGENT_STREAM_CHAT_FONT_PX: "30",
@@ -99,6 +100,8 @@ const mock = `
 window.__listeners = {};
 window.__settingsData = JSON.parse(sessionStorage.getItem("mockSettingsData") || ${JSON.stringify(JSON.stringify(settingsData))});
 window.__savedSettingsPatches = [];
+window.__userCharactersRecovered = false;
+if (location.search.includes("user-list-failure")) window.__settingsData.values.PICOAGENT_CHARACTER = "user-test";
 window.__memoryItems = [
   { category: "好み", text: "私は結論から読むのが好き", updated_at: "2026-08-18T08:30:00Z", hits: 4 },
   { category: "継続指示", text: "今後はサイズをMBかGBで表示してほしい", updated_at: "2026-08-18T07:15:00Z", hits: 2 },
@@ -125,7 +128,10 @@ window.__TAURI__ = {
       ));
       return { items: window.__memoryItems };
     }
-    if (name === "pet_user_characters") return { characters: [{ id: "user-test", name: "追加テスト", path: "http://127.0.0.1:${port}/assets/characters/mugi", user: true }], root: "" };
+    if (name === "pet_user_characters") {
+      if (location.search.includes("user-list-failure") && !window.__userCharactersRecovered) throw new Error("追加キャラクター一覧の検証用エラー");
+      return { characters: [{ id: "user-test", name: "追加テスト", path: "http://127.0.0.1:${port}/assets/characters/mugi", user: true }], root: "" };
+    }
     if (name === "settings_character_discover_downloads") return { candidates: [
       { kind: "live2d", name: "ひより", path: "C:\\Users\\me\\Downloads\\ひより.zip" },
       { kind: "mmd", name: "モデル", path: "C:\\Users\\me\\Downloads\\モデル.pmx" },
@@ -761,6 +767,54 @@ try {
     if (buttons.some(button => !button.inside || !button.textFits || button.width < 80)) throw new Error(`長い警告で保存操作がつぶれます: ${width} ${JSON.stringify(buttons)}`);
     if (width === 960 && buttons.some(button => button.height > 60)) throw new Error("通常幅で保存ボタンの文字が縦に並びます");
   }
+  // 一覧が読めなくても保存済みIDと無関係な設定の草稿を守り、明示再取得だけで復旧する。
+  const userListPage = await browser.newPage({ viewport: { width: 960, height: 760 } });
+  await userListPage.addInitScript(mock);
+  await userListPage.goto(`http://127.0.0.1:${port}/settings.html?tab=display&user-list-failure`);
+  const userListReason = userListPage.locator(".character-list-diagnostic-container");
+  await userListReason.getByText("追加キャラクター一覧の検証用エラー", { exact: true }).waitFor();
+  await userListPage.waitForFunction(() => !document.getElementById("save").disabled);
+  const userSelect = userListPage.locator('[data-setting-key="PICOAGENT_CHARACTER"] select');
+  const rendererOf = target => target.locator(".field").filter({ has: target.locator("label", { hasText: "このキャラの描画方式" }) }).locator("select");
+  if (await userSelect.inputValue() !== "user-test" || !(await userSelect.isDisabled())) throw new Error("一覧失敗で保存IDか選択禁止が失われました");
+  const relatedFields = [rendererOf(userListPage), userListPage.locator('textarea[placeholder="性格・口調・一人称など"]'), userListPage.locator(".field").filter({ has: userListPage.locator("label", { hasText: "このキャラの Aivis Style ID" }) }).locator("input")];
+  for (const control of relatedFields) if (!(await control.isDisabled())) throw new Error("一覧失敗中にキャラ関連設定を編集できます");
+  if (!(await userListReason.isVisible())) throw new Error("一覧失敗の理由が画面に表示されません");
+  const userFont = userListPage.locator("#setting-PICOAGENT_STREAM_CHAT_FONT_PX");
+  await userFont.fill("31");
+  await userListPage.locator("#save").click();
+  await userListPage.waitForFunction(() => document.getElementById("status")?.textContent?.includes("保存しました"));
+  const userPatch = await userListPage.evaluate(() => window.__savedSettingsPatches.at(-1));
+  if (userPatch.PICOAGENT_STREAM_CHAT_FONT_PX !== "31" || Object.hasOwn(userPatch, "PICOAGENT_CHARACTER")) throw new Error(`他設定の保存がキャラIDを変更しました: ${JSON.stringify(userPatch)}`);
+  if (!(await userListReason.textContent()).includes("追加キャラクター一覧の検証用エラー") || !(await userListReason.isVisible())) throw new Error("他設定の保存で一覧失敗の理由が消えました");
+  await userFont.fill("32");
+  await userListPage.evaluate(() => { window.__userCharactersRecovered = true; });
+  await userListPage.getByRole("button", { name: "キャラクター一覧を再取得", exact: true }).click();
+  await userListPage.waitForFunction(() => !document.getElementById("save").disabled && document.querySelector('[data-setting-key="PICOAGENT_CHARACTER"] select')?.disabled === false);
+  if (await userSelect.inputValue() !== "user-test" || !(await userSelect.locator('option[value="user-test"]').textContent()).includes("追加テスト")) throw new Error("再取得後に追加キャラ一覧と元IDが復旧しません");
+  if (await userListReason.isVisible() || await userFont.inputValue() !== "32") throw new Error("一覧復旧で失敗理由か配信文字サイズの草稿が不正です");
+  if (!(await userListPage.locator("#dirtySummary").textContent()).includes("未保存 1件")) throw new Error("再取得後に文字サイズの未保存状態が失われました");
+  await userListPage.close();
+
+  // 明示2Dは未保存リセットで戻り、保存後の通常復帰はそのIDの指定を削除する。
+  const rendererPage = await browser.newPage({ viewport: { width: 960, height: 760 } });
+  await rendererPage.addInitScript(mock);
+  await rendererPage.goto(`http://127.0.0.1:${port}/settings.html?tab=character`);
+  await rendererPage.waitForFunction(() => !document.getElementById("save").disabled);
+  const rendererSelect = rendererOf(rendererPage);
+  await rendererSelect.selectOption("image");
+  await rendererPage.waitForFunction(() => document.getElementById("dirtySummary")?.textContent?.includes("未保存 1件"));
+  await rendererPage.locator("#resetChanges").click();
+  await rendererPage.waitForFunction(() => !document.getElementById("save").disabled && document.getElementById("resetChanges").disabled);
+  if (await rendererSelect.inputValue() !== "auto") throw new Error("未保存2D指定のリセットで通常描画に戻りません");
+  for (const renderer of ["image", "auto"]) {
+    await rendererSelect.selectOption(renderer);
+    await rendererPage.locator("#save").click();
+    await rendererPage.waitForFunction(() => document.getElementById("status")?.textContent?.includes("保存しました") && !document.getElementById("save").disabled);
+    const overrides = await rendererPage.evaluate(() => window.__settingsData.values.PICOAGENT_RENDERER_OVERRIDES);
+    if (renderer === "image" ? overrides.mugi !== "image" : Object.hasOwn(overrides, "mugi")) throw new Error(`描画方式の保存・解除が不一致: ${JSON.stringify(overrides)}`);
+  }
+  await rendererPage.close();
   const recoveryPage = await browser.newPage();
   await recoveryPage.addInitScript(mock);
   await recoveryPage.goto(`http://127.0.0.1:${port}/settings.html?load-failure=1`);

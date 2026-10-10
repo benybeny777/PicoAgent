@@ -869,6 +869,7 @@ pub async fn pet_init(app: AppHandle, state: State<'_, AppState>) -> Result<Valu
         "characterId": character_id,
         "characterOverrides": state.config.get_all().get("PICOAGENT_CHARACTER_OVERRIDES").cloned().unwrap_or_else(|| json!({})),
         "live2dSdkOverrides": state.config.get_all().get("PICOAGENT_LIVE2D_SDK_OVERRIDES").cloned().unwrap_or_else(|| json!({})),
+        "rendererOverrides": crate::renderer_setting::load(&state.config.get_all())?,
         "history": recent_history,
         // 原本を読めなかったキャラクターは保存を止めている。黙っていると利用者は
         // 保存されていると思ったまま会話を続け、再起動でその分がまるごと消える。
@@ -3090,6 +3091,9 @@ pub async fn settings_save(
             return Err("配信チャットの文字サイズは18〜48の整数で指定してください。".to_string());
         }
     }
+    let renderer_guard = patch
+        .contains_key(crate::renderer_setting::CONFIG_KEY)
+        .then(|| crate::store::lock_state(crate::renderer_setting::CONFIG_KEY));
     let schedule_guard = patch
         .contains_key(crate::scheduler::CONFIG_KEY)
         .then(|| crate::store::lock_state(crate::scheduler::CONFIG_KEY));
@@ -3201,12 +3205,15 @@ pub async fn settings_save(
                 patch,
                 &base_revisions.unwrap_or_default(),
                 |latest, checked_patch| {
+                    crate::renderer_setting::validate_patch(checked_patch)
+                        .map_err(anyhow::Error::msg)?;
                     preserve_unreadable_secrets(checked_patch, latest)
                         .map_err(anyhow::Error::msg)?;
                     crate::scheduler::reconcile_settings_patch(latest, checked_patch)
                         .map_err(anyhow::Error::msg)?;
                     let mut candidate = latest.clone();
                     candidate.extend(checked_patch.clone());
+                    crate::renderer_setting::load(&candidate).map_err(anyhow::Error::msg)?;
                     validate_multi_ai_settings(&state.config, &candidate)
                         .map_err(anyhow::Error::msg)?;
                     let mut encrypted = Vec::new();
@@ -3249,6 +3256,7 @@ pub async fn settings_save(
         }
     }
     drop(schedule_guard);
+    drop(renderer_guard);
 
     if memory_search_changed {
         crate::memory_embedding::reset()
@@ -3331,6 +3339,7 @@ pub async fn settings_save(
         let active_character = state.config.get("PICOAGENT_CHARACTER", "mugi");
         let stream = crate::stream_profile::resolve(&state.config, &active_character);
         let mut ui = json!({
+            "rendererOverrides": crate::renderer_setting::load(&state.config.get_all())?,
             "fontPx": state.config.get("PICOAGENT_BUBBLE_FONT_PX", "13"),
             "streamChatFontPx": state.config.get("PICOAGENT_STREAM_CHAT_FONT_PX", "22"),
             "theme": state.config.get("PICOAGENT_THEME", "system"),
@@ -3883,6 +3892,35 @@ pub fn pet_save_ui_pref(
         .config
         .set_all(patch)
         .map_err(|error| format!("表示設定の保存に失敗しました: {error}"))
+}
+
+#[tauri::command]
+pub fn pet_set_character_renderer(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    character_id: String,
+    renderer: Option<String>,
+) -> Result<Value, String> {
+    let saved = crate::renderer_setting::set_character(
+        &state.config,
+        &character_id,
+        renderer.as_deref(),
+        |overrides| {
+            if let Some(win) = app.get_webview_window("main") {
+                win.emit("pet:ui", json!({ "rendererOverrides": overrides }))
+                    .map_err(|error| {
+                        format!("描画設定は保存しましたが、画面へ反映できません: {error}")
+                    })?;
+            }
+            Ok(())
+        },
+    )?;
+    let mut result = json!({ "rendererOverrides": saved.overrides });
+    if let Some(reason) = saved.notification_error {
+        crate::log_paths::append_app_log(&app, &reason);
+        result["notificationError"] = json!(reason);
+    }
+    Ok(result)
 }
 
 #[tauri::command]

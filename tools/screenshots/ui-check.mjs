@@ -46,12 +46,13 @@ function mockScript({ layout, characterId = "mugi", scenes = {}, onboardingDone 
 window.__calls = [];
 window.__listeners = {};
 window.__saved = ${JSON.stringify(scenes)};
+window.__rendererConfig = JSON.parse(localStorage.getItem("test.renderer-config") || "{}");
 window.__TAURI__ = {
   core: { invoke: (name, args = {}) => {
     window.__calls.push({ name, args: JSON.parse(JSON.stringify(args)) });
     if (name === "pet_init") return Promise.resolve({
       up: true, providerId: "local", theme: "system", uiTheme: ${JSON.stringify(uiTheme)}, fontPx: "14", streamChatFontPx: "22", voiceVolume: "35",
-      characterId: ${JSON.stringify(characterId)}, characterOverrides: {}, live2dSdkOverrides: {},
+      characterId: ${JSON.stringify(characterId)}, characterOverrides: {}, live2dSdkOverrides: {}, rendererOverrides: window.__rendererConfig,
       layout: ${JSON.stringify(layout)}, scenes: window.__saved, history: ${JSON.stringify(history)},
       quickActions: "", napMinutes: "0", onboardingDone: ${JSON.stringify(onboardingDone)},
       relationshipMemoryEnabled: true, relationship: {}, bondLabel: "いっしょの相棒",
@@ -60,6 +61,13 @@ window.__TAURI__ = {
       chatterEnabled: false, chatterMinSecs: "9999", chatterMaxSecs: "9999", betaBuild: false,
     });
     if (name === "pet_save_scene") { window.__saved = args.scenes; return Promise.resolve(); }
+    if (name === "pet_set_character_renderer") {
+      if (window.__rendererSaveFailure) return Promise.reject("描画設定の検証用保存失敗");
+      if (args.renderer == null) delete window.__rendererConfig[args.characterId];
+      else window.__rendererConfig[args.characterId] = args.renderer;
+      localStorage.setItem("test.renderer-config", JSON.stringify(window.__rendererConfig));
+      return Promise.resolve({ rendererOverrides: window.__rendererConfig });
+    }
     if (name === "engine_status") return Promise.resolve({ phase: "ready" });
     if (name === "aivis_status") return Promise.resolve({ enabled: false });
     if (name === "pet_speak") return Promise.resolve({ enabled: false });
@@ -98,7 +106,7 @@ const report = [];
 const fail = (label, detail) => { failures.push(`${label}: ${detail}`); console.error(`NG ${label}: ${detail}`); };
 const ok = label => console.log(`OK ${label}`);
 
-async function openApp({ layout, width, height, characterId, scenes, onboardingDone, history, uiTheme }) {
+async function openApp({ layout, width, height, characterId, scenes, onboardingDone, history, uiTheme, beforeNavigate, diagnostic = false }) {
   // 窓とモニターは別の寸法。キャラ拡大時の窓拡張も実ブリッジと同じく検査する。
   const context = await browser.newContext({ viewport: { width, height }, screen: { width: 1920, height: 1080 }, deviceScaleFactor: 1 });
   const page = await context.newPage();
@@ -107,9 +115,10 @@ async function openApp({ layout, width, height, characterId, scenes, onboardingD
   page.on("pageerror", error => errors.push(String(error)));
   page.on("console", message => { if (message.type() === "error") errors.push(message.text()); });
   await page.addInitScript(mockScript({ layout, characterId, scenes, onboardingDone, history, uiTheme }));
+  await beforeNavigate?.(page);
   await page.goto(base);
   await page.waitForFunction(() => !document.getElementById("petApp").classList.contains("is-booting"), null, { timeout: 30000 });
-  await page.waitForFunction(() => {
+  if (!diagnostic) await page.waitForFunction(() => {
     const canvas = document.querySelector("[data-source=character] canvas");
     return canvas && canvas.width > 1 && canvas.height > 1;
   }, null, { timeout: 30000 });
@@ -199,6 +208,8 @@ const characters = process.env.UI_CHECK_CHARACTERS === "all"
   : (process.env.UI_CHECK_CHARACTERS || "mugi,rin,photoreal-prototype").split(",");
 const layoutIds = (process.env.UI_CHECK_LAYOUTS || "pet,mascot,stream").split(",");
 
+try {
+if (process.env.UI_CHECK_DIAGNOSTIC_ONLY !== "1") {
 for (const characterId of characters) {
   for (const layout of layoutIds) {
     const [width, height] = LAYOUTS[layout];
@@ -638,11 +649,58 @@ for (const [layout, width, height, key, initial, step] of [["pet", 900, 600, "PI
   await context.close();
 }
 
+}
+// 実際の読み込み失敗から診断・保存・再起動までを通し、自動PNG切替を見逃さない。
+for (const layout of Object.keys(LAYOUTS)) {
+  const label = `${layout}/描画失敗の診断`;
+  const { context, page } = await openApp({
+    layout, width: 200, height: 240, characterId: "mugi", diagnostic: true,
+    beforeNavigate: async page => {
+      await page.route("**/assets/characters/mugi/character.json*", async route => {
+        const manifest = JSON.parse(fs.readFileSync(path.join(uiDir, "assets/characters/mugi/character.json"), "utf8"));
+        manifest.live2d = { model: "検査用の存在しない.model3.json" };
+        await route.fulfill({ json: manifest });
+      });
+    },
+  });
+  try {
+    await page.locator(".character-diagnostic").waitFor();
+    const current = await page.evaluate(() => ({
+      hidden: getComputedStyle(document.querySelector("[data-source=character]")).visibility === "hidden",
+      renderer: document.querySelector(".character-view")?.dataset.renderKind || "",
+      reason: document.querySelector(".character-diagnostic-reason").textContent,
+      config: window.__rendererConfig,
+    }));
+    if (!current.hidden || current.renderer || !current.reason || Object.keys(current.config).length) fail(label, `黙った描画切替または理由欠損: ${JSON.stringify(current)}`);
+    for (const selector of [".character-diagnostic-actions button:first-child", ".character-diagnostic-actions button:last-child"]) {
+      await page.locator(selector).scrollIntoViewIfNeeded();
+      const fit = await fullyInside(page, selector);
+      if (!fit.inside) fail(label, `最小窓で診断操作が隠れています: ${JSON.stringify(fit)}`);
+    }
+    await page.evaluate(() => { window.__rendererSaveFailure = true; });
+    await page.getByRole("button", { name: "このキャラを2D表示にする" }).click();
+    await page.waitForFunction(() => document.querySelector(".character-diagnostic-reason").textContent.includes("検証用保存失敗"));
+    if (await page.evaluate(() => Object.keys(window.__rendererConfig).length)) fail(label, "保存失敗で描画指定が変わりました");
+    await page.evaluate(() => { window.__rendererSaveFailure = false; });
+    await page.getByRole("button", { name: "このキャラを2D表示にする" }).click();
+    await page.waitForFunction(() => document.querySelector(".character-diagnostic").hidden && document.querySelector(".character-view")?.dataset.renderKind === "2d");
+    if (await page.evaluate(() => window.__rendererConfig.mugi) !== "image") fail(label, "明示2Dが保存されませんでした");
+    await page.reload();
+    await page.waitForFunction(() => !document.getElementById("petApp").classList.contains("is-booting") && document.querySelector(".character-view")?.dataset.renderKind === "2d");
+    if (await page.locator(".character-diagnostic").isVisible()) fail(label, "保存済み2Dの再起動で診断が残ります");
+    await page.screenshot({ path: path.join(outDir, `${layout}-explicit-image.png`), omitBackground: true });
+    ok(`${label} 保存失敗の保護・明示2D・再起動`);
+  } finally { await context.close(); }
+}
+
 fs.writeFileSync(path.join(outDir, "report.json"), JSON.stringify({ report, failures }, null, 2));
-await browser.close();
-server.close();
 if (failures.length) {
   console.error(`\n${failures.length} 件の失敗`);
-  process.exit(1);
+  process.exitCode = 1;
+} else {
+  console.log("\nすべて合格");
 }
-console.log("\nすべて合格");
+} finally {
+  await browser.close();
+  await new Promise(resolve => server.close(resolve));
+}
