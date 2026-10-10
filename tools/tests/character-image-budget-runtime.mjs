@@ -141,3 +141,22 @@ test("表情と視線とまばたき段階も同一フレームへまとめ明�
   state.renderer.dispose(); state.renderer.resize(2, 2, 1);
   assert.equal(state.drawn.length, 3);
 });
+
+
+test("減らす設定で口が閉じたまま発話終了しても閉眼を残さず静止顔へ戻る", () => {
+  const state = fixture({ reducedMotion: true, springing: false });
+  state.renderer.setFrameBudget(30); state.tick(0);
+  state.renderer.setSpeaking(true);
+  const fireTimer = () => {
+    const [id, timer] = [...state.timers][0];
+    state.timers.delete(id); timer.callback();
+  };
+  fireTimer(); state.tick(34);
+  fireTimer(); state.tick(68);
+  assert.equal(state.drawn.at(-1).name, "blink_closed");
+  assert.equal(state.renderer.mouthOpen, false);
+  state.renderer.setSpeaking(false); state.tick(102);
+  assert.equal(state.drawn.at(-1).name, "mouth_closed");
+  assert.equal(state.frames.size, 0); assert.equal(state.timers.size, 0);
+  state.renderer.dispose();
+});

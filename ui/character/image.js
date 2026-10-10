@@ -346,6 +346,8 @@ export class ImageRenderer {
     if (!this.speaking) this.setMouth(0);
     this.stopBlink();
     this.scheduleBlink();
+    // 口形が変わらなくても、解除した閉眼を静止顔へ描き直す。
+    this.requestDraw();
   }
 
   setGaze(x) {
