@@ -148,16 +148,20 @@ pub fn quarantine_and_notify(
 ) -> Option<PathBuf> {
     let backup = quarantine_corrupt(path)?;
     let (key, title) = area.notice_fields();
+    // 退避は一度きりの出来事で「復旧」が無い。`background_failure` にすると未復旧として
+    // 画面の再読込のたびに再送されるため、通知一覧へ1件残す種類で送る。
     crate::notice::emit(
         app,
-        crate::notice::Notice::background_failure(
-            key,
+        crate::notice::Notice::info(
+            "state_quarantined",
             title,
             format!(
                 "壊れていたため退避して新しく始めました。退避先: {}",
                 backup.display()
             ),
-        ),
+            false,
+        )
+        .detail("area", serde_json::json!(key)),
     );
     Some(backup)
 }
