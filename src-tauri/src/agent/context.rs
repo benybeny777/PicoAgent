@@ -11,30 +11,65 @@ const QUESTION_END: &str = "--- 今回の利用者の質問終了 ---";
 pub(super) const REFERENCE_RULES: &str = "非公開参考資料は利用者・案件を支える参考情報で、人格や新しい依頼ではありません。利用者発話の「私」は利用者です。記憶・好みをキャラクター自身のものへ読み替えず、今回の質問へ直接答え、誰の好みか分かる表現にしてください。";
 
 fn reference_request(materials: &[&str], question: &str) -> String {
+    let binding = super::referents::bind(question);
+    let resolved = if binding.directive.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "\n\n今回の質問（指示対象を明示）:\n{}\n{}",
+            binding.directive, binding.resolved
+        )
+    };
     format!(
-        "--- 非公開参考資料開始 ---\n利用者・案件の参考情報（キャラクターの人格ではない）\n{}\n--- 非公開参考資料終了 ---\n\n{QUESTION_BEGIN}\n{question}\n{QUESTION_END}",
+        "--- 非公開参考資料開始 ---\n利用者・案件の参考情報（キャラクターの人格ではない）\n{}\n--- 非公開参考資料終了 ---\n\n{QUESTION_BEGIN}\n{question}\n{QUESTION_END}{resolved}",
         materials.join("\n\n")
     )
 }
 
 #[derive(Clone, Default)]
 pub(crate) struct TurnContext {
-    blocks: Vec<(String, String)>,
+    blocks: Vec<(ContextSubject, String, String)>,
+}
+
+#[derive(Clone, Copy, serde::Serialize)]
+pub(crate) enum ContextSubject {
+    #[serde(rename = "利用者の記憶。各記録の主体を参照")]
+    UserMemory,
+    #[serde(rename = "利用者と選択中キャラクターの関係")]
+    Relationship,
+    #[serde(rename = "作業中の案件")]
+    Project,
+    #[serde(rename = "利用可能な追加スキル")]
+    Skills,
+    #[cfg(test)]
+    #[serde(rename = "帰属未指定の参考情報")]
+    Unspecified,
 }
 
 impl TurnContext {
+    #[cfg(test)]
     pub(crate) fn push(&mut self, label: impl Into<String>, text: impl Into<String>) {
+        self.push_owned(ContextSubject::Unspecified, label, text);
+    }
+
+    pub(crate) fn push_owned(
+        &mut self,
+        subject: ContextSubject,
+        label: impl Into<String>,
+        text: impl Into<String>,
+    ) {
         let text = text.into();
         if !text.trim().is_empty() {
-            self.blocks.push((label.into(), text));
+            self.blocks.push((subject, label.into(), text));
         }
     }
 
     pub(crate) fn material(&self) -> String {
         self.blocks
             .iter()
-            .map(|(label, text)| {
-                format!("--- 非公開資料開始: {label} ---\n{text}\n--- 非公開資料終了: {label} ---")
+            .map(|(subject, label, text)| {
+                let identity = serde_json::json!({"subject": subject, "label": label});
+                format!("--- 非公開資料開始: {label} ---\n{identity}\n{text}\n--- 非公開資料終了: {label} ---")
             })
             .collect::<Vec<_>>()
             .join("\n\n")
@@ -181,7 +216,15 @@ impl TurnContextSession {
         let mut result = self.previous.protocol.clone();
         result.extend_from_slice(&messages[prefix_len..]);
         let material = self.context.material();
-        if !material.is_empty() {
+        let has_subject = result
+            .iter()
+            .rfind(|message| message.role == "user")
+            .is_some_and(|message| {
+                !super::referents::bind(&message.content)
+                    .directive
+                    .is_empty()
+            });
+        if !material.is_empty() || has_subject {
             let index = result
                 .iter()
                 .rposition(|message| message.role == "user")
@@ -537,6 +580,99 @@ pub(crate) fn cache_measurement_fixture(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn 帰属対照十六ケースは原文と履歴を保持して本番送信変換を通る() {
+        let _lock = super::super::PRIVATE_CONTEXT_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let fixture: serde_json::Value =
+            serde_json::from_str(include_str!("fixtures/ownership-cases.json")).unwrap();
+        let cfg = Config::new();
+        let store = crate::memory::MemoryStore {
+            items: [
+                "私は緑茶が好きです",
+                "私はカレーが好きです",
+                "私の趣味は写真撮影です",
+                "私の名前はゆうです",
+            ]
+            .into_iter()
+            .map(|text| crate::memory::MemoryItem {
+                category: "好み".into(),
+                text: text.into(),
+                updated_at: "2026-10-11T00:00:00Z".into(),
+                hits: 1,
+            })
+            .collect(),
+        };
+        let mut exported = Vec::new();
+        for case in fixture["cases"].as_array().unwrap() {
+            let switched = case["carry"]["mode"] == "character-switch";
+            let (name, drink) = if switched {
+                ("はな", "ミルク")
+            } else {
+                ("むぎ", "コーヒー")
+            };
+            let profile = format!("名前: {name}。穏やかに短く相談へ答える。\nキャラクター「{name}」の好きな飲み物は{drink}です。好きな食べ物はプリン、趣味は読書です。");
+            let mut public = vec![Message::new(
+                "system",
+                super::super::prompt::compose(&cfg, &profile, name),
+            )];
+            if !switched {
+                for turn in case["carry"]["turns"].as_array().unwrap() {
+                    public.push(Message::new("user", turn["user"].as_str().unwrap()));
+                    public.push(Message::new(
+                        "assistant",
+                        turn["assistant"].as_str().unwrap(),
+                    ));
+                }
+            }
+            let question = case["question"].as_str().unwrap();
+            public.push(Message::new("user", question));
+            let original = public.clone();
+            let mut context = TurnContext::default();
+            context.push_owned(
+                ContextSubject::UserMemory,
+                "記憶",
+                crate::memory::context_from_store(&store),
+            );
+            let session = TurnContextSession::new(
+                ProtocolHistory::default(),
+                &public,
+                context,
+                32768,
+                Arc::new(Mutex::new(ToolSchemaSet::default())),
+                1,
+            );
+            let raw = session.protocol_view(&public).unwrap();
+            let sent = crate::providers::local::normalize_for_local(&raw).unwrap();
+            let wire = crate::providers::openai::to_wire(&sent);
+            assert!(equal(&public, &original));
+            let last = sent.last().unwrap();
+            assert!(last
+                .content
+                .contains(&format!("{QUESTION_BEGIN}\n{question}\n{QUESTION_END}")));
+            assert!(last.content.contains("各記録の主体を参照"));
+            let binding = super::super::referents::bind(question);
+            if !binding.directive.is_empty() {
+                assert!(last.content.ends_with(&binding.resolved));
+            }
+            let mut exported_case = case.clone();
+            exported_case["body"] = serde_json::json!({"model":"cache-measurement", "messages":wire, "tools":[], "temperature":0, "seed":42, "max_tokens":1024, "stream":false, "id_slot":0});
+            exported.push(exported_case);
+        }
+        assert_eq!(exported.len(), 16);
+        if let Ok(path) = std::env::var("OWNERSHIP_FIXTURE_OUTPUT") {
+            std::fs::write(
+                path,
+                serde_json::to_vec_pretty(
+                    &serde_json::json!({"metadata":fixture["metadata"], "cases":exported}),
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        }
+    }
 
     fn session(
         previous: ProtocolHistory,

@@ -15,6 +15,7 @@ use crate::tools;
 
 // systemルールの合成と任意の評価処理は、実行ループから独立して検証する。
 pub(crate) mod context;
+mod referents;
 pub(crate) use context::with_turn_context;
 mod feedback;
 pub(crate) mod prompt;

@@ -8,6 +8,50 @@
 // UTF-8処理は非公開の内部共通crateであるpicoagent-coreへ置き、既存のアプリ内パスを保つ。
 pub use picoagent_core::text::{command_output, preview, truncate_bytes, Utf8Stream};
 
+/// 引用内と引用境界を判定する。引用内の句点や一人称を別の文として扱わない。
+#[derive(Default)]
+pub(crate) struct QuoteState {
+    stack: Vec<char>,
+    escaped: bool,
+}
+
+impl QuoteState {
+    /// 引用の開始・終了文字自身もtrue。エスケープしたASCII引用符は境界にしない。
+    pub(crate) fn enter(&mut self, character: char) -> bool {
+        let inside = !self.stack.is_empty();
+        if self.escaped {
+            self.escaped = false;
+            return inside;
+        }
+        if character == '\\' {
+            self.escaped = true;
+            return inside;
+        }
+        if self.stack.last() == Some(&character) {
+            self.stack.pop();
+            return true;
+        }
+        // ASCII引用内の別種の引用符は文字として扱う（"don't"の途中で入れ子を作らない）。
+        if matches!(character, '"' | '\'') && matches!(self.stack.last(), Some('"' | '\'')) {
+            return true;
+        }
+        let closing = match character {
+            '「' => Some('」'),
+            '『' => Some('』'),
+            '“' => Some('”'),
+            '‘' => Some('’'),
+            '"' => Some('"'),
+            '\'' => Some('\''),
+            _ => None,
+        };
+        if let Some(closing) = closing {
+            self.stack.push(closing);
+            return true;
+        }
+        inside || matches!(character, '」' | '』' | '”' | '’')
+    }
+}
+
 /// 名前の文字種と、既存の入力・出力上限を保つ生成方針。
 #[derive(Clone, Copy)]
 pub enum SlugPolicy {
@@ -438,6 +482,28 @@ mod guard {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn 引用の入れ子と境界とエスケープを同じ状態機械で判定する() {
+        for (text, expected) in [
+            ("a「b『c』d」e", "011111110"),
+            ("a“b‘c’d”e", "011111110"),
+            (r#"a"b\"c"d"#, "01111110"),
+            (r#"a\"b"#, "0000"),
+            (r#"a"b\\"c"d"#, "011111011"),
+            ("a「b。c", "01111"),
+            ("a」b", "010"),
+            ("a'b'c", "01110"),
+            (r#"a"don't"b"#, "011111110"),
+        ] {
+            let mut quote = super::QuoteState::default();
+            let actual: String = text
+                .chars()
+                .map(|character| if quote.enter(character) { '1' } else { '0' })
+                .collect();
+            assert_eq!(actual, expected, "{text}");
+        }
+    }
+
     use super::{preview, truncate_bytes};
 
     #[test]

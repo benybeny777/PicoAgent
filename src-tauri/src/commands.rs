@@ -420,13 +420,20 @@ async fn prepare_turn_context(
             base
         }
     };
-    context.push("記憶", memory);
-    context.push("関係性", state.relationship_context.lock().unwrap().clone());
-    context.push(
+    use agent::context::ContextSubject;
+    context.push_owned(ContextSubject::UserMemory, "記憶", memory);
+    context.push_owned(
+        ContextSubject::Relationship,
+        "関係性",
+        state.relationship_context.lock().unwrap().clone(),
+    );
+    context.push_owned(
+        ContextSubject::Project,
         "プロジェクト文脈",
         crate::tools::project::project_context(&state.config)?,
     );
-    context.push(
+    context.push_owned(
+        ContextSubject::Skills,
         "利用者追加スキル",
         crate::user_skills::prompt_context(&state.config),
     );

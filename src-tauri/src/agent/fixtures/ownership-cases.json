@@ -1,0 +1,38 @@
+{
+  "metadata": {
+    "purpose": "所有主体の誤読・引用の誤帰属・会話持越しを原文回答で判定する16ケース。語句一致だけで合格にしない。",
+    "sourceFixtures": ["ownership-baseline.json", "baseline.json", "after-ordered.json"],
+    "serverArgsReference": "quality-ordered-server-args.json",
+    "execution": {"baseUrl": "http://127.0.0.1:18969", "max_tokens": 1024, "seed": 42, "temperature": 0, "stream": false, "id_slot": 0, "tools": []},
+    "boundary": "ケース定義のみ。rootが同じ構造変換で旧新bodyへ反映する。実験未実行。ケース間で履歴・資料・人格を混ぜず、指定したcarryだけを渡す。",
+    "speaker": {"id": "fixture-user-yu", "name": "ゆう", "role": "user"},
+    "character": {"id": "fixture-mugi", "name": "むぎ", "role": "assistant"},
+    "facts": [
+      {"owner": "fixture-user-yu", "kind": "飲物", "value": "緑茶"},
+      {"owner": "fixture-user-yu", "kind": "食物", "value": "カレー"},
+      {"owner": "fixture-user-yu", "kind": "趣味", "value": "写真撮影"},
+      {"owner": "fixture-mugi", "kind": "飲物", "value": "コーヒー"},
+      {"owner": "fixture-mugi", "kind": "食物", "value": "プリン"},
+      {"owner": "fixture-mugi", "kind": "趣味", "value": "読書"}
+    ],
+    "rules": ["存在しない一番・頻度・期間・経験を追加しない", "未知の事実は不明と答える", "利用者は会話文で私、キャラはあなたとして質問される", "引用中の一人称は引用の発話者に属する"]
+  },
+  "cases": [
+    {"name":"01-私の飲物","question":"私の好きな飲み物を教えて","expectedSubject":["fixture-user-yu"],"expectedFacts":["利用者ゆうは緑茶が好き"],"reject":["利用者の飲物をコーヒーとする","むぎ自身の好みとして緑茶を言う","一番・いつも・毎日を足す"],"carry":{"mode":"fresh","turns":[]}},
+    {"name":"02-あなたの飲物","question":"あなたの好きな飲み物を教えて","expectedSubject":["fixture-mugi"],"expectedFacts":["むぎはコーヒーが好き"],"reject":["むぎの飲物を緑茶とする","利用者の好みだけを答える"],"carry":{"mode":"fresh","turns":[]}},
+    {"name":"03-利用者名称の食物","question":"利用者のゆうはどんな食べ物が好き？","expectedSubject":["fixture-user-yu"],"expectedFacts":["ゆうはカレーが好き"],"reject":["プリンをゆうの好みとする","キャラ自身のカレー好きとして答える"],"carry":{"mode":"fresh","turns":[]}},
+    {"name":"04-キャラ名称の食物","question":"むぎの好きな食べ物は何？","expectedSubject":["fixture-mugi"],"expectedFacts":["むぎはプリンが好き"],"reject":["カレーをむぎの好みとする","第三者のむぎとして人格を離脱する"],"carry":{"mode":"fresh","turns":[]}},
+    {"name":"05-私の趣味","question":"私の趣味を覚えている？","expectedSubject":["fixture-user-yu"],"expectedFacts":["利用者ゆうの趣味は写真撮影"],"reject":["利用者の趣味を読書とする","写真撮影をキャラ自身の趣味として答える"],"carry":{"mode":"fresh","turns":[]}},
+    {"name":"06-あなたの趣味","question":"あなたの趣味は何？","expectedSubject":["fixture-mugi"],"expectedFacts":["むぎの趣味は読書"],"reject":["むぎの趣味を写真撮影とする","利用者の趣味だけを答える"],"carry":{"mode":"fresh","turns":[]}},
+    {"name":"07-両者の飲物比較","question":"私とあなたの好きな飲み物を、それぞれ区別して教えて","expectedSubject":["fixture-user-yu","fixture-mugi"],"expectedFacts":["利用者ゆうは緑茶が好き","むぎはコーヒーが好き"],"reject":["主体を逆にする","二人とも緑茶またはコーヒーとする","所有主語を省いて区別不能にする"],"carry":{"mode":"fresh","turns":[]}},
+    {"name":"08-名称で両者の趣味比較","question":"利用者ゆうとキャラむぎの趣味の違いを教えて","expectedSubject":["fixture-user-yu","fixture-mugi"],"expectedFacts":["ゆうは写真撮影","むぎは読書"],"reject":["両者の趣味を逆にする","共通の趣味を根拠なく足す"],"carry":{"mode":"fresh","turns":[]}},
+    {"name":"09-利用者の未知事実","question":"私の好きな果物は何？","expectedSubject":["fixture-user-yu"],"expectedFacts":["ゆうの好きな果物は資料にないため不明"],"reject":["果物を推測して断定する","キャラの好みやカレーで代用する"],"carry":{"mode":"fresh","turns":[]}},
+    {"name":"10-キャラの未知事実","question":"あなたは毎日何杯コーヒーを飲むの？","expectedSubject":["fixture-mugi"],"expectedFacts":["コーヒー好きは既知だが頻度と杯数は不明"],"reject":["毎日一杯・いつも飲むなど未提供の習慣を作る","利用者の緑茶の習慣を作る"],"carry":{"mode":"fresh","turns":[]}},
+    {"name":"11-引用中の私","question":"友人のあおいが『私は紅茶が好き』と言いました。この『私』は誰で、何が好き？","expectedSubject":["fixture-friend-aoi"],"expectedFacts":["引用の私はあおい","あおいは紅茶が好き"],"reject":["引用の私をゆうまたはむぎとする","ゆうの既知の好みを紅茶で上書きする"],"carry":{"mode":"fresh","turns":[]}},
+    {"name":"12-引用中のあなた","question":"あおいがけんに『あなたは麦茶が好きだね』と言いました。この『あなた』は誰で、何が好き？","expectedSubject":["fixture-friend-ken"],"expectedFacts":["引用のあなたはけん","引用ではけんが麦茶好きだと述べられている"],"reject":["引用のあなたをむぎとする","むぎの好みを麦茶へ変更する","あおいの好みとする"],"carry":{"mode":"fresh","turns":[]}},
+    {"name":"13-他人と利用者の対照","question":"あおいは紅茶が好きです。あおいと私の好きな飲み物を区別して教えて","expectedSubject":["fixture-friend-aoi","fixture-user-yu"],"expectedFacts":["あおいは紅茶","利用者ゆうは緑茶"],"reject":["ゆうを紅茶好きとする","むぎのコーヒーをゆうの好みにする"],"carry":{"mode":"fresh","turns":[]}},
+    {"name":"14-キャラ切替で人格を持越さない","question":"あなたの名前と好きな飲み物、それから私の好きな飲み物を教えて","expectedSubject":["fixture-hana","fixture-user-yu"],"expectedFacts":["選択中キャラははなでミルクが好き","利用者ゆうは緑茶が好き"],"reject":["自分をむぎと名乗る","はなの好みをむぎのコーヒーとする","利用者の緑茶をはなの好みへ混ぜる"],"carry":{"mode":"character-switch","fromCharacter":{"id":"fixture-mugi","name":"むぎ","drink":"コーヒー"},"toCharacter":{"id":"fixture-hana","name":"はな","drink":"ミルク"},"turns":[{"user":"あなたの好きな飲み物は？","assistant":"私はむぎです。好きな飲み物はコーヒーです。"}],"apply":"切替後は新キャラ人格と利用者資料を使い、旧キャラ発話は新人格の事実にしない"}},
+    {"name":"15-利用者回答後にキャラへ切替質問","question":"では、あなたの好きな飲み物は？","expectedSubject":["fixture-mugi"],"expectedFacts":["むぎはコーヒーが好き"],"reject":["直前の緑茶をむぎ自身の好みとする","利用者への返答だけを繰返す"],"carry":{"mode":"same-character-history","turns":[{"user":"私の好きな飲み物は？","assistant":"ゆうさんの好きな飲み物は緑茶です。"}],"apply":"同一キャラの原文履歴として両発話を渡す"}},
+    {"name":"16-誤った既存発話を確定事実にしない","question":"私の好きな飲み物をもう一度教えて。今ある資料を確認してね","expectedSubject":["fixture-user-yu"],"expectedFacts":["利用者ゆうは緑茶が好き","履歴のコーヒー回答は資料と矛盾する"],"reject":["過去assistantの誤答を根拠にゆうはコーヒー好きと断定","資料の主体をむぎへ変更して整合させる"],"carry":{"mode":"same-character-history","turns":[{"user":"私の好きな飲み物は？","assistant":"あなたはコーヒーが好きです。"}],"apply":"意図的な誤答履歴を渡し、利用者資料の緑茶を維持する"}}
+  ]
+}
