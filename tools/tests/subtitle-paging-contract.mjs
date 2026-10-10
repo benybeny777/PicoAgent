@@ -1,6 +1,7 @@
 // 配信字幕のページ分けと、読み上げとの同期、選択禁止の契約。
 import assert from "node:assert/strict";
 import test from "node:test";
+import vm from "node:vm";
 import { uiFile } from "./lib/ui-source.mjs";
 
 const pager = uiFile("chat/pager.js");
@@ -36,4 +37,14 @@ test("配信画面でも処理中表示を隠さない", () => {
   // 状態行の見た目は形式で分岐しない（配信だけ消す指定を持たない）。
   assert.match(chatCss, /\.status\.busy, \.status\.engine-pending \{ display: flex;/);
   assert.doesNotMatch(stream, /\.status[^{]*\{[^}]*display: none/);
+});
+
+test("Markdownの表は字幕と読み上げに載せず前後の文は残す", () => {
+  // 天気の日別予報など、表の欄を横に読むと意味が通らない。表は回答欄の Markdown 表示で見せる。
+  const source = voice.replace(/^import .*;\r?$/gm, "").replace(/export function/g, "function");
+  const { sanitizeSpeechText } = vm.runInNewContext(`${source}\n({ sanitizeSpeechText })`, {});
+  const text = "**横浜市の天気：快晴**\nいまは 21°C\n\n| 日付 | 天気 |\n| --- | --- |\n| 10/10（土） | 快晴 |\n\n傘はいらないよ。";
+  assert.equal(sanitizeSpeechText(text), "**横浜市の天気：快晴**\nいまは 21°C\n傘はいらないよ。");
+  // 縦棒を含むだけの文は表として外さない。
+  assert.equal(sanitizeSpeechText("A|Bの比較です。"), "A|Bの比較です。");
 });

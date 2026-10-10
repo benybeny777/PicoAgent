@@ -1,4 +1,4 @@
-// text.rs - 文字列を安全に切り詰めるための共通層。
+// text.rs - 文字列を安全に切り詰めるための共通層と、スキル出力で共有する小さな表示整形。
 //
 // Rust の文字列は UTF-8 バイト列で、`&s[..120]` のようなバイト位置での切り出しは
 // **その位置が文字の途中だと panic する**。日本語は 1 文字 3 バイトなので、固定長で
@@ -7,6 +7,26 @@
 
 // 実装は非公開の内部共通crateであるpicoagent-coreへ置き、既存のアプリ内パスを保つ。
 pub use picoagent_core::text::{command_output, preview, truncate_bytes, Utf8Stream};
+
+/// 曜日の1文字表記（「月」〜「日」）。日付の横に添える表示と会話文脈で共通に使う。
+pub fn weekday_ja(day: chrono::Weekday) -> &'static str {
+    ["月", "火", "水", "木", "金", "土", "日"][day.num_days_from_monday() as usize]
+}
+
+/// 数値列を Unicode ブロック文字の簡易チャート（スパークライン）にする。
+/// 全部同じ値なら中段の高さで横一直線にする（最下段だと「急落」に見える）。
+pub fn sparkline(values: &[f64]) -> String {
+    const BARS: [char; 8] = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
+    let min = values.iter().copied().fold(f64::INFINITY, f64::min);
+    let max = values.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+    if max.partial_cmp(&min) != Some(std::cmp::Ordering::Greater) {
+        return BARS[3].to_string().repeat(values.len());
+    }
+    values
+        .iter()
+        .map(|&v| BARS[((((v - min) / (max - min)) * 7.0).round() as usize).min(7)])
+        .collect()
+}
 
 /// 固定長のバイト添字による文字列の切り出しが残っていないかを走査するガード。
 #[cfg(test)]
@@ -119,11 +139,33 @@ mod guard {
             "ストリーミング受信は text::Utf8Stream を使ってください（チャンク境界で日本語が化けます）: {offenders:?}"
         );
     }
+
+    /// スパークラインは `text::sparkline` を正本にする。天気・為替・市場指数へ同じ関数が
+    /// 3つ複写され、横一直線の扱いだけが食い違っていた。
+    #[test]
+    fn スパークラインを各所で複写しない() {
+        let offenders: Vec<String> = guard_scan::all_sources()
+            .iter()
+            .filter(|source| source.name != "text.rs" && source.body().contains("'▁', '▂'"))
+            .map(|source| source.path.display().to_string())
+            .collect();
+        assert!(
+            offenders.is_empty(),
+            "スパークラインは crate::text::sparkline を使ってください: {offenders:?}"
+        );
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::{preview, truncate_bytes};
+
+    #[test]
+    fn スパークラインは最小を最下段に最大を最上段に置く() {
+        assert_eq!(super::sparkline(&[1.0, 2.0, 8.0]), "▁▂█");
+        assert_eq!(super::sparkline(&[5.0, 5.0]), "▄▄");
+        assert_eq!(super::sparkline(&[]), "");
+    }
 
     #[test]
     fn 日本語を文字数で切り詰める() {

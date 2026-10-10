@@ -2277,8 +2277,7 @@ pub async fn pet_send(
 fn current_time_context() -> String {
     use chrono::{Datelike, Local, Timelike};
     let now = Local::now();
-    let weekday =
-        ["月", "火", "水", "木", "金", "土", "日"][now.weekday().num_days_from_monday() as usize];
+    let weekday = crate::text::weekday_ja(now.weekday());
     let hour = now.hour();
     let part = match hour {
         5..=10 => "朝",
@@ -2705,6 +2704,9 @@ fn speech_text(text: &str) -> String {
         .map(str::trim)
         .take_while(|line| !line.starts_with("参考:") && !line.starts_with("参考："))
         .filter(|line| !line.is_empty())
+        // Markdown の表は欄を横に読むと意味が通らない（天気の日別予報など）。表の中身は画面で見せる。
+        .filter(|line| !is_markdown_table_row(line))
+        .map(|line| line.trim_start_matches('#').trim_start())
         .filter(|line| !line.starts_with("http://") && !line.starts_with("https://"))
         .filter(|line| !looks_like_rss_speech_dump_line(line))
         .filter(|line| !is_bracketed_note_line(line))
@@ -2717,7 +2719,12 @@ fn speech_text(text: &str) -> String {
         })
         .collect::<Vec<_>>()
         .join(" ");
-    spoken.split_whitespace().collect::<Vec<_>>().join(" ")
+    // 太字の記号は声にしない（「アスタリスク」と読まれる合成エンジンがある）。
+    spoken
+        .replace("**", "")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn remove_bare_urls(text: &str) -> String {
@@ -2767,6 +2774,11 @@ fn looks_like_rss_speech_dump_line(line: &str) -> bool {
 }
 
 // 読み上げ不要な装飾文字（罫線・ブロック＝スパークライン、各種記号・絵文字、異体字セレクタ）。
+/// Markdown の表の1行（見出し・区切り・本文）か。
+fn is_markdown_table_row(line: &str) -> bool {
+    line.len() >= 2 && line.starts_with('|') && line.ends_with('|')
+}
+
 fn is_chart_or_emoji(c: char) -> bool {
     matches!(c as u32,
         0x2580..=0x259F   // 罫線・ブロック要素（▁▂▃▅▇ など）
@@ -6429,6 +6441,17 @@ mod tests {
         assert_eq!(speech_text(text), "明日は晴れです。");
         // 括弧のあとに本文が続く行は読み上げる。
         assert_eq!(speech_text("【重要】明日は雨です"), "【重要】明日は雨です");
+    }
+
+    #[test]
+    fn 読み上げではmarkdownの表と記号を声にしない() {
+        let text = "**☀️ 横浜市の天気：快晴**\nいまは 21°C\n\n| 日付 | 天気 |\n| --- | --- |\n| 10/10（土） | ☀️ 快晴 |\n\n### まとめ\n傘はいらないよ。";
+        assert_eq!(
+            speech_text(text),
+            "横浜市の天気：快晴 いまは 21°C まとめ 傘はいらないよ。"
+        );
+        // 縦棒を含むだけの文は表として外さない。
+        assert_eq!(speech_text("A|Bの比較です。"), "A|Bの比較です。");
     }
 
     #[test]

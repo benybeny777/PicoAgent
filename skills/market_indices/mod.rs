@@ -86,22 +86,6 @@ fn direct_query(text: &str) -> Option<Value> {
     Some(Value::Object(args))
 }
 
-fn sparkline(values: &[f64]) -> String {
-    const BARS: [char; 8] = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
-    let min = values.iter().cloned().fold(f64::INFINITY, f64::min);
-    let max = values.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-    if max.partial_cmp(&min) != Some(std::cmp::Ordering::Greater) {
-        return BARS[0].to_string().repeat(values.len());
-    }
-    values
-        .iter()
-        .map(|&value| {
-            let idx = (((value - min) / (max - min)) * 7.0).round() as usize;
-            BARS[idx.min(7)]
-        })
-        .collect()
-}
-
 fn symbol_info(input: &str) -> (&'static str, &'static str) {
     match input.trim().to_lowercase().as_str() {
         "topix" | "トピックス" => ("^TOPX", "TOPIX"),
@@ -281,7 +265,7 @@ impl Tool for MarketIndicesTool {
                 out.push_str(&format!(
                     "\n直近{}日の推移\n{}\n始値 {:.2} / 終値 {:.2}",
                     days,
-                    sparkline(&values),
+                    crate::text::sparkline(&values),
                     first,
                     last
                 ));

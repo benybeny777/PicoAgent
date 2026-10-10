@@ -79,15 +79,16 @@ impl Tool for DailyBriefingTool {
             .take(5)
             .map(|event| format!("- {} {}", event.due_at, event.text))
             .collect();
-        let mut out = String::from("おでかけ前チェック:\n");
+        // 天気は見出しと日別の表を持つ Markdown なので、前後を空行で区切って表の終わりを明示する。
+        let mut out = String::from("おでかけ前チェックだよ。\n\n");
         out.push_str(&weather);
         if events.is_empty() {
-            out.push_str("\n今日見る通知は今のところ少なめだよ。");
+            out.push_str("\n\n今日見る通知は今のところ少なめだよ。");
         } else {
-            out.push_str("\n控えている通知:\n");
+            out.push_str("\n\n**控えている通知**\n");
             out.push_str(&events.join("\n"));
         }
-        out.push_str("\n雨・気温・風を見て、必要なら傘や上着を持っていこう。");
+        out.push_str("\n\n雨・気温・風を見て、必要なら傘や上着を持っていこう。");
         out
     }
 }
