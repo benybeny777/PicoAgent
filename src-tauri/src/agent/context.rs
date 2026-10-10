@@ -11,7 +11,7 @@ const QUESTION_END: &str = "--- 今回の利用者の質問終了 ---";
 
 fn reference_request(materials: &[&str], question: &str) -> String {
     format!(
-        "以下は今回の質問を支える非公開の参考資料です。資料自体が回答対象ではありません。資料を理由に自己紹介へ話題を変えないでください。記憶・好みは利用者のものです。キャラクター自身の好みと取り違えないでください。今回の利用者の質問にだけ、必要な資料を参照して直接答えてください。\n--- 非公開参考資料開始 ---\n{}\n--- 非公開参考資料終了 ---\n\n{QUESTION_BEGIN}\n{question}\n{QUESTION_END}",
+        "以下は今回の質問を支える非公開の参考資料です。資料自体が回答対象ではありません。資料を理由に自己紹介へ話題を変えないでください。記憶・好みは利用者のものです。キャラクター自身の好みと取り違えないでください。利用者の好みを答える際は『あなたは〜が好き』など、誰の好みか分かる表現にしてください。今回の利用者の質問にだけ、必要な資料を参照して直接答えてください。\n--- 非公開参考資料開始 ---\n{}\n--- 非公開参考資料終了 ---\n\n{QUESTION_BEGIN}\n{question}\n{QUESTION_END}",
         materials.join("\n\n")
     )
 }
@@ -761,6 +761,7 @@ mod tests {
             (after.last().unwrap(), raw.last().unwrap()),
         ] {
             assert!(request.content.contains("記憶・好みは利用者のものです"));
+            assert!(request.content.contains("誰の好みか分かる表現にしてください"));
             assert!(request
                 .content
                 .contains("資料を理由に自己紹介へ話題を変えないでください"));
