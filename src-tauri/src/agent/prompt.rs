@@ -37,7 +37,7 @@ pub fn normalize_setting(values: &mut Map<String, Value>) {
     }
 }
 
-pub fn base(config: &Config) -> String {
+fn base_content(config: &Config) -> String {
     let configured = config.get("PICOAGENT_SYSTEM_PROMPT", DEFAULT_SYSTEM_PROMPT);
     let mut prompt = if is_previous_default(&configured) {
         DEFAULT_SYSTEM_PROMPT.to_string()
@@ -54,14 +54,23 @@ pub fn base(config: &Config) -> String {
     prompt.push_str("\n\nまだ実行していない作業について「今から調べる」「確認してみる」「ちょっと待ってて」のように後で行う約束をしないでください。調べる・作るなどが必要なら、その応答の中でスキルを実行して結果を伝え、実行できないときはできない理由を正直に伝えてください。");
     // 作業フォルダの AGENTS.md（この案件の作法）。許可ルートを切り替えると内容も入れ替わる。
     crate::project_rules::append_prompt_context(&mut prompt, config);
+    prompt
+}
+
+fn finish(mut prompt: String) -> String {
     // 資料の帰属と質問との境界は固定規則。変動資料の包みへ毎回複写しない。
+    // キャラプロフィールも含めた最後に、一つの入口から一度だけ付ける。
     prompt.push_str("\n\n");
     prompt.push_str(super::context::REFERENCE_RULES);
     prompt
 }
 
+pub fn base(config: &Config) -> String {
+    finish(base_content(config))
+}
+
 pub fn compose(config: &Config, character_profile: &str, character_id: &str) -> String {
-    let mut prompt = base(config);
+    let mut prompt = base_content(config);
     if !character_profile.is_empty() {
         prompt.push_str("\n\n選択中キャラクターの人格設定:\n");
         prompt.push_str(character_profile);
@@ -70,6 +79,7 @@ pub fn compose(config: &Config, character_profile: &str, character_id: &str) -> 
             character_id,
         ));
     }
+    let prompt = finish(prompt);
     // 人格を組み立てたこの場所が、公開検査の照合元を更新する唯一の入り口。
     // 呼び出し側（会話の作り直し・キャラ切替・設定変更）へ登録を任せると、
     // 増えた経路のどれか1つが忘れた時点で人格設定が画面へ出る。
@@ -113,6 +123,12 @@ mod tests {
         assert!(prompt.contains("ユーザーの妹として接する"));
         assert!(!prompt.contains("長期メモリ"));
         assert!(!prompt.contains("関係性メモリ"));
+        assert!(prompt.ends_with(super::super::context::REFERENCE_RULES));
+        assert!(super::base(&config).ends_with(super::super::context::REFERENCE_RULES));
+        assert!(
+            prompt.find("名前: むぎ").unwrap()
+                < prompt.find(super::super::context::REFERENCE_RULES).unwrap()
+        );
         assert_eq!(
             prompt
                 .matches(super::super::context::REFERENCE_RULES)

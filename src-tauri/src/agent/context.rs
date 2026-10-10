@@ -12,7 +12,7 @@ pub(super) const REFERENCE_RULES: &str = "非公開参考資料は利用者・�
 
 fn reference_request(materials: &[&str], question: &str) -> String {
     format!(
-        "--- 非公開参考資料開始 ---\n{}\n--- 非公開参考資料終了 ---\n\n{QUESTION_BEGIN}\n{question}\n{QUESTION_END}",
+        "--- 非公開参考資料開始 ---\n利用者・案件の参考情報（キャラクターの人格ではない）\n{}\n--- 非公開参考資料終了 ---\n\n{QUESTION_BEGIN}\n{question}\n{QUESTION_END}",
         materials.join("\n\n")
     )
 }
@@ -771,6 +771,7 @@ mod tests {
             assert!(request.content.starts_with("--- 非公開参考資料開始 ---\n"));
             let (materials, question) = request.content.split_once(QUESTION_BEGIN).unwrap();
             assert!(materials.contains("--- 非公開参考資料開始 ---"));
+            assert!(materials.contains("利用者・案件の参考情報（キャラクターの人格ではない）"));
             assert!(materials.contains("--- 非公開参考資料終了 ---"));
             assert_eq!(question, format!("\n{}\n{QUESTION_END}", original.content));
             assert_eq!(request.images, original.images);
