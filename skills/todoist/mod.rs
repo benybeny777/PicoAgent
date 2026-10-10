@@ -108,7 +108,7 @@ impl Tool for TodoistTool {
                 if !project_id.is_empty() {
                     request = request.query(&[("project_id", project_id)]);
                 }
-                handle_text_response(request.send().await, "Todoist API").await
+                crate::tools::http::service_reply(cfg, request.send().await, "Todoist API").await
             }
             "create" => {
                 let Some(content) = args
@@ -142,7 +142,8 @@ impl Tool for TodoistTool {
                         payload["project_id"] = json!(project_id);
                     }
                 }
-                handle_text_response(
+                crate::tools::http::service_reply(
+                    cfg,
                     client
                         .post(format!("{}/tasks", TODOIST_BASE))
                         .bearer_auth(token)
@@ -162,7 +163,8 @@ impl Tool for TodoistTool {
                 else {
                     return "エラー: task_id が指定されていません。".to_string();
                 };
-                handle_text_response(
+                crate::tools::http::service_reply(
+                    cfg,
                     client
                         .post(format!("{}/tasks/{}/close", TODOIST_BASE, task_id))
                         .bearer_auth(token)
@@ -174,23 +176,6 @@ impl Tool for TodoistTool {
             }
             _ => "エラー: action は list/create/close のいずれかを指定してください。".to_string(),
         }
-    }
-}
-
-async fn handle_text_response(
-    response: Result<reqwest::Response, reqwest::Error>,
-    label: &str,
-) -> String {
-    let response = match response {
-        Ok(response) => response,
-        Err(error) => return format!("エラー: {} への接続に失敗しました: {}", label, error),
-    };
-    let status = response.status();
-    let body = crate::tool_response_text!(response);
-    if status.is_success() {
-        body
-    } else {
-        format!("エラー: {} が HTTP {} を返しました。", label, status)
     }
 }
 

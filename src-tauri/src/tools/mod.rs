@@ -164,6 +164,7 @@ pub trait Tool: Send + Sync {
 
 pub mod http;
 pub mod process;
+pub mod whisper;
 
 pub struct ToolReg {
     pub make: fn() -> Box<dyn Tool>,
@@ -179,46 +180,94 @@ fn bundled_tool_dirs(tool: &str) -> Vec<PathBuf> {
     crate::components::runtime_dirs(&format!("tools/{tool}"))
 }
 
-/// ディレクトリ配下から実行ファイルを再帰探索する（アーカイブの展開レイアウト差異に強くする）。
-fn find_bundled_exe(dir: &Path, exe_name: &str, depth: usize) -> Option<PathBuf> {
-    if depth > 7 {
-        return None;
-    }
-    let entries = std::fs::read_dir(dir).ok()?;
-    let mut subdirs = Vec::new();
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.is_file() && path.file_name().and_then(|n| n.to_str()) == Some(exe_name) {
-            return Some(path);
-        }
-        if path.is_dir() {
-            subdirs.push(path);
-        }
-    }
-    subdirs
-        .into_iter()
-        .find_map(|sub| find_bundled_exe(&sub, exe_name, depth + 1))
+/// 明示設定か管理同梱物だけを使う。設定されたコマンド名だけはPATH検索を許可する。
+pub fn resolve_cli_path(
+    cfg: &Config,
+    config_key: &str,
+    tool_dir: &str,
+    exe: &str,
+) -> Result<PathBuf, String> {
+    resolve_cli_in(
+        &cfg.get(config_key, ""),
+        &bundled_tool_dirs(tool_dir),
+        config_key,
+        exe,
+    )
 }
 
-/// CLI ツールの実行パスを解決する。優先順: 明示設定（config_key）→ 同梱（setup tools）→ PATH。
-/// `exe` は拡張子なしの実行ファイル名（Windows では自動で .exe を付ける）。
-pub fn resolve_cli_path(cfg: &Config, config_key: &str, tool_dir: &str, exe: &str) -> String {
-    let configured = cfg.get(config_key, "");
-    let trimmed = configured.trim();
-    if !trimmed.is_empty() && trimmed != exe {
-        return trimmed.to_string();
+fn resolve_cli_in(
+    configured: &str,
+    dirs: &[PathBuf],
+    key: &str,
+    exe: &str,
+) -> Result<PathBuf, String> {
+    let configured = configured.trim();
+    if !configured.is_empty() {
+        let path = Path::new(configured);
+        if path.is_absolute() || path.components().count() > 1 {
+            if !process::is_executable_file(path) {
+                return Err(format!(
+                    "{key} で指定した実行ファイルがありません: {}",
+                    path.display()
+                ));
+            }
+            return std::path::absolute(path)
+                .map_err(|error| format!("実行パスを解決できません: {error}"));
+        }
+        // フォールバック許可: PR #472の利用者決定。明示したコマンド名だけPATHで解決する。
+        return process::resolve_executable(configured)
+            .ok_or_else(|| format!("{key} で指定したコマンドがPATHにありません"));
     }
     let exe_name = if cfg!(windows) {
         format!("{exe}.exe")
     } else {
         exe.to_string()
     };
-    for dir in bundled_tool_dirs(tool_dir) {
-        if let Some(found) = find_bundled_exe(&dir, &exe_name, 0) {
-            return found.to_string_lossy().to_string();
+    for dir in dirs {
+        if !dir.exists() {
+            continue;
+        }
+        let found = find_bundled_exe(dir, &exe_name, 0)?;
+        return found.ok_or_else(|| {
+            format!("{exe} の同梱配置が不完全です。設定 → 追加機能・更新 から修復してください")
+        });
+    }
+    Err(format!("{exe} が見つかりません。設定 → 追加機能・更新 から導入するか、{key} にパスを指定してください"))
+}
+
+fn find_bundled_exe(dir: &Path, exe_name: &str, depth: usize) -> Result<Option<PathBuf>, String> {
+    // 実行ファイルの配置を深さ7まで検査する。対象外のFrameworks等は欠損候補にしない。
+    if depth > 7 {
+        return Ok(None);
+    }
+    let mut found = None;
+    for entry in
+        std::fs::read_dir(dir).map_err(|error| format!("同梱ツールを読めません: {error}"))?
+    {
+        let path = entry
+            .map_err(|error| format!("同梱ツールの項目を読めません: {error}"))?
+            .path();
+        let candidate =
+            if path.is_file() && path.file_name().and_then(|n| n.to_str()) == Some(exe_name) {
+                if !process::is_executable_file(&path) {
+                    return Err(format!(
+                        "同梱実行ファイルに実行権限がありません: {}",
+                        path.display()
+                    ));
+                }
+                Some(path)
+            } else if path.is_dir() {
+                find_bundled_exe(&path, exe_name, depth + 1)?
+            } else {
+                None
+            };
+        if let Some(candidate) = candidate {
+            if found.replace(candidate).is_some() {
+                return Err("同梱の実行ファイルが重複しています。修復してください".into());
+            }
         }
     }
-    exe.to_string()
+    Ok(found)
 }
 
 pub fn config_guide(tool_label: &str, keys: &[&str], note: &str) -> String {
@@ -235,6 +284,47 @@ pub fn config_guide(tool_label: &str, keys: &[&str], note: &str) -> String {
     }
     out.push_str("\n保存後、もう一度同じ依頼をしてください。APIキーやトークンの値はチャット・ログ・ドキュメントへ貼らないでください。");
     out
+}
+
+#[cfg(test)]
+mod cli_resolution_tests {
+    #[test]
+    fn 設定と同梱が欠損したら別候補へ進まない() {
+        let dir = tempfile::tempdir().unwrap();
+        let installed = dir.path().join("installed");
+        let packaged = dir.path().join("packaged");
+        std::fs::create_dir(&packaged).unwrap();
+        let exe = if cfg!(windows) { "tool.exe" } else { "tool" };
+        let target = packaged.join(exe);
+        std::fs::write(&target, []).unwrap();
+        // 正しいCLIと併存する無関係な深い資産は、配置不完全にしない。
+        std::fs::create_dir_all(packaged.join("a/b/c/d/e/f/g/h/i")).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert!(
+                super::resolve_cli_in(&target.to_string_lossy(), &[], "TEST_PATH", "tool").is_err()
+            );
+            assert!(super::resolve_cli_in("", &[packaged.clone()], "TEST_PATH", "tool").is_err());
+            std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let dirs = [installed.clone(), packaged];
+        assert_eq!(
+            super::resolve_cli_in("", &dirs, "TEST_PATH", "tool").unwrap(),
+            target
+        );
+        let missing = dir.path().join("missing.exe");
+        assert!(
+            super::resolve_cli_in(&missing.to_string_lossy(), &dirs, "TEST_PATH", "tool").is_err()
+        );
+        std::fs::create_dir(&installed).unwrap();
+        assert!(super::resolve_cli_in("", &dirs, "TEST_PATH", "tool")
+            .unwrap_err()
+            .contains("不完全"));
+        assert!(super::resolve_cli_in("", &[], "TEST_PATH", "tool").is_err());
+        let command = if cfg!(windows) { "cmd" } else { "sh" };
+        assert!(super::resolve_cli_in(command, &[], "TEST_PATH", "tool").is_ok());
+    }
 }
 
 static TOOLS: OnceLock<Vec<Box<dyn Tool>>> = OnceLock::new();
@@ -1224,4 +1314,15 @@ mod tests {
         assert!(names.contains(&"meeting_recorder".to_string()));
         assert!(names.contains(&"whisper_transcribe".to_string()));
     }
+}
+
+/// ToolのString戻り値へ、実行前の失敗を伝える。
+#[macro_export]
+macro_rules! tool_try {
+    ($value:expr) => {
+        match $value {
+            Ok(value) => value,
+            Err(error) => return format!("エラー: {error}"),
+        }
+    };
 }

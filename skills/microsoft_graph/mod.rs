@@ -142,7 +142,7 @@ impl Tool for MicrosoftGraphTool {
                     },
                     "saveToSentItems": true
                 });
-                handle_text_response(
+                crate::tools::http::service_reply(cfg,
                     client
                         .post(format!("{}/me/sendMail", GRAPH_BASE))
                         .bearer_auth(token)
@@ -154,7 +154,7 @@ impl Tool for MicrosoftGraphTool {
                 .await
             }
             "list_events" => {
-                handle_text_response(
+                crate::tools::http::service_reply(cfg,
                     client
                         .get(format!("{}/me/events", GRAPH_BASE))
                         .bearer_auth(token)
@@ -182,7 +182,7 @@ impl Tool for MicrosoftGraphTool {
                     "start": { "dateTime": start, "timeZone": timezone },
                     "end": { "dateTime": end, "timeZone": timezone }
                 });
-                handle_text_response(
+                crate::tools::http::service_reply(cfg,
                     client
                         .post(format!("{}/me/events", GRAPH_BASE))
                         .bearer_auth(token)
@@ -212,7 +212,7 @@ impl Tool for MicrosoftGraphTool {
                     return super::config_guide("Microsoft Graph", &["PICOAGENT_MS_GRAPH_TEAM_ID", "PICOAGENT_MS_GRAPH_CHANNEL_ID"], "Teams送信では依頼で team_id/channel_id を渡すか、既定値を設定してください。");
                 }
                 let body = args.get("body").and_then(Value::as_str).unwrap_or("");
-                handle_text_response(
+                crate::tools::http::service_reply(cfg,
                     client
                         .post(format!("{}/teams/{}/channels/{}/messages", GRAPH_BASE, team_id, channel_id))
                         .bearer_auth(token)
@@ -225,27 +225,6 @@ impl Tool for MicrosoftGraphTool {
             }
             _ => "エラー: action は send_mail/list_events/create_event/teams_send のいずれかを指定してください。".to_string(),
         }
-    }
-}
-
-async fn handle_text_response(
-    response: Result<reqwest::Response, reqwest::Error>,
-    label: &str,
-) -> String {
-    let response = match response {
-        Ok(response) => response,
-        Err(error) => return format!("エラー: {} への接続に失敗しました: {}", label, error),
-    };
-    let status = response.status();
-    let body = crate::tool_response_text!(response);
-    if status.is_success() {
-        if body.is_empty() {
-            "OK".to_string()
-        } else {
-            body
-        }
-    } else {
-        format!("エラー: {} が HTTP {} を返しました。", label, status)
     }
 }
 

@@ -6,7 +6,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { mainScript } from "./lib/ui-source.mjs";
 
-const main = await readFile(new URL("../../ui/app/main.js", import.meta.url), "utf8");
+const main = (await readFile(new URL("../../ui/app/main.js", import.meta.url), "utf8")).replace(/\r\n/g, "\n");
 const boot = await readFile(new URL("../../ui/app/boot.js", import.meta.url), "utf8");
 const engine = await readFile(new URL("../../ui/app/engine.js", import.meta.url), "utf8");
 const allMain = mainScript();
@@ -26,7 +26,7 @@ const startup = main.slice(startupStart, startupEnd);
 test("セットアップ済みのlocal選択はAIと音声の準備完了まで起動画面を維持する", () => {
   assert.match(engine, /required = \(info\.providerId \|\| "local"\) === "local";/);
   assert.match(startup, /if \(engine\.required && info\.onboardingDone\) \{[\s\S]*?const state = await engine\.waitUntilSettled\(/);
-  assert.match(startup, /status\.set\("声を準備中…", "boot"\);[\s\S]*?await bridge\.prepareVoiceModel\(\);\s*\n\s*if \(startupGreeting\) preparedGreeting = await voice\.prepare\(startupGreeting\);/);
+  assert.match(startup, /status\.set\("声を準備中…", "boot"\);[\s\S]*?await voice\.prepareModel\(\);\s*\n\s*if \(startupGreeting\) preparedGreeting = await voice\.prepare\(startupGreeting\);/);
   // 初期化前・ローカルAIの準備前は送信させない。
   assert.match(engine, /if \(!initialized\) return "初期化完了後に送信できます";/);
   assert.match(engine, /if \(required && !ready\) return "ローカルAIの準備完了後に送信できます";/);
@@ -40,7 +40,7 @@ test("初回セットアップはローカルAIの取得完了を待たない", 
 
 test("準備完了後に配信画面へ切り替え、起動音声はその後に再生する", () => {
   const engineAt = startup.indexOf("await engine.waitUntilSettled(");
-  const voiceAt = startup.indexOf("await bridge.prepareVoiceModel()");
+  const voiceAt = startup.indexOf("await voice.prepareModel()");
   const speechAt = startup.indexOf("preparedGreeting = await voice.prepare(startupGreeting)");
   const releaseAt = startup.indexOf("await boot.release(status)");
   const playAt = main.indexOf("voice.playPrepared(preparedGreeting)");
@@ -57,7 +57,7 @@ test("準備完了後に配信画面へ切り替え、起動音声はその後�
 
 test("ローカルAIがエラーなら音声準備へ進まず元のエラーを保つ", () => {
   assert.match(startup, /if \(state\?\.phase === "error"\) startupError = state\.message/);
-  assert.match(startup, /if \(!startupError && info\.onboardingDone && info\.ttsEnabled !== false\) \{[\s\S]*?prepareVoiceModel/);
+  assert.match(startup, /if \(!startupError && info\.onboardingDone && info\.ttsEnabled !== false\) \{[\s\S]*?prepareModel/);
 });
 
 test("長いダウンロード中は進捗通知を続け通常画面で停止する", () => {
@@ -164,7 +164,12 @@ test("再初期化は通常画面の位置を保存してから起動用の配�
   const start = commands.indexOf("pub fn restart_app(");
   const restart = commands.slice(start, commands.indexOf("\n}", start));
   const remember = restart.indexOf("crate::remember_window_position(&app)?");
-  assert.ok(remember >= 0 && remember < restart.indexOf("state.bump_conversation_epoch()"));
+  const characterLock = restart.indexOf("state.character.lock()");
+  const commitLock = restart.indexOf("state.conversation_commit.lock()");
+  const epoch = restart.indexOf("state.conversation_epoch.fetch_add(");
+  assert.ok(remember >= 0 && remember < characterLock);
+  assert.ok(characterLock < commitLock && commitLock < epoch);
+  assert.ok(epoch < restart.indexOf("state.rebuild_from_character("));
   assert.ok(remember < restart.indexOf("crate::layout::restart_boot(&app)"));
   const finishStart = layout.indexOf("pub fn finish_boot(");
   const finish = layout.slice(finishStart, layout.indexOf("\n}", finishStart));
@@ -197,8 +202,11 @@ test("任意キャラクターのI/O待ちはすべて有界化する", async ()
 
 test("選択キャラ失敗時は別キャラを出さず診断を表示する", () => {
   assert.match(startup, /characterSource\.element\.style\.visibility = "hidden";/);
-  assert.match(startup, /startupError = `選択したキャラを読み込めません: /);
-  assert.match(main, /if \(startupError\) status\.setSticky\(startupError, "error"\);/);
+  assert.match(startup, /characterError = `選択したキャラを読み込めません: /);
+  assert.match(main, /if \(characterError\) status\.set\(characterError, "character-load"\);/);
+  assert.match(main, /status\.clear\("character-load"\);/);
+  assert.ok(startup.indexOf("chat.history.hydrate(info.history)") < startup.indexOf("await loadCharacter("), "履歴は描画失敗前に復元する");
+  assert.equal(startup.split("chat.history.hydrate(info.history)").length, 2, "履歴の復元は一度だけ行う");
   assert.doesNotMatch(startup, /loadCharacter\("mugi"/);
 });
 

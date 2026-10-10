@@ -11,6 +11,10 @@ const settingsSearch = document.getElementById("settingsSearch");
 const clearSettingsSearch = document.getElementById("clearSettingsSearch");
 const dirtySummary = document.getElementById("dirtySummary");
 const { errorDetail, errorMessage, logApp, tail, twoStepAction } = window.PicoUI;
+const characterListDiagnostic = document.createElement("div");
+characterListDiagnostic.className = "character-list-diagnostic-container";
+characterListDiagnostic.hidden = true;
+form.before(characterListDiagnostic);
 
 // 公式モデルの取得・規約リンクは、WebViewの新窓ではなく既定ブラウザで開く。
 function officialModelLink(label, href, status) {
@@ -40,6 +44,10 @@ let renderingSettings = false;
 let characterOverrides = {};
 let characterVoiceOverrides = {};
 let characterLive2dSdkOverrides = {};
+let characterRendererOverrides = {};
+let characterRendererSelect;
+let characterRendererField;
+let userCharactersError = null;
 let characterFramingEditor = null;
 let characterStreamProfiles = {};
 let characterStreamProfileEditor = null;
@@ -263,6 +271,8 @@ function updateDirtyStateNow() {
     "changed",
     stableStringify(current.PICOAGENT_LIVE2D_SDK_OVERRIDES) !== stableStringify(savedSnapshot.PICOAGENT_LIVE2D_SDK_OVERRIDES)
   );
+  characterRendererField?.classList.toggle("changed",
+    stableStringify(current.PICOAGENT_RENDERER_OVERRIDES) !== stableStringify(savedSnapshot.PICOAGENT_RENDERER_OVERRIDES));
   form.querySelector(".alarm-editor")?.closest(".card-config")?.classList.toggle(
     "changed",
     stableStringify(current.PICOAGENT_ALARMS) !== stableStringify(savedSnapshot.PICOAGENT_ALARMS)
@@ -2066,27 +2076,12 @@ function buildSkillCategoryList(tools, values) {
 // 自分で追加したキャラクター（PicoAgent/characters 配下）を一覧の形へそろえる。
 // 同梱と同じ id は同梱側を優先し、追加分が同梱キャラを乗っ取らないようにする。
 async function loadUserCharacters(bundled) {
-  const known = new Set(bundled.map(character => character.id));
-  try {
-    const result = await window.picoagent.settings.userCharacters();
-    userCharacterRoot = result?.root || "";
-    return (result?.characters || [])
-      .filter(character => !known.has(character.id))
-      .map(character => ({
-        id: character.id,
-        name: character.name,
-        description: character.description || "",
-        manifest: `${character.id}/character.json`,
-        root: window.picoagent.assetUrl(character.path),
-        user: true,
-        live2d: !!character.live2d,
-        mmd: !!character.mmd,
-      }));
-  } catch (error) {
-    // フォールバック許可: 追加キャラを取れなくても同梱キャラの設定は開けるようにする。
-    statusEl.textContent = `追加キャラクターを読み込めませんでした: ${errorMessage(error)}`;
-    return [];
-  }
+  const result = await window.PicoUI.loadUserCharacters(
+    () => window.picoagent.settings.userCharacters(), path => window.picoagent.assetUrl(path), bundled,
+  );
+  userCharacterRoot = result.root;
+  userCharactersError = result.error;
+  return result.entries;
 }
 
 async function loadCharacterPersona(id) {
@@ -2107,7 +2102,7 @@ async function loadCharacterPersona(id) {
 }
 
 function captureCharacterSettingsFields() {
-  const fields = [characterPersona, characterSpeaker, characterLive2dSdkSelect]
+  const fields = [characterPersona, characterSpeaker, characterLive2dSdkSelect, characterRendererSelect]
     .filter(Boolean).map(field => ({ field, value: field.value }));
   const sdkHidden = characterLive2dSdkField?.hidden;
   const sdkHint = characterLive2dSdkHint?.textContent;
@@ -2122,10 +2117,22 @@ function captureCharacterSettingsFields() {
 }
 
 function saveCurrentCharacterPersona(id) {
-  if (!characterPersona) return;
+  if (!characterPersona || userCharactersError) return;
   const value = characterPersona.value;
   if (value === characterDefaultPersonas[id]) delete characterOverrides[id];
   else characterOverrides[id] = value;
+}
+
+async function loadCharacterRenderer(id) {
+  if (!characterRendererSelect) return;
+  const entry = characterCatalog.characters.find(character => character.id === id);
+  if (!entry) return;
+  const manifest = await loadCharacterManifestForSettings(entry);
+  const { imageAnimationsOf, savedVariant } = await import("./character/manifest.js");
+  const variants = Array.isArray(manifest.variants) ? manifest.variants : [];
+  const variant = variants.find(item => item.id === savedVariant(id)) || variants[0] || null;
+  characterRendererSelect.options[1].disabled = !imageAnimationsOf(manifest, variant).idle;
+  characterRendererSelect.value = characterRendererOverrides[id] || "auto";
 }
 
 function live2dModelEntries(config) {
@@ -3276,13 +3283,14 @@ async function render() {
   characterOverrides = v.PICOAGENT_CHARACTER_OVERRIDES || {};
   characterVoiceOverrides = v.PICOAGENT_TTS_CHARACTER_OVERRIDES || {};
   characterLive2dSdkOverrides = v.PICOAGENT_LIVE2D_SDK_OVERRIDES || {};
+  characterRendererOverrides = cloneSettings(v.PICOAGENT_RENDERER_OVERRIDES || {});
   characterStreamProfiles = cloneSettings(v.PICOAGENT_STREAM_PROFILES || {});
   const characterSec = section("キャラクター設定");
   characterSelect = el("select");
   const requestedCharacter = v.PICOAGENT_CHARACTER || characterCatalog.default;
-  const selectedCharacter = characterCatalog.characters.some(character => character.id === requestedCharacter)
-    ? requestedCharacter
-    : characterCatalog.default;
+  const requestedExists = characterCatalog.characters.some(character => character.id === requestedCharacter);
+  const missingSavedCharacter = !requestedExists && !userCharactersError;
+  const selectedCharacter = requestedExists || userCharactersError ? requestedCharacter : characterCatalog.default;
   const selectedCharacterEntry = characterCatalog.characters.find(character => character.id === selectedCharacter);
   let displayedCharacterId = selectedCharacter;
   setQuickSettingsSummary("character", selectedCharacterEntry?.name || selectedCharacter);
@@ -3293,6 +3301,9 @@ async function render() {
       selected: character.id === selectedCharacter,
     }));
   }
+  if (!selectedCharacterEntry) characterSelect.append(el("option", {
+    value: selectedCharacter, textContent: `${selectedCharacter} — 一覧から確認できません`, selected: true,
+  }));
   characterSec.append(registerInput(
     "PICOAGENT_CHARACTER",
     characterSelect,
@@ -3341,10 +3352,10 @@ async function render() {
   ));
   characterFramingEditor = buildCharacterFramingEditor();
   characterSec.append(characterFramingEditor.node);
-  await characterFramingEditor.load();
+  if (selectedCharacterEntry) await characterFramingEditor.load();
   characterStreamProfileEditor = buildCharacterStreamProfileEditor(v);
   characterSec.append(characterStreamProfileEditor.node);
-  characterStreamProfileEditor.load();
+  if (selectedCharacterEntry) characterStreamProfileEditor.load();
   characterLive2dSdkSelect = el("select");
   for (const option of [
     { value: "auto", label: "自動（推奨）" },
@@ -3362,16 +3373,31 @@ async function render() {
     updateDirtyState();
   });
   characterSec.append(characterLive2dSdkField);
+  characterRendererSelect = el("select", {}, [
+    el("option", { value: "auto", textContent: "パックの通常描画" }),
+    el("option", { value: "image", textContent: "2D画像表示" }),
+  ]);
+  characterRendererField = el("div", { className: "field" }, [
+    el("label", { textContent: "このキャラの描画方式" }), characterRendererSelect,
+    el("p", { className: "hint", textContent: "2Dは画像のあるキャラだけ選べます。骨・物理・視線などモデル固有の表現は使いません。通常描画を選ぶと保存済みの2D指定を解除します。" }),
+  ]);
+  characterRendererSelect.addEventListener("change", () => {
+    if (characterRendererSelect.value === "image") characterRendererOverrides[displayedCharacterId] = "image";
+    else delete characterRendererOverrides[displayedCharacterId];
+    updateDirtyState();
+  });
+  characterSec.append(characterRendererField);
+  if (selectedCharacterEntry) await loadCharacterRenderer(selectedCharacter);
   characterPersona = el("textarea", { placeholder: "性格・口調・一人称など" });
   characterPersona.addEventListener("input", () => {
     saveCurrentCharacterPersona(displayedCharacterId);
     updateDirtyState();
   });
   characterSec.append(el("div", { className: "field" }, [el("label", { textContent: "このキャラの性格・口調" }), characterPersona]));
-  await loadCharacterPersona(selectedCharacter);
+  if (selectedCharacterEntry) await loadCharacterPersona(selectedCharacter);
   loadCharacterVoice(selectedCharacter);
   updateCharacterVoiceContext(selectedCharacter);
-  await loadCharacterLive2dSdk(selectedCharacter);
+  if (selectedCharacterEntry) await loadCharacterLive2dSdk(selectedCharacter);
   let previousCharacter = selectedCharacter;
   let characterSwitchQueue = Promise.resolve();
   let characterSwitchPending = 0;
@@ -3399,6 +3425,7 @@ async function render() {
         await loadCharacterPersona(requestedCharacter);
         loadCharacterVoice(requestedCharacter);
         await loadCharacterLive2dSdk(requestedCharacter);
+        await loadCharacterRenderer(requestedCharacter);
         await characterFramingEditor?.load();
         characterStreamProfileEditor?.load();
         characterSelect.value = requestedCharacter;
@@ -3532,6 +3559,30 @@ async function render() {
 
   // --- 導入済みキャラクターの検索・形式フィルター・選択 ---
   const charSec = section("キャラクターを探して選ぶ");
+  if (userCharactersError || !selectedCharacterEntry || missingSavedCharacter) {
+    const warning = el("section", { className: "character-list-diagnostic" });
+    warning.setAttribute("role", "status");
+    warning.append(el("strong", { textContent: "キャラクター一覧を確認できません" }), el("p", {
+      textContent: userCharactersError ? errorMessage(userCharactersError)
+        : missingSavedCharacter ? `保存されていたキャラ「${requestedCharacter}」は一覧にありません。「${selectedCharacter}」を選択しました。保存するまで設定のIDは変更しません。`
+          : `${selectedCharacter} が一覧にありません。保存されたIDは変更していません。`,
+    }));
+    const retry = el("button", { type: "button", className: "secondary", textContent: "キャラクター一覧を再取得" });
+    retry.addEventListener("click", async () => {
+      data.values = cloneSettings(collect());
+      renderingSettings = true;
+      setSettingsMutationBusy(true);
+      try { await render(); }
+      catch (error) { statusEl.textContent = `一覧の再取得に失敗: ${errorMessage(error)}`; }
+      finally { renderingSettings = false; setSettingsMutationBusy(false); updateDirtyState(); }
+    });
+    warning.append(retry);
+    characterListDiagnostic.replaceChildren(warning);
+    characterListDiagnostic.hidden = false;
+  } else {
+    characterListDiagnostic.replaceChildren();
+    characterListDiagnostic.hidden = true;
+  }
   charSec.append(el("p", {
     className: "hint",
     textContent: "名前・ID・説明で検索し、描画形式で絞り込めます。選択後は上の性格・口調などを調整して「保存」してください。",
@@ -4051,6 +4102,12 @@ async function render() {
   panels.character.append(charSec, characterSec);
   panels.voice.append(voiceSec);
   panels["character-register"].append(addSec);
+  if (userCharactersError || !selectedCharacterEntry) {
+    for (const node of [characterSec, charSec, addSec, characterSpeakerField, panels["character-maker"]]) {
+      node.inert = true;
+      for (const control of node.querySelectorAll("button, input, select, textarea")) control.disabled = true;
+    }
+  }
 
   // --- 叩く AI コネクタごとの設定（選択中のプロバイダの設定だけ表示する） ---
   const provSec = section("AIサービスごとの設定");
@@ -4236,6 +4293,7 @@ function collect() {
   patch.PICOAGENT_CHARACTER_OVERRIDES = characterOverrides;
   patch.PICOAGENT_TTS_CHARACTER_OVERRIDES = characterVoiceOverrides;
   patch.PICOAGENT_LIVE2D_SDK_OVERRIDES = characterLive2dSdkOverrides;
+  patch.PICOAGENT_RENDERER_OVERRIDES = characterRendererOverrides;
   patch.PICOAGENT_STREAM_PROFILES = characterStreamProfiles;
   if (alarmEditorState) patch.PICOAGENT_ALARMS = alarmEditorState.getJson();
   if (scheduleEditorState) patch.PICOAGENT_SCHEDULED_TASKS = scheduleEditorState.getJson();

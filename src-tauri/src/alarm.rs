@@ -19,7 +19,7 @@ fn default_snooze_minutes() -> u32 {
     5
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Alarm {
     pub id: String,
     /// "HH:MM"（24時間表記）。

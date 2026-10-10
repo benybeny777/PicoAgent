@@ -9,7 +9,6 @@ use async_trait::async_trait;
 use base64::{engine::general_purpose::STANDARD, Engine};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use tauri::Emitter;
 
 use super::{Tool, ToolReg};
 use crate::config::Config;
@@ -69,17 +68,15 @@ impl Drop for Operation {
                 let body = format!("ゲーム停止記録の保存に失敗: {error}");
                 crate::log_paths::log_detached(&body);
                 if let Some(app) = crate::durable_jobs::app_handle() {
-                    if let Err(error) = app.emit(
-                        "pet:notice",
-                        json!({
-                            "kind":"game_play", "title":"ゲーム操作の記録失敗",
-                            "body":body, "ok":false, "at":chrono::Utc::now().to_rfc3339()
-                        }),
-                    ) {
-                        crate::log_paths::log_detached(&format!(
-                            "ゲーム停止記録の失敗を画面へ通知できません: {error}"
-                        ));
-                    }
+                    crate::notice::emit(
+                        app,
+                        crate::notice::Notice::info(
+                            "game_play",
+                            "ゲーム操作の記録失敗",
+                            body,
+                            false,
+                        ),
+                    );
                 }
             }
         }

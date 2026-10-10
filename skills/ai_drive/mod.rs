@@ -103,10 +103,9 @@ async fn send_chunks(
         }
         // 308 は Google の「続きを送れ」。OneDrive の途中応答 202 は is_success() に含まれる。
         if !(response.status().is_success() || response.status().as_u16() == 308) {
-            let status = response.status();
-            return Err(format!(
-                "エラー: {service}がアップロード中にHTTP {status}を返しました。"
-            ));
+            return crate::tools::http::service_body(cfg, service, Ok(response))
+                .await
+                .map(|_| ());
         }
         offset = end;
     }
@@ -274,12 +273,6 @@ fn auth_error(provider: &str) -> String {
     format!("エラー: {provider} の認証更新が必要です（HTTP 401）。設定画面でアクセストークンを更新してからジョブを再試行してください。")
 }
 
-async fn response_text(response: reqwest::Response) -> String {
-    crate::tools::http::response_text(response)
-        .await
-        .unwrap_or_default()
-}
-
 async fn google_upload(
     cfg: &Config,
     path: &SafePath,
@@ -328,9 +321,17 @@ async fn google_upload(
         return auth_error("Google Drive");
     }
     let existing_status = existing.status();
-    let existing_body = response_text(existing).await;
+    let existing_body = crate::tool_try!(crate::tools::http::response_text(existing).await);
     if !existing_status.is_success() {
-        return format!("エラー: Google Driveが重複確認時にHTTP {existing_status}を返しました。");
+        return format!(
+            "エラー: {}",
+            crate::tools::http::safe_service_error(
+                cfg,
+                "Google Drive重複確認",
+                existing_status,
+                &existing_body
+            )
+        );
     }
     if serde_json::from_str::<Value>(&existing_body)
         .ok()
@@ -372,8 +373,7 @@ async fn google_upload(
         return auth_error("Google Drive");
     }
     if !response.status().is_success() {
-        let status = response.status();
-        return format!("エラー: Google Driveがアップロード開始時にHTTP {status}を返しました。");
+        return crate::tools::http::service_reply(cfg, Ok(response), "Google Drive").await;
     }
     // セッションURLは資格情報相当なので、ジョブ状態・ログ・結果へ保存しない。
     let Some(session) = response
@@ -443,9 +443,12 @@ async fn onedrive_upload(
         return auth_error("OneDrive");
     }
     let status = response.status();
-    let body = response_text(response).await;
+    let body = crate::tool_try!(crate::tools::http::response_text(response).await);
     if !status.is_success() {
-        return format!("エラー: OneDriveがアップロード開始時にHTTP {status}を返しました。");
+        return format!(
+            "エラー: {}",
+            crate::tools::http::safe_service_error(cfg, "OneDriveアップロード開始", status, &body)
+        );
     }
     // uploadUrlは事前認証済みURLなので、永続化もログ出力もしない。
     let Some(session) = serde_json::from_str::<Value>(&body).ok().and_then(|value| {
@@ -508,8 +511,7 @@ async fn download(cfg: &Config, provider: &str, file_id: &str, relative: &str) -
         });
     }
     if !response.status().is_success() {
-        let status = response.status();
-        return format!("エラー: クラウドストレージがHTTP {status}を返しました。");
+        return crate::tools::http::service_reply(cfg, Ok(response), "クラウドストレージ").await;
     }
     if response
         .content_length()

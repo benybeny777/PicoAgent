@@ -105,7 +105,8 @@ impl Tool for MisskeyTool {
                     .get("visibility")
                     .and_then(Value::as_str)
                     .unwrap_or("public");
-                handle_text_response(
+                crate::tools::http::service_reply(
+                    cfg,
                     client
                         .post(format!("{}/api/notes/create", base))
                         .json(&json!({ "i": token, "text": text, "visibility": visibility }))
@@ -121,7 +122,8 @@ impl Tool for MisskeyTool {
                     .and_then(Value::as_u64)
                     .filter(|value| (1..=100).contains(value))
                     .unwrap_or(20);
-                handle_text_response(
+                crate::tools::http::service_reply(
+                    cfg,
                     client
                         .post(format!("{}/api/notes/timeline", base))
                         .json(&json!({ "i": token, "limit": limit }))
@@ -141,7 +143,8 @@ impl Tool for MisskeyTool {
                     .and_then(Value::as_u64)
                     .filter(|value| (1..=100).contains(value))
                     .unwrap_or(20);
-                handle_text_response(
+                crate::tools::http::service_reply(
+                    cfg,
                     client
                         .post(format!("{}/api/users/search", base))
                         .json(&json!({ "i": token, "query": query, "limit": limit }))
@@ -173,23 +176,6 @@ fn text_arg<'a>(args: &'a Value, key: &str, max_chars: usize) -> Result<&'a str,
         ));
     }
     Ok(text)
-}
-
-async fn handle_text_response(
-    response: Result<reqwest::Response, reqwest::Error>,
-    label: &str,
-) -> String {
-    let response = match response {
-        Ok(response) => response,
-        Err(error) => return format!("エラー: {} への接続に失敗しました: {}", label, error),
-    };
-    let status = response.status();
-    let body = crate::tool_response_text!(response);
-    if status.is_success() {
-        body
-    } else {
-        format!("エラー: {} が HTTP {} を返しました。", label, status)
-    }
 }
 
 inventory::submit! { ToolReg { make: || Box::new(MisskeyTool) } }

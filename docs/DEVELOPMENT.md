@@ -250,7 +250,7 @@ cargo xtask license issue --customer "購入者名" --purchase-id "BOOTH注文�
 - 軽量販売版はAivisをインストーラへ含めず、初回起動または設定の「追加機能・更新」で選んだ場合だけ、Aivis Project公式GitHub Releaseから `%APPDATA%\PicoAgent\bundled\aivis\` へ直接取得します。GitHub APIのサイズとSHA-256 digestを検証し、PicoAgentのReleaseからは再配布しません。インストール済み版と推奨版は設定画面に併記し、古い場合は更新、新しい場合は明示確認付きで推奨版へ戻す操作を表示します。大容量取得は接続と無通信の待ち時間だけを制限してストリームを止めず、更新・再導入時はステージング済みの新版へ原子的に入れ替え、失敗時は旧版を維持します。推奨版を上げるときは `component-manifest.json` の `targetVersion` と同じ版の公式Releaseリンクを1回の変更で更新します。実行時取得と開発用 `xtask` はこの正本を参照します
 - `PICOAGENT_TTS_ENABLED` が有効なら起動時に内部ポート（既定 `11436`）で裏起動し、アプリ終了時に停止します。旧既定の `10102` が保存済みなら起動時に移行します
 - 推論デバイスは内部設定 `PICOAGENT_TTS_DEVICE` の既定 `auto` で GPU 候補を確認し、あれば GPU、なければ CPU（通常の設定画面には出しません）
-- 話者は設定画面に出さずキャラクター既定声を使います。未導入なら起動時のローディング画面で AIVMX を追加し、合成時に `/speakers` から実際の style ID を解決します
+- 既定声は同梱・追加とも `character.json` の `voice` を正本とし、実際に読み込めたキャラのID・人格と同じ登録で渡します。型でprovider・UUID・声指定を検証し、バックエンドにキャラ別声定数表を複製しません。優先順はキャラ別上書き、manifestの声、声指定なしのキャラだけ全体設定です。上書きは設定「キャラの音声」で変更できます。未導入なら起動時の準備で AIVMX を追加し、合成時に `/speakers` から実際の style ID を解決します。指定話者・指定スタイルの解決失敗は無音で理由を通知し、別の数値IDや全体声へ降格しません
 - 音量は `PICOAGENT_TTS_VOLUME`（0〜100、初期値35）。保存後すぐ、再生中の音声にも反映されます。読み上げをミュート、または音量を0にすると口パクも停止して口を閉じ、再生途中で音量を戻した場合だけその時点から再開します
 
 > 同梱 Aivis の初回起動はモデル確認や BERT 読み込みで数十秒かかることがあります。キャラ固有の音声モデル導入は起動シーケンス中に「声を準備中…」としてまとめて行うため、通常画面での待ちは発生しません。
@@ -326,10 +326,21 @@ NSIS アンインストーラは、インストール先またはPicoAgent管理
 
 ## 📄 主要ファイル
 
+キャラ描画の選択は `ui/character/index.js` の登録表と各方式の `supports()` を正本とし、最優先の対応方式1つだけを初期化する。失敗時に下位方式を試さず、キャラなし診断・再試行へ進む。利用者の明示2D指定は `PICOAGENT_RENDERER_OVERRIDES` のIDごとの `image` だけで、通常へ戻す操作はそのIDを削除する。メイン画面は狭い保存口 `pet_set_character_renderer` の成功後に再読込し、設定画面は草稿・保存・リセットへ同期する。古い世代の読込・診断操作を最新の表示へ混ぜない。
+
+追加キャラ一覧の取得と正規化は両画面で共通化する。取得失敗を空一覧へ降格せず、元の選択ID・未保存草稿を保持する。関連編集だけを停止し、他設定の保存へキャラの既定値を書き戻さない。理由と再取得操作は復旧まで保持する。Live2DのSDKモデル候補の選択と、描画方式をまたぐ切替を混同しない。
+
+外部HTTP取得の安全経路は `src-tauri/src/tools/http.rs` の `fetch_guarded` に集約する。全ホップの用途別URL方針・公開IP確認、検査済みDNS解決先固定、秘密ヘッダ除去、時間・本文・転送上限を一緒に保つ。DNS固定のため `no_proxy()` で直接接続し、プロキシ必須環境ではこの経路を使えない。`web_fetch` の先頭取得＋打切り表示と、API・RSSの上限超過エラーを区別する。通常の外向きHTTPは共有クライアントを使い、API応答は `service_reply` / `service_body` で短い理由とHTTP状態コードを返す。既知の設定秘密値を切詰め前に伏せ、本文取得失敗を空へ降格しない。
+
+外部CLIは `tools::resolve_cli_path` で明示指定、未設定時だけ管理下の同梱物を解決する。コマンド名だけの明示指定時に限り共通探索を使う（macOSではPATHの後に既存Homebrew配置 `/opt/homebrew/bin`・`/usr/local/bin` も確認）。指定先や優先する管理配置の欠損は修復エラーにする。Whisperの2スキルは `tools::whisper` で解決し、固定モデル名は取得側と共通の `crates/picoagent-core/src/paths.rs` を正本とする。別名の導入モデルは `PICOAGENT_TRANSCRIBE_MODEL` へ明示し、`.bin` の名前順探索はしない。
+
+コマンド許可の所有者は `tools::process::command_policy` とする。チャットと予約実行は同じ `check` を呼び、引数制限と物理削除禁止を承認前後でも適用する。スキル側へ許可リストや検査の写しを作らない。ripgrepの欠損・実行失敗時の内蔵検索は撤去し、`doc_search` の正常な0一致時のファイル名検索だけを維持する。
+
 | ファイル | 役割 |
 |---|---|
 | `src-tauri/src/main.rs` / `lib.rs` | エントリ・Builder（state・command・menu イベント・setup） |
-| `src-tauri/src/commands.rs` | Tauri command（`pet_*` / `settings_*`）と共有状態 `AppState` |
+| `src-tauri/src/commands.rs` | Tauri command（`pet_*` / `settings_*`）と共有状態 `AppState`。会話入口はターン所有後に文脈を読み、後処理と履歴保存まで直列化する。雑談は混雑なら生成せず、目覚ましは取得後の生成だけ20秒を上限とする |
+| `src-tauri/src/conversation_turn.rs` | 会話ターンの直列化と現在ターンの停止旗・RAII解放。会話状態と世代照合の書き戻し確定は状態所有者の `commands.rs` が担当 |
 | `src-tauri/src/menu.rs` | 右クリックネイティブメニューと選択イベント処理 |
 | `src-tauri/src/config.rs` | 設定の正本（`app_config_dir/config.json`）。`get()` でシークレットを透過復号 |
 | `crates/picoagent-core/` | **非公開の内部共通コア**。正規形メッセージとUTF-8安全処理など、Tauri・OS・製品設定に依存しない処理を置く。外部公開は行わず `publish = false` を保つ |
@@ -338,6 +349,7 @@ NSIS アンインストーラは、インストール先またはPicoAgent管理
 | `src-tauri/src/hotkey.rs` | グローバルホットキー（`tauri-plugin-global-shortcut`）。起動時と設定保存時に `apply()` が全解除→設定どおり再登録し、終了時は `release()` で OS へ返す。呼び出しキーが無いまま隠れて操作不能にならないよう、登録できなければ非表示のウィンドウを表示へ戻す |
 | `src-tauri/src/secret.rs` | シークレット（`password` 型設定）をOSの資格情報保護へ預ける（Windows は DPAPI、macOS はログインキーチェーン）。Linux は平文 |
 | `src-tauri/src/history.rs` | 会話履歴の永続化（キャラ別 `app_data_dir/history-<キャラID>.json`。起動時・キャラ切替時に直近を文脈へ復元） |
+| `src-tauri/src/notice.rs` | 画面通知の形式・送信・失敗と復旧の間引き。購読前の待機列と新着を直列化し、画面の再読込時は未復旧の失敗を再表示 |
 | `src-tauri/src/alarm.rs` | 目覚まし時計の保存（config `PICOAGENT_ALARMS`）と曜日・時刻の正規化。発火はフロント時刻監視 → `pet_alarm_wake` |
 | `src-tauri/src/engine.rs` | 同梱 llama-server とモデル GGUF のライフサイクル（DL・spawn・状態通知） |
 | `src-tauri/src/agent.rs` / `agent/{prompt,feedback}.rs` | エージェント実行ループ／systemルールと文脈の合成／任意の計画・自己評価。スキルとメモリは既存の各正本を使い、実体のないhooks層は作らない |
