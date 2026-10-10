@@ -1,7 +1,10 @@
-"""音声学習スクリプトで共有するパス検証。"""
+"""音声学習スクリプトで共有するパス検証と原子的配置。"""
 
 from __future__ import annotations
 
+import os
+import sys
+import time
 from pathlib import Path, PureWindowsPath
 
 WINDOWS_RESERVED_NAMES = {
@@ -73,3 +76,28 @@ def unique_wav_names(file_names: list[str], label: str) -> None:
         if key in seen:
             raise SystemExit(f"候補一覧に同名WAVが重複しています: {label} {seen[key]} / {file_name}")
         seen[key] = file_name
+
+
+# 同じOS操作だけを再試行する。恒久的な権限不足・長い保持は元の例外を返す。
+ATOMIC_MOVE_DELAYS = (0.025, 0.05, 0.1, 0.2, 0.4)
+
+
+def atomic_move(source: Path, destination: Path, *, replace: bool = True, cleanup_file: bool = False):
+    """Windows共有違反だけ有限待機し、失敗stageは保持する。"""
+    operation = os.replace if replace else os.rename
+    try:
+        for attempt in range(len(ATOMIC_MOVE_DELAYS) + 1):
+            try:
+                operation(source, destination)
+                return
+            except OSError as error:
+                if sys.platform != "win32" or getattr(error, "winerror", None) not in (5, 32, 33) or attempt == len(ATOMIC_MOVE_DELAYS):
+                    raise
+                time.sleep(ATOMIC_MOVE_DELAYS[attempt])
+    except BaseException as error:
+        if cleanup_file:
+            try:
+                source.unlink(missing_ok=True)
+            except OSError as cleanup:
+                raise RuntimeError(f"原子的配置失敗後の一時ファイルを回収できません: {cleanup}") from error
+        raise

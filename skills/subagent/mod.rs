@@ -158,11 +158,8 @@ fn parse_multi_request(cfg: &Config, args: &Value) -> Result<Option<MultiRequest
         .and_then(Value::as_i64)
         .unwrap_or(6)
         .clamp(1, 12) as usize;
-    let configured_concurrency = cfg
-        .get("PICOAGENT_MULTI_AGENT_MAX_CONCURRENCY", "3")
-        .parse::<usize>()
-        .unwrap_or(3)
-        .clamp(1, MAX_AGENTS);
+    let configured_concurrency =
+        cfg.int(&crate::config::ints::MULTI_AGENT_MAX_CONCURRENCY)? as usize;
     let max_concurrency = args
         .get("max_concurrency")
         .and_then(Value::as_i64)
@@ -590,12 +587,7 @@ impl Tool for SubagentTool {
     }
 
     fn config_schema(&self) -> Vec<Field> {
-        vec![Field::new(
-            "PICOAGENT_SUBAGENT_MAX_DEPTH",
-            "サブエージェントの最大ネスト深さ",
-            "number",
-            "2",
-        )]
+        vec![Field::int(&crate::config::ints::SUBAGENT_MAX_DEPTH)]
     }
 
     async fn run(&self, cfg: &Config, args: Value) -> String {
@@ -605,11 +597,8 @@ impl Tool for SubagentTool {
             Err(error) => return error,
         };
 
-        let max_depth = cfg
-            .get("PICOAGENT_SUBAGENT_MAX_DEPTH", "2")
-            .parse::<usize>()
-            .unwrap_or(2)
-            .max(1);
+        let max_depth =
+            crate::tool_try!(cfg.int(&crate::config::ints::SUBAGENT_MAX_DEPTH)) as usize;
         if agent::agent_depth() >= max_depth {
             return format!(
                 "エラー: サブエージェントのネストが上限（{max_depth}）に達したため、これ以上は委譲できません。このタスクは自分で続行してください。"

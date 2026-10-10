@@ -17,13 +17,22 @@
       "sources": [
         {
           "name": "ggml-org 公式 whisper.cpp Releases",
-          "url": "https://github.com/ggml-org/whisper.cpp/releases"
+          "url": "https://github.com/ggml-org/whisper.cpp/releases/tag/v1.9.5"
+        },
+        {
+          "name": "安定版が明示する公式バイナリ配布",
+          "url": "https://github.com/ggml-org/whisper.cpp/releases/tag/b5454"
         },
         {
           "name": "whisper.cpp 公式モデル配布",
           "url": "https://huggingface.co/ggerganov/whisper.cpp"
         }
-      ]
+      ],
+      "targetVersion": "v1.9.5",
+      "binaryRelease": "b5454",
+      "sourceCommit": "d1be6fde11ac6e0407606b4e42fe72d34add8037",
+      "sourceSha256": "645445da884df6dbd52b30f82d7be7c01d1767c938714e477e786b88d529e9f4",
+      "sourceSize": 9631456
     },
     "character-maker": {
       "installMode": "managed",
@@ -75,15 +84,24 @@
       "installMode": "managed",
       "targetVersion": "2026-09-21",
       "sources": [
-        { "name": "Krea 2 Turbo公式モデル・利用条件", "url": "https://huggingface.co/krea/Krea-2-Turbo" },
-        { "name": "ComfyUI公式Krea 2量子化モデル", "url": "https://huggingface.co/Comfy-Org/Krea-2" }
+        {
+          "name": "Krea 2 Turbo公式モデル・利用条件",
+          "url": "https://huggingface.co/krea/Krea-2-Turbo"
+        },
+        {
+          "name": "ComfyUI公式Krea 2量子化モデル",
+          "url": "https://huggingface.co/Comfy-Org/Krea-2"
+        }
       ]
     },
     "video-ltx25": {
       "installMode": "managed",
       "targetVersion": "2026-09-21",
       "sources": [
-        { "name": "Lightricks公式LTX 2.5モデル・利用条件", "url": "https://huggingface.co/Lightricks/LTX-2.5" }
+        {
+          "name": "Lightricks公式LTX 2.5モデル・利用条件",
+          "url": "https://huggingface.co/Lightricks/LTX-2.5"
+        }
       ]
     },
     "office": {

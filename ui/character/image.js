@@ -59,15 +59,19 @@ function loadImage(url, signal) {
 function measureContent(image) {
   const width = image.naturalWidth;
   const height = image.naturalHeight;
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) throw new Error("キャラ画像の寸法が不正です");
   const sampleHeight = Math.min(512, height);
   const factor = sampleHeight / height;
   const sampleWidth = Math.max(1, Math.round(width * factor));
   const canvas = el("canvas", { width: sampleWidth, height: sampleHeight });
   const context = canvas.getContext("2d", { willReadFrequently: true });
-  context.drawImage(image, 0, 0, sampleWidth, sampleHeight);
+  if (!context) throw new Error("キャラ画像の可視範囲を測る canvas を準備できません");
   let data;
-  try { data = context.getImageData(0, 0, sampleWidth, sampleHeight).data; }
-  catch { return { x: 0, y: 0, w: width, h: height }; } // フォールバック許可: 画素を読めない出所の画像は全体を可視範囲とみなす。
+  try {
+    context.drawImage(image, 0, 0, sampleWidth, sampleHeight);
+    data = context.getImageData(0, 0, sampleWidth, sampleHeight).data;
+  }
+  finally { canvas.width = 0; canvas.height = 0; }
   let minX = sampleWidth, minY = sampleHeight, maxX = -1, maxY = -1;
   for (let y = 0; y < sampleHeight; y += 1) {
     for (let x = 0; x < sampleWidth; x += 1) {
@@ -79,8 +83,6 @@ function measureContent(image) {
       }
     }
   }
-  canvas.width = 0;
-  canvas.height = 0;
   if (maxX < 0) return { x: 0, y: 0, w: width, h: height };
   const scale = 1 / factor;
   const x = Math.max(0, (minX - 1) * scale);

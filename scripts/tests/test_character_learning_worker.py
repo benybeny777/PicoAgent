@@ -11,6 +11,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 ROOT=Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT/'scripts'))
 SPEC=importlib.util.spec_from_file_location('learning_worker',ROOT/'scripts/character-learning-worker.py')
 WORKER=importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(WORKER)
@@ -66,10 +67,11 @@ class WorkerTests(unittest.TestCase):
     def test_再開照合に使う本文は書き込み途中で中断しても旧内容を壊さない(self):
         target=Path(self.directory.name)/'transcript.txt'
         target.write_text('完成した文字起こし', encoding='utf-8')
-        with patch.object(Path, 'replace', side_effect=OSError('停止')):
+        with patch.object(WORKER.os, 'replace', side_effect=OSError('停止')):
             with self.assertRaises(OSError):
                 WORKER.atomic_text(target, '途中')
         self.assertEqual(target.read_text(encoding='utf-8'), '完成した文字起こし')
+        self.assertFalse(target.with_suffix(target.suffix+'.incoming').exists())
         source=(ROOT/'scripts/character-learning-worker.py').read_text(encoding='utf-8')
         for name in ('transcript.txt', 'esd.list', 'selected-reference.jsonl'):
             self.assertNotIn(f"'{name}').write_text", source)
@@ -159,7 +161,7 @@ class WorkerTests(unittest.TestCase):
     def test_実二プロセスで競合を拒否して終了時に解放する(self):
         """強制終了後もOSが排他を解放し、次プロセスが取得できる。"""
         script=ROOT/'scripts/character-learning-worker.py'
-        code="import importlib.util,sys,time; s=importlib.util.spec_from_file_location('w',sys.argv[1]); w=importlib.util.module_from_spec(s); s.loader.exec_module(w); lock=w.RuntimeLock(sys.argv[2]); lock.__enter__(); print('locked',flush=True); time.sleep(30)"
+        code="import importlib.util,sys,time; from pathlib import Path; sys.path.insert(0,str(Path(sys.argv[1]).parent)); s=importlib.util.spec_from_file_location('w',sys.argv[1]); w=importlib.util.module_from_spec(s); s.loader.exec_module(w); lock=w.RuntimeLock(sys.argv[2]); lock.__enter__(); print('locked',flush=True); time.sleep(30)"
         child=subprocess.Popen([sys.executable,'-u','-c',code,str(script),str(self.runtime)],stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
         try:
             import threading

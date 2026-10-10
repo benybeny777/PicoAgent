@@ -2,7 +2,7 @@
 
 use std::io::{Read, Seek, SeekFrom};
 use std::sync::{
-    atomic::{AtomicBool, AtomicU64, Ordering},
+    atomic::{AtomicU64, Ordering},
     Arc, Mutex,
 };
 
@@ -12,6 +12,7 @@ use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder
 
 use crate::agent;
 use crate::aivis;
+use crate::character_voice::CharacterVoice;
 use crate::config::Config;
 use crate::message::Message;
 use crate::providers;
@@ -33,12 +34,12 @@ const LEGACY_AUTO_SUMMARY_BEGIN: &str = "[以前の会話の要約（自動）: 
 
 /// 人格・スキル定義・回答生成の余白を残した会話予算。
 /// local は実際の llama-server コンテキスト長へ追従し、それ以外は安全側の既定値にする。
-fn conversation_token_budget(cfg: &Config) -> usize {
+fn conversation_token_budget(cfg: &Config) -> Result<usize, String> {
     if cfg.get("PICOAGENT_PROVIDER", "local") == "local" {
-        let context = crate::providers::local::context_length(cfg);
-        return (context * 3 / 4).clamp(1_500, 24_000);
+        let context = crate::providers::local::context_length(cfg)?;
+        return Ok((context as u128 * 3 / 4).clamp(1_500, 24_000) as usize);
     }
-    MAX_CONTEXT_TOKENS
+    Ok(MAX_CONTEXT_TOKENS)
 }
 
 /// 以前の自動要約を除去して、最新の要約1ブロックだけへ置き換える。
@@ -66,39 +67,62 @@ fn replace_auto_summary(content: &str, summary: &str) -> String {
     )
 }
 
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct LoadedCharacter {
+    pub id: String,
+    pub profile: String,
+    pub greeting: String,
+    pub voice: Option<CharacterVoice>,
+    /// manifestを読み込んで登録が成功した場合だけtrue。声なし確定と未登録を区別する。
+    pub registered: bool,
+}
+
+struct RequestReceipt {
+    id: String,
+    epoch: u64,
+    question: Option<Arc<crate::tools::ask_user::PendingQuestion>>,
+    approval: Option<Arc<crate::tools::run_command::PendingCommandApproval>>,
+}
+
 pub struct AppState {
     pub config: Config,
     pub provider_id: Mutex<String>,
     pub model: Mutex<String>,
     pub messages: Mutex<Vec<Message>>,
-    pub character_profile: Mutex<String>,
-    /// 選択中キャラクターの `character.json` の `greeting`（人格そのままの挨拶）。
-    /// 短い挨拶にモデルを呼ばず返すとき、全キャラ共通の定型文にならないよう使う。
-    pub character_greeting: Mutex<String>,
-    /// 会話文脈が属する選択中キャラクターID。これが変わったら会話を破棄して
-    /// 旧キャラの一人称・自己紹介が新キャラの応答へ混ざらないようにする。
-    pub character_id: Mutex<String>,
-    /// 会話から暗黙的に抽出した長期メモリ。system 文脈へ差し込む。
+    pub character: Mutex<LoadedCharacter>,
     pub memory_context: Mutex<String>,
     /// キャラクターごとの関係性と共有した出来事。数値は見せず自然な距離感へ反映する。
     pub relationship_context: Mutex<String>,
     /// 直近の自発雑談（独り言）。繰り返しを避けるため次回生成へ「避ける文」として渡す。
     pub recent_chatter: Mutex<Vec<String>>,
     /// チャットで確認待ちの未許可コマンド。ユーザーが「許可」または「キャンセル」と返すまで保持する。
-    pub pending_command: Mutex<Option<crate::tools::run_command::PendingCommandApproval>>,
+    pub pending_command: Mutex<Option<Arc<crate::tools::run_command::PendingCommandApproval>>>,
     /// ask_user で提示中の質問。次のユーザー発話を選択肢へ寄せるために保持する。
-    pub pending_question: Mutex<Option<crate::tools::ask_user::PendingQuestion>>,
+    pub pending_question: Mutex<Option<Arc<crate::tools::ask_user::PendingQuestion>>>,
     /// キャラクターの現在感情状態（ルールベース推定）。
     pub emotion: Mutex<crate::emotion::EmotionState>,
-    /// 停止ボタンによる中断要求。送信開始時に false へ戻し、実行中の生成・ツール処理でも確認する。
-    /// マルチAIのようにツール経由で子エージェントを起こす経路へも渡せるよう `Arc` で持つ。
-    pub cancel_requested: Arc<AtomicBool>,
+    /// awaitを跨ぐ会話ターン排他と、そのターンだけの停止旗。
+    pub turn: crate::conversation_turn::ConversationTurn,
+    /// 世代確認・会話書戻し・履歴保存と、世代無効化を短い同期区間にする。
+    conversation_commit: Mutex<()>,
     /// 通常会話で手元CLIを叩く場合の明示セッション。同じキャラ・会話世代・人格・CLI設定
     /// の間だけ再利用し、別会話や設定変更では新しいセッションへ切り替える。
     agent_cli_session: Mutex<Option<(String, crate::providers::agent_cli::Session)>>,
     /// 会話状態の世代番号。リセット・キャラ切替・再初期化後に古い非同期処理が
     /// 履歴や文脈を書き戻さないよう、送信開始時の値と完了時の値を照合する。
     pub conversation_epoch: AtomicU64,
+}
+
+fn take_received<T>(pending: &Mutex<Option<Arc<T>>>, received: Option<&Arc<T>>) -> Option<Arc<T>> {
+    let mut pending = pending.lock().unwrap();
+    if received
+        .zip(pending.as_ref())
+        .is_some_and(|(received, current)| Arc::ptr_eq(received, current))
+    {
+        pending.take()
+    } else {
+        None
+    }
 }
 
 impl AppState {
@@ -108,16 +132,15 @@ impl AppState {
             provider_id: Mutex::new("local".to_string()),
             model: Mutex::new(String::new()),
             messages: Mutex::new(Vec::new()),
-            character_profile: Mutex::new(String::new()),
-            character_greeting: Mutex::new(String::new()),
-            character_id: Mutex::new(String::new()),
+            character: Mutex::new(LoadedCharacter::default()),
             memory_context: Mutex::new(String::new()),
             relationship_context: Mutex::new(String::new()),
             recent_chatter: Mutex::new(Vec::new()),
             pending_command: Mutex::new(None),
             pending_question: Mutex::new(None),
             emotion: Mutex::new(crate::emotion::EmotionState::default()),
-            cancel_requested: Arc::new(AtomicBool::new(false)),
+            turn: crate::conversation_turn::ConversationTurn::default(),
+            conversation_commit: Mutex::new(()),
             agent_cli_session: Mutex::new(None),
             conversation_epoch: AtomicU64::new(0),
         }
@@ -128,7 +151,94 @@ impl AppState {
     }
 
     pub fn bump_conversation_epoch(&self) {
+        let _commit = self.conversation_commit.lock().unwrap();
         self.conversation_epoch.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// character→確定ゲートで世代を再検査し、同期の書戻しと履歴保存を一体にする。
+    fn with_current<R>(
+        &self,
+        id: &str,
+        epoch: u64,
+        commit: impl FnOnce(&LoadedCharacter) -> R,
+    ) -> Option<R> {
+        let character = self.character.lock().unwrap();
+        let _commit = self.conversation_commit.lock().unwrap();
+        let current_id = if character.id.is_empty() {
+            self.config.get("PICOAGENT_CHARACTER", "mugi")
+        } else {
+            character.id.clone()
+        };
+        if current_id != id || self.conversation_epoch() != epoch {
+            return None;
+        }
+        Some(commit(&character))
+    }
+
+    /// 待機前の受付時点を保存し、未提示の質問/コマンドへの先回り返答を防ぐ。
+    fn request_receipt(&self) -> RequestReceipt {
+        let character = self.character.lock().unwrap();
+        let _commit = self.conversation_commit.lock().unwrap();
+        RequestReceipt {
+            id: if character.id.is_empty() {
+                self.config.get("PICOAGENT_CHARACTER", "mugi")
+            } else {
+                character.id.clone()
+            },
+            epoch: self.conversation_epoch(),
+            question: self.pending_question.lock().unwrap().clone(),
+            approval: self.pending_command.lock().unwrap().clone(),
+        }
+    }
+
+    /// 受付時と同一の確認だけを原子的に取り出し、依頼本文を確定する。
+    fn request_snapshot(
+        &self,
+        text: String,
+        receipt: &RequestReceipt,
+    ) -> Option<(
+        String,
+        Option<Arc<crate::tools::run_command::PendingCommandApproval>>,
+    )> {
+        self.with_current(&receipt.id, receipt.epoch, |_| {
+            let question = take_received(&self.pending_question, receipt.question.as_ref());
+            let text = question
+                .and_then(|question| crate::tools::ask_user::resolve_answer(&question, &text))
+                .unwrap_or(text);
+            let approval = if is_persistent_approval_text(&text)
+                || is_approval_text(&text)
+                || is_cancel_text(&text)
+            {
+                take_received(&self.pending_command, receipt.approval.as_ref())
+            } else {
+                None
+            };
+            (text, approval)
+        })
+    }
+
+    /// 外部メモリstore編集と文脈反映を同じ確定区間に置く。closure内でawaitしない。
+    pub fn edit_memory_context<R, E>(
+        &self,
+        edit: impl FnOnce() -> Result<(R, String), E>,
+    ) -> Result<R, E> {
+        let character = self.character.lock().unwrap();
+        let _commit = self.conversation_commit.lock().unwrap();
+        self.conversation_epoch.fetch_add(1, Ordering::Relaxed);
+        let (result, next) = edit()?;
+        *self.memory_context.lock().unwrap() = next;
+        self.rebuild_from_character(&character, false);
+        Ok(result)
+    }
+
+    /// 外部メモリ編集は現在のターンを無効化し、文脈更新と再構成を一体にする。
+    pub fn replace_memory_context(&self, next: String) {
+        let result: Result<(), std::convert::Infallible> =
+            self.edit_memory_context(|| Ok(((), next)));
+        match result {
+            Ok(()) => {}
+            Err(never) => match never {},
+        }
     }
 
     fn agent_cli_session(&self, key: String) -> crate::providers::agent_cli::Session {
@@ -141,6 +251,63 @@ impl AppState {
         let session = crate::providers::agent_cli::Session::new();
         *current = Some((key, session.clone()));
         session
+    }
+
+    /// 読込と検証を全部済ませてからID・人格・挨拶・声と会話を同時に確定する。
+    fn register_character(
+        &self,
+        mut next: LoadedCharacter,
+        prepare: impl FnOnce(bool) -> Result<(String, Vec<Message>), String>,
+    ) -> Result<(), String> {
+        if !crate::character_pack::is_valid_id(&next.id) {
+            return Err("キャラクターIDが不正です。".into());
+        }
+        if next.profile.chars().count() > 4000 {
+            return Err("キャラクター人格設定は4000文字以内にしてください。".into());
+        }
+        if next.greeting.chars().count() > 500 {
+            return Err("キャラクターの挨拶は500文字以内にしてください。".into());
+        }
+        if let Some(voice) = &next.voice {
+            voice
+                .validate()
+                .map_err(|error| voice.failure(&next.id, error))?;
+        }
+        next.registered = true;
+        let mut current = self.character.lock().unwrap();
+        let changed = !current.id.is_empty() && current.id != next.id;
+        // この後に失敗しうる読み込みは残さない。失敗時は旧スナップショットも会話も温存する。
+        let (relationship, recent) = prepare(changed)?;
+        let memory = self.memory_context.lock().unwrap().clone();
+        let prompt = agent::prompt::compose(
+            &self.config,
+            &next.profile,
+            &next.id,
+            &memory,
+            &relationship,
+        );
+        self.bump_conversation_epoch();
+        let mut relationship_context = self.relationship_context.lock().unwrap();
+        let mut messages = self.messages.lock().unwrap();
+        let kept = if changed {
+            recent
+        } else {
+            messages
+                .iter()
+                .filter(|m| m.role != "system")
+                .cloned()
+                .collect()
+        };
+        let mut prepared = vec![Message::new("system", prompt)];
+        prepared.extend(kept);
+        if changed {
+            self.pending_command.lock().unwrap().take();
+            self.pending_question.lock().unwrap().take();
+        }
+        *relationship_context = relationship;
+        *messages = prepared;
+        *current = next;
+        Ok(())
     }
 
     /// 関係性の文脈を更新する。**中身が変わったときだけ true を返す。**
@@ -157,46 +324,65 @@ impl AppState {
         true
     }
 
+    /// 対象キャラの選択、関係性store操作、文脈反映を同じ確定区間で行う。
+    fn edit_relationship_context(
+        &self,
+        edit: impl FnOnce(&str, &str) -> Result<crate::relationship::RelationshipState, String>,
+    ) -> Result<crate::relationship::RelationshipState, String> {
+        let character = self.character.lock().unwrap();
+        let _commit = self.conversation_commit.lock().unwrap();
+        let id = if character.id.is_empty() {
+            self.config.get("PICOAGENT_CHARACTER", "mugi")
+        } else {
+            character.id.clone()
+        };
+        let mode = self.config.get("PICOAGENT_COMPANION_MODE", "both");
+        let relationship = edit(&id, &mode)?;
+        if self.set_relationship_context(relationship_prompt_context(&self.config, &relationship)) {
+            self.conversation_epoch.fetch_add(1, Ordering::Relaxed);
+            self.rebuild_from_character(&character, false);
+        }
+        Ok(relationship)
+    }
+
     /// system プロンプトを設定から作り直す。会話の流れ（system 以外）は保持する
     /// （人格やプロンプト変更で直近の会話文脈を失わないため）。
     pub fn reset_conversation(&self) {
-        let character_profile = self.character_profile.lock().unwrap().clone();
-        let character_id = self.character_id.lock().unwrap().clone();
+        self.rebuild_conversation(false, || {});
+    }
+
+    /// character→文脈→messagesの順で確定し、登録後に旧人格を書き戻さない。
+    /// 非公開のclosureは並行回帰の割込位置を固定するためだけに使う。
+    fn rebuild_conversation(&self, clear: bool, after_character_lock: impl FnOnce()) {
+        let character = self.character.lock().unwrap();
+        after_character_lock();
+        let _commit = self.conversation_commit.lock().unwrap();
+        self.conversation_epoch.fetch_add(1, Ordering::Relaxed);
+        self.rebuild_from_character(&character, clear);
+    }
+
+    /// 保持中のcharacterを使う。turn自身のメモリ更新は世代を変えない。
+    fn rebuild_from_character(&self, character: &LoadedCharacter, clear: bool) {
         let memory_context = self.memory_context.lock().unwrap().clone();
         let relationship_context = self.relationship_context.lock().unwrap().clone();
         let prompt = agent::prompt::compose(
             &self.config,
-            &character_profile,
-            &character_id,
+            &character.profile,
+            &character.id,
             &memory_context,
             &relationship_context,
         );
         let mut messages = self.messages.lock().unwrap();
-        let kept: Vec<Message> = messages
-            .iter()
-            .filter(|m| m.role != "system")
-            .cloned()
-            .collect();
-        let mut next = Vec::with_capacity(kept.len() + 1);
-        next.push(Message::new("system", prompt));
-        next.extend(kept);
+        let mut next = vec![Message::new("system", prompt)];
+        if !clear {
+            next.extend(
+                messages
+                    .iter()
+                    .filter(|message| message.role != "system")
+                    .cloned(),
+            );
+        }
         *messages = next;
-    }
-
-    /// 会話を完全に初期化する（system のみに戻す）。「新しい会話」用。
-    pub fn clear_conversation(&self) {
-        let character_profile = self.character_profile.lock().unwrap().clone();
-        let character_id = self.character_id.lock().unwrap().clone();
-        let memory_context = self.memory_context.lock().unwrap().clone();
-        let relationship_context = self.relationship_context.lock().unwrap().clone();
-        let prompt = agent::prompt::compose(
-            &self.config,
-            &character_profile,
-            &character_id,
-            &memory_context,
-            &relationship_context,
-        );
-        *self.messages.lock().unwrap() = vec![Message::new("system", prompt)];
     }
 }
 
@@ -301,13 +487,13 @@ async fn maybe_summarize_context(
     provider: &dyn providers::Provider,
     cfg: &Config,
     model: &str,
-) -> Vec<Message> {
+) -> Result<Vec<Message>, String> {
     let clean = clean_turns(&convo);
     let total: usize = convo.iter().map(estimate_tokens).sum();
-    let summarize_threshold = conversation_token_budget(cfg) * 7 / 10;
+    let summarize_threshold = conversation_token_budget(cfg)? * 7 / 10;
     // 閾値以下またはターン数が少なすぎる場合はスキップ（最低 6 ターン必要）。
     if total <= summarize_threshold || clean.len() < 6 {
-        return convo;
+        return Ok(convo);
     }
 
     // 古い 40% を要約対象にする（最低 2 ターン、残す側も最低 2 ターン確保）。
@@ -337,12 +523,18 @@ async fn maybe_summarize_context(
     ];
 
     // 非公開利用: 要約は system メッセージの中へ入れ直すだけで、利用者へ見せる本文にはならない。
-    let Ok(summary_msg) = provider.chat(cfg, model, &summary_msgs, &[]).await else {
-        return convo;
+    let cancel = agent::cancel_flag();
+    let Some(Ok(summary_msg)) = agent::cancel_while(
+        provider.chat(cfg, model, &summary_msgs, &[]),
+        cancel.as_deref(),
+    )
+    .await
+    else {
+        return Ok(convo);
     };
     let summary_text = summary_msg.content.trim().to_string();
     if summary_text.is_empty() {
-        return convo;
+        return Ok(convo);
     }
 
     // 最初の system メッセージだけを最新の要約1ブロックへ置換し、古いターンを差し替える。
@@ -360,13 +552,13 @@ async fn maybe_summarize_context(
         })
         .collect();
     result.extend(to_keep.iter().cloned());
-    result
+    Ok(result)
 }
 
 /// 履歴ファイルの分割キーになる、現在アクティブな選択中キャラクターID。
 /// state 側が未設定（起動直後など）なら設定の選択キャラへフォールバックする。
 pub fn active_character_id(state: &AppState) -> String {
-    let id = state.character_id.lock().unwrap().clone();
+    let id = state.character.lock().unwrap().id.clone();
     if id.is_empty() {
         state.config.get("PICOAGENT_CHARACTER", "mugi")
     } else {
@@ -389,6 +581,21 @@ fn conversation_is_current(state: &AppState, character_id: &str, epoch: u64) -> 
     active_character_id(state) == character_id && state.conversation_epoch() == epoch
 }
 
+fn persist_conversation(
+    state: &AppState,
+    app: &AppHandle,
+    id: &str,
+    epoch: u64,
+    messages: Vec<Message>,
+) -> bool {
+    state
+        .with_current(id, epoch, |_| {
+            *state.messages.lock().unwrap() = messages.clone();
+            crate::history::save(app, id, &messages);
+        })
+        .is_some()
+}
+
 enum PersistedReply {
     Current(String),
     Stale,
@@ -404,16 +611,19 @@ fn record_turn(
     user_text: &str,
     reply: String,
 ) -> Result<Value, String> {
-    if !conversation_is_current(state, character_id, epoch) {
+    let budget = conversation_token_budget(&state.config)?;
+    let recorded = state.with_current(character_id, epoch, |_| {
+        let mut convo = state.messages.lock().unwrap().clone();
+        convo.push(Message::new("user", user_text));
+        convo.push(Message::new("assistant", reply.clone()));
+        let compacted = compacted_conversation(&convo, budget);
+        *state.messages.lock().unwrap() = compacted.clone();
+        crate::history::save(app, character_id, &compacted);
+    });
+    if recorded.is_none() {
         crate::log_paths::append_app_log(app, "古い会話ターンの記録を破棄しました。");
         return Ok(json!({ "stale": true, "reply": "" }));
     }
-    let mut convo = state.messages.lock().unwrap().clone();
-    convo.push(Message::new("user", user_text));
-    convo.push(Message::new("assistant", reply.clone()));
-    let compacted = compacted_conversation(&convo, conversation_token_budget(&state.config));
-    *state.messages.lock().unwrap() = compacted.clone();
-    crate::history::save(app, character_id, &compacted);
     Ok(json!({ "reply": reply }))
 }
 
@@ -454,8 +664,7 @@ async fn run_agent_and_persist(
     character_id: &str,
     epoch: u64,
 ) -> anyhow::Result<PersistedReply> {
-    // 前回の中断要求が残らないよう、送信開始時にフラグを戻す。
-    state.cancel_requested.store(false, Ordering::Relaxed);
+    let cancel = agent::cancel_flag();
     // ツール経由で起こす子エージェント（サブエージェント／マルチAI）も同じ停止ボタンで
     // 止められるよう、中断フラグをタスクローカルへ載せて配下へ伝播させる。
     let run = async {
@@ -481,19 +690,20 @@ async fn run_agent_and_persist(
             convo,
             5,
             Some(app),
-            Some(&*state.cancel_requested),
+            cancel.as_deref(),
         );
         if let Some(session) = cli_session {
             return crate::providers::agent_cli::with_session(session, task).await;
         }
         task.await
     };
-    let reply = agent::with_cancel(Arc::clone(&state.cancel_requested), run).await?;
+    let reply = run.await?;
     // 会話文脈を圧縮（system + クリーンな直近発話）して保持し、ファイルへ永続化する。
-    let compacted = compacted_conversation(convo, conversation_token_budget(&state.config));
-    if conversation_is_current(state, character_id, epoch) {
-        *state.messages.lock().unwrap() = compacted.clone();
-        crate::history::save(app, character_id, &compacted);
+    let compacted = compacted_conversation(
+        convo,
+        conversation_token_budget(&state.config).map_err(anyhow::Error::msg)?,
+    );
+    if persist_conversation(state, app, character_id, epoch, compacted) {
         Ok(PersistedReply::Current(reply))
     } else {
         crate::log_paths::append_app_log(app, "古いAI応答の会話履歴書き戻しを破棄しました。");
@@ -543,11 +753,12 @@ fn resolved_judge_model(
 /// `persona` として複製すると、統合AIが内部文脈を回答へ復唱する経路を増やしてしまう。
 fn stable_persona_prompt(state: &AppState) -> String {
     let mut persona = agent::prompt::base(&state.config);
-    let character_profile = state.character_profile.lock().unwrap().clone();
+    let character = state.character.lock().unwrap().clone();
+    let character_profile = character.profile;
     if !character_profile.is_empty() {
         persona.push_str("\n\n選択中キャラクターの人格設定:\n");
         persona.push_str(&character_profile);
-        let character_id = state.character_id.lock().unwrap().clone();
+        let character_id = character.id;
         persona.push_str(&crate::relationship_preset::profile_suffix(
             &state.config,
             &character_id,
@@ -620,23 +831,20 @@ async fn run_multi_ai_and_persist(
     character_id: &str,
     epoch: u64,
 ) -> anyhow::Result<PersistedReply> {
-    state.cancel_requested.store(false, Ordering::Relaxed);
     // 設定由来のこの経路は `agent::run` を通らないため、そのままだとネスト深さが0から
     // 始まり、チャット経由より1段深く委譲できてしまう。深さ1のスコープを張って
     // 上限判定をチャット経由とそろえる。中断フラグも配下の候補AIへ伝播させる。
     // 戻り値はツール出力ではなく利用者への最終返信なので、ツール出力上限で打ち切らない。
-    let raw_reply = agent::with_cancel(
-        Arc::clone(&state.cancel_requested),
-        agent::with_agent_depth(1, tools::dispatch_final(&state.config, "subagent", args)),
-    )
-    .await;
+    let raw_reply =
+        agent::with_agent_depth(1, tools::dispatch_final(&state.config, "subagent", args)).await;
     let private_context = stable_persona_prompt(state);
     let reply = agent::safe_public_answer_or_fallback(raw_reply, &private_context);
     convo.push(Message::new("assistant", reply.clone()));
-    let compacted = compacted_conversation(convo, conversation_token_budget(&state.config));
-    if conversation_is_current(state, character_id, epoch) {
-        *state.messages.lock().unwrap() = compacted.clone();
-        crate::history::save(app, character_id, &compacted);
+    let compacted = compacted_conversation(
+        convo,
+        conversation_token_budget(&state.config).map_err(anyhow::Error::msg)?,
+    );
+    if persist_conversation(state, app, character_id, epoch, compacted) {
         Ok(PersistedReply::Current(reply))
     } else {
         crate::log_paths::append_app_log(app, "古いマルチAI応答の会話履歴書き戻しを破棄しました。");
@@ -670,18 +878,26 @@ fn apply_emotion_and_reply(
 /// 会話を完全に初期化し、履歴ファイルも消す（「会話をリセット」用）。UI へも通知する。
 pub fn clear_conversation_and_history(app: &AppHandle) -> Result<(), String> {
     let state = app.state::<AppState>();
-    let character_id = active_character_id(&state);
-    crate::history::clear(app, &character_id)
-        .map_err(|error| format!("会話履歴を削除できません: {error}"))?;
     tauri::async_runtime::block_on(crate::memory_embedding::reset_for_edit(|| {
-        crate::memory::clear(app)
+        let character = state.character.lock().unwrap();
+        let _commit = state.conversation_commit.lock().unwrap();
+        state.conversation_epoch.fetch_add(1, Ordering::Relaxed);
+        let id = if character.id.is_empty() {
+            state.config.get("PICOAGENT_CHARACTER", "mugi")
+        } else {
+            character.id.clone()
+        };
+        crate::history::clear(app, &id)
+            .map_err(|error| anyhow::anyhow!("会話履歴を削除できません: {error}"))?;
+        crate::memory::clear(app)?;
+        state.pending_command.lock().unwrap().take();
+        state.pending_question.lock().unwrap().take();
+        state.recent_chatter.lock().unwrap().clear();
+        state.memory_context.lock().unwrap().clear();
+        state.rebuild_from_character(&character, true);
+        Ok(())
     }))
-    .map_err(|error| format!("長期メモリを削除できません: {error}"))?;
-    state.bump_conversation_epoch();
-    state.pending_command.lock().unwrap().take();
-    state.recent_chatter.lock().unwrap().clear();
-    state.memory_context.lock().unwrap().clear();
-    state.clear_conversation();
+    .map_err(|error| format!("会話と長期メモリを削除できません: {error}"))?;
     if let Some(win) = app.get_webview_window("main") {
         if let Err(error) = win.emit("pet:reset", ()) {
             crate::log_paths::append_app_log(
@@ -707,20 +923,60 @@ impl Default for AppState {
 const STARTUP_PROVIDER_PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
 const SETTINGS_PROVIDER_PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
-async fn probe_with_timeout(
-    probe: impl std::future::Future<Output = bool>,
-    timeout: std::time::Duration,
-) -> bool {
-    tokio::time::timeout(timeout, probe).await.unwrap_or(false)
+/// 画面機能が不正な数値を既定値や前回値へ置き換えないための共通情報。
+fn numeric_ui_settings(config: &Config) -> Map<String, Value> {
+    use crate::config::ints;
+    let mut payload = Map::new();
+    for (name, setting) in [
+        ("fontPx", &ints::BUBBLE_FONT_PX),
+        ("streamChatFontPx", &ints::STREAM_CHAT_FONT_PX),
+        ("voiceVolume", &ints::TTS_VOLUME),
+        ("napMinutes", &ints::NAP_MINUTES),
+        ("chatterMinSecs", &ints::CHATTER_MIN_SECS),
+        ("chatterMaxSecs", &ints::CHATTER_MAX_SECS),
+    ] {
+        let value = match config.int(setting) {
+            Ok(value) if value.unsigned_abs() <= 9_007_199_254_740_991 => json!(value),
+            Ok(value) => json!(value.to_string()),
+            Err(_) => Value::Null,
+        };
+        payload.insert(name.into(), value);
+    }
+    payload.insert(
+        "invalidNumbers".into(),
+        json!(config.invalid_int_settings()),
+    );
+    payload.insert(
+        "numberSettings".into(),
+        json!(crate::config::number_settings_schema()),
+    );
+    payload
 }
 
-async fn current_up(state: &AppState, timeout: std::time::Duration) -> bool {
+async fn probe_with_timeout(
+    probe: impl std::future::Future<Output = Result<bool, String>>,
+    timeout: std::time::Duration,
+) -> Result<bool, String> {
+    tokio::time::timeout(timeout, probe).await.map_err(|_| {
+        format!(
+            "AIの接続確認が{}秒以内に完了しませんでした",
+            timeout.as_secs_f64()
+        )
+    })?
+}
+
+async fn current_up(state: &AppState, timeout: std::time::Duration) -> Result<bool, String> {
     let id = state.provider_id.lock().unwrap().clone();
     match providers::get(&id) {
-        // フォールバック許可: 接続可否表示は本体初期化の必須条件ではない。
-        // 外部CLIや接続先が停止していても上限時間でfalseへ正規化し、画面を先に進める。
         Some(p) => probe_with_timeout(p.is_up(&state.config), timeout).await,
-        None => false,
+        None => Err(format!("選択中のAI「{id}」が見つかりません")),
+    }
+}
+
+fn provider_status(result: Result<bool, String>) -> (Option<bool>, Option<String>) {
+    match result {
+        Ok(up) => (Some(up), None),
+        Err(error) => (None, Some(error)),
     }
 }
 
@@ -778,48 +1034,55 @@ pub async fn pet_init(app: AppHandle, state: State<'_, AppState>) -> Result<Valu
         .collect();
     let character_id = state.config.get("PICOAGENT_CHARACTER", "mugi");
     let relationship_mode = state.config.get("PICOAGENT_COMPANION_MODE", "both");
-    // フォールバック許可: 関係性データが読めないだけで起動シーケンス全体を止めない
+    // フォールバック許可: PR #463 採用案6。読込失敗を画面へ知らせて起動を続ける（根拠: PR #463）
     // （`pet_init` が失敗するとフロントはローディングから先へ進めない）。
-    // 読めなかった理由はログへ残し、まっさらな関係性として続行する。
-    let relationship = match crate::relationship::load(&app, &character_id, &relationship_mode) {
-        Ok(relationship) => relationship,
-        Err(error) => {
-            crate::log_paths::append_app_log(
-                &app,
-                &format!("関係性データを読めないため初期状態で続行します: {error}"),
-            );
-            crate::relationship::RelationshipState::empty(&character_id, &relationship_mode)
-        }
-    };
+    // 読めなかった理由を戻り値で画面へ渡し、元のファイルは保存し直さない。
+    let (relationship, relationship_error) =
+        match crate::relationship::load(&app, &character_id, &relationship_mode) {
+            Ok(relationship) => (relationship, None),
+            Err(error) => {
+                crate::log_paths::append_app_log(
+                    &app,
+                    &format!("関係性データを読めないため初期状態で続行します: {error}"),
+                );
+                (
+                    crate::relationship::RelationshipState::empty(
+                        &character_id,
+                        &relationship_mode,
+                    ),
+                    Some(error),
+                )
+            }
+        };
     let bond_label = relationship.bond_label();
     let stream = crate::stream_profile::resolve(&state.config, &character_id);
-    Ok(json!({
+    let (up, provider_error) =
+        provider_status(current_up(&state, STARTUP_PROVIDER_PROBE_TIMEOUT).await);
+    let mut info = json!({
         "betaBuild": cfg!(feature = "beta-full"),
         "model": model,
         "providerId": state.config.get("PICOAGENT_PROVIDER", "local"),
-        "up": current_up(&state, STARTUP_PROVIDER_PROBE_TIMEOUT).await,
+        "up": up,
+        "providerError": provider_error,
         "theme": state.config.get("PICOAGENT_THEME", "system"),
-        "fontPx": state.config.get("PICOAGENT_BUBBLE_FONT_PX", "13"),
-        "streamChatFontPx": state.config.get("PICOAGENT_STREAM_CHAT_FONT_PX", "22"),
         "uiTheme": state.config.get("PICOAGENT_UI_THEME", "pastel"),
         "titleBarPinned": state.config.get_bool("PICOAGENT_TITLE_BAR_PINNED", false),
-        "voiceVolume": state.config.get("PICOAGENT_TTS_VOLUME", "35"),
         "characterId": character_id,
         "characterOverrides": state.config.get_all().get("PICOAGENT_CHARACTER_OVERRIDES").cloned().unwrap_or_else(|| json!({})),
         "live2dSdkOverrides": state.config.get_all().get("PICOAGENT_LIVE2D_SDK_OVERRIDES").cloned().unwrap_or_else(|| json!({})),
+        "rendererOverrides": crate::renderer_setting::load(&state.config.get_all())?,
         "history": recent_history,
         // 原本を読めなかったキャラクターは保存を止めている。黙っていると利用者は
         // 保存されていると思ったまま会話を続け、再起動でその分がまるごと消える。
         "historySaveBlocked": crate::history::saving_blocked(&character_id),
         "quickActions": state.config.get("PICOAGENT_QUICK_ACTIONS", ""),
-        "napMinutes": state.config.get("PICOAGENT_NAP_MINUTES", "15"),
         "layout": crate::layout::current(&state.config),
         // 画面構成（シーン）の保存値。利用者が動かしたソースだけの差分で、既定配置は画面側が持つ。
         "scenes": crate::scene::load(&state.config),
         "gazeTrackingEnabled": state.config.get_bool("PICOAGENT_GAZE_TRACKING_ENABLED", false),
         // 生存通知の間隔はしきい値から決める（固定値だと設定を縮めたとき通知が間に合わない）。
         "bootProgressIntervalMs": crate::boot_screen::progress_interval_ms(
-            crate::boot_screen::timeout_ms(&app),
+            crate::boot_screen::timeout_ms(&app)?,
         ),
         "streamBackground": stream.background,
         "streamBackgroundImage": stream.background_image,
@@ -828,14 +1091,18 @@ pub async fn pet_init(app: AppHandle, state: State<'_, AppState>) -> Result<Valu
         "streamCaptionColor": stream.caption_color,
         "ttsEnabled": state.config.get_bool("PICOAGENT_TTS_ENABLED", false),
         "chatterEnabled": state.config.get_bool("PICOAGENT_CHATTER_ENABLED", false),
-        "chatterMinSecs": state.config.get("PICOAGENT_CHATTER_MIN_SECS", "90"),
-        "chatterMaxSecs": state.config.get("PICOAGENT_CHATTER_MAX_SECS", "240"),
         "onboardingDone": state.config.get_bool("PICOAGENT_ONBOARDING_DONE", false),
         "companionMode": relationship_mode,
         "relationshipMemoryEnabled": state.config.get_bool("PICOAGENT_RELATIONSHIP_MEMORY_ENABLED", true),
         "relationship": relationship,
+        "relationshipError": relationship_error,
         "bondLabel": bond_label,
-    }))
+    });
+    info.as_object_mut()
+        .expect("初期情報はオブジェクト")
+        .extend(numeric_ui_settings(&state.config));
+    crate::notice::flush(&app);
+    Ok(info)
 }
 
 #[tauri::command]
@@ -857,28 +1124,19 @@ pub fn pet_relationship_event(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<Value, String> {
-    let character_id = active_character_id(&state);
-    let mode = state.config.get("PICOAGENT_COMPANION_MODE", "both");
-    if !state
+    let enabled = state
         .config
-        .get_bool("PICOAGENT_RELATIONSHIP_MEMORY_ENABLED", true)
-    {
-        let relationship = crate::relationship::load(&app, &character_id, &mode)?;
-        return Ok(json!({
-            "relationship": relationship,
-            "bondLabel": relationship.bond_label(),
-            "memoryEnabled": false,
-        }));
-    }
-    let relationship = crate::relationship::record(&app, &character_id, &mode, &kind, &detail)?;
-    let bond_label = relationship.bond_label();
-    if state.set_relationship_context(relationship_prompt_context(&state.config, &relationship)) {
-        state.reset_conversation();
-    }
-    Ok(json!({
-        "relationship": relationship,
-        "bondLabel": bond_label,
-    }))
+        .get_bool("PICOAGENT_RELATIONSHIP_MEMORY_ENABLED", true);
+    let relationship = state.edit_relationship_context(|id, mode| {
+        if enabled {
+            crate::relationship::record(&app, id, mode, &kind, &detail)
+        } else {
+            crate::relationship::load(&app, id, mode)
+        }
+    })?;
+    Ok(
+        json!({ "relationship": relationship, "bondLabel": relationship.bond_label(), "memoryEnabled": enabled }),
+    )
 }
 
 #[tauri::command]
@@ -888,14 +1146,10 @@ pub fn pet_relationship_pin_moment(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<Value, String> {
-    let character_id = active_character_id(&state);
-    let mode = state.config.get("PICOAGENT_COMPANION_MODE", "both");
-    let relationship =
-        crate::relationship::set_moment_pinned(&app, &character_id, &mode, &moment_id, pinned)?;
+    let relationship = state.edit_relationship_context(|id, mode| {
+        crate::relationship::set_moment_pinned(&app, id, mode, &moment_id, pinned)
+    })?;
     let bond_label = relationship.bond_label();
-    *state.relationship_context.lock().unwrap() =
-        relationship_prompt_context(&state.config, &relationship);
-    state.reset_conversation();
     Ok(json!({ "relationship": relationship, "bondLabel": bond_label }))
 }
 
@@ -905,25 +1159,18 @@ pub fn pet_relationship_delete_moment(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<Value, String> {
-    let character_id = active_character_id(&state);
-    let mode = state.config.get("PICOAGENT_COMPANION_MODE", "both");
-    let relationship = crate::relationship::delete_moment(&app, &character_id, &mode, &moment_id)?;
+    let relationship = state.edit_relationship_context(|id, mode| {
+        crate::relationship::delete_moment(&app, id, mode, &moment_id)
+    })?;
     let bond_label = relationship.bond_label();
-    *state.relationship_context.lock().unwrap() =
-        relationship_prompt_context(&state.config, &relationship);
-    state.reset_conversation();
     Ok(json!({ "relationship": relationship, "bondLabel": bond_label }))
 }
 
 #[tauri::command]
 pub fn pet_relationship_clear(app: AppHandle, state: State<'_, AppState>) -> Result<Value, String> {
-    let character_id = active_character_id(&state);
-    let mode = state.config.get("PICOAGENT_COMPANION_MODE", "both");
-    let relationship = crate::relationship::clear(&app, &character_id, &mode)?;
+    let relationship =
+        state.edit_relationship_context(|id, mode| crate::relationship::clear(&app, id, mode))?;
     let bond_label = relationship.bond_label();
-    *state.relationship_context.lock().unwrap() =
-        relationship_prompt_context(&state.config, &relationship);
-    state.reset_conversation();
     Ok(json!({ "relationship": relationship, "bondLabel": bond_label }))
 }
 
@@ -945,12 +1192,9 @@ pub fn pet_complete_onboarding(
         .config
         .set_all(patch)
         .map_err(|error| error.to_string())?;
-    let character_id = active_character_id(&state);
-    let relationship = crate::relationship::set_mode(&app, &character_id, &mode)?;
+    let relationship = state
+        .edit_relationship_context(|id, mode| crate::relationship::set_mode(&app, id, mode))?;
     let bond_label = relationship.bond_label();
-    if state.set_relationship_context(relationship_prompt_context(&state.config, &relationship)) {
-        state.reset_conversation();
-    }
     if let Some(main) = app.get_webview_window("main") {
         if let Err(error) =
             main.set_always_on_top(state.config.get_bool("PICOAGENT_ALWAYS_ON_TOP", true))
@@ -981,6 +1225,13 @@ pub fn pet_show_onboarding(app: AppHandle) -> Result<(), String> {
     main.set_focus().map_err(|error| error.to_string())
 }
 
+/// 利用者が検出ボタンを押した時だけ、固定したCLI候補を確認する。保存は既存設定APIで行う。
+#[tauri::command]
+pub async fn settings_detect_cli(id: String) -> Result<Value, String> {
+    let report = crate::tools::cli_detection::detect(&id).await?;
+    serde_json::to_value(report).map_err(|error| format!("CLI検出結果を返せません: {error}"))
+}
+
 /// 初回起動と設定画面で共用する追加コンポーネントの準備状態。
 #[tauri::command(async)]
 pub fn settings_components_status(app: AppHandle) -> Result<Value, String> {
@@ -1003,7 +1254,8 @@ pub async fn settings_generation_environment(app: AppHandle) -> Result<Value, St
             "画像・動画・キャラクター生成はWindows x64とApple Silicon Mac専用です（Intel Macは対象外）。何も取得していません。".into(),
         )
     };
-    let installed = crate::components::installed_generation_runtime(&app);
+    let installed = crate::components::installed_generation_runtime(&app)
+        .map_err(|error| format!("{error:#}"))?;
     let device = match &selection {
         BackendSelection::Supported(selected) => Some(selected.device.clone()),
         BackendSelection::Unsupported(_) => {
@@ -1168,7 +1420,7 @@ pub fn pet_daily_greeting(app: AppHandle, state: State<'_, AppState>) -> Result<
 pub async fn aivis_status(app: AppHandle, state: State<'_, AppState>) -> Result<Value, String> {
     let enabled = state.config.get_bool("PICOAGENT_TTS_ENABLED", false);
     let up = if enabled {
-        aivis::is_ready(&app, &state).await
+        aivis::is_ready(&app, &state).await?
     } else {
         false
     };
@@ -1183,13 +1435,21 @@ pub async fn pet_prepare_voice_model(
     if !state.config.get_bool("PICOAGENT_TTS_ENABLED", false) {
         return Ok(json!({ "enabled": false }));
     }
-    aivis::ensure_started(&app)
+    let (character_id, voice) = effective_tts_voice(&state)?;
+    aivis::ensure_started(&app).await.map_err(|error| {
+        log_command_error(
+            &app,
+            "Aivis の起動確認に失敗しました",
+            voice.failure(&character_id, error),
+        )
+    })?;
+    let endpoint = aivis::endpoint(&app, &state)?;
+    prepare_tts_voice_model(&app, &state, &endpoint, &voice)
         .await
-        .map_err(|error| log_command_error(&app, "Aivis の起動確認に失敗しました", error))?;
-    let endpoint = aivis::endpoint(&app, &state);
-    let voice = effective_tts_voice(&state);
-    prepare_tts_voice_model(&app, &state, &endpoint, &voice).await?;
-    let speaker = resolve_tts_speaker(&endpoint, voice).await;
+        .map_err(|error| voice.failure(&character_id, error))?;
+    let speaker = resolve_tts_speaker(&endpoint, &voice)
+        .await
+        .map_err(|error| voice.failure(&character_id, error))?;
     Ok(json!({ "enabled": true, "ready": true, "speaker": speaker }))
 }
 
@@ -1198,45 +1458,33 @@ pub fn pet_set_character_profile(
     character_id: String,
     profile: String,
     greeting: Option<String>,
+    voice: Option<CharacterVoice>,
     state: State<'_, AppState>,
     app: AppHandle,
 ) -> Result<Value, String> {
-    if !crate::character_pack::is_valid_id(&character_id) {
-        return Err("キャラクターIDが不正です。".to_string());
-    }
-    if profile.chars().count() > 4000 {
-        return Err("キャラクター人格設定は4000文字以内にしてください。".to_string());
-    }
-    let greeting = greeting.unwrap_or_default();
-    if greeting.chars().count() > 500 {
-        return Err("キャラクターの挨拶は500文字以内にしてください。".to_string());
-    }
-    *state.character_profile.lock().unwrap() = profile;
-    *state.character_greeting.lock().unwrap() = greeting;
-    let mode = state.config.get("PICOAGENT_COMPANION_MODE", "both");
-    let relationship = crate::relationship::load(&app, &character_id, &mode)?;
-    state.set_relationship_context(relationship_prompt_context(&state.config, &relationship));
-    let previous = {
-        let mut current = state.character_id.lock().unwrap();
-        let previous = current.clone();
-        *current = character_id.clone();
-        previous
-    };
-    if previous.is_empty() || previous == character_id {
-        // 起動直後の初回設定、または同一キャラの人格更新。直近の文脈は保持する。
-        state.reset_conversation();
-    } else {
-        // キャラクター変更: 旧キャラの会話文脈を捨て、切替先キャラの履歴を復元する。
-        // 旧キャラの履歴はファイルに残るため、戻れば続きから話せる。
-        state.bump_conversation_epoch();
-        state.pending_command.lock().unwrap().take();
-        state.clear_conversation();
-        let recent =
-            crate::history::load_recent(&app, &character_id).map_err(|error| error.to_string())?;
-        if !recent.is_empty() {
-            state.messages.lock().unwrap().extend(recent);
-        }
-    }
+    state.register_character(
+        LoadedCharacter {
+            id: character_id.clone(),
+            profile,
+            greeting: greeting.unwrap_or_default(),
+            voice,
+            registered: false,
+        },
+        |changed| {
+            let mode = state.config.get("PICOAGENT_COMPANION_MODE", "both");
+            let relationship = crate::relationship::load(&app, &character_id, &mode)?;
+            let recent = if changed {
+                crate::history::load_recent(&app, &character_id)
+                    .map_err(|error| error.to_string())?
+            } else {
+                Vec::new()
+            };
+            Ok((
+                relationship_prompt_context(&state.config, &relationship),
+                recent,
+            ))
+        },
+    )?;
     let stream = crate::stream_profile::resolve(&state.config, &character_id);
     Ok(json!({
         "ok": true,
@@ -1742,6 +1990,10 @@ pub async fn pet_send(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<Value, String> {
+    let receipt = state.request_receipt();
+    let turn = state.turn.acquire().await;
+    agent::with_cancel(turn.flag(), async {
+    if !conversation_is_current(&state, &receipt.id, receipt.epoch) { return Ok(json!({ "stale": true, "reply": "" })); }
     let text = text.trim().to_string();
     if text.is_empty() {
         return Ok(json!({ "reply": "" }));
@@ -1749,33 +2001,19 @@ pub async fn pet_send(
     if let Some(reply) = topic_guard_reply(&app, &text) {
         return Ok(reply);
     }
-    // ask_user で提示した質問への返答なら、番号やラベルを選択肢名へ寄せてから会話へ入れる
-    // （モデルが「2」だけを見て何の2か分からなくなるのを防ぐ）。答え方が自由記述なら素通しする。
-    let pending_question = state.pending_question.lock().unwrap().take();
-    let text = match pending_question {
-        Some(question) => match crate::tools::ask_user::resolve_answer(&question, &text) {
-            Some(label) => label,
-            None => text,
-        },
-        None => text,
-    };
-    // 番号を選択肢へ展開した本文も、要約・複数AI・履歴保存へ渡す前に照合する。
-    if let Some(reply) = topic_guard_reply(&app, &text) {
-        return Ok(reply);
-    }
+    let Some((text, pending)) = state.request_snapshot(text, &receipt) else { return Ok(json!({ "stale": true, "reply": "" })); };
+    let request_character_id = receipt.id.clone();
+    let request_epoch = receipt.epoch;
+    if let Some(reply) = topic_guard_reply(&app, &text) { return Ok(reply); }
     let user_text = text.clone();
-    let request_character_id = active_character_id(&state);
-    let request_epoch = state.conversation_epoch();
-
-    let pending = state.pending_command.lock().unwrap().clone();
+    if !conversation_is_current(&state, &request_character_id, request_epoch) {
+        return Ok(json!({ "stale": true, "reply": "" }));
+    }
     if let Some(pending) = pending {
         if is_persistent_approval_text(&text) {
-            *state.pending_command.lock().unwrap() = None;
-            let reply = crate::tools::run_command::execute_with_persistent_approval(
-                &state.config,
-                &pending,
-            )
-            .await;
+            let cancel = agent::cancel_flag();
+            let reply = agent::cancel_while(crate::tools::run_command::execute_with_persistent_approval(
+                &state.config, &pending), cancel.as_deref()).await.unwrap_or_else(|| agent::cancel_message().to_string());
             return record_turn(
                 &state,
                 &app,
@@ -1786,8 +2024,8 @@ pub async fn pet_send(
             );
         }
         if is_approval_text(&text) {
-            *state.pending_command.lock().unwrap() = None;
-            let reply = crate::tools::run_command::execute_pending(&pending).await;
+            let cancel = agent::cancel_flag();
+            let reply = agent::cancel_while(crate::tools::run_command::execute_pending(&pending), cancel.as_deref()).await.unwrap_or_else(|| agent::cancel_message().to_string());
             return record_turn(
                 &state,
                 &app,
@@ -1798,7 +2036,6 @@ pub async fn pet_send(
             );
         }
         if is_cancel_text(&text) {
-            *state.pending_command.lock().unwrap() = None;
             return record_turn(
                 &state,
                 &app,
@@ -1820,7 +2057,7 @@ pub async fn pet_send(
     // セマンティックメモリ: クエリに関連するメモリを今回のリクエスト向けに絞り込み、
     // 今回の convo の system メッセージのみ更新する（state.memory_context は変えない）。
     {
-        // フォールバック許可: 意味検索を使えない間（初回導入中・オフライン・非対応構成）も
+        // フォールバック許可: 意味検索を使えない間（初回導入中・オフライン・非対応構成）も（根拠: PR #428 意味検索を使えない間の通常メモリ）
         // 会話は止めず、system文脈に入っている言及回数順の記憶で応答し、理由を画面へ出す。
         let semantic_ctx = match crate::memory::context_for_query(&app, &state.config, &text).await
         {
@@ -1848,7 +2085,7 @@ pub async fn pet_send(
     // 起動時ではなく毎回作り直して古い内容が残らないようにする。
     apply_project_context(
         &mut convo,
-        &crate::tools::project::project_context(&state.config),
+        &crate::tools::project::project_context(&state.config)?,
     );
     // SKILL.mdは利用者が会話中や外部エディタから変更できるため、索引を毎ターン
     // 入れ替える。本文は必要になったときだけuser_skillツールで読み、systemを肥大化させない。
@@ -1874,7 +2111,7 @@ pub async fn pet_send(
     // 単一AIだけは従来どおり、長い会話を選択中AIで要約してから実行する。
     // マルチAIは候補数+計画/統合の推論を行うため、ここで追加の要約推論を重ねない。
     let mut convo = if multi_ai_args.is_none() {
-        maybe_summarize_context(convo, provider, &state.config, &model).await
+        maybe_summarize_context(convo, provider, &state.config, &model).await?
     } else {
         convo
     };
@@ -1909,44 +2146,56 @@ pub async fn pet_send(
         }
     };
     if matches!(result, Ok(PersistedReply::Current(_))) {
+        let current = state.with_current(&request_character_id, request_epoch, |character| {
         if state
             .config
             .get_bool("PICOAGENT_RELATIONSHIP_MEMORY_ENABLED", true)
         {
-            match crate::relationship::record(
+            let relationship_result = crate::relationship::record(
                 &app,
                 &request_character_id,
                 &state.config.get("PICOAGENT_COMPANION_MODE", "both"),
                 "conversation",
                 &user_text,
-            ) {
-                Ok(relationship) => {
-                    // 文面が変わったときだけ system を作り直す（毎ターンだとプロンプト
-                    // キャッシュが無効化され、全文の再評価が走る）。
-                    if state.set_relationship_context(relationship_prompt_context(
-                        &state.config,
-                        &relationship,
-                    )) {
-                        state.reset_conversation();
-                    }
+            );
+            static RELATIONSHIP_SAVE: crate::notice::FailureLatch = crate::notice::FailureLatch::new();
+            RELATIONSHIP_SAVE.report(&app, "relationship-save", "関係性の保存",
+                relationship_result.as_ref().map(|_| ()).map_err(|error| format!("関係性を保存できないため、この会話の出来事を反映できません: {error}")),
+                "関係性の保存が復旧しました");
+            if let Ok(relationship) = relationship_result {
+                // 文面が変わったときだけ system を作り直す（毎ターンだとプロンプト
+                // キャッシュが無効化され、全文の再評価が走る）。
+                if state.set_relationship_context(relationship_prompt_context(
+                    &state.config,
+                    &relationship,
+                )) {
+                    state.rebuild_from_character(character, false);
                 }
-                Err(error) => crate::log_paths::append_app_log(
-                    &app,
-                    &format!("会話後の関係性データ更新に失敗しました: {error}"),
-                ),
             }
         }
         capture_project_rules(&app, &state.config, &user_text);
-        if let Some(memory_context) =
-            crate::memory::update_from_turn(&app, &state.config, &user_text)
-        {
-            *state.memory_context.lock().unwrap() = memory_context;
-            state.reset_conversation();
-            let refreshed = state.messages.lock().unwrap().clone();
-            if conversation_is_current(&state, &request_character_id, request_epoch) {
-                crate::history::save(&app, &request_character_id, &refreshed);
-            }
+        let memory_result = crate::memory::update_from_turn(&app, &state.config, &user_text);
+        static MEMORY_SAVE: crate::notice::FailureLatch = crate::notice::FailureLatch::new();
+        // 候補なしのターンはI/Oを試していないため復旧とは扱わない。
+        if !matches!(memory_result, Ok(None)) {
+            MEMORY_SAVE.report(
+                &app,
+                "memory-save",
+                "長期メモリの保存",
+                memory_result.as_ref().map(|_| ()).map_err(|error| {
+                    format!("長期メモリを保存できないため、この会話の内容は覚えられません: {error}")
+                }),
+                "長期メモリの保存が復旧しました",
+            );
         }
+        if let Ok(Some(memory_context)) = memory_result {
+            *state.memory_context.lock().unwrap() = memory_context;
+            state.rebuild_from_character(character, false);
+            let refreshed = state.messages.lock().unwrap().clone();
+            crate::history::save(&app, &request_character_id, &refreshed);
+        }
+        });
+        if current.is_none() { return Ok(json!({ "stale": true, "reply": "" })); }
     }
 
     match result {
@@ -1960,7 +2209,9 @@ pub async fn pet_send(
                     .iter()
                     .map(|option| json!({ "label": option.label, "description": option.description }))
                     .collect();
-                *state.pending_question.lock().unwrap() = Some(question);
+                let budget = conversation_token_budget(&state.config)?;
+                let current = state.with_current(&request_character_id, request_epoch, |_| {
+                *state.pending_question.lock().unwrap() = Some(Arc::new(question));
                 // 会話へ残すのはマーカーではなく、人が読める質問文にする。
                 let mut refreshed = state.messages.lock().unwrap().clone();
                 if let Some(last) = refreshed
@@ -1971,16 +2222,18 @@ pub async fn pet_send(
                     last.content = prompt.clone();
                 }
                 let compacted =
-                    compacted_conversation(&refreshed, conversation_token_budget(&state.config));
-                if conversation_is_current(&state, &request_character_id, request_epoch) {
-                    *state.messages.lock().unwrap() = compacted.clone();
-                    crate::history::save(&app, &request_character_id, &compacted);
-                }
+                    compacted_conversation(&refreshed, budget);
+                *state.messages.lock().unwrap() = compacted.clone();
+                crate::history::save(&app, &request_character_id, &compacted);
+                });
+                if current.is_none() { return Ok(json!({ "stale": true, "reply": "" })); }
                 return Ok(json!({ "reply": prompt, "choices": choices }));
             }
             if let Some(pending) = crate::tools::run_command::parse_approval_marker(&reply) {
-                *state.pending_command.lock().unwrap() = Some(pending.clone());
                 let prompt = crate::tools::run_command::approval_prompt(&pending);
+                let budget = conversation_token_budget(&state.config)?;
+                let current = state.with_current(&request_character_id, request_epoch, |_| {
+                *state.pending_command.lock().unwrap() = Some(Arc::new(pending.clone()));
                 let mut refreshed = state.messages.lock().unwrap().clone();
                 if let Some(last) = refreshed
                     .iter_mut()
@@ -1990,14 +2243,16 @@ pub async fn pet_send(
                     last.content = prompt.clone();
                 }
                 let compacted =
-                    compacted_conversation(&refreshed, conversation_token_budget(&state.config));
-                if conversation_is_current(&state, &request_character_id, request_epoch) {
-                    *state.messages.lock().unwrap() = compacted.clone();
-                    crate::history::save(&app, &request_character_id, &compacted);
-                }
+                    compacted_conversation(&refreshed, budget);
+                *state.messages.lock().unwrap() = compacted.clone();
+                crate::history::save(&app, &request_character_id, &compacted);
+                });
+                if current.is_none() { return Ok(json!({ "stale": true, "reply": "" })); }
                 return Ok(json!({ "reply": prompt }));
             }
-            let mut response = apply_emotion_and_reply(&app, &state, &user_text, reply);
+            let Some(mut response) = state.with_current(&request_character_id, request_epoch, |_| apply_emotion_and_reply(&app, &state, &user_text, reply)) else {
+                return Ok(json!({ "stale": true, "reply": "" }));
+            };
             if quit_app {
                 if let Some(map) = response.as_object_mut() {
                     map.insert("quitApp".to_string(), json!(true));
@@ -2010,6 +2265,7 @@ pub async fn pet_send(
             Ok(json!({ "error": true, "reply": format!("AIと話せなかったよ。{}", message) }))
         }
     }
+    }).await
 }
 
 // アイドル時の自発雑談を生成する。雑談スキル(chitchat)が指示文を提供し、ここで
@@ -2021,8 +2277,7 @@ pub async fn pet_send(
 fn current_time_context() -> String {
     use chrono::{Datelike, Local, Timelike};
     let now = Local::now();
-    let weekday =
-        ["月", "火", "水", "木", "金", "土", "日"][now.weekday().num_days_from_monday() as usize];
+    let weekday = crate::text::weekday_ja(now.weekday());
     let hour = now.hour();
     let part = match hour {
         5..=10 => "朝",
@@ -2079,105 +2334,121 @@ fn best_source_url(
 
 #[tauri::command]
 pub async fn pet_idle_chatter(app: AppHandle, state: State<'_, AppState>) -> Result<Value, String> {
-    if !state.config.get_bool("PICOAGENT_CHATTER_ENABLED", false) {
-        return Ok(json!({ "enabled": false }));
-    }
-    let request_character_id = active_character_id(&state);
-    let request_epoch = state.conversation_epoch();
-    let id = state.provider_id.lock().unwrap().clone();
-    let model = state.model.lock().unwrap().clone();
-    let provider = match providers::get(&id) {
-        Some(p) => p,
-        None => return Ok(json!({ "enabled": true, "reply": "" })),
+    let receipt = state.request_receipt();
+    let Some(turn) = state.turn.try_acquire() else {
+        return Ok(json!({ "busy": true }));
     };
-
-    // 直近の独り言を「避ける文」として渡し、毎回ちがう内容にする。
-    let avoid = state.recent_chatter.lock().unwrap().clone();
-    // 話題メモ（ニュース等）を1件取得。雑談がこの話題に触れたら出典URLを末尾に添える。
-    let brief = crate::tools::chitchat::trends::topic_brief(&state.config).await;
-    let topic_memo = brief.as_ref().map(|b| b.memo.clone()).unwrap_or_default();
-    let instruction = tools::dispatch(
-        &state.config,
-        "chitchat",
-        json!({ "avoid": avoid, "topic": topic_memo }),
-    )
-    .await;
-    // 雑談は「人格(system)＋現在時刻＋指示」だけで生成する。直近の会話（ユーザー発話）は
-    // 文脈へ入れない（小型モデルが入力をオウム返しするのを防ぐため）。
-    let system = state
-        .messages
-        .lock()
-        .unwrap()
-        .iter()
-        .find(|m| m.role == "system")
-        .cloned();
-    let mut convo: Vec<Message> = Vec::new();
-    if let Some(system) = system {
-        convo.push(system);
-    }
-    convo.push(Message::new(
-        "user",
-        format!("{}\n\n{instruction}", current_time_context()),
-    ));
-
-    match provider.chat(&state.config, &model, &convo, &[]).await {
-        Ok(message) => {
-            // 雑談は「人格(system)＋指示」だけを文脈にするぶん、小型モデルが人格設定を
-            // そのまま返しやすい。エージェント経路を通らないのでここで落とす。
-            let prompt = crate::agent::system_prompt_of(&convo);
-            let reply = match crate::agent::guard_public_answer(
-                message.content.trim().to_string(),
-                &prompt,
-            ) {
-                Ok(reply) => reply,
-                Err(reason) => {
-                    crate::log_paths::append_app_log(
-                        &app,
-                        &format!("自発雑談の非公開文脈を公開前に破棄しました: {reason}"),
-                    );
-                    String::new()
-                }
-            };
-            if !conversation_is_current(&state, &request_character_id, request_epoch) {
-                crate::log_paths::append_app_log(
-                    &app,
-                    "古い自発雑談の会話履歴書き戻しを破棄しました。",
-                );
-                return Ok(json!({ "enabled": true, "stale": true, "reply": "" }));
-            }
-            // 直近の独り言として記録（末尾 6 件まで保持）。次回の重複回避に使う。
-            if !reply.is_empty() {
-                let mut recent = state.recent_chatter.lock().unwrap();
-                recent.push(reply.clone());
-                let len = recent.len();
-                if len > 6 {
-                    recent.drain(0..len - 6);
-                }
-                let compacted = {
-                    let mut messages = state.messages.lock().unwrap();
-                    messages.push(Message::new("assistant", reply.clone()));
-                    compacted_conversation(&messages, conversation_token_budget(&state.config))
-                };
-                *state.messages.lock().unwrap() = compacted.clone();
-                crate::history::save(&app, &request_character_id, &compacted);
-            }
-            // 雑談が話題メモ（ニュース等）に触れていれば、一致する出典URLを末尾に添える。
-            // URL 行は読み上げ（speech_text）で除外されるため音声には乗らない。
-            let display = match brief
-                .as_ref()
-                .and_then(|b| best_source_url(&reply, &b.sources))
-            {
-                Some(url) if !reply.is_empty() => format!("{reply}\n\n参考:\n{url}"),
-                _ => reply,
-            };
-            Ok(json!({ "enabled": true, "reply": display }))
+    agent::with_cancel(turn.flag(), async {
+        if !conversation_is_current(&state, &receipt.id, receipt.epoch) {
+            return Ok(json!({ "enabled": true, "stale": true, "reply": "" }));
         }
-        Err(error) => Err(log_command_error(
-            &app,
-            "自発雑談の生成に失敗しました",
-            error,
-        )),
-    }
+        if !state.config.get_bool("PICOAGENT_CHATTER_ENABLED", false) {
+            return Ok(json!({ "enabled": false }));
+        }
+        let request_character_id = receipt.id.clone();
+        let request_epoch = receipt.epoch;
+        let id = state.provider_id.lock().unwrap().clone();
+        let model = state.model.lock().unwrap().clone();
+        let provider = match providers::get(&id) {
+            Some(p) => p,
+            None => return Ok(json!({ "enabled": true, "reply": "" })),
+        };
+
+        // 直近の独り言を「避ける文」として渡し、毎回ちがう内容にする。
+        let avoid = state.recent_chatter.lock().unwrap().clone();
+        // 話題メモ（ニュース等）を1件取得。雑談がこの話題に触れたら出典URLを末尾に添える。
+        let brief = crate::tools::chitchat::trends::topic_brief(&state.config).await?;
+        let topic_memo = brief.as_ref().map(|b| b.memo.clone()).unwrap_or_default();
+        let instruction = tools::dispatch(
+            &state.config,
+            "chitchat",
+            json!({ "avoid": avoid, "topic": topic_memo }),
+        )
+        .await;
+        // 雑談は「人格(system)＋現在時刻＋指示」だけで生成する。直近の会話（ユーザー発話）は
+        // 文脈へ入れない（小型モデルが入力をオウム返しするのを防ぐため）。
+        let system = state
+            .messages
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|m| m.role == "system")
+            .cloned();
+        let mut convo: Vec<Message> = Vec::new();
+        if let Some(system) = system {
+            convo.push(system);
+        }
+        convo.push(Message::new(
+            "user",
+            format!("{}\n\n{instruction}", current_time_context()),
+        ));
+
+        let cancel = agent::cancel_flag();
+        match agent::cancel_while(
+            provider.chat(&state.config, &model, &convo, &[]),
+            cancel.as_deref(),
+        )
+        .await
+        {
+            None => Ok(json!({ "reply": "" })),
+            Some(Ok(message)) => {
+                // 雑談は「人格(system)＋指示」だけを文脈にするぶん、小型モデルが人格設定を
+                // そのまま返しやすい。エージェント経路を通らないのでここで落とす。
+                let prompt = crate::agent::system_prompt_of(&convo);
+                let reply = match crate::agent::guard_public_answer(
+                    message.content.trim().to_string(),
+                    &prompt,
+                ) {
+                    Ok(reply) => reply,
+                    Err(reason) => {
+                        crate::log_paths::append_app_log(
+                            &app,
+                            &format!("自発雑談の非公開文脈を公開前に破棄しました: {reason}"),
+                        );
+                        String::new()
+                    }
+                };
+                let budget = conversation_token_budget(&state.config)?;
+                let current = state.with_current(&request_character_id, request_epoch, |_| {
+                    // 直近の独り言として記録（末尾 6 件まで保持）。次回の重複回避に使う。
+                    if !reply.is_empty() {
+                        let mut recent = state.recent_chatter.lock().unwrap();
+                        recent.push(reply.clone());
+                        let len = recent.len();
+                        if len > 6 {
+                            recent.drain(0..len - 6);
+                        }
+                        let compacted = {
+                            let mut messages = state.messages.lock().unwrap();
+                            messages.push(Message::new("assistant", reply.clone()));
+                            compacted_conversation(&messages, budget)
+                        };
+                        *state.messages.lock().unwrap() = compacted.clone();
+                        crate::history::save(&app, &request_character_id, &compacted);
+                    }
+                });
+                if current.is_none() {
+                    return Ok(json!({ "enabled": true, "stale": true, "reply": "" }));
+                }
+                // 雑談が話題メモ（ニュース等）に触れていれば、一致する出典URLを末尾に添える。
+                // URL 行は読み上げ（speech_text）で除外されるため音声には乗らない。
+                let display = match brief
+                    .as_ref()
+                    .and_then(|b| best_source_url(&reply, &b.sources))
+                {
+                    Some(url) if !reply.is_empty() => format!("{reply}\n\n参考:\n{url}"),
+                    _ => reply,
+                };
+                Ok(json!({ "enabled": true, "reply": display }))
+            }
+            Some(Err(error)) => Err(log_command_error(
+                &app,
+                "自発雑談の生成に失敗しました",
+                error,
+            )),
+        }
+    })
+    .await
 }
 
 #[tauri::command]
@@ -2206,32 +2477,39 @@ pub fn pet_daily_events(app: AppHandle, state: State<'_, AppState>) -> Result<Va
 #[tauri::command]
 pub async fn pet_alarms(state: State<'_, AppState>) -> Result<Value, String> {
     let alarms = crate::alarm::load(&state.config)?;
-    Ok(json!({ "alarms": serde_json::to_value(&alarms).unwrap_or_else(|_| json!([])) }))
+    let alarms = serde_json::to_value(&alarms)
+        .map_err(|error| format!("目覚まし一覧を応答へ変換できません: {error}"))?;
+    Ok(json!({ "alarms": alarms }))
 }
 
-// 既定の起こし文（生成に失敗・エンジン未起動でも必ず声がけできるよう用意）。
-fn default_wake_message(label: &str) -> String {
-    if label.is_empty() {
-        "おはよう…そろそろ起きる時間だよ。ゆっくりでいいから、少しずつ目を覚まそうね。".to_string()
-    } else {
-        format!("おはよう…「{label}」の時間だよ。あせらなくていいからね、ゆっくり起きよう。")
+fn safe_wake_message(content: &str, prompt: &str) -> Result<String, String> {
+    if content.trim().is_empty() {
+        return Err("起こし文の生成結果が空です".into());
     }
-}
-
-fn safe_wake_message(content: &str, prompt: &str) -> Option<String> {
-    crate::agent::guard_public_answer(content.trim().to_string(), prompt).ok()
+    crate::agent::guard_public_answer(content.trim().to_string(), prompt)
+        .map_err(|reason| format!("起こし文の公開検査で拒否されました: {reason}"))
 }
 
 /// 起こし文は `agent::run` を通らない。表示・読み上げへ渡す前に公開検査を通す。
-fn guard_public_answer_for_wake(content: &str, convo: &[Message]) -> Option<String> {
+fn guard_public_answer_for_wake(content: &str, convo: &[Message]) -> Result<String, String> {
     safe_wake_message(content, &crate::agent::system_prompt_of(convo))
 }
 
-// 選択中キャラの口調で、やさしい起こし文を生成する（失敗時は None）。
-async fn generate_wake_message(state: &AppState, label: &str) -> Option<String> {
+// 選択中キャラの起こし文を生成し、失敗の理由を上位へ返す。
+async fn generate_wake_message(state: &AppState, label: &str) -> Result<String, String> {
     let id = state.provider_id.lock().unwrap().clone();
     let model = state.model.lock().unwrap().clone();
-    let provider = providers::get(&id)?;
+    let provider = providers::get(&id)
+        .ok_or_else(|| format!("目覚ましのAIプロバイダ「{id}」が登録されていません"))?;
+    generate_wake_message_using(state, label, provider, &model).await
+}
+
+async fn generate_wake_message_using(
+    state: &AppState,
+    label: &str,
+    provider: &dyn providers::Provider,
+    model: &str,
+) -> Result<String, String> {
     let label_hint = if label.is_empty() {
         String::new()
     } else {
@@ -2243,50 +2521,131 @@ async fn generate_wake_message(state: &AppState, label: &str) -> Option<String> 
     let mut convo = state.messages.lock().unwrap().clone();
     convo.push(Message::new("user", instruction));
     let message = provider
-        .chat(&state.config, &model, &convo, &[])
+        .chat(&state.config, model, &convo, &[])
         .await
-        .ok()?;
+        .map_err(|error| format!("起こし文を生成できません: {error:#}"))?;
     guard_public_answer_for_wake(&message.content, &convo)
+}
+
+fn prepare_alarm(
+    alarms: &[crate::alarm::Alarm],
+    id: &str,
+    consumed: bool,
+) -> Result<Option<crate::alarm::Alarm>, String> {
+    let target = alarms
+        .iter()
+        .find(|alarm| alarm.id == id)
+        .cloned()
+        .ok_or_else(|| format!("目覚まし「{id}」が登録されていません"))?;
+    if !target.enabled && (target.repeat || !consumed) {
+        return Ok(None);
+    }
+    Ok(Some(target))
+}
+
+/// 生成後の公開直前に定義を再照合し、成功した一度きりだけを消費する。
+fn consume_alarm(
+    alarms: &mut [crate::alarm::Alarm],
+    expected: &crate::alarm::Alarm,
+    consumed: bool,
+    save: impl FnOnce(&[crate::alarm::Alarm]) -> Result<(), String>,
+) -> Result<bool, String> {
+    let Some(current) = alarms.iter().find(|alarm| alarm.id == expected.id) else {
+        return Ok(false);
+    };
+    if current != expected || (!current.enabled && (current.repeat || !consumed)) {
+        return Ok(false);
+    }
+    if !current.repeat && current.enabled {
+        for alarm in alarms.iter_mut().filter(|alarm| alarm.id == expected.id) {
+            alarm.enabled = false;
+        }
+        save(alarms)?;
+    }
+    Ok(true)
+}
+
+async fn acquire_alarm_turn(
+    state: &AppState,
+) -> (crate::conversation_turn::TurnGuard<'_>, RequestReceipt) {
+    let turn = state.turn.acquire().await;
+    let receipt = state.request_receipt();
+    (turn, receipt)
+}
+
+fn finish_alarm_generation(
+    state: &AppState,
+    receipt: &RequestReceipt,
+    result: Result<String, String>,
+) -> Result<Option<String>, String> {
+    // 生成の成功・失敗を問わず、旧キャラの結果を現在の目覚ましへ公開しない。
+    if !conversation_is_current(state, &receipt.id, receipt.epoch) {
+        return Ok(None);
+    }
+    result.map(Some)
 }
 
 // 目覚ましを発火する: やさしい起こし文を返し、一度きりの目覚ましは無効化して保存する。
 #[tauri::command]
 pub async fn pet_alarm_wake(
     id: String,
+    consumed: Option<bool>,
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<Value, String> {
-    // 読む→直す→書き戻すはロックの中で完結させ、以降の待ち合わせ（生成）へは持ち込まない。
-    let label = {
-        let _guard = crate::store::lock_state(crate::alarm::CONFIG_KEY);
-        // 読めなかった場合は空一覧で書き戻さない（登録済みの目覚ましが全部消えるため）。
-        let mut alarms = crate::alarm::load(&state.config)
-            .map_err(|error| log_command_error(&app, "目覚ましを読み取れません", error))?;
-        let target = alarms.iter().find(|a| a.id == id).cloned();
-        let label = target.as_ref().map(|a| a.label.clone()).unwrap_or_default();
-        // 一度きりの目覚ましは鳴ったら無効化する（曜日繰り返しはそのまま）。
-        if let Some(alarm) = target.as_ref() {
-            if !alarm.repeat {
-                for a in alarms.iter_mut() {
-                    if a.id == id {
-                        a.enabled = false;
-                    }
-                }
-                if let Err(error) = crate::alarm::save(&state.config, &alarms) {
-                    crate::log_paths::append_app_log(
-                        &app,
-                        &format!("目覚ましの無効化保存に失敗しました: {error}"),
-                    );
-                }
-            }
+    let (turn, receipt) = acquire_alarm_turn(&state).await;
+    agent::with_cancel(turn.flag(), async {
+        if !conversation_is_current(&state, &receipt.id, receipt.epoch) {
+            return Ok(json!({ "stale": true, "reply": "" }));
         }
-        label
-    };
-    let reply = match generate_wake_message(&state, &label).await {
-        Some(text) => text,
-        None => default_wake_message(&label),
-    };
-    Ok(json!({ "reply": reply }))
+        // 読む→直す→書き戻すはロックの中で完結させ、以降の待ち合わせ（生成）へは持ち込まない。
+        let consumed = consumed.unwrap_or(false);
+        let expected = {
+            let _guard = crate::store::lock_state(crate::alarm::CONFIG_KEY);
+            let alarms = crate::alarm::load(&state.config)
+                .map_err(|error| log_command_error(&app, "目覚ましを読み取れません", error))?;
+            let Some(expected) = prepare_alarm(&alarms, &id, consumed)? else {
+                return Ok(json!({ "cancelled": true, "reply": "" }));
+            };
+            expected
+        };
+        let cancel = agent::cancel_flag();
+        let generated = match tokio::time::timeout(
+            std::time::Duration::from_secs(20),
+            agent::cancel_while(
+                generate_wake_message(&state, &expected.label),
+                cancel.as_deref(),
+            ),
+        )
+        .await
+        {
+            Ok(Some(result)) => result,
+            Ok(None) => Err("目覚ましの生成を停止しました".into()),
+            Err(_) => Err("目覚ましの起こし文を20秒以内に生成できませんでした".into()),
+        };
+        let Some(reply) = finish_alarm_generation(&state, &receipt, generated)
+            .map_err(|error| log_command_error(&app, "目覚ましの生成に失敗しました", error))?
+        else {
+            return Ok(json!({ "stale": true, "reply": "" }));
+        };
+        // character→確定ゲート→目覚ましstore→設定書込。awaitはこの外で完了済み。
+        state
+            .with_current(&receipt.id, receipt.epoch, |_| {
+                let _guard = crate::store::lock_state(crate::alarm::CONFIG_KEY);
+                let mut alarms = crate::alarm::load(&state.config)
+                    .map_err(|error| log_command_error(&app, "目覚ましを読み取れません", error))?;
+                if !consume_alarm(&mut alarms, &expected, consumed, |alarms| {
+                    crate::alarm::save(&state.config, alarms).map_err(|error| {
+                        log_command_error(&app, "目覚ましの無効化を保存できません", error)
+                    })
+                })? {
+                    return Ok(json!({ "cancelled": true, "reply": "" }));
+                }
+                Ok(json!({ "reply": reply, "consumed": true }))
+            })
+            .unwrap_or_else(|| Ok(json!({ "stale": true, "reply": "" })))
+    })
+    .await
 }
 
 /// 行全体が括弧の注記だけでできているか。`【マルチAI合議の統合結果】` の見出しや
@@ -2345,6 +2704,9 @@ fn speech_text(text: &str) -> String {
         .map(str::trim)
         .take_while(|line| !line.starts_with("参考:") && !line.starts_with("参考："))
         .filter(|line| !line.is_empty())
+        // Markdown の表は欄を横に読むと意味が通らない（天気の日別予報など）。表の中身は画面で見せる。
+        .filter(|line| !is_markdown_table_row(line))
+        .map(|line| line.trim_start_matches('#').trim_start())
         .filter(|line| !line.starts_with("http://") && !line.starts_with("https://"))
         .filter(|line| !looks_like_rss_speech_dump_line(line))
         .filter(|line| !is_bracketed_note_line(line))
@@ -2357,7 +2719,12 @@ fn speech_text(text: &str) -> String {
         })
         .collect::<Vec<_>>()
         .join(" ");
-    spoken.split_whitespace().collect::<Vec<_>>().join(" ")
+    // 太字の記号は声にしない（「アスタリスク」と読まれる合成エンジンがある）。
+    spoken
+        .replace("**", "")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn remove_bare_urls(text: &str) -> String {
@@ -2407,6 +2774,11 @@ fn looks_like_rss_speech_dump_line(line: &str) -> bool {
 }
 
 // 読み上げ不要な装飾文字（罫線・ブロック＝スパークライン、各種記号・絵文字、異体字セレクタ）。
+/// Markdown の表の1行（見出し・区切り・本文）か。
+fn is_markdown_table_row(line: &str) -> bool {
+    line.len() >= 2 && line.starts_with('|') && line.ends_with('|')
+}
+
 fn is_chart_or_emoji(c: char) -> bool {
     matches!(c as u32,
         0x2580..=0x259F   // 罫線・ブロック要素（▁▂▃▅▇ など）
@@ -2416,175 +2788,50 @@ fn is_chart_or_emoji(c: char) -> bool {
     )
 }
 
-struct TtsVoice {
-    /// 合成に使う style ID（フォールバック）。speaker_uuid があれば実 ID は実行時に解決する。
-    speaker: String,
-    model_uuid: Option<String>,
-    /// AivisHub モデルの話者 UUID。あれば導入確認と実 style ID 解決に使う。
-    speaker_uuid: Option<String>,
-    /// 複数スタイルから選ぶときのスタイル名（例: ノーマル）。
-    style_name: Option<String>,
-}
+type TtsVoice = CharacterVoice;
 
-// るな（AivisHub）の話者情報。global style ID はエンジンが導入時に算出するため、
-// ハードコードはフォールバックに留め、実 ID は speaker_uuid から `/speakers` で解決する。
-const RIN_AIVIS_SPEAKER: &str = "345585728";
-const RIN_AIVIS_MODEL_UUID: &str = "4f281e78-eba6-495a-8e50-5c322d02b5b1";
-const RIN_AIVIS_SPEAKER_UUID: &str = "aa63d66e-92fe-499e-9e0d-15dad4a61d0d";
-const RIN_AIVIS_STYLE_NAME: &str = "ノーマル";
-
-// まい（AivisHub「まい」）。実 style ID は speaker_uuid から `/speakers` で解決し、
-// 下記はフォールバック。
-const MAI_AIVIS_SPEAKER: &str = "1431611904";
-const MAI_AIVIS_MODEL_UUID: &str = "e9339137-2ae3-4d41-9394-fb757a7e61e6";
-const MAI_AIVIS_SPEAKER_UUID: &str = "41b7785f-35cc-4089-a360-dd8a63da5e75";
-const MAI_AIVIS_STYLE_NAME: &str = "ノーマル";
-
-// Live2D キャラの既定声（いずれも AivisHub）。実 style ID は speaker_uuid から
-// `/speakers` で解決する。解決失敗時のフォールバックは実IDが事前に分からないため、
-// 同梱既定声（Anneli ノーマル = PICOAGENT_TTS_SPEAKER の既定値）にして無音を避ける。
-const LIVE2D_AIVIS_FALLBACK_SPEAKER: &str = "888753760";
-// ひより（AivisHub「まお」）
-const HIYORI_AIVIS_MODEL_UUID: &str = "a59cb814-0083-4369-8542-f51a29e72af7";
-const HIYORI_AIVIS_SPEAKER_UUID: &str = "e756b8e4-b606-4e15-99b1-3f9c6a1b2317";
-const HIYORI_AIVIS_STYLE_NAME: &str = "ふつー";
-// はる（AivisHub「花音」）
-const HARU_AIVIS_MODEL_UUID: &str = "a670e6b8-0852-45b2-8704-1bc9862f2fe6";
-const HARU_AIVIS_SPEAKER_UUID: &str = "b1ca560f-f212-4e67-ab7d-0a4f5afb75a8";
-const HARU_AIVIS_STYLE_NAME: &str = "ノーマル";
-// イプシロン（AivisHub「コハク」）
-const EPSILON_AIVIS_MODEL_UUID: &str = "22e8ed77-94fe-4ef2-871f-a86f94e9a579";
-const EPSILON_AIVIS_SPEAKER_UUID: &str = "5680ac39-43c9-487a-bc3e-018c0d29cc38";
-const EPSILON_AIVIS_STYLE_NAME: &str = "せつなめ";
-// ライス（AivisHub「阿井田 茂」）
-const RICE_AIVIS_MODEL_UUID: &str = "47e53151-a378-46f3-abee-ce13aa07feb1";
-const RICE_AIVIS_SPEAKER_UUID: &str = "561e4e59-3bc9-4726-9028-44a3c12a6f1d";
-// わんこ（AivisHub「TANAKA」）
-const WANKO_AIVIS_MODEL_UUID: &str = "470a41e2-863f-4bf2-8a20-bf7cde0d8f7b";
-const WANKO_AIVIS_SPEAKER_UUID: &str = "e7b467ab-3947-4876-892f-fea9a75fd9e4";
-
-fn aivis_voice(model_uuid: &str, speaker_uuid: &str, style_name: &str) -> TtsVoice {
-    TtsVoice {
-        speaker: LIVE2D_AIVIS_FALLBACK_SPEAKER.to_string(),
-        model_uuid: Some(model_uuid.to_string()),
-        speaker_uuid: Some(speaker_uuid.to_string()),
-        style_name: Some(style_name.to_string()),
+fn effective_tts_voice(state: &AppState) -> Result<(String, TtsVoice), String> {
+    let character = state.character.lock().unwrap().clone();
+    if !character.registered {
+        return Err(
+            "キャラクターの人格と声がまだ登録されていないため、読み上げを準備できません。".into(),
+        );
     }
-}
-
-fn default_character_tts_voice(character_id: &str) -> Option<TtsVoice> {
-    match character_id {
-        "rin" => Some(TtsVoice {
-            speaker: RIN_AIVIS_SPEAKER.to_string(),
-            model_uuid: Some(RIN_AIVIS_MODEL_UUID.to_string()),
-            speaker_uuid: Some(RIN_AIVIS_SPEAKER_UUID.to_string()),
-            style_name: Some(RIN_AIVIS_STYLE_NAME.to_string()),
-        }),
-        "mai" => Some(TtsVoice {
-            speaker: MAI_AIVIS_SPEAKER.to_string(),
-            model_uuid: Some(MAI_AIVIS_MODEL_UUID.to_string()),
-            speaker_uuid: Some(MAI_AIVIS_SPEAKER_UUID.to_string()),
-            style_name: Some(MAI_AIVIS_STYLE_NAME.to_string()),
-        }),
-        "mugi" => Some(aivis_voice(
-            HIYORI_AIVIS_MODEL_UUID,
-            HIYORI_AIVIS_SPEAKER_UUID,
-            "あまあま",
-        )),
-        "aoi" => Some(aivis_voice(
-            HIYORI_AIVIS_MODEL_UUID,
-            HIYORI_AIVIS_SPEAKER_UUID,
-            "おちつき",
-        )),
-        "hiyori" => Some(aivis_voice(
-            HIYORI_AIVIS_MODEL_UUID,
-            HIYORI_AIVIS_SPEAKER_UUID,
-            HIYORI_AIVIS_STYLE_NAME,
-        )),
-        "haru" => Some(aivis_voice(
-            HARU_AIVIS_MODEL_UUID,
-            HARU_AIVIS_SPEAKER_UUID,
-            HARU_AIVIS_STYLE_NAME,
-        )),
-        "epsilon" => Some(aivis_voice(
-            EPSILON_AIVIS_MODEL_UUID,
-            EPSILON_AIVIS_SPEAKER_UUID,
-            EPSILON_AIVIS_STYLE_NAME,
-        )),
-        "mao" => Some(aivis_voice(
-            HIYORI_AIVIS_MODEL_UUID,
-            HIYORI_AIVIS_SPEAKER_UUID,
-            "おちつき",
-        )),
-        "rice" => Some(aivis_voice(
-            RICE_AIVIS_MODEL_UUID,
-            RICE_AIVIS_SPEAKER_UUID,
-            "Calm",
-        )),
-        "wanko" => Some(aivis_voice(
-            WANKO_AIVIS_MODEL_UUID,
-            WANKO_AIVIS_SPEAKER_UUID,
-            "Happy",
-        )),
-        _ => None,
-    }
-}
-
-fn effective_tts_voice(state: &AppState) -> TtsVoice {
-    // 保存値ではなく実際に読み込めた人格へ声を揃える（切替直後の取り違えを防ぐ）。
-    let active = state.character_id.lock().unwrap().clone();
-    let character_id = if active.is_empty() {
-        state.config.get("PICOAGENT_CHARACTER", "mugi")
-    } else {
-        active
-    };
-    let default = default_character_tts_voice(&character_id);
+    let character_id = character.id;
     let override_voice = state
         .config
         .get_all()
         .get("PICOAGENT_TTS_CHARACTER_OVERRIDES")
         .and_then(|value| value.get(&character_id))
         .cloned();
-    let override_speaker = override_voice
-        .as_ref()
-        .and_then(|value| value.get("speaker"))
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty());
-    let override_model_uuid = override_voice
-        .as_ref()
-        .and_then(|value| value.get("modelUuid"))
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty());
-    let override_speaker_uuid = override_voice
-        .as_ref()
-        .and_then(|value| value.get("speakerUuid"))
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty());
-    let override_style_name = override_voice
-        .as_ref()
-        .and_then(|value| value.get("styleName"))
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty());
-    if let Some(speaker) = override_speaker {
-        // 数値IDはフォールバックとして保ちつつ、保存済みの安定した話者UUIDを優先する。
-        // モデルの再読込でstyle IDが変わっても、同じキャラクターの声を解決できる。
-        return TtsVoice {
-            speaker: speaker.to_string(),
-            model_uuid: override_model_uuid.map(str::to_string),
-            speaker_uuid: override_speaker_uuid.map(str::to_string),
-            style_name: override_style_name.map(str::to_string),
-        };
-    }
-    default.unwrap_or_else(|| TtsVoice {
-        speaker: state.config.get("PICOAGENT_TTS_SPEAKER", "888753760"),
-        model_uuid: None,
-        speaker_uuid: None,
-        style_name: None,
-    })
+    let voice = if let Some(mut value) = override_voice
+        .filter(|value| !value.is_null() && value.as_object().is_none_or(|map| !map.is_empty()))
+    {
+        // 保存済み上書きはAivis専用の仕様で、providerを持たない既存形式も同じ型で検証する。
+        let object = value
+            .as_object_mut()
+            .ok_or_else(|| "キャラの声の上書きがオブジェクトではありません。".to_string())?;
+        object.entry("provider").or_insert(json!("aivis"));
+        serde_json::from_value::<TtsVoice>(value)
+            .map_err(|error| format!("{character_id}の声の上書きを読めません: {error}"))?
+    } else if let Some(voice) = character.voice {
+        voice
+    } else {
+        // voiceが無いキャラは全体設定の明示指定を使う（SPEC「話者」）。
+        TtsVoice {
+            provider: "aivis".into(),
+            style_id: Some(state.config.get("PICOAGENT_TTS_SPEAKER", "888753760")),
+            model_uuid: None,
+            model_name: None,
+            speaker_uuid: None,
+            style_name: None,
+            source_url: None,
+        }
+    };
+    voice
+        .validate()
+        .map_err(|error| voice.failure(&character_id, error))?;
+    Ok((character_id, voice))
 }
 
 async fn prepare_tts_voice_model(
@@ -2607,16 +2854,16 @@ async fn prepare_tts_voice_model(
     Ok(())
 }
 
-async fn resolve_tts_speaker(endpoint: &str, voice: TtsVoice) -> String {
-    match voice.speaker_uuid.as_deref() {
-        Some(speaker_uuid) => {
-            aivis::resolve_style_id(endpoint, speaker_uuid, voice.style_name.as_deref())
-                .await
-                // フォールバック許可: 既存環境の手動 style ID 指定を尊重し、解決失敗時も合成 API 側のエラーを返せるようにする。
-                .unwrap_or(voice.speaker)
-        }
-        None => voice.speaker,
+async fn resolve_tts_speaker(endpoint: &str, voice: &TtsVoice) -> Result<String, String> {
+    if let Some(speaker_uuid) = voice.speaker_uuid.as_deref() {
+        return aivis::resolve_style_id(endpoint, speaker_uuid, voice.style_name.as_deref())
+            .await
+            .map_err(|error| error.to_string());
     }
+    voice
+        .style_id
+        .clone()
+        .ok_or_else(|| "声のstyleIdがありません。".to_string())
 }
 
 #[tauri::command]
@@ -2632,67 +2879,77 @@ pub async fn pet_speak(
     if text.trim().is_empty() {
         return Ok(json!({ "enabled": true, "skipped": true }));
     }
-    aivis::ensure_started(&app)
-        .await
-        .map_err(|error| log_command_error(&app, "Aivis の起動確認に失敗しました", error))?;
-    let endpoint = aivis::endpoint(&app, &state);
-    let voice = effective_tts_voice(&state);
-    // AivisHub モデル指定があり未導入なら導入する。通常は起動時に事前導入済み。
-    prepare_tts_voice_model(&app, &state, &endpoint, &voice).await?;
-    // speaker_uuid があれば実 style ID を `/speakers` から解決する（取り違え防止）。
-    // 解決できなければ設定値の style ID を使う。
-    let speaker = resolve_tts_speaker(&endpoint, voice).await;
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(180))
-        .build()
-        .map_err(|error| {
-            log_command_error(&app, "Aivis HTTP クライアント作成に失敗しました", error)
-        })?;
-    let query_url = format!("{endpoint}/audio_query");
-    let query = client
-        .post(&query_url)
-        .query(&[("text", text.as_str()), ("speaker", speaker.as_str())])
-        .send()
+    let (character_id, voice) = effective_tts_voice(&state)?;
+    let result: Result<Value, String> = async {
+        aivis::ensure_started(&app)
+            .await
+            .map_err(|error| log_command_error(&app, "Aivis の起動確認に失敗しました", error))?;
+        let endpoint = aivis::endpoint(&app, &state)?;
+        // AivisHub モデル指定があり未導入なら導入する。通常は起動時に事前導入済み。
+        prepare_tts_voice_model(&app, &state, &endpoint, &voice).await?;
+        // speaker_uuid があれば実 style ID を `/speakers` から解決する（取り違え防止）。
+        // UUID指定の解決失敗では合成へ進まない。
+        let speaker = resolve_tts_speaker(&endpoint, &voice).await?;
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(180))
+            .build()
+            .map_err(|error| {
+                log_command_error(
+                    &app,
+                    "Aivis HTTP クライアント作成に失敗しました",
+                    error.without_url(),
+                )
+            })?;
+        let query_url = format!("{endpoint}/audio_query");
+        let query = crate::tools::http::service_response(
+            &state.config,
+            "Aivis の音声クエリ作成",
+            client
+                .post(&query_url)
+                .query(&[("text", text.as_str()), ("speaker", speaker.as_str())])
+                .send()
+                .await,
+        )
         .await
         .map_err(|error| log_command_error(&app, "Aivis の音声クエリ作成に失敗しました", error))?;
-    if !query.status().is_success() {
-        return Err(log_command_error(
-            &app,
-            "Aivis の音声クエリ作成に失敗しました",
-            format!("HTTP {}", query.status()),
-        ));
-    }
-    let mut audio_query: Value = query
-        .json()
-        .await
-        .map_err(|error| log_command_error(&app, "Aivis の音声クエリを読めませんでした", error))?;
-    limit_aivis_volume(&mut audio_query);
-    let synthesis_url = format!("{endpoint}/synthesis");
-    let wav = client
-        .post(&synthesis_url)
-        .query(&[("speaker", speaker.as_str())])
-        .json(&audio_query)
-        .send()
+        let mut audio_query: Value = query.json().await.map_err(|error| {
+            log_command_error(
+                &app,
+                "Aivis の音声クエリを読めませんでした",
+                error.without_url(),
+            )
+        })?;
+        limit_aivis_volume(&mut audio_query);
+        let synthesis_url = format!("{endpoint}/synthesis");
+        let wav = crate::tools::http::service_response(
+            &state.config,
+            "Aivis の音声合成",
+            client
+                .post(&synthesis_url)
+                .query(&[("speaker", speaker.as_str())])
+                .json(&audio_query)
+                .send()
+                .await,
+        )
         .await
         .map_err(|error| log_command_error(&app, "Aivis の音声合成に失敗しました", error))?;
-    if !wav.status().is_success() {
-        return Err(log_command_error(
-            &app,
-            "Aivis の音声合成に失敗しました",
-            format!("HTTP {}", wav.status()),
-        ));
+        let bytes = wav.bytes().await.map_err(|error| {
+            log_command_error(
+                &app,
+                "Aivis の音声データを読めませんでした",
+                error.without_url(),
+            )
+        })?;
+        let lip_sync = aivis_lip_sync_timeline(&audio_query);
+        Ok(json!({
+            "enabled": true,
+            "mime": "audio/wav",
+            "audio": bytes.to_vec(),
+            "lipSync": lip_sync
+        }))
     }
-    let bytes = wav
-        .bytes()
-        .await
-        .map_err(|error| log_command_error(&app, "Aivis の音声データを読めませんでした", error))?;
-    let lip_sync = aivis_lip_sync_timeline(&audio_query);
-    Ok(json!({
-        "enabled": true,
-        "mime": "audio/wav",
-        "audio": bytes.to_vec(),
-        "lipSync": lip_sync
-    }))
+    .await;
+    result.map_err(|error| voice.failure(&character_id, error))
 }
 
 /// Aivisのモデルによっては既定出力が0dBへ張り付き、クリップ由来のざらつきが出る。
@@ -2883,12 +3140,16 @@ fn validate_multi_ai_settings(cfg: &Config, patch: &Map<String, Value>) -> Resul
             "統合・分担用プロバイダ \"{judge}\" が見つかりません。"
         ));
     }
-    let concurrency = patch
-        .get("PICOAGENT_MULTI_AGENT_MAX_CONCURRENCY")
-        .and_then(|value| value.as_str().and_then(|text| text.parse::<usize>().ok()))
-        .unwrap_or(3);
-    if !(1..=8).contains(&concurrency) {
-        return Err("マルチAIの最大並列数は1〜8にしてください。".to_string());
+    let key = crate::config::ints::MULTI_AGENT_MAX_CONCURRENCY.key;
+    if let Some(value) = patch.get(key) {
+        let (_, invalid) =
+            crate::config::validate_int_patch(Map::from_iter([(key.to_string(), value.clone())]));
+        if let Some(error) = invalid.first() {
+            return Err(error["message"]
+                .as_str()
+                .expect("整数検証の理由")
+                .to_string());
+        }
     }
     Ok(())
 }
@@ -2898,6 +3159,7 @@ pub(crate) fn encrypt_existing_secrets(app: &AppHandle, config: &Config) {
     let all = config.get_all();
     let schema_keys = secret_keys();
     let mut patch = Map::new();
+    let mut failures = Vec::new();
     for (key, value) in &all {
         if !is_secret_setting(&schema_keys, key) {
             continue;
@@ -2909,24 +3171,31 @@ pub(crate) fn encrypt_existing_secrets(app: &AppHandle, config: &Config) {
                         patch.insert(key.clone(), Value::String(value));
                     }
                     Err(error) => {
-                        crate::log_paths::append_app_log(
-                            app,
-                            &format!("既存シークレットを保護できないため平文を維持します: {key} ({error})"),
-                        );
+                        failures.push(format!("{key}: {error}"));
                     }
                 }
             }
         }
     }
     if !patch.is_empty() {
-        // フォールバック許可: 移行保存に失敗してもアプリ起動は止めない。
         if let Err(error) = config.set_all(patch) {
-            crate::log_paths::append_app_log(
-                app,
-                &format!("既存シークレットの保護保存に失敗しました: {error}"),
-            );
+            failures.push(error.to_string());
         }
     }
+    // フォールバック許可: PR #463 採用案4。平文が残ることを通知し起動を続ける。（根拠: PR #463）
+    static SECRET_MIGRATION: crate::notice::FailureLatch = crate::notice::FailureLatch::new();
+    let result = if failures.is_empty() {
+        Ok(())
+    } else {
+        Err(format!("APIキーを暗号化して保存できませんでした。平文のまま残っています。設定画面で保存し直してください: {}", failures.join("、")))
+    };
+    SECRET_MIGRATION.report(
+        app,
+        "secret-migration",
+        "APIキーの保護",
+        result,
+        "APIキーの保護保存が復旧しました",
+    );
 }
 
 #[tauri::command]
@@ -2994,6 +3263,7 @@ pub async fn settings_load(
         },
         "license": crate::license::status(&state.config),
         "values": values,
+        "numberSettings": crate::config::number_settings_schema(),
         "valueRevisions": value_revisions,
         "unavailableSecrets": unavailable_secrets,
         "active": { "providerId": provider_id, "model": model },
@@ -3098,13 +3368,47 @@ fn diagnose_tool_test(name: &str, result: &str, ok: bool) -> String {
     "原因を分類できませんでした。表示された API エラー本文、token の権限、対象ID、ネットワーク状態を順に確認してください。".to_string()
 }
 
-fn valid_stream_chat_font_px(value: &Value) -> bool {
-    value.as_str().is_some_and(|text| {
-        text.is_empty()
-            || text
-                .parse::<u8>()
-                .is_ok_and(|size| (18..=48).contains(&size))
-    })
+fn validate_numeric_settings_patch(
+    config: &Config,
+    patch: Map<String, Value>,
+) -> (Map<String, Value>, Vec<Value>) {
+    let (normalized, mut invalid) = crate::config::validate_int_patch(patch);
+    for setting in crate::config::ints::INT_SETTINGS {
+        if normalized.contains_key(setting.key)
+            && !invalid.iter().any(|error| error["key"] == setting.key)
+        {
+            if let Err(message) = config.int_or_auto_in_patch(setting, &normalized) {
+                invalid.push(json!({"key":setting.key,"message":message}));
+            }
+        }
+    }
+    use crate::config::ints::{CHATTER_MAX_SECS, CHATTER_MIN_SECS};
+    if invalid.is_empty()
+        && [CHATTER_MIN_SECS.key, CHATTER_MAX_SECS.key]
+            .iter()
+            .any(|key| normalized.contains_key(*key))
+    {
+        let minimum = config.int_in_patch(&CHATTER_MIN_SECS, &normalized);
+        let maximum = config.int_in_patch(&CHATTER_MAX_SECS, &normalized);
+        match (minimum, maximum) {
+            (Ok(minimum), Ok(maximum)) if minimum > maximum => {
+                for key in [CHATTER_MIN_SECS.key, CHATTER_MAX_SECS.key] {
+                    invalid.push(
+                        json!({"key":key,"message":"雑談の最短間隔は最長間隔以下にしてください。"}),
+                    );
+                }
+            }
+            (minimum, maximum) => {
+                for (setting, result) in [(CHATTER_MIN_SECS, minimum), (CHATTER_MAX_SECS, maximum)]
+                {
+                    if let Err(message) = result {
+                        invalid.push(json!({"key":setting.key,"message":message}));
+                    }
+                }
+            }
+        }
+    }
+    (normalized, invalid)
 }
 
 #[tauri::command]
@@ -3114,19 +3418,26 @@ pub async fn settings_save(
     state: State<'_, AppState>,
     app: tauri::AppHandle,
 ) -> Result<Value, String> {
+    // 全項目を先に検証し、不正値を含む保存では他の設定やファイルにも触れない。
+    let (normalized, invalid) = validate_numeric_settings_patch(&state.config, patch);
+    if !invalid.is_empty() {
+        return Ok(json!({"conflicts": [], "invalid": invalid}));
+    }
+    patch = normalized;
     if let Some(value) = patch.get("PICOAGENT_MEMORY_DEVICE") {
         if !matches!(value.as_str(), Some("gpu" | "cpu")) {
             return Err("記憶検索の実行先はGPU優先またはCPUを選んでください".to_string());
         }
     }
-    if let Some(value) = patch.get("PICOAGENT_STREAM_CHAT_FONT_PX") {
-        if !valid_stream_chat_font_px(value) {
-            return Err("配信チャットの文字サイズは18〜48の整数で指定してください。".to_string());
-        }
-    }
+    let renderer_guard = patch
+        .contains_key(crate::renderer_setting::CONFIG_KEY)
+        .then(|| crate::store::lock_state(crate::renderer_setting::CONFIG_KEY));
     let schedule_guard = patch
         .contains_key(crate::scheduler::CONFIG_KEY)
         .then(|| crate::store::lock_state(crate::scheduler::CONFIG_KEY));
+    let alarm_guard = patch
+        .contains_key(crate::alarm::CONFIG_KEY)
+        .then(|| crate::store::lock_state(crate::alarm::CONFIG_KEY));
     if let Some(value) = patch.get(crate::scene::CONFIG_KEY).cloned() {
         patch.insert(
             crate::scene::CONFIG_KEY.to_string(),
@@ -3229,45 +3540,57 @@ pub async fn settings_save(
             patch.insert(crate::layout::SIZES_KEY.to_string(), sizes);
         }
 
-        let (conflicts, prepared) = state
-            .config
-            .set_all_checked_with(
-                patch,
-                &base_revisions.unwrap_or_default(),
-                |latest, checked_patch| {
-                    preserve_unreadable_secrets(checked_patch, latest)
-                        .map_err(anyhow::Error::msg)?;
-                    crate::scheduler::reconcile_settings_patch(latest, checked_patch)
-                        .map_err(anyhow::Error::msg)?;
-                    let mut candidate = latest.clone();
-                    candidate.extend(checked_patch.clone());
-                    validate_multi_ai_settings(&state.config, &candidate)
-                        .map_err(anyhow::Error::msg)?;
-                    let mut encrypted = Vec::new();
-                    for (key, value) in checked_patch.iter() {
-                        if !is_secret_setting(&schema_keys, key) {
-                            continue;
-                        }
-                        if let Some(text) = value.as_str() {
-                            if !text.is_empty() && !crate::secret::is_encrypted(text) {
-                                encrypted.push((
-                                    key.clone(),
-                                    crate::secret::encrypt(key, text).map_err(|error| {
-                                        anyhow::anyhow!(
-                                            "シークレットを安全に保存できません: {error}"
-                                        )
-                                    })?,
-                                ));
-                            }
+        let mut locked_invalid = Vec::new();
+        let save_result = state.config.set_all_checked_with(
+            patch,
+            &base_revisions.unwrap_or_default(),
+            |latest, checked_patch| {
+                // 他の保存を待つ間に変わった値も、秘密値保護などの副作用より前に再検証する。
+                let (_, invalid) =
+                    validate_numeric_settings_patch(&state.config, checked_patch.clone());
+                if !invalid.is_empty() {
+                    locked_invalid = invalid;
+                    anyhow::bail!("最新の設定では数値を保存できません。");
+                }
+                crate::renderer_setting::validate_patch(checked_patch)
+                    .map_err(anyhow::Error::msg)?;
+                preserve_unreadable_secrets(checked_patch, latest).map_err(anyhow::Error::msg)?;
+                crate::scheduler::reconcile_settings_patch(latest, checked_patch)
+                    .map_err(anyhow::Error::msg)?;
+                let mut candidate = latest.clone();
+                candidate.extend(checked_patch.clone());
+                crate::renderer_setting::load(&candidate).map_err(anyhow::Error::msg)?;
+                validate_multi_ai_settings(&state.config, &candidate)
+                    .map_err(anyhow::Error::msg)?;
+                let mut encrypted = Vec::new();
+                for (key, value) in checked_patch.iter() {
+                    if !is_secret_setting(&schema_keys, key) {
+                        continue;
+                    }
+                    if let Some(text) = value.as_str() {
+                        if !text.is_empty() && !crate::secret::is_encrypted(text) {
+                            encrypted.push((
+                                key.clone(),
+                                crate::secret::encrypt(key, text).map_err(|error| {
+                                    anyhow::anyhow!("シークレットを安全に保存できません: {error}")
+                                })?,
+                            ));
                         }
                     }
-                    for (key, value) in encrypted {
-                        checked_patch.insert(key, Value::String(value));
-                    }
-                    Ok(())
-                },
-            )
-            .map_err(|e| log_command_error(&app, "設定保存に失敗しました", e))?;
+                }
+                for (key, value) in encrypted {
+                    checked_patch.insert(key, Value::String(value));
+                }
+                Ok(())
+            },
+        );
+        let (conflicts, prepared) = match save_result {
+            Err(_) if !locked_invalid.is_empty() => {
+                return Ok(json!({"conflicts":[],"invalid":locked_invalid}))
+            }
+            Err(error) => return Err(log_command_error(&app, "設定保存に失敗しました", error)),
+            Ok(saved) => saved,
+        };
         if !conflicts.is_empty() {
             return Ok(json!({
                 "ok": false,
@@ -3277,12 +3600,26 @@ pub async fn settings_save(
         }
         prepared
     };
+    for setting in crate::config::ints::INT_SETTINGS {
+        if prepared_patch.contains_key(setting.key) && state.config.int_or_auto(setting).is_ok() {
+            crate::notice::emit(
+                &app,
+                crate::notice::Notice::recovered(
+                    &format!("numeric-setting:{}", setting.key),
+                    "数値設定を復旧しました",
+                    "設定を正常に読み取れます。",
+                ),
+            );
+        }
+    }
     for (key, value) in &prepared_patch {
         if is_secret_setting(&schema_keys, key) && value.as_str() == Some("") {
             crate::secret::forget(key);
         }
     }
+    drop(alarm_guard);
     drop(schedule_guard);
+    drop(renderer_guard);
 
     if memory_search_changed {
         crate::memory_embedding::reset()
@@ -3302,17 +3639,11 @@ pub async fn settings_save(
 
     // 人格プロンプト・メモリは軽いので常に即反映する（再起動対象外）。
     if system_context_changed || memory_setting_changed {
-        *state.memory_context.lock().unwrap() = crate::memory::context(&app, &state.config);
-        state.reset_conversation();
+        state.replace_memory_context(crate::memory::context(&app, &state.config));
     }
     if companion_mode_changed || relationship_memory_changed {
-        let character_id = active_character_id(&state);
-        let mode = state.config.get("PICOAGENT_COMPANION_MODE", "both");
-        let relationship = crate::relationship::set_mode(&app, &character_id, &mode)?;
-        if state.set_relationship_context(relationship_prompt_context(&state.config, &relationship))
-        {
-            state.reset_conversation();
-        }
+        state
+            .edit_relationship_context(|id, mode| crate::relationship::set_mode(&app, id, mode))?;
     }
 
     // 表示形式は再起動なしで当てる（ウィンドウ寸法とフロントの data-layout）。
@@ -3365,15 +3696,11 @@ pub async fn settings_save(
         let active_character = state.config.get("PICOAGENT_CHARACTER", "mugi");
         let stream = crate::stream_profile::resolve(&state.config, &active_character);
         let mut ui = json!({
-            "fontPx": state.config.get("PICOAGENT_BUBBLE_FONT_PX", "13"),
-            "streamChatFontPx": state.config.get("PICOAGENT_STREAM_CHAT_FONT_PX", "22"),
+            "rendererOverrides": crate::renderer_setting::load(&state.config.get_all())?,
             "theme": state.config.get("PICOAGENT_THEME", "system"),
             "uiTheme": state.config.get("PICOAGENT_UI_THEME", "pastel"),
             "titleBarPinned": state.config.get_bool("PICOAGENT_TITLE_BAR_PINNED", false),
-            "voiceVolume": state.config.get("PICOAGENT_TTS_VOLUME", "35"),
             "chatterEnabled": state.config.get_bool("PICOAGENT_CHATTER_ENABLED", false),
-            "chatterMinSecs": state.config.get("PICOAGENT_CHATTER_MIN_SECS", "90"),
-            "chatterMaxSecs": state.config.get("PICOAGENT_CHATTER_MAX_SECS", "240"),
             "relationshipMemoryEnabled": state.config.get_bool("PICOAGENT_RELATIONSHIP_MEMORY_ENABLED", true),
             "layout": crate::layout::current(&state.config),
             "gazeTrackingEnabled": state.config.get_bool("PICOAGENT_GAZE_TRACKING_ENABLED", false),
@@ -3385,6 +3712,9 @@ pub async fn settings_save(
             "ttsEnabled": state.config.get_bool("PICOAGENT_TTS_ENABLED", false),
         });
         // 以前は起動時の pet_init でしか渡しておらず、クイック操作の変更が再起動まで反映されなかった。
+        ui.as_object_mut()
+            .expect("画面情報はオブジェクト")
+            .extend(numeric_ui_settings(&state.config));
         ui["quickActions"] = json!(state.config.get("PICOAGENT_QUICK_ACTIONS", ""));
         if !requires_restart {
             if let Err(error) = win.emit("pet:model", format!("{} / {}", provider.label(), model)) {
@@ -3415,6 +3745,12 @@ pub async fn settings_save(
         }
     }
 
+    let (up, provider_error) =
+        provider_status(current_up(&state, SETTINGS_PROVIDER_PROBE_TIMEOUT).await);
+    if let Some(win) = app.get_webview_window("pet") {
+        win.emit("pet:ui", json!({"up":up,"providerError":provider_error}))
+            .map_err(|error| log_command_error(&app, "接続状態を反映できませんでした", error))?;
+    }
     Ok(json!({
         "ok": true,
         "requiresRestart": requires_restart,
@@ -3422,7 +3758,8 @@ pub async fn settings_save(
         "restartAivis": restart_aivis,
         "hotkeyWarning": hotkey_warning,
         "valueRevisions": state.config.value_revisions(),
-        "up": current_up(&state, SETTINGS_PROVIDER_PROBE_TIMEOUT).await
+        "up": up,
+        "providerError": provider_error
     }))
 }
 
@@ -3474,21 +3811,17 @@ fn capture_project_rules(app: &AppHandle, config: &crate::config::Config, user_t
             // 既に書いてある作法は静かに飛ばす（同じ通知を毎回出さない）。
             Ok(None) => {}
             Ok(Some(path)) => {
-                let payload = json!({
-                    "kind": "project_rule",
-                    "title": "AGENTS.mdへ作法を追記しました",
-                    "body": rule,
-                    "ok": true,
-                    "rule": rule,
-                    "path": path.display().to_string(),
-                    "at": chrono::Local::now().to_rfc3339(),
-                });
-                if let Err(error) = app.emit("pet:notice", payload) {
-                    crate::log_paths::append_app_log(
-                        app,
-                        &format!("AGENTS.md追記を画面へ通知できません: {error}"),
-                    );
-                }
+                crate::notice::emit(
+                    app,
+                    crate::notice::Notice::info(
+                        "project_rule",
+                        "AGENTS.mdへ作法を追記しました",
+                        &rule,
+                        true,
+                    )
+                    .detail("rule", json!(rule))
+                    .detail("path", json!(path.display().to_string())),
+                );
             }
             Err(error) => crate::log_paths::append_app_log(
                 app,
@@ -3623,32 +3956,35 @@ pub fn restart_app(
     crate::remember_window_position(&app)?;
 
     let pid = state.config.get("PICOAGENT_PROVIDER", "local");
-    *state.provider_id.lock().unwrap() = pid.clone();
-    let model = {
-        let m = state.config.get("PICOAGENT_MODEL", "");
-        if m.is_empty() {
+    {
+        let mut character = state.character.lock().unwrap();
+        let _commit = state.conversation_commit.lock().unwrap();
+        state.conversation_epoch.fetch_add(1, Ordering::Relaxed);
+        let character_id = state.config.get("PICOAGENT_CHARACTER", "mugi");
+        let relationship_mode = state.config.get("PICOAGENT_COMPANION_MODE", "both");
+        let relationship = crate::relationship::load(&app, &character_id, &relationship_mode)?;
+        let recent =
+            crate::history::load_recent(&app, &character_id).map_err(|error| error.to_string())?;
+        let model = state.config.get("PICOAGENT_MODEL", "");
+        let model = if model.is_empty() {
             providers::get(&pid)
-                .map(|p| p.default_model(&state.config))
+                .map(|provider| provider.default_model(&state.config))
                 .unwrap_or_default()
         } else {
-            m
-        }
-    };
-    *state.model.lock().unwrap() = model;
-    *state.memory_context.lock().unwrap() = crate::memory::context(&app, &state.config);
-    state.bump_conversation_epoch();
-    state.pending_command.lock().unwrap().take();
-
-    // 選択中キャラの履歴を文脈へ読み込み直す（旧キャラの会話は持ち越さない）。
-    let character_id = state.config.get("PICOAGENT_CHARACTER", "mugi");
-    *state.character_id.lock().unwrap() = character_id.clone();
-    let relationship_mode = state.config.get("PICOAGENT_COMPANION_MODE", "both");
-    let relationship = crate::relationship::load(&app, &character_id, &relationship_mode)?;
-    state.set_relationship_context(relationship_prompt_context(&state.config, &relationship));
-    state.clear_conversation();
-    let recent =
-        crate::history::load_recent(&app, &character_id).map_err(|error| error.to_string())?;
-    if !recent.is_empty() {
+            model
+        };
+        *state.provider_id.lock().unwrap() = pid.clone();
+        *state.model.lock().unwrap() = model;
+        *state.memory_context.lock().unwrap() = crate::memory::context(&app, &state.config);
+        *state.relationship_context.lock().unwrap() =
+            relationship_prompt_context(&state.config, &relationship);
+        state.pending_command.lock().unwrap().take();
+        state.pending_question.lock().unwrap().take();
+        *character = LoadedCharacter {
+            id: character_id,
+            ..LoadedCharacter::default()
+        };
+        state.rebuild_from_character(&character, true);
         state.messages.lock().unwrap().extend(recent);
     }
 
@@ -3834,6 +4170,7 @@ pub fn pet_reset_layout(app: AppHandle) {
 /// これが届かないと `boot_screen` が読み込み失敗と判断し、案内画面へ切り替える。
 #[tauri::command]
 pub fn pet_frontend_ready(app: AppHandle) {
+    crate::notice::begin_boot();
     crate::boot_screen::mark_started(&app);
     if let Err(error) = crate::layout::restart_boot(&app) {
         crate::log_paths::append_app_log(
@@ -3878,20 +4215,21 @@ const MAIN_UI_PREF_KEYS: [&str; 3] = [
 /// メイン画面の見た目設定を検証し、保存する値へ正規化する。
 fn checked_main_ui_pref(key: &str, value: &Value) -> Result<Value, String> {
     match key {
-        "PICOAGENT_BUBBLE_FONT_PX" => value
-            .as_str()
-            .and_then(|text| text.parse::<u8>().ok())
-            .filter(|size| (10..=28).contains(size))
-            .map(|size| json!(size.to_string()))
-            .ok_or_else(|| "会話の文字サイズは10〜28の整数で指定してください。".to_string()),
-        "PICOAGENT_STREAM_CHAT_FONT_PX" => {
-            if valid_stream_chat_font_px(value)
-                && value.as_str().is_some_and(|text| !text.is_empty())
-            {
-                Ok(value.clone())
-            } else {
-                Err("配信チャットの文字サイズは18〜48の整数で指定してください。".to_string())
+        "PICOAGENT_BUBBLE_FONT_PX" | "PICOAGENT_STREAM_CHAT_FONT_PX" => {
+            if value.is_null() || value.as_str().is_some_and(|text| text.trim().is_empty()) {
+                return Err("文字サイズを整数で指定してください。".into());
             }
+            let (mut normalized, invalid) = crate::config::validate_int_patch(Map::from_iter([(
+                key.to_string(),
+                value.clone(),
+            )]));
+            if let Some(error) = invalid.first() {
+                return Err(error["message"]
+                    .as_str()
+                    .expect("検証理由は文字列")
+                    .to_string());
+            }
+            Ok(normalized.remove(key).expect("検証した設定キー"))
         }
         "PICOAGENT_TITLE_BAR_PINNED" => value.as_bool().map(Value::Bool).ok_or_else(|| {
             "タイトルバーの常時表示は true / false で指定してください。".to_string()
@@ -3917,6 +4255,35 @@ pub fn pet_save_ui_pref(
         .config
         .set_all(patch)
         .map_err(|error| format!("表示設定の保存に失敗しました: {error}"))
+}
+
+#[tauri::command]
+pub fn pet_set_character_renderer(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    character_id: String,
+    renderer: Option<String>,
+) -> Result<Value, String> {
+    let saved = crate::renderer_setting::set_character(
+        &state.config,
+        &character_id,
+        renderer.as_deref(),
+        |overrides| {
+            if let Some(win) = app.get_webview_window("main") {
+                win.emit("pet:ui", json!({ "rendererOverrides": overrides }))
+                    .map_err(|error| {
+                        format!("描画設定は保存しましたが、画面へ反映できません: {error}")
+                    })?;
+            }
+            Ok(())
+        },
+    )?;
+    let mut result = json!({ "rendererOverrides": saved.overrides });
+    if let Some(reason) = saved.notification_error {
+        crate::log_paths::append_app_log(&app, &reason);
+        result["notificationError"] = json!(reason);
+    }
+    Ok(result)
 }
 
 #[tauri::command]
@@ -4107,7 +4474,7 @@ struct UpdateDownloadCleanup {
 impl Drop for UpdateDownloadCleanup {
     fn drop(&mut self) {
         if self.armed {
-            // フォールバック許可: 失敗・中断時のPicoAgent管理下更新一時ファイルだけを掃除する。
+            // 失敗・中断時のPicoAgent管理下更新一時ファイルだけを掃除する。
             if let Err(error) = std::fs::remove_file(&self.partial) {
                 if error.kind() != std::io::ErrorKind::NotFound {
                     crate::log_paths::append_app_log(
@@ -4434,7 +4801,7 @@ pub fn spawn_update_check(app: AppHandle) {
         if !enabled {
             return;
         }
-        // フォールバック許可: オフラインは通常状態として何も表示しない。通信・解析エラーはログへ残す。
+        // オフラインは通常状態として何も表示しない。通信・解析エラーはログと通知へ残す。
         let body = match fetch_update_feed().await {
             Ok(Some(body)) => body,
             Ok(None) => return,
@@ -4442,6 +4809,16 @@ pub fn spawn_update_check(app: AppHandle) {
                 crate::log_paths::append_app_log(
                     &app,
                     &format!("起動時の更新確認に失敗しました: {error}"),
+                );
+                // 起動ごとに1回だけの確認で「復旧」が無いので、通知一覧へ1件残す種類で送る。
+                crate::notice::emit(
+                    &app,
+                    crate::notice::Notice::info(
+                        "update",
+                        "更新確認",
+                        format!("起動時の更新確認に失敗しました: {error}"),
+                        false,
+                    ),
                 );
                 return;
             }
@@ -4452,6 +4829,16 @@ pub fn spawn_update_check(app: AppHandle) {
                 crate::log_paths::append_app_log(
                     &app,
                     &format!("更新情報を解析できません: {error}"),
+                );
+                // 起動ごとに1回だけの確認で「復旧」が無いので、通知一覧へ1件残す種類で送る。
+                crate::notice::emit(
+                    &app,
+                    crate::notice::Notice::info(
+                        "update",
+                        "更新確認",
+                        format!("更新情報を解析できません: {error}"),
+                        false,
+                    ),
                 );
                 return;
             }
@@ -4475,21 +4862,7 @@ pub fn spawn_update_check(app: AppHandle) {
             .get("releasePage")
             .and_then(Value::as_str)
             .unwrap_or("https://github.com/benybeny777/PicoAgent-Distribution/releases");
-        if let Err(error) = app.emit(
-            "pet:notice",
-            json!({
-                "kind": "update",
-                "ok": true,
-                "title": format!("新しいバージョン v{latest} があるよ"),
-                "body": format!("現在は v{current}。設定の「製品情報・ライセンス」からアップデートできます。詳細: {link}"),
-                "at": chrono::Utc::now().to_rfc3339(),
-            }),
-        ) {
-            crate::log_paths::append_app_log(
-                &app,
-                &format!("更新案内を画面へ通知できません: {error}"),
-            );
-        }
+        crate::notice::emit(&app, crate::notice::Notice::info("update", format!("新しいバージョン v{latest} があるよ"), format!("現在は v{current}。設定の「製品情報・ライセンス」からアップデートできます。詳細: {link}"), true));
     });
 }
 
@@ -4544,9 +4917,7 @@ fn update_series_is_newer(latest: &str, current: &str) -> bool {
 /// エージェントは実行中の生成・再試行待機・ツール処理を中断する。
 #[tauri::command]
 pub fn pet_cancel(state: State<'_, AppState>) {
-    state
-        .cancel_requested
-        .store(true, std::sync::atomic::Ordering::Relaxed);
+    state.turn.cancel();
 }
 
 /// 画像付きメッセージをエージェントへ送信する。
@@ -4558,74 +4929,88 @@ pub async fn pet_send_image(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<Value, String> {
-    let text = text.trim().to_string();
-    if text.is_empty() && images.is_empty() {
-        return Ok(json!({ "reply": "" }));
-    }
-    if let Some(reply) = topic_guard_reply(&app, &text) {
-        return Ok(reply);
-    }
-    // 画像の枚数・サイズ制限（1枚あたり最大 10MB base64、最大 8 枚）。
-    if images.len() > 8 {
-        return Err("画像が多すぎます（最大 8 枚まで）。".to_string());
-    }
-    for img in &images {
-        if img.len() > 10 * 1024 * 1024 {
-            return Err("画像サイズが大きすぎます（1枚 10MB まで）。".to_string());
+    let receipt = state.request_receipt();
+    let turn = state.turn.acquire().await;
+    agent::with_cancel(turn.flag(), async {
+        if !conversation_is_current(&state, &receipt.id, receipt.epoch) {
+            return Ok(json!({ "stale": true, "reply": "" }));
         }
-    }
-    let request_character_id = active_character_id(&state);
-    let request_epoch = state.conversation_epoch();
-
-    let (provider, model) = match selected_provider(&state) {
-        Ok(pair) => pair,
-        Err(reply) => return Ok(reply),
-    };
-
-    let mut convo = state.messages.lock().unwrap().clone();
-    let user_text = if text.is_empty() {
-        "この画像について教えてください。".to_string()
-    } else {
-        text.clone()
-    };
-    convo.push(crate::message::Message::user_with_images(
-        user_text.clone(),
-        images,
-    ));
-
-    let mut convo = maybe_summarize_context(convo, provider, &state.config, &model).await;
-    if !conversation_is_current(&state, &request_character_id, request_epoch) {
-        crate::log_paths::append_app_log(&app, "古い画像付きAI応答の実行開始を破棄しました。");
-        return Ok(json!({ "stale": true, "reply": "" }));
-    }
-
-    let result = run_agent_and_persist(
-        &app,
-        &state,
-        provider,
-        &model,
-        &mut convo,
-        &request_character_id,
-        request_epoch,
-    )
-    .await;
-
-    match result {
-        Ok(PersistedReply::Stale) => Ok(json!({ "stale": true, "reply": "" })),
-        Ok(PersistedReply::Current(reply)) => {
-            let mut response = apply_emotion_and_reply(&app, &state, &user_text, reply);
-            if tool_requested_app_quit(&convo) {
-                if let Some(map) = response.as_object_mut() {
-                    map.insert("quitApp".to_string(), json!(true));
-                }
+        let text = text.trim().to_string();
+        if text.is_empty() && images.is_empty() {
+            return Ok(json!({ "reply": "" }));
+        }
+        if let Some(reply) = topic_guard_reply(&app, &text) {
+            return Ok(reply);
+        }
+        // 画像の枚数・サイズ制限（1枚あたり最大 10MB base64、最大 8 枚）。
+        if images.len() > 8 {
+            return Err("画像が多すぎます（最大 8 枚まで）。".to_string());
+        }
+        for img in &images {
+            if img.len() > 10 * 1024 * 1024 {
+                return Err("画像サイズが大きすぎます（1枚 10MB まで）。".to_string());
             }
-            Ok(response)
         }
-        Err(e) => {
-            let message = log_command_error(&app, "画像付き AI 応答に失敗しました", e);
-            Ok(json!({ "error": true, "reply": format!("AIと話せなかったよ。{}", message) }))
+        let request_character_id = receipt.id.clone();
+        let request_epoch = receipt.epoch;
+
+        let (provider, model) = match selected_provider(&state) {
+            Ok(pair) => pair,
+            Err(reply) => return Ok(reply),
+        };
+
+        let mut convo = state.messages.lock().unwrap().clone();
+        let user_text = if text.is_empty() {
+            "この画像について教えてください。".to_string()
+        } else {
+            text.clone()
+        };
+        convo.push(crate::message::Message::user_with_images(
+            user_text.clone(),
+            images,
+        ));
+
+        let mut convo = maybe_summarize_context(convo, provider, &state.config, &model).await?;
+        if !conversation_is_current(&state, &request_character_id, request_epoch) {
+            crate::log_paths::append_app_log(&app, "古い画像付きAI応答の実行開始を破棄しました。");
+            return Ok(json!({ "stale": true, "reply": "" }));
         }
-    }
+
+        let result = run_agent_and_persist(
+            &app,
+            &state,
+            provider,
+            &model,
+            &mut convo,
+            &request_character_id,
+            request_epoch,
+        )
+        .await;
+
+        match result {
+            Ok(PersistedReply::Stale) => Ok(json!({ "stale": true, "reply": "" })),
+            Ok(PersistedReply::Current(reply)) => {
+                let Some(mut response) =
+                    state.with_current(&request_character_id, request_epoch, |_| {
+                        apply_emotion_and_reply(&app, &state, &user_text, reply)
+                    })
+                else {
+                    return Ok(json!({ "stale": true, "reply": "" }));
+                };
+                if tool_requested_app_quit(&convo) {
+                    if let Some(map) = response.as_object_mut() {
+                        map.insert("quitApp".to_string(), json!(true));
+                    }
+                }
+                Ok(response)
+            }
+            Err(e) => {
+                let message = log_command_error(&app, "画像付き AI 応答に失敗しました", e);
+                Ok(json!({ "error": true, "reply": format!("AIと話せなかったよ。{}", message) }))
+            }
+        }
+    })
+    .await
 }
 
 /// デスクトップのスクリーンショットを撮影し PNG を base64 data URL で返す。
@@ -5198,14 +5583,404 @@ fn settings_tab(tab: Option<&str>) -> Option<&str> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn 数値保存は待機中の別保存後も間隔の逆転と副作用を拒否する() {
+        use serde_json::{json, Map};
+        let config = crate::config::Config::new();
+        let minimum = crate::config::ints::CHATTER_MIN_SECS.key;
+        let maximum = crate::config::ints::CHATTER_MAX_SECS.key;
+        let path = crate::guard_scan::repo_root().join("temp").join(format!(
+            "numeric-save-{}-{}.json",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        config.load(path.clone()).unwrap();
+        config
+            .set_all(Map::from_iter([
+                (minimum.into(), json!("90")),
+                (maximum.into(), json!("240")),
+            ]))
+            .unwrap();
+        let patch = Map::from_iter([(minimum.into(), json!("200"))]);
+        assert!(
+            super::validate_numeric_settings_patch(&config, patch.clone())
+                .1
+                .is_empty()
+        );
+        // 最初の候補検査の後、別の保存が先に完了する順序を確定して再現する。
+        config
+            .set_all(Map::from_iter([(maximum.into(), json!("100"))]))
+            .unwrap();
+        let before = std::fs::read(&path).unwrap();
+        let mut side_effects = 0;
+        let result = config.set_all_checked_with(patch, &Map::new(), |_, candidate| {
+            let (_, invalid) = super::validate_numeric_settings_patch(&config, candidate.clone());
+            anyhow::ensure!(invalid.is_empty(), "数値保存を拒否: {invalid:?}");
+            side_effects += 1;
+            Ok(())
+        });
+        assert!(result.is_err());
+        assert_eq!(side_effects, 0);
+        assert_eq!(
+            config.int(&crate::config::ints::CHATTER_MIN_SECS).unwrap(),
+            90
+        );
+        assert_eq!(std::fs::read(&path).unwrap(), before);
+        std::fs::remove_file(path).unwrap();
+    }
+
+    fn valid_stream_chat_font_px(value: &serde_json::Value) -> bool {
+        let patch = serde_json::Map::from_iter([(
+            crate::config::ints::STREAM_CHAT_FONT_PX.key.to_string(),
+            value.clone(),
+        )]);
+        crate::config::validate_int_patch(patch).1.is_empty()
+    }
+
+    #[test]
+    fn 数値保存候補は未変更の間隔を読み逆転する保存を両欄で拒否する() {
+        use serde_json::{json, Map};
+        let config = crate::config::Config::new();
+        let minimum = crate::config::ints::CHATTER_MIN_SECS.key;
+        let maximum = crate::config::ints::CHATTER_MAX_SECS.key;
+        config.set(maximum, "120");
+        let before = config.get_all();
+        let (_, invalid) = super::validate_numeric_settings_patch(
+            &config,
+            Map::from_iter([(minimum.into(), json!("２４０"))]),
+        );
+        assert_eq!(invalid.len(), 2);
+        assert!(invalid.iter().any(|value| value["key"] == minimum));
+        assert!(invalid.iter().any(|value| value["key"] == maximum));
+        assert_eq!(config.get_all(), before);
+        let (normalized, invalid) = super::validate_numeric_settings_patch(
+            &config,
+            Map::from_iter([
+                (minimum.into(), json!("９０")),
+                (maximum.into(), json!("２４０")),
+            ]),
+        );
+        assert!(invalid.is_empty());
+        assert_eq!(normalized[minimum], json!("90"));
+    }
+
+    fn manifest_voice(id: &str) -> Option<super::CharacterVoice> {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../characters");
+        let manifest: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(root.join(id).join("character.json")).unwrap(),
+        )
+        .unwrap();
+        manifest
+            .get("voice")
+            .map(|value| serde_json::from_value(value.clone()).unwrap())
+    }
+
+    #[test]
+    fn 未登録の声は保存済みキャラや全体声へ切り替えない() {
+        let state = super::AppState::new();
+        state.config.set("PICOAGENT_CHARACTER", "mugi");
+        assert!(super::effective_tts_voice(&state).is_err());
+        state.character.lock().unwrap().id = "mugi".into();
+        assert!(super::effective_tts_voice(&state).is_err());
+        let source = include_str!("commands.rs");
+        for function in [
+            "pub async fn pet_prepare_voice_model",
+            "pub async fn pet_speak",
+        ] {
+            let body = source
+                .split(function)
+                .nth(1)
+                .unwrap()
+                .split("#[tauri::command]")
+                .next()
+                .unwrap();
+            assert!(
+                body.find("effective_tts_voice").unwrap()
+                    < body.find("aivis::ensure_started").unwrap()
+            );
+        }
+    }
+
+    #[test]
+    fn キャラの声は上書きと実読込manifestと全体指定の順で解決する() {
+        let state = super::AppState::new();
+        state.config.set("PICOAGENT_CHARACTER", "hiyori");
+        state.config.set("PICOAGENT_TTS_SPEAKER", "123");
+        for id in [
+            "rin",
+            "mai",
+            "mugi",
+            "aoi",
+            "hiyori",
+            "haru",
+            "epsilon",
+            "mao",
+            "rice",
+            "wanko",
+            "sena",
+            "mugi-normal-lvs",
+            "photoreal-prototype",
+        ] {
+            let voice = manifest_voice(id);
+            *state.character.lock().unwrap() = super::LoadedCharacter {
+                id: id.into(),
+                voice: voice.clone(),
+                registered: true,
+                ..Default::default()
+            };
+            let (active, result) = super::effective_tts_voice(&state).unwrap();
+            assert_eq!(active, id);
+            if let Some(voice) = voice {
+                assert_eq!(result, voice);
+            } else {
+                assert_eq!(result.style_id.as_deref(), Some("123"));
+            }
+        }
+        let voice = manifest_voice("mugi");
+        *state.character.lock().unwrap() = super::LoadedCharacter {
+            id: "追加パック".into(),
+            voice: voice.clone(),
+            registered: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            super::effective_tts_voice(&state).unwrap().1,
+            voice.unwrap()
+        );
+        state.config.set_value(
+            "PICOAGENT_TTS_CHARACTER_OVERRIDES",
+            serde_json::json!({"追加パック":{"speaker":"00123"}}),
+        );
+        let voice = super::effective_tts_voice(&state).unwrap().1;
+        assert_eq!(voice.style_id.as_deref(), Some("00123"));
+        assert_eq!(voice.model_uuid, None);
+        state.config.set_value(
+            "PICOAGENT_TTS_CHARACTER_OVERRIDES",
+            serde_json::json!({"追加パック":{"speaker":"bad"}}),
+        );
+        assert!(super::effective_tts_voice(&state).is_err());
+    }
+
+    #[test]
+    fn 人格登録の読込失敗は旧人格と声と履歴と世代を保持する() {
+        let _private = crate::agent::PRIVATE_CONTEXT_TEST_LOCK.lock().unwrap();
+        let state = super::AppState::new();
+        let old = super::LoadedCharacter {
+            id: "mugi".into(),
+            profile: "旧人格".into(),
+            greeting: "旧挨拶".into(),
+            voice: manifest_voice("mugi"),
+            registered: true,
+        };
+        *state.character.lock().unwrap() = old.clone();
+        *state.messages.lock().unwrap() = vec![crate::message::Message::new("user", "原文")];
+        let epoch = state.conversation_epoch();
+        let next = super::LoadedCharacter {
+            id: "rin".into(),
+            profile: "新人格".into(),
+            greeting: "新挨拶".into(),
+            voice: manifest_voice("rin"),
+            registered: true,
+        };
+        for stage in ["関係性", "会話履歴"] {
+            assert!(state
+                .register_character(next.clone(), |_| Err(format!("{stage}読込失敗")))
+                .is_err());
+            assert_eq!(*state.character.lock().unwrap(), old);
+            assert_eq!(state.messages.lock().unwrap()[0].content, "原文");
+            assert_eq!(state.conversation_epoch(), epoch);
+        }
+        state
+            .register_character(next.clone(), |changed| {
+                assert!(changed);
+                Ok((
+                    "新関係性".into(),
+                    vec![crate::message::Message::new("user", "新履歴")],
+                ))
+            })
+            .unwrap();
+        assert_eq!(*state.character.lock().unwrap(), next);
+        assert_eq!(state.messages.lock().unwrap()[1].content, "新履歴");
+        assert_eq!(state.conversation_epoch(), epoch + 1);
+        crate::agent::remember_private_context("");
+    }
+
+    #[test]
+    fn 会話再構成中のキャラ登録は旧人格を書き戻さない() {
+        use std::sync::{Arc, Barrier};
+        let mut outcomes = Vec::new();
+        for clear in [false, true] {
+            let state = Arc::new(super::AppState::new());
+            *state.character.lock().unwrap() = super::LoadedCharacter {
+                id: "old".into(),
+                profile: "旧人格".into(),
+                registered: true,
+                ..Default::default()
+            };
+            *state.messages.lock().unwrap() = vec![
+                Message::new("system", "旧system"),
+                Message::new("user", "既存の会話"),
+            ];
+            state.rebuild_conversation(clear, || {});
+            assert_eq!(
+                state.messages.lock().unwrap().len(),
+                if clear { 1 } else { 2 }
+            );
+            let entered = Arc::new(Barrier::new(2));
+            let resume = Arc::new(Barrier::new(2));
+            let reset = {
+                let state = state.clone();
+                let entered = entered.clone();
+                let resume = resume.clone();
+                std::thread::spawn(move || {
+                    state.rebuild_conversation(clear, || {
+                        entered.wait();
+                        resume.wait();
+                    })
+                })
+            };
+            entered.wait();
+            let character_locked = state.character.try_lock().is_err();
+            let queued = Arc::new(Barrier::new(2));
+            let registration = {
+                let state = state.clone();
+                let queued = queued.clone();
+                std::thread::spawn(move || {
+                    queued.wait();
+                    state
+                        .register_character(
+                            super::LoadedCharacter {
+                                id: "new".into(),
+                                profile: "新人格".into(),
+                                ..Default::default()
+                            },
+                            |_| Ok((String::new(), vec![Message::new("user", "新履歴")])),
+                        )
+                        .unwrap();
+                })
+            };
+            queued.wait();
+            if character_locked {
+                resume.wait();
+                reset.join().unwrap();
+                registration.join().unwrap();
+            } else {
+                registration.join().unwrap();
+                resume.wait();
+                reset.join().unwrap();
+            }
+            let character = state.character.lock().unwrap();
+            let messages = state.messages.lock().unwrap();
+            assert_eq!(character.id, "new");
+            let new_persona = messages[0].content.contains("新人格")
+                && !messages[0].content.contains("旧人格")
+                && messages
+                    .get(1)
+                    .is_some_and(|message| message.content == "新履歴");
+            outcomes.push((clear, character_locked, new_persona));
+        }
+        assert!(
+            outcomes
+                .iter()
+                .all(|(_, locked, current)| *locked && *current),
+            "会話再構成で旧人格を書き戻しました: {outcomes:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn 話者uuidの解決失敗は数値idへ切り替えない() {
+        use std::io::{Read, Write};
+        let server = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let endpoint = format!("http://{}", server.local_addr().unwrap());
+        server.set_nonblocking(true).unwrap();
+        let worker = std::thread::spawn(move || {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            let mut socket = loop {
+                match server.accept() {
+                    Ok((socket, _)) => break socket,
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        assert!(
+                            std::time::Instant::now() < deadline,
+                            "話者要求が到着しませんでした"
+                        );
+                        std::thread::sleep(std::time::Duration::from_millis(5));
+                    }
+                    Err(error) => panic!("話者要求の受信に失敗しました: {error}"),
+                }
+            };
+            socket.set_nonblocking(false).unwrap();
+            socket
+                .set_read_timeout(Some(std::time::Duration::from_secs(5)))
+                .unwrap();
+            let mut buffer = [0; 4096];
+            assert!(socket.read(&mut buffer).unwrap() > 0, "話者要求が空でした");
+            socket
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\n[]")
+                .unwrap();
+        });
+        let voice = manifest_voice("rin").unwrap();
+        let result = super::resolve_tts_speaker(&endpoint, &voice).await;
+        worker.join().unwrap();
+        assert!(result.is_err());
+        let voice: super::CharacterVoice =
+            serde_json::from_value(serde_json::json!({"provider":"aivis","styleId":"00123"}))
+                .unwrap();
+        assert_eq!(
+            super::resolve_tts_speaker(&endpoint, &voice).await.unwrap(),
+            "00123"
+        );
+    }
+
+    #[test]
+    fn 声の正本を複製する表と解決失敗後の数値切替を禁止する() {
+        let source = include_str!("commands.rs")
+            .split("#[cfg(test)]")
+            .next()
+            .unwrap();
+        assert!(!source.contains(&["default_character", "_tts_voice"].concat()));
+        assert!(!source.contains(&["_AIVIS_", "SPEAKER_UUID"].concat()));
+        let resolve = source
+            .split("async fn resolve_tts_speaker")
+            .nth(1)
+            .unwrap()
+            .split("#[tauri::command]")
+            .next()
+            .unwrap();
+        assert!(!resolve.contains("unwrap_or"));
+    }
+
+    #[test]
+    fn 音声httpは原因本文を安全に返して本文入りurlを出さない() {
+        let source = include_str!("commands.rs");
+        let speak = source
+            .split("pub async fn pet_speak(")
+            .nth(1)
+            .unwrap()
+            .split("/// Aivisのモデル")
+            .next()
+            .unwrap();
+        assert_eq!(
+            speak
+                .matches("crate::tools::http::service_response(")
+                .count(),
+            2
+        );
+        assert!(speak.contains("error.without_url()"));
+        assert!(!speak.contains("format!(\"HTTP {}\""));
+        assert_eq!(speak.matches("voice.failure(").count(), 1);
+    }
+
     use super::{
         aivis_lip_sync_timeline, centered_window_position, checked_main_ui_pref,
-        compacted_conversation, default_character_tts_voice, enable_tts_after_component_install,
-        limit_aivis_volume, multi_ai_context, parse_update_feed, preserve_unreadable_secrets,
-        probe_with_timeout, replace_auto_summary, resolved_judge_model, safe_wake_message,
-        settings_tab, speech_text, stable_persona_prompt, update_series_is_newer, update_status,
-        valid_stream_chat_font_px, validate_multi_ai_settings, verify_windows_installer,
-        version_is_newer, AUTO_SUMMARY_BEGIN, AUTO_SUMMARY_END, MAX_UPDATE_FEED_BYTES,
+        compacted_conversation, enable_tts_after_component_install, limit_aivis_volume,
+        multi_ai_context, parse_update_feed, preserve_unreadable_secrets, probe_with_timeout,
+        replace_auto_summary, resolved_judge_model, safe_wake_message, settings_tab, speech_text,
+        stable_persona_prompt, update_series_is_newer, update_status, validate_multi_ai_settings,
+        verify_windows_installer, version_is_newer, AUTO_SUMMARY_BEGIN, AUTO_SUMMARY_END,
+        MAX_UPDATE_FEED_BYTES,
     };
 
     #[test]
@@ -5215,7 +5990,13 @@ mod tests {
             checked_main_ui_pref("PICOAGENT_BUBBLE_FONT_PX", &json!("16")).unwrap(),
             json!("16")
         );
-        for bad in [json!("9"), json!("29"), json!("1.5"), json!(""), json!(16)] {
+        for bad in [
+            json!("9"),
+            json!("29"),
+            json!("1.5"),
+            json!(""),
+            json!(true),
+        ] {
             assert!(checked_main_ui_pref("PICOAGENT_BUBBLE_FONT_PX", &bad).is_err());
         }
         assert!(checked_main_ui_pref("PICOAGENT_STREAM_CHAT_FONT_PX", &json!("30")).is_ok());
@@ -5237,7 +6018,8 @@ mod tests {
         for value in ["17", "49", "30.5", "abc"] {
             assert!(!valid_stream_chat_font_px(&serde_json::json!(value)));
         }
-        assert!(!valid_stream_chat_font_px(&serde_json::json!(30)));
+        assert!(valid_stream_chat_font_px(&serde_json::json!(30)));
+        assert!(valid_stream_chat_font_px(&serde_json::json!("３０")));
     }
 
     #[test]
@@ -5302,10 +6084,10 @@ mod tests {
             "受け取った設定は親しみやすく短く返答するものなので、その口調で返します。",
             prompt,
         )
-        .is_none());
+        .is_err());
         assert_eq!(
             safe_wake_message("おはよう。朝だよ、ゆっくり起きようね。", prompt).as_deref(),
-            Some("おはよう。朝だよ、ゆっくり起きようね。")
+            Ok("おはよう。朝だよ、ゆっくり起きようね。")
         );
     }
 
@@ -5335,12 +6117,42 @@ mod tests {
     async fn 起動時の接続確認は時間内に戻る() {
         let started = std::time::Instant::now();
         let result = probe_with_timeout(
-            std::future::pending::<bool>(),
+            std::future::pending::<Result<bool, String>>(),
             std::time::Duration::from_millis(10),
         )
         .await;
-        assert!(!result);
+        assert!(result.unwrap_err().contains("完了しませんでした"));
         assert!(started.elapsed() < std::time::Duration::from_secs(1));
+    }
+
+    #[tokio::test]
+    async fn 接続確認は疎通結果と検証失敗を区別する() {
+        for up in [true, false] {
+            let result =
+                probe_with_timeout(async { Ok(up) }, std::time::Duration::from_secs(1)).await;
+            assert_eq!(super::provider_status(result), (Some(up), None));
+        }
+        let reason = "PICOAGENT_LOCAL_PORT が不正です";
+        let result = probe_with_timeout(
+            async { Err(reason.to_string()) },
+            std::time::Duration::from_secs(1),
+        )
+        .await;
+        assert_eq!(
+            super::provider_status(result),
+            (None, Some(reason.to_string()))
+        );
+    }
+
+    #[test]
+    fn 会話予算は不正文脈長を拒否し最大整数でも溢れない() {
+        let cfg = crate::config::Config::new();
+        cfg.set("PICOAGENT_LOCAL_CTX", "8192");
+        assert!(super::conversation_token_budget(&cfg)
+            .unwrap_err()
+            .contains("PICOAGENT_LOCAL_CTX"));
+        cfg.set("PICOAGENT_LOCAL_CTX", &i64::MAX.to_string());
+        assert_eq!(super::conversation_token_budget(&cfg).unwrap(), 24_000);
     }
 
     #[test]
@@ -5420,7 +6232,7 @@ mod tests {
     #[test]
     fn 統合aiの人格には長期メモリと会話中のsystem文脈を混ぜない() {
         let state = super::AppState::new();
-        *state.character_profile.lock().unwrap() = "むぎとして柔らかく話す。".to_string();
+        state.character.lock().unwrap().profile = "むぎとして柔らかく話す。".to_string();
         *state.memory_context.lock().unwrap() = "外へ重ねて渡さない長期メモリ".to_string();
         state.messages.lock().unwrap().push(Message::new(
             "system",
@@ -5484,69 +6296,6 @@ mod tests {
             serde_json::json!(r#"[{"provider":"local"}]"#),
         );
         assert!(validate_multi_ai_settings(&Config::new(), &consensus).is_err());
-    }
-
-    #[test]
-    fn 表示中のキャラの声を保存中のキャラより優先する() {
-        use super::{effective_tts_voice, AppState};
-        let state = AppState::new();
-        state.config.set("PICOAGENT_CHARACTER", "hiyori");
-        assert_eq!(
-            effective_tts_voice(&state).style_name.as_deref(),
-            Some("ふつー")
-        );
-        *state.character_id.lock().unwrap() = "mugi".to_string();
-        assert_eq!(
-            effective_tts_voice(&state).style_name.as_deref(),
-            Some("あまあま")
-        );
-        *state.character_id.lock().unwrap() = "hiyori".to_string();
-        assert_eq!(
-            effective_tts_voice(&state).style_name.as_deref(),
-            Some("ふつー")
-        );
-    }
-
-    #[test]
-    fn キャラ声の数値idと話者uuidを両方保持する() {
-        use super::{effective_tts_voice, AppState};
-        let state = AppState::new();
-        state.config.set("PICOAGENT_CHARACTER", "miko-mmd");
-        state.config.set_value(
-            "PICOAGENT_TTS_CHARACTER_OVERRIDES",
-            serde_json::json!({"miko-mmd":{"speaker":"1533692672","modelUuid":"8e120ad8","speakerUuid":"15bfc9c1","styleName":"ノーマル"}}),
-        );
-        let voice = effective_tts_voice(&state);
-        assert_eq!(voice.speaker, "1533692672");
-        assert_eq!(voice.model_uuid.as_deref(), Some("8e120ad8"));
-        assert_eq!(voice.speaker_uuid.as_deref(), Some("15bfc9c1"));
-        assert_eq!(voice.style_name.as_deref(), Some("ノーマル"));
-    }
-
-    #[test]
-    fn 組み込みキャラはそれぞれ既定声を持つ() {
-        let expected = [
-            ("mugi", "あまあま"),
-            ("rin", "ノーマル"),
-            ("mai", "ノーマル"),
-            ("hiyori", "ふつー"),
-            ("haru", "ノーマル"),
-            ("epsilon", "せつなめ"),
-            ("mao", "おちつき"),
-            ("rice", "Calm"),
-            ("wanko", "Happy"),
-        ];
-        for (character_id, style_name) in expected {
-            let voice = default_character_tts_voice(character_id)
-                .unwrap_or_else(|| panic!("{character_id} の既定声がありません"));
-            assert_eq!(
-                voice.style_name.as_deref(),
-                Some(style_name),
-                "{character_id}"
-            );
-            assert!(voice.model_uuid.is_some(), "{character_id}");
-            assert!(voice.speaker_uuid.is_some(), "{character_id}");
-        }
     }
 
     #[test]
@@ -5695,6 +6444,17 @@ mod tests {
     }
 
     #[test]
+    fn 読み上げではmarkdownの表と記号を声にしない() {
+        let text = "**☀️ 横浜市の天気：快晴**\nいまは 21°C\n\n| 日付 | 天気 |\n| --- | --- |\n| 10/10（土） | ☀️ 快晴 |\n\n### まとめ\n傘はいらないよ。";
+        assert_eq!(
+            speech_text(text),
+            "横浜市の天気：快晴 いまは 21°C まとめ 傘はいらないよ。"
+        );
+        // 縦棒を含むだけの文は表として外さない。
+        assert_eq!(speech_text("A|Bの比較です。"), "A|Bの比較です。");
+    }
+
+    #[test]
     fn 読み上げではチャート記号と絵文字を外す() {
         let text = "天気 東京 ☀️ 快晴\n今日の気温 18〜27度 ▁▂▃▅▇";
         let spoken = speech_text(text);
@@ -5821,3 +6581,7 @@ mod guard {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "conversation_turn_tests.rs"]
+mod conversation_turn_tests;

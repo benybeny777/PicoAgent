@@ -15,11 +15,11 @@ function logBridgeError(context, error) {
   const detail = error && (error.stack || error.message) ? error.stack || error.message : String(error);
   try {
     invoke("pet_log", { level: "error", message: `${context} 失敗`, detail: String(detail) }).catch(logError => {
-      // フォールバック許可: pet_log 自体の失敗は再帰ログにせず、開発者コンソールへだけ出す。
+      // pet_log 自体の失敗は再帰ログにせず、開発者コンソールへだけ出す。
       console.warn("invoke エラーログ保存に失敗しました", logError);
     });
   } catch (logError) {
-    // フォールバック許可: pet_log 自体の失敗は再帰ログにせず、開発者コンソールへだけ出す。
+    // pet_log 自体の失敗は再帰ログにせず、開発者コンソールへだけ出す。
     console.warn("invoke エラーログ保存に失敗しました", logError);
   }
 }
@@ -118,7 +118,7 @@ window.picoagent = {
   openGeneratedMedia: (path) => call("pet_open_generated_media", { path }),
   quit: () => call("pet_quit"),
   alarms: () => call("pet_alarms"),
-  alarmWake: (id) => call("pet_alarm_wake", { id }),
+  alarmWake: (id, consumed = false) => call("pet_alarm_wake", { id, consumed }),
   speak: (text) => call("pet_speak", { text }),
   prepareVoiceModel: () => call("pet_prepare_voice_model"),
   log: (level, message, detail) => invoke("pet_log", { level, message, detail }),
@@ -132,6 +132,7 @@ window.picoagent = {
   // 配置編集（OBS風）の位置・倍率を設定へ保存する（確定時だけ呼ぶ）。
   saveScene: (scenes) => call("pet_save_scene", { scenes }),
   saveUiPref: (key, value) => call("pet_save_ui_pref", { key, value }),
+  setCharacterRenderer: (characterId, renderer) => call("pet_set_character_renderer", { characterId, renderer }),
   // ウィンドウとフキダシの位置・サイズを既定へ戻す。
   resetLayout: () => call("pet_reset_layout"),
   aivisStatus: () => call("aivis_status"),
@@ -186,7 +187,7 @@ window.picoagent = {
     try { return await getCurrentWindow().startResizeDragging(direction); }
     catch (error) { logInvokeError("startResizeDragging", error); throw error; }
   },
-  setCharacterProfile: (characterId, profile, greeting) => call("pet_set_character_profile", { characterId, profile, greeting }),
+  setCharacterProfile: (characterId, profile, greeting, voice) => call("pet_set_character_profile", { characterId, profile, greeting, voice }),
   relationshipState: () => call("pet_relationship_state"),
   relationshipEvent: (kind, detail = "") => call("pet_relationship_event", { kind, detail }),
   pinRelationshipMoment: (momentId, pinned) => call("pet_relationship_pin_moment", { momentId, pinned }),
@@ -269,6 +270,7 @@ window.picoagent = {
     // 不具合の連絡へ添える診断情報を1ファイルへ書き出す（秘密値は含めない）。
     exportDiagnostics: () => call("settings_export_diagnostics"),
     componentStatus: () => call("settings_components_status"),
+    detectCli: (id) => call("settings_detect_cli", { id }),
     generationEnvironment: () => call("settings_generation_environment"),
     installComponents: (ids, enableTts = false, acceptedLicenseIds = []) => call("settings_components_install", { ids, enableTts, acceptedLicenseIds }),
     removeComponent: (id) => call("settings_components_remove", { id }),

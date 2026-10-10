@@ -2,10 +2,14 @@
 import importlib.util
 import json
 import tempfile
+import sys
 import unittest
 import zipfile
 from pathlib import Path
 from unittest.mock import patch
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import voice_training_common as COMMON
 
 SPEC = importlib.util.spec_from_file_location("learning_runtime", Path(__file__).parents[1] / "setup-character-learning-runtime.py")
 RUNTIME = importlib.util.module_from_spec(SPEC)
@@ -261,6 +265,29 @@ class RuntimeTests(unittest.TestCase):
                 self.assertEqual(call.args[2]["CUDA_VISIBLE_DEVICES"], "2")
         self.assertEqual(json.loads((self.root / "install.json").read_text(encoding="utf-8"))["environment"]["CUDA_VISIBLE_DEVICES"], "2")
 
+    def test_一時共有違反後の公開とcli失敗復元は同じrenameでstageを保持する(self):
+        original = COMMON.os.rename
+        seen = set()
+        def rename(source, destination):
+            pair = (str(source), str(destination))
+            if pair not in seen:
+                seen.add(pair)
+                error = PermissionError("一時共有違反")
+                error.winerror = 32
+                raise error
+            return original(source, destination)
+        def populate(stage, *args):
+            (stage / "proof").write_text("new-runtime", encoding="utf-8")
+        with patch.object(COMMON.sys, "platform", "win32"), patch.object(COMMON.os, "rename", side_effect=rename) as calls, patch.object(COMMON.time, "sleep"), patch.object(RUNTIME.platform, "system", return_value="Windows"), patch.object(RUNTIME.platform, "machine", return_value="AMD64"), patch.object(RUNTIME.subprocess, "run"), patch.object(RUNTIME, "populate", side_effect=populate), patch.object(RUNTIME, "run", side_effect=RuntimeError("最終CLI失敗")):
+            with self.assertRaisesRegex(RuntimeError, "最終CLI失敗"):
+                RUNTIME.install(self.root, self.shared, self.ffmpeg, self.uv, self.status, True)
+            self.assertEqual(calls.call_count, 4)
+        self.assertFalse(self.root.exists())
+        stage = next(self.root.parent.glob(".installing-*"))
+        self.assertEqual((stage / "proof").read_text(encoding="utf-8"), "new-runtime")
+        self.assertFalse((stage / "install.json").exists())
+        self.assertTrue((stage / "failure.json").is_file())
+
     def test_Deno書庫は固定ハッシュと安全な単一実体だけ許可する(self):
         archive = self.base / "deno.zip"
         for name, succeeds in (("deno.exe", True), ("../deno.exe", False)):
@@ -296,6 +323,77 @@ class RuntimeTests(unittest.TestCase):
         record = json.loads((self.root / "install.json").read_text(encoding="utf-8"))
         self.assertEqual(record["tools"]["deno"]["archiveSha256"], RUNTIME.DENO_SHA256)
         self.assertEqual(record["environment"]["DENO_DIR"], str(self.root.resolve() / "cache/deno"))
+
+
+
+
+class AtomicMoveTests(unittest.TestCase):
+    def setUp(self):
+        repo = Path(__file__).resolve().parents[2]
+        (repo / "temp").mkdir(exist_ok=True)
+        temporary = tempfile.TemporaryDirectory(dir=repo / "temp")
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name)
+
+    @staticmethod
+    def sharing_error(code):
+        error = PermissionError("原子的配置の共有拒否")
+        error.winerror = code
+        return error
+
+    def test_共有違反だけ同じ操作で再試行し成功後に一時物を残さない(self):
+        for replace in (False, True):
+            for code in (5, 32, 33):
+                source, target = self.root / "incoming", self.root / "target"
+                source.write_text("new", encoding="utf-8")
+                if replace:
+                    target.write_text("old", encoding="utf-8")
+                operation_name = "replace" if replace else "rename"
+                operation = getattr(COMMON.os, operation_name)
+                count = 0
+                def move(*args):
+                    nonlocal count
+                    count += 1
+                    if count < 3:
+                        raise self.sharing_error(code)
+                    return operation(*args)
+                with patch.object(COMMON.sys, "platform", "win32"), patch.object(COMMON.os, operation_name, side_effect=move) as calls, patch.object(COMMON.time, "sleep") as sleep:
+                    COMMON.atomic_move(source, target, replace=replace)
+                    self.assertEqual(calls.call_count, 3)
+                    self.assertEqual(sleep.call_count, 2)
+                    self.assertTrue(all(call.args == (source, target) for call in calls.call_args_list))
+                self.assertFalse(source.exists())
+                self.assertEqual(target.read_text(encoding="utf-8"), "new")
+                target.unlink()
+
+    def test_共有違反の上限は元例外と旧版を保持しjson一時物を回収する(self):
+        target = self.root / "status.json"
+        target.write_text("old", encoding="utf-8")
+        error = self.sharing_error(5)
+        with patch.object(COMMON.sys, "platform", "win32"), patch.object(COMMON.os, "replace", side_effect=error) as calls, patch.object(COMMON.time, "sleep") as sleep:
+            with self.assertRaises(PermissionError) as raised:
+                RUNTIME.atomic_json(target, {"state": "completed"})
+            self.assertIs(raised.exception, error)
+            self.assertEqual(calls.call_count, len(COMMON.ATOMIC_MOVE_DELAYS) + 1)
+            self.assertEqual(sleep.call_count, len(COMMON.ATOMIC_MOVE_DELAYS))
+        self.assertEqual(target.read_text(encoding="utf-8"), "old")
+        self.assertEqual(list(self.root.glob("*.incoming")), [])
+
+    def test_長期lockのrenameは未確定stageを保持しその他osエラーは即時返す(self):
+        stage, destination = self.root / "stage", self.root / "runtime"
+        stage.mkdir()
+        (stage / "value").write_text("new", encoding="utf-8")
+        for platform, code, attempts in (("win32", 32, len(COMMON.ATOMIC_MOVE_DELAYS) + 1), ("win32", 87, 1), ("linux", 5, 1)):
+            error = self.sharing_error(code)
+            with patch.object(COMMON.sys, "platform", platform), patch.object(COMMON.os, "rename", side_effect=error) as calls, patch.object(COMMON.time, "sleep") as sleep:
+                with self.assertRaises(PermissionError) as raised:
+                    COMMON.atomic_move(stage, destination, replace=False)
+                self.assertIs(raised.exception, error)
+                self.assertEqual(calls.call_count, attempts)
+                self.assertEqual(sleep.call_count, attempts - 1)
+            self.assertTrue(stage.is_dir())
+            self.assertFalse(destination.exists())
+            self.assertEqual((stage / "value").read_text(encoding="utf-8"), "new")
 
 
 if __name__ == "__main__":

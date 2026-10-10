@@ -9,11 +9,13 @@ export function createEngine({ status, onChange, onReady }) {
   let ready = true;
   let phase = "ready";
   let online = null;
+  let providerError = null;
 
   const gb = bytes => (Number(bytes) / 1e9).toFixed(1);
 
   function apply(state) {
     if (!state?.phase || !required) return;
+    providerError = null;
     phase = state.phase;
     ready = phase === "ready";
     if (phase === "download") {
@@ -36,6 +38,18 @@ export function createEngine({ status, onChange, onReady }) {
     onChange();
   }
 
+  function applyProviderStatus(info) {
+    const previousError = providerError;
+    providerError = info.up === null ? String(info.providerError || "接続状態を確認できません") : null;
+    if (providerError) { status.setSticky(`接続状態不明: ${providerError}`, "error"); online?.(null); }
+    else {
+      if (previousError) status.setSticky("");
+      online?.(info.up === true);
+      ready = !required || info.up === true;
+    }
+    onChange();
+  }
+
   return {
     init(info, setOnline) {
       online = setOnline;
@@ -43,15 +57,16 @@ export function createEngine({ status, onChange, onReady }) {
       ready = !required || info.up === true;
       phase = ready ? "ready" : "idle";
       initialized = true;
-      online?.(info.up === true);
-      onChange();
+      applyProviderStatus(info);
     },
     apply,
+    applyProviderStatus,
     get phase() { return phase; },
     get required() { return required; },
     /** 送信できない理由（送れるなら空文字）。 */
     blockedReason() {
       if (!initialized) return "初期化完了後に送信できます";
+      if (providerError) return `接続状態不明: ${providerError}`;
       if (required && !ready) return "ローカルAIの準備完了後に送信できます";
       return "";
     },

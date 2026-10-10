@@ -146,3 +146,19 @@ export function createEmitter() {
     },
   };
 }
+
+// 起動・更新payloadの整数はバックエンドの宣言と同じ範囲で確認し、代替値を作らない。
+export function readIntegerSetting(payload, key, property) {
+  const invalid = payload.invalidNumbers?.find(item => item.key === key);
+  if (invalid) return { value: null, error: invalid.message };
+  let value = payload[property];
+  if (typeof value === "string" && /^-?\d+$/.test(value)) {
+    const exact = BigInt(value);
+    if (exact > BigInt(Number.MAX_SAFE_INTEGER) || exact < BigInt(Number.MIN_SAFE_INTEGER)) value = exact;
+  }
+  const schema = payload.numberSettings?.[key];
+  if (!schema || (typeof value !== "bigint" && !Number.isSafeInteger(value))) return { value: null, error: `${key}の整数設定を確認できません` };
+  const quantity = BigInt(value);
+  if (quantity < BigInt(schema.range[0]) || quantity > BigInt(schema.range[1])) return { value: null, error: `${key}は${schema.range.join("〜")}${schema.unit || ""}の範囲で設定してください` };
+  return { value, error: null };
+}

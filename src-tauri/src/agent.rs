@@ -403,10 +403,6 @@ pub(crate) fn remember_private_context(prompt: &str) {
     }
 }
 
-/// 登録済み文脈はプロセス内で共有するため、触るテスト同士を直列化する。
-#[cfg(test)]
-pub(crate) static PRIVATE_CONTEXT_TEST_LOCK: Mutex<()> = Mutex::new(());
-
 /// 登録済みの非公開文脈。まだ人格を組み立てていなければ空。
 fn remembered_private_context() -> String {
     PRIVATE_CONTEXT
@@ -872,9 +868,10 @@ fn selected_character_greeting(app: Option<&tauri::AppHandle>) -> String {
         return String::new();
     };
     app.state::<crate::commands::AppState>()
-        .character_greeting
+        .character
         .lock()
         .unwrap()
+        .greeting
         .clone()
 }
 
@@ -946,8 +943,30 @@ async fn dispatch_with_activity(
     answer
 }
 
-/// 指数バックオフ付きリトライでプロバイダを呼び出す。
-/// 429（レート制限）・500 系エラーは最大 3 回リトライする。認証エラーは即時失敗。
+/// HTTP状態を正本に再試行の待機時間を決める。本文中の数字は判定に使わない。
+fn provider_retry_delay(error: &anyhow::Error, attempt: u32) -> Option<std::time::Duration> {
+    if let Some(http) = error.downcast_ref::<crate::providers::ProviderHttpError>() {
+        if !matches!(http.status, 408 | 409 | 425 | 429 | 500..=599) {
+            return None;
+        }
+        if let Some(delay) = http.retry_after {
+            return Some(delay.min(std::time::Duration::from_secs(30)));
+        }
+    } else {
+        let transport = error.downcast_ref::<reqwest::Error>()?;
+        if !(transport.is_connect()
+            || transport.is_timeout()
+            || transport.is_body()
+            || transport.is_request())
+        {
+            return None;
+        }
+    }
+    // 接続・転送の失敗を含め最大3回呼び出す。設定や応答形式の不正は繰り返さない。
+    Some(std::time::Duration::from_secs(1u64 << attempt.min(1)))
+}
+
+/// 最大3回呼び出し、認証・引数などの恒久的HTTP失敗は即時に返す。
 async fn chat_with_retry(
     provider: &dyn Provider,
     cfg: &Config,
@@ -959,18 +978,14 @@ async fn chat_with_retry(
 ) -> anyhow::Result<Message> {
     let (app, cancel) = control;
     let mut last_err = anyhow::anyhow!("リトライ上限に達しました");
+    let mut next_delay = std::time::Duration::ZERO;
     for attempt in 0u32..3 {
-        if attempt > 0 {
-            let wait_ms = (1u64 << attempt) * 1000;
-            if cancel_while(
-                tokio::time::sleep(std::time::Duration::from_millis(wait_ms)),
-                cancel,
-            )
-            .await
-            .is_none()
-            {
-                anyhow::bail!("{CANCEL_MESSAGE}");
-            }
+        if attempt > 0
+            && cancel_while(tokio::time::sleep(next_delay), cancel)
+                .await
+                .is_none()
+        {
+            anyhow::bail!("{CANCEL_MESSAGE}");
         }
         let Some(result) = cancel_while(
             // 非公開利用: 生チャンクは `buffer_only` へ溜めるだけで公開しない。
@@ -986,23 +1001,19 @@ async fn chat_with_retry(
             Ok(msg) => return Ok(msg),
             Err(e) => {
                 let msg = e.to_string();
-                // 認証エラー・パラメータ不正は即時失敗（リトライしても解決しない）。
-                if msg.contains("401")
-                    || msg.contains("403")
-                    || msg.contains("400")
-                    || msg.contains("404")
-                {
+                let Some(delay) = provider_retry_delay(&e, attempt) else {
                     if let Some(handle) = app {
                         crate::log_paths::append_app_log(
                             handle,
                             &format!(
-                                "プロバイダ呼び出しが認証/引数エラーで失敗（リトライなし・provider={} model={model}）: {msg}",
+                                "プロバイダ呼び出しが恒久的HTTPエラーで失敗（再試行なし・provider={} model={model}）: {msg}",
                                 provider.id()
                             ),
                         );
                     }
                     return Err(e);
-                }
+                };
+                next_delay = delay;
                 // リトライは無音にせず毎回記録する（間欠障害の頻度を後から追えるように）。
                 if let Some(handle) = app {
                     crate::log_paths::append_app_log(
@@ -1158,17 +1169,19 @@ async fn run_scoped(
     // スーパーエージェントモードのトップレベルでは自律ループの上限を引き上げる
     // （多段のツール連鎖・自己反省を回し切れるようにする）。サブエージェントは元の上限のまま。
     let max_steps = if super_agent && agent_depth() <= 1 {
-        cfg.get("PICOAGENT_SUPER_AGENT_MAX_STEPS", "12")
-            .parse::<usize>()
-            .unwrap_or(12)
-            .clamp(max_steps, 30)
+        let configured = cfg
+            .int(&crate::config::ints::SUPER_AGENT_MAX_STEPS)
+            .map_err(anyhow::Error::msg)? as usize;
+        anyhow::ensure!(configured >= max_steps,
+            "PICOAGENT_SUPER_AGENT_MAX_STEPS はこの処理の最小ステップ数 {max_steps} 以上にしてください");
+        configured
     } else {
         max_steps
     };
     // 進捗ステータス（計画→実行・ツール実行の可視化）をフロントへ送る。
     let emit_status = make_status_emitter(app);
 
-    let mut schemas = tools::schemas_for_text("");
+    let mut schemas = tools::schemas_for_conversation(cfg, "", &[]).map_err(anyhow::Error::msg)?;
     let mut last = String::new();
     // 事前Web検索で得た参照元URL（最終回答の末尾に「参考:」として添える）。
     let mut sources: Vec<SourceLink> = Vec::new();
@@ -1233,7 +1246,8 @@ async fn run_scoped(
             .collect();
         let earlier_assistant_texts: Vec<&str> =
             earlier_assistant_owned.iter().map(String::as_str).collect();
-        schemas = tools::schemas_for_conversation(cfg, &user_text, &earlier_user_texts);
+        schemas = tools::schemas_for_conversation(cfg, &user_text, &earlier_user_texts)
+            .map_err(anyhow::Error::msg)?;
         // 画像付き依頼は本文だけでは意図を決められない。先回り実行や定型回答を
         // 適用せず、画像と依頼をモデルへ渡してから通常のツール選択へ進む。
         let has_images = messages[user_index]
@@ -1314,7 +1328,7 @@ async fn run_scoped(
     }
 
     // 計画ステップ: 複雑クエリをサブタスクに分解し、進捗としてだけ表示する。
-    // （PICOAGENT_PLANNING_ENABLED=true かつ複雑クエリのみ。設定OFF・単純質問はスキップ）。
+    // スーパーエージェントの複雑な質問だけで行う。単独の旧計画設定は使わない。
     if super_agent {
         emit_status("計画を立てています…".to_string());
     }
@@ -1322,11 +1336,11 @@ async fn run_scoped(
         feedback::planning_step(provider, cfg, model, &original_user_text),
         cancel,
     )
-    .await
-    .flatten();
+    .await;
     if cancelled() {
         return direct_answer(messages, CANCEL_MESSAGE.to_string());
     }
+    let plan = plan.ok_or_else(|| anyhow::anyhow!(CANCEL_MESSAGE))??;
     if let Some(plan) = plan {
         if super_agent {
             // 計画本文をそのままフロントへ送り、実行前にステップ一覧を見せる。
@@ -1605,7 +1619,7 @@ async fn run_scoped(
                 };
                 // 自己評価が回答を作り直しても、「これから検索する」という約束や出典欠落を
                 // 最終表示へ戻さない。取得済み見出しによる救済もここより前では書き換えられる。
-                let improved = finalize_sourced_answer(improved, &sources);
+                let improved = finalize_sourced_answer(improved?, &sources);
                 let safe = make_safe_final_answer(
                     provider,
                     cfg,
@@ -1646,7 +1660,7 @@ async fn run_scoped(
     else {
         return direct_answer(messages, CANCEL_MESSAGE.to_string());
     };
-    let improved = finalize_sourced_answer(improved, &sources);
+    let improved = finalize_sourced_answer(improved?, &sources);
     let safe = make_safe_final_answer(
         provider,
         cfg,
@@ -1664,6 +1678,11 @@ async fn run_scoped(
     publish_fn(safe.clone());
     Ok(safe)
 }
+
+/// 登録済み文脈はプロセス内で共有するため、触るテスト同士を直列化する。
+/// 本体の途中へ置くと共通ガードの本体走査が途中で終わるため、テストの直前に置く。
+#[cfg(test)]
+pub(crate) static PRIVATE_CONTEXT_TEST_LOCK: Mutex<()> = Mutex::new(());
 
 #[cfg(test)]
 mod tests {
@@ -1702,6 +1721,216 @@ mod tests {
 
     struct SlowProvider;
 
+    // 同じ組み立てで状態・待機・通信失敗を切り替え、再試行の境界を確かめる。
+    struct RetryProvider {
+        status: Option<u16>,
+        retry_after: Option<std::time::Duration>,
+        calls: std::sync::atomic::AtomicUsize,
+        transport_url: Option<String>,
+    }
+
+    impl RetryProvider {
+        fn error(&self) -> anyhow::Error {
+            match self.status {
+                Some(status) => anyhow::Error::new(crate::providers::ProviderHttpError {
+                    service: "試験".into(),
+                    endpoint: "生成".into(),
+                    status,
+                    retry_after: self.retry_after,
+                    body: "context4096 / 4000ms / model-400b / 401".into(),
+                })
+                .context("呼び出しの文脈"),
+                None => anyhow::anyhow!("キー未設定 context4096 / 4000ms / 401"),
+            }
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl crate::providers::Provider for RetryProvider {
+        fn id(&self) -> &'static str {
+            "retry-test"
+        }
+        fn label(&self) -> &'static str {
+            "再試行テスト"
+        }
+        fn default_model(&self, _cfg: &crate::config::Config) -> String {
+            "test".into()
+        }
+        async fn list_models(&self, _cfg: &crate::config::Config) -> anyhow::Result<Vec<String>> {
+            Ok(vec![])
+        }
+        async fn is_up(&self, _cfg: &crate::config::Config) -> Result<bool, String> {
+            Ok(true)
+        }
+        async fn chat(
+            &self,
+            _cfg: &crate::config::Config,
+            _model: &str,
+            _messages: &[Message],
+            _tools: &[serde_json::Value],
+        ) -> anyhow::Result<Message> {
+            self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            if let Some(url) = &self.transport_url {
+                crate::tools::http::client()
+                    .map_err(anyhow::Error::msg)?
+                    .get(url)
+                    .send()
+                    .await
+                    .map_err(crate::providers::http_error::send_error)?;
+            }
+            Err(self.error())
+        }
+    }
+
+    #[test]
+    fn 再試行は本文の数字ではなく文脈付き_http状態で決める() {
+        use std::time::Duration;
+        for status in [400, 401, 403, 404, 422, 501, 500, 408, 409, 425, 429] {
+            let provider = RetryProvider {
+                status: Some(status),
+                retry_after: None,
+                calls: 0.into(),
+                transport_url: None,
+            };
+            let expected = matches!(status, 408 | 409 | 425 | 429 | 500..=599);
+            assert_eq!(
+                super::provider_retry_delay(&provider.error(), 0),
+                expected.then_some(Duration::from_secs(1))
+            );
+            assert_eq!(
+                super::provider_retry_delay(&provider.error(), 1),
+                expected.then_some(Duration::from_secs(2))
+            );
+        }
+        let provider = RetryProvider {
+            status: None,
+            retry_after: None,
+            calls: 0.into(),
+            transport_url: None,
+        };
+        assert_eq!(super::provider_retry_delay(&provider.error(), 0), None);
+    }
+
+    #[test]
+    fn http再試行は三回までで待機指定を守り恒久的失敗は一回で止まる() {
+        use std::time::{Duration, Instant};
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        for (status, expected) in [(500, 3), (429, 3), (401, 1), (422, 1)] {
+            let provider = RetryProvider {
+                status: Some(status),
+                retry_after: Some(Duration::from_millis(30)),
+                calls: 0.into(),
+                transport_url: None,
+            };
+            let started = Instant::now();
+            let error = runtime
+                .block_on(super::chat_with_retry(
+                    &provider,
+                    &crate::config::Config::new(),
+                    "test",
+                    &[],
+                    &[],
+                    std::sync::Arc::new(|_| {}),
+                    (None, None),
+                ))
+                .unwrap_err();
+            assert!(error
+                .downcast_ref::<crate::providers::ProviderHttpError>()
+                .is_some());
+            assert_eq!(
+                provider.calls.load(std::sync::atomic::Ordering::SeqCst),
+                expected
+            );
+            if expected == 3 {
+                assert!(started.elapsed() >= Duration::from_millis(60));
+            }
+        }
+        let provider = RetryProvider {
+            status: Some(429),
+            retry_after: Some(Duration::from_secs(90)),
+            calls: 0.into(),
+            transport_url: None,
+        };
+        assert_eq!(
+            super::provider_retry_delay(&provider.error(), 0),
+            Some(Duration::from_secs(30))
+        );
+    }
+
+    #[test]
+    fn 設定不正は一回で止め通信の切断だけ一秒二秒で三回試す() {
+        use crate::providers::compatible::test_server::Server;
+        use std::time::{Duration, Instant};
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let server = Server::raw(Vec::new());
+        for (transport_url, expected) in [
+            (None, 1),
+            (Some(server.url.clone()), 3),
+            (Some("URLではない".into()), 1),
+        ] {
+            let provider = RetryProvider {
+                status: None,
+                retry_after: None,
+                calls: 0.into(),
+                transport_url,
+            };
+            let started = Instant::now();
+            let result = runtime.block_on(super::chat_with_retry(
+                &provider,
+                &crate::config::Config::new(),
+                "test",
+                &[],
+                &[],
+                std::sync::Arc::new(|_| {}),
+                (None, None),
+            ));
+            assert!(result.is_err());
+            assert_eq!(
+                provider.calls.load(std::sync::atomic::Ordering::SeqCst),
+                expected
+            );
+            if expected == 3 {
+                assert!(started.elapsed() >= Duration::from_secs(3));
+            }
+        }
+        assert_eq!(server.finish().len(), 3);
+    }
+
+    #[test]
+    fn 再試行待機中の停止は次の_http呼び出しへ進まない() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::Arc;
+        let cancel = Arc::new(AtomicBool::new(false));
+        let request = Arc::clone(&cancel);
+        let worker = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            request.store(true, Ordering::Relaxed);
+        });
+        let provider = RetryProvider {
+            status: Some(429),
+            retry_after: Some(std::time::Duration::from_secs(30)),
+            calls: 0.into(),
+            transport_url: None,
+        };
+        let started = std::time::Instant::now();
+        let error = tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(super::chat_with_retry(
+                &provider,
+                &crate::config::Config::new(),
+                "test",
+                &[],
+                &[],
+                Arc::new(|_| {}),
+                (None, Some(cancel.as_ref())),
+            ))
+            .unwrap_err();
+        worker.join().unwrap();
+        assert_eq!(error.to_string(), super::CANCEL_MESSAGE);
+        assert_eq!(provider.calls.load(Ordering::SeqCst), 1);
+        assert!(started.elapsed() < std::time::Duration::from_secs(2));
+    }
+
     struct ImageRequestProvider(std::sync::atomic::AtomicUsize);
 
     #[async_trait::async_trait]
@@ -1718,8 +1947,8 @@ mod tests {
         async fn list_models(&self, _cfg: &crate::config::Config) -> anyhow::Result<Vec<String>> {
             Ok(vec![])
         }
-        async fn is_up(&self, _cfg: &crate::config::Config) -> bool {
-            true
+        async fn is_up(&self, _cfg: &crate::config::Config) -> Result<bool, String> {
+            Ok(true)
         }
         async fn chat(
             &self,
@@ -1750,9 +1979,24 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn スーパーエージェント上限を呼出最小へ黙って引き上げない() {
+        let cfg = crate::config::Config::new();
+        cfg.set("PICOAGENT_SUPER_AGENT", "true");
+        cfg.set("PICOAGENT_SUPER_AGENT_MAX_STEPS", "12");
+        let provider = ImageRequestProvider(std::sync::atomic::AtomicUsize::new(0));
+        let mut messages = vec![Message::new("user", "画像を説明して")];
+        let error = super::run_scoped(&cfg, &provider, "test", &mut messages, 20, None, None)
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("PICOAGENT_SUPER_AGENT_MAX_STEPS"));
+        assert_eq!(provider.0.load(std::sync::atomic::Ordering::SeqCst), 0);
+        assert_eq!(messages.len(), 1);
+    }
+
+    #[tokio::test]
     async fn 画像付き最新依頼は挨拶や先回り検索より先にモデルへ渡す() {
         let cfg = crate::config::Config::new();
-        cfg.set("PICOAGENT_PLANNING_ENABLED", "false");
         cfg.set("PICOAGENT_SELF_EVAL_ENABLED", "false");
         for text in [
             "こんにちは",
@@ -1770,7 +2014,6 @@ mod tests {
     #[tokio::test]
     async fn 過去の画像は最新のテキスト依頼の定型処理を妨げない() {
         let cfg = crate::config::Config::new();
-        cfg.set("PICOAGENT_PLANNING_ENABLED", "false");
         cfg.set("PICOAGENT_SELF_EVAL_ENABLED", "false");
         let provider = ImageRequestProvider(std::sync::atomic::AtomicUsize::new(0));
         let mut messages = vec![
@@ -1799,8 +2042,8 @@ mod tests {
         async fn list_models(&self, _cfg: &crate::config::Config) -> anyhow::Result<Vec<String>> {
             Ok(vec![])
         }
-        async fn is_up(&self, _cfg: &crate::config::Config) -> bool {
-            true
+        async fn is_up(&self, _cfg: &crate::config::Config) -> Result<bool, String> {
+            Ok(true)
         }
         async fn chat(
             &self,
@@ -1819,7 +2062,6 @@ mod tests {
         use std::sync::atomic::{AtomicBool, Ordering};
         use std::sync::Arc;
         let cfg = crate::config::Config::new();
-        cfg.set("PICOAGENT_PLANNING_ENABLED", "false");
         cfg.set("PICOAGENT_SELF_EVAL_ENABLED", "false");
         let cancel = Arc::new(AtomicBool::new(false));
         let request = Arc::clone(&cancel);

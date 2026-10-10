@@ -88,21 +88,12 @@ impl Tool for ClipboardTextTool {
     }
 
     fn config_schema(&self) -> Vec<Field> {
-        vec![Field::new(
-            "PICOAGENT_CLIPBOARD_MAX_CHARS",
-            "クリップボード取得の最大文字数（500〜8000）",
-            "text",
-            "3000",
-        )]
+        vec![Field::int(&crate::config::ints::CLIPBOARD_MAX_CHARS)]
     }
 
     async fn run(&self, cfg: &Config, args: Value) -> String {
-        let max_chars = cfg
-            .get("PICOAGENT_CLIPBOARD_MAX_CHARS", "3000")
-            .parse::<usize>()
-            .ok()
-            .map(|value| value.clamp(500, 8000))
-            .unwrap_or(3000);
+        let max_chars =
+            crate::tool_try!(cfg.int(&crate::config::ints::CLIPBOARD_MAX_CHARS)) as usize;
         let mode = args
             .get("mode")
             .and_then(Value::as_str)

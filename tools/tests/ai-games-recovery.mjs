@@ -8,9 +8,11 @@ import test from "node:test";
 import { pathToFileURL } from "node:url";
 
 const appDir = new URL("../../ui/app/", import.meta.url);
-const source = await readFile(new URL("game.js", appDir), "utf8");
+const source = (await readFile(new URL("game.js", appDir), "utf8")).replace(/\r\n/g, "\n");
 const exposed = source
   .replace('from "./bridge.js"', `from "${new URL("bridge.js", appDir).href}"`)
+  .replace('from "./ui-store.js"', `from "${new URL("ui-store.js", appDir).href}"`)
+  .replace('from "./toast.js"', `from "${new URL("toast.js", appDir).href}"`)
   .replace('from "./util.js"', `from "${new URL("util.js", appDir).href}"`)
   .replace("  return { open, close };\n}", "  return { open, close, startSession, submitAnswer, state: () => session };\n}");
 assert.notEqual(exposed, source, "ゲームモジュールの写しを作れません");
@@ -42,7 +44,7 @@ globalThis.picoagent = {
 globalThis.setInterval = callback => { const id = ++timerSequence; timers.set(id, callback); return id; };
 globalThis.clearInterval = id => { timers.delete(id); };
 globalThis.document = { getElementById: element, addEventListener() {} };
-globalThis.localStorage = { getItem: () => "off", setItem() {} };
+globalThis.localStorage = { getItem: key => key.includes("sound") ? "off" : null, setItem() {} };
 const directory = await mkdtemp(join(tmpdir(), "pico-game-"));
 const copy = join(directory, "game.js");
 await writeFile(copy, exposed);

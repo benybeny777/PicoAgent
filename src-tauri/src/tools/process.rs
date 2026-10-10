@@ -22,6 +22,64 @@ use tokio::process::{Child, Command};
 const MAX_TIMEOUT_SECS: u64 = 7200;
 const MAX_CAPTURE_BYTES: usize = 1024 * 1024;
 
+/// OSへ存在確認だけを問い合わせる。確認不能を不存在として資産削除へ進めない。
+pub(crate) fn process_alive(pid: u32) -> anyhow::Result<bool> {
+    anyhow::ensure!(pid > 0, "確認対象のプロセスIDが不正です");
+    #[cfg(windows)]
+    {
+        use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
+        use windows_sys::Win32::{
+            Foundation::STILL_ACTIVE,
+            System::Threading::{
+                GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+            },
+        };
+        // OSから取得したハンドルだけをOwnedHandleへ移し、成功・失敗の両方で閉じる。
+        let raw = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
+        if raw.is_null() {
+            return process_open_error(pid, std::io::Error::last_os_error());
+        }
+        let handle = unsafe { OwnedHandle::from_raw_handle(raw) };
+        let mut code = 0;
+        if unsafe { GetExitCodeProcess(handle.as_raw_handle(), &mut code) } == 0 {
+            return Err(anyhow::anyhow!(
+                "プロセス {pid} の実行状態を確認できません: {}",
+                std::io::Error::last_os_error()
+            ));
+        }
+        Ok(code == STILL_ACTIVE as u32)
+    }
+    #[cfg(unix)]
+    {
+        let pid_os = i32::try_from(pid)
+            .map_err(|error| anyhow::anyhow!("確認対象のプロセスIDが不正です: {error}"))?;
+        // kill 0は確認専用。別プロセスへシグナルを送らない。
+        if unsafe { libc::kill(pid_os, 0) } == 0 {
+            return Ok(true);
+        }
+        let error = std::io::Error::last_os_error();
+        match error.raw_os_error() {
+            Some(libc::ESRCH) => Ok(false),
+            Some(libc::EPERM) => Ok(true),
+            _ => Err(anyhow::anyhow!(
+                "プロセス {pid} の実行状態を確認できません: {error}"
+            )),
+        }
+    }
+}
+
+#[cfg(windows)]
+fn process_open_error(pid: u32, error: std::io::Error) -> anyhow::Result<bool> {
+    use windows_sys::Win32::Foundation::ERROR_INVALID_PARAMETER;
+    if error.raw_os_error() == Some(ERROR_INVALID_PARAMETER as i32) {
+        Ok(false)
+    } else {
+        Err(anyhow::anyhow!(
+            "プロセス {pid} の実行状態を確認できません: {error}"
+        ))
+    }
+}
+
 /// 物理削除コマンドかどうか。
 ///
 /// スキル経由のファイル削除は必ず OS のゴミ箱へ移す決まりで、`rm` / `del` /
@@ -206,7 +264,7 @@ fn resolve_executable_in(
     None
 }
 
-fn is_executable_file(path: &Path) -> bool {
+pub(super) fn is_executable_file(path: &Path) -> bool {
     let Ok(metadata) = path.metadata() else {
         return false;
     };
@@ -546,8 +604,60 @@ async fn read_capture<R: tokio::io::AsyncRead + Unpin>(
 
 #[cfg(test)]
 mod tests {
-    use super::{command, output, output_or_install_hint};
+    #[cfg(windows)]
+    use super::process_open_error;
+    use super::{command, command_sync, output, output_or_install_hint, process_alive};
     use std::process::Stdio;
+
+    #[test]
+    fn 実プロセスの生存と終了を確認コマンドなしで問い合わせる() {
+        assert!(process_alive(std::process::id()).unwrap());
+        assert!(process_alive(0).is_err());
+        #[cfg(windows)]
+        let mut command = command_sync("powershell.exe");
+        #[cfg(windows)]
+        command.args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            "Start-Sleep -Seconds 30",
+        ]);
+        #[cfg(unix)]
+        let mut command = command_sync("sleep");
+        #[cfg(unix)]
+        command.arg("30");
+        let mut child = command.spawn().unwrap();
+        let pid = child.id();
+        let alive = process_alive(pid);
+        let stopped = child.kill();
+        let waited = child.wait();
+        assert!(stopped.is_ok(), "検査用の子を停止できません: {stopped:?}");
+        assert!(waited.is_ok(), "検査用の子を回収できません: {waited:?}");
+        assert!(alive.unwrap());
+        assert!(!process_alive(pid).unwrap());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windowsの不存在だけをfalseにして権限不足と確認不能を理由付きで返す() {
+        use windows_sys::Win32::Foundation::{ERROR_ACCESS_DENIED, ERROR_INVALID_PARAMETER};
+        assert!(!process_open_error(
+            123,
+            std::io::Error::from_raw_os_error(ERROR_INVALID_PARAMETER as i32)
+        )
+        .unwrap());
+        for code in [ERROR_ACCESS_DENIED as i32, 1] {
+            let error = process_open_error(123, std::io::Error::from_raw_os_error(code))
+                .unwrap_err()
+                .to_string();
+            assert!(
+                error.contains("プロセス 123")
+                    && error.contains(&std::io::Error::from_raw_os_error(code).to_string()),
+                "{error}"
+            );
+        }
+        assert!(!process_alive(u32::MAX).unwrap());
+    }
 
     #[test]
     fn 既定設定で実行し出力を取れる() {
@@ -804,8 +914,12 @@ mod tests {
                 panic!("親子PIDを書いた検査ファイルを10秒以内に読み切れませんでした: {last_error}");
             }
             let mut alive = ids.clone();
+            let mut query_errors = Vec::new();
             for _ in 0..120 {
-                alive.retain(|pid| windows_process_exists(*pid));
+                alive.retain(|pid| match process_alive(*pid) {
+                    Ok(exists) => exists,
+                    Err(error) => { query_errors.push(error.to_string()); true }
+                });
                 if alive.is_empty() {
                     break;
                 }
@@ -818,20 +932,8 @@ mod tests {
                     .output();
             }
             let _ = std::fs::remove_file(&marker);
-            assert!(alive.is_empty(), "中断後も残った検査プロセス: {alive:?}");
+            assert!(alive.is_empty(), "中断後も残った検査プロセス: {alive:?}、確認失敗: {query_errors:?}");
         });
-    }
-
-    #[cfg(windows)]
-    fn windows_process_exists(pid: u32) -> bool {
-        let filter = format!("PID eq {pid}");
-        let Ok(result) = std::process::Command::new("tasklist.exe")
-            .args(["/FI", &filter, "/FO", "CSV", "/NH"])
-            .output()
-        else {
-            return true;
-        };
-        String::from_utf8_lossy(&result.stdout).contains(&format!("\"{pid}\""))
     }
 }
 
@@ -958,29 +1060,27 @@ mod guard {
         );
     }
 
-    /// `PICOAGENT_COMMAND_ALLOWLIST` でユーザー / AI 指定のコマンドを実行する経路は、
-    /// 物理削除の拒否（`process::is_physical_delete`）も必ず通すこと。
-    ///
-    /// run_command だけがこの判定を持っていて、同じ allowlist で動くスケジューラには
-    /// 無かった。許可コマンドに `powershell` があれば、予約実行から `Remove-Item` を
-    /// 通せてしまう状態だった。
     #[test]
-    fn 許可コマンド実行経路は物理削除を拒否する() {
-        let mut violations = Vec::new();
-        for source in guard_scan::all_sources() {
-            if source.name == "process.rs" {
-                continue; // 判定の定義元
-            }
-            let body = source.body();
-            if body.contains("PICOAGENT_COMMAND_ALLOWLIST") && !body.contains("is_physical_delete")
-            {
-                violations.push(source.path.display().to_string());
-            }
-        }
+    fn 許可リストは共通判定だけが読み取る() {
+        let violations: Vec<_> = guard_scan::all_sources()
+            .into_iter()
+            .filter(|source| source.name != "process.rs")
+            .filter(|source| {
+                let body = source.body();
+                body.contains(r#"get("PICOAGENT_COMMAND_ALLOWLIST""#)
+            })
+            .map(|source| source.path.clone())
+            .collect();
         assert!(
             violations.is_empty(),
-            "許可コマンドを実行する経路が物理削除を拒否していません。`process::is_physical_delete()` を通してください: {violations:?}"
+            "許可リストはcommand_policyから読み取ってください: {violations:?}"
         );
+        for body in [
+            include_str!("../../../skills/run_command/mod.rs"),
+            include_str!("../scheduler.rs"),
+        ] {
+            assert!(body.contains("command_policy::check"));
+        }
     }
 
     /// 停止・回収・出力確定の失敗を捨てると、プロセスやファイルが残ったまま成功扱いになる。
@@ -1015,5 +1115,119 @@ mod guard {
             "リソース解放の失敗は伝播または診断出力してください:\n{}",
             violations.join("\n")
         );
+    }
+}
+/// 対話・予約・承認後の実行が共有するコマンド許可の正本。
+pub mod command_policy {
+    use crate::config::Config;
+    pub const DEFAULT_ALLOWLIST: &str = "git status,git diff,npm test,cargo test";
+    const KEY: &str = "PICOAGENT_COMMAND_ALLOWLIST";
+
+    pub fn tokens(program: &str, args: &[String]) -> Vec<String> {
+        std::iter::once(program.to_string())
+            .chain(args.iter().cloned())
+            .collect()
+    }
+
+    pub fn validate_args(args: &[String]) -> Result<(), String> {
+        if args.len() > 32 {
+            return Err("args は32個以内で指定してください".into());
+        }
+        if args
+            .iter()
+            .any(|arg| arg.chars().count() > 500 || arg.contains('\0'))
+        {
+            return Err("各 arg は500文字以内で、NULを含めず指定してください".into());
+        }
+        Ok(())
+    }
+
+    /// 承認でも突破できない条件。allowlistへの登録前と承認後にも適用する。
+    pub fn validate(program: &str, args: &[String]) -> Result<(), String> {
+        if program.trim().is_empty() || program.contains('\0') {
+            return Err("program が不正です".into());
+        }
+        validate_args(args)?;
+        if super::is_physical_delete(program, args) {
+            return Err(super::physical_delete_error()
+                .trim_start_matches("エラー: ")
+                .to_string());
+        }
+        Ok(())
+    }
+
+    pub fn check(cfg: &Config, program: &str, args: &[String]) -> Result<(), String> {
+        validate(program, args)?;
+        let requested = tokens(program, args);
+        if cfg.get(KEY, DEFAULT_ALLOWLIST).split(',').any(|entry| {
+            entry
+                .split_whitespace()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                == requested
+        }) {
+            Ok(())
+        } else {
+            Err(format!(
+                "許可されていないコマンドです: {}",
+                requested.join(" ")
+            ))
+        }
+    }
+
+    /// 永続許可の保存値を作る。呼び出し元は状態ロック下で設定保存まで済ませる。
+    pub fn approval_patch(
+        cfg: &Config,
+        program: &str,
+        args: &[String],
+    ) -> Result<Option<(String, String)>, String> {
+        validate(program, args)?;
+        if check(cfg, program, args).is_ok() {
+            return Ok(None);
+        }
+        let entry = tokens(program, args).join(" ");
+        // 保存形式が空白区切りなので、表せない引数を誤った許可へ書き換えない。
+        if tokens(program, args)
+            .iter()
+            .any(|token| token.contains(',') || token.chars().any(char::is_whitespace))
+        {
+            return Err(
+                "空白・カンマを含むコマンドは永続許可できません。今回だけ許可してください".into(),
+            );
+        }
+        let current = cfg.get(KEY, DEFAULT_ALLOWLIST);
+        let next = if current.trim().is_empty() {
+            entry
+        } else {
+            format!("{},{entry}", current.trim())
+        };
+        Ok(Some((KEY.into(), next)))
+    }
+
+    #[cfg(test)]
+    mod tests {
+        #[test]
+        fn 許可表と承認不能条件を共通で判定する() {
+            let cfg = crate::config::Config::new();
+            cfg.set(
+                "PICOAGENT_COMMAND_ALLOWLIST",
+                "git status,rm item,powershell -Command Remove-Item",
+            );
+            for (program, args, expected) in [
+                ("git", vec!["status"], true),
+                ("git", vec!["diff"], false),
+                ("rm", vec!["item"], false),
+                ("powershell", vec!["-Command", "Remove-Item"], false),
+            ] {
+                let args: Vec<String> = args.into_iter().map(str::to_string).collect();
+                assert_eq!(super::check(&cfg, program, &args).is_ok(), expected);
+                if super::super::is_physical_delete(program, &args) {
+                    assert!(super::approval_patch(&cfg, program, &args).is_err());
+                }
+            }
+            assert!(super::validate("git", &vec!["a".into(); 33]).is_err());
+            assert!(super::validate("git", &["a".repeat(501)]).is_err());
+            assert!(super::approval_patch(&cfg, "git", &["a b".into()]).is_err());
+        }
     }
 }

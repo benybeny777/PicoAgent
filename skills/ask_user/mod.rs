@@ -85,7 +85,7 @@ fn parse_options(args: &Value) -> Result<Vec<QuestionOption>, String> {
 fn marker(pending: &PendingQuestion) -> String {
     match serde_json::to_string(pending) {
         Ok(encoded) => format!("{MARKER}{encoded}"),
-        // フォールバック許可: 直列化に失敗したら質問文をそのまま返す（黙って質問を落とさない）。
+        // 直列化に失敗したら質問文をそのまま返す（黙って質問を落とさない）。
         Err(error) => format!("エラー: 質問を組み立てられませんでした: {error}"),
     }
 }

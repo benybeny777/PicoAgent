@@ -50,12 +50,7 @@ impl Tool for DiscordTool {
                 "password",
                 "https://discord.com/api/webhooks/...",
             ),
-            Field::new(
-                "PICOAGENT_DISCORD_TIMEOUT_SECS",
-                "Discord API 待ち時間（秒、3〜60）",
-                "text",
-                "15",
-            ),
+            Field::int(&crate::config::ints::DISCORD_TIMEOUT_SECS),
         ]
     }
 
@@ -78,12 +73,8 @@ impl Tool for DiscordTool {
                 MAX_CONTENT_CHARS
             );
         }
-        let timeout_secs = cfg
-            .get("PICOAGENT_DISCORD_TIMEOUT_SECS", "15")
-            .parse::<u64>()
-            .ok()
-            .filter(|value| (3..=60).contains(value))
-            .unwrap_or(15);
+        let timeout_secs =
+            crate::tool_try!(cfg.int(&crate::config::ints::DISCORD_TIMEOUT_SECS)) as u64;
         let mut payload = json!({ "content": content });
         if let Some(username) = args
             .get("username")
@@ -105,11 +96,13 @@ impl Tool for DiscordTool {
             Ok(response) if response.status().is_success() => {
                 "OK: Discord へ送信しました。".to_string()
             }
-            Ok(response) => format!(
-                "エラー: Discord Webhook が HTTP {} を返しました。",
-                response.status()
+            Ok(response) => {
+                crate::tools::http::service_reply(cfg, Ok(response), "Discord Webhook").await
+            }
+            Err(error) => format!(
+                "エラー: Discord Webhook への接続に失敗しました: {}",
+                error.without_url()
             ),
-            Err(error) => format!("エラー: Discord Webhook への接続に失敗しました: {}", error),
         }
     }
 }

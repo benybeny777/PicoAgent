@@ -18,10 +18,8 @@ use super::{Tool, ToolReg};
 use crate::config::Config;
 use crate::message::Field;
 
-const MAX_ARGS: usize = 32;
-const MAX_ARG_CHARS: usize = 500;
 pub const MAX_OUTPUT_BYTES: usize = 32 * 1024;
-const DEFAULT_ALLOWLIST: &str = "git status,git diff,npm test,cargo test";
+use crate::tools::process::command_policy::{self, DEFAULT_ALLOWLIST};
 const APPROVAL_MARKER: &str = "__PICOAGENT_COMMAND_APPROVAL__";
 
 pub struct RunCommandTool;
@@ -77,59 +75,24 @@ fn parse_args(args: &Value) -> Result<Vec<String>, String> {
     let array = values
         .as_array()
         .ok_or_else(|| "args は文字列配列で指定してください。".to_string())?;
-    if array.len() > MAX_ARGS {
-        return Err(format!("args は {} 個以内で指定してください。", MAX_ARGS));
-    }
     let mut out = Vec::new();
     for value in array {
         let arg = value
             .as_str()
             .ok_or_else(|| "args は文字列配列で指定してください。".to_string())?;
-        if arg.chars().count() > MAX_ARG_CHARS {
-            return Err(format!(
-                "各 arg は {} 文字以内で指定してください。",
-                MAX_ARG_CHARS
-            ));
-        }
         out.push(arg.to_string());
     }
+    command_policy::validate_args(&out)?;
     Ok(out)
 }
 
+#[cfg(test)]
 fn command_tokens(program: &str, args: &[String]) -> Vec<String> {
-    let mut tokens = Vec::with_capacity(args.len() + 1);
-    tokens.push(program.to_string());
-    tokens.extend(args.iter().cloned());
-    tokens
+    command_policy::tokens(program, args)
 }
-
-fn command_entry(program: &str, args: &[String]) -> String {
-    command_tokens(program, args).join(" ")
-}
-
-fn allowlist_entries(cfg: &Config) -> Vec<Vec<String>> {
-    cfg.get("PICOAGENT_COMMAND_ALLOWLIST", DEFAULT_ALLOWLIST)
-        .split(',')
-        .filter_map(|entry| {
-            let tokens: Vec<String> = entry
-                .split_whitespace()
-                .filter(|token| !token.is_empty())
-                .map(ToString::to_string)
-                .collect();
-            if tokens.is_empty() {
-                None
-            } else {
-                Some(tokens)
-            }
-        })
-        .collect()
-}
-
 fn allowed(cfg: &Config, program: &str, args: &[String]) -> bool {
-    let tokens = command_tokens(program, args);
-    allowlist_entries(cfg).iter().any(|entry| entry == &tokens)
+    command_policy::check(cfg, program, args).is_ok()
 }
-
 fn approval_token() -> String {
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -251,12 +214,7 @@ impl Tool for RunCommandTool {
                 "textarea",
                 DEFAULT_ALLOWLIST,
             ),
-            Field::new(
-                "PICOAGENT_COMMAND_TIMEOUT_SECS",
-                "run_command の既定タイムアウト秒（1〜120）",
-                "text",
-                "30",
-            ),
+            Field::int(&crate::config::ints::COMMAND_TIMEOUT_SECS),
         ]
     }
 
@@ -273,8 +231,8 @@ impl Tool for RunCommandTool {
             Ok(parsed_args) => parsed_args,
             Err(error) => return format!("エラー: {}", error),
         };
-        if crate::tools::process::is_physical_delete(program, &parsed_args) {
-            return crate::tools::process::physical_delete_error();
+        if let Err(error) = command_policy::validate(program, &parsed_args) {
+            return format!("エラー: {error}");
         }
         let base = command_root(cfg);
         let requested_cwd = args.get("cwd").and_then(Value::as_str).unwrap_or(".");
@@ -285,12 +243,8 @@ impl Tool for RunCommandTool {
                 cwd.display()
             );
         }
-        let default_timeout = cfg
-            .get("PICOAGENT_COMMAND_TIMEOUT_SECS", "30")
-            .parse::<u64>()
-            .ok()
-            .filter(|value| (1..=120).contains(value))
-            .unwrap_or(30);
+        let default_timeout =
+            crate::tool_try!(cfg.int(&crate::config::ints::COMMAND_TIMEOUT_SECS)) as u64;
         let timeout_secs = args
             .get("timeout_secs")
             .and_then(Value::as_u64)
@@ -340,8 +294,8 @@ impl Tool for RunCommandTool {
 
 pub async fn execute_pending(pending: &PendingCommandApproval) -> String {
     let cwd = PathBuf::from(&pending.cwd);
-    if crate::tools::process::is_physical_delete(&pending.program, &pending.args) {
-        return crate::tools::process::physical_delete_error();
+    if let Err(error) = command_policy::validate(&pending.program, &pending.args) {
+        return format!("エラー: {error}");
     }
     if is_protected_edit_path(&cwd) {
         return format!(
@@ -357,8 +311,8 @@ pub async fn execute_with_persistent_approval(
     pending: &PendingCommandApproval,
 ) -> String {
     let cwd = PathBuf::from(&pending.cwd);
-    if crate::tools::process::is_physical_delete(&pending.program, &pending.args) {
-        return crate::tools::process::physical_delete_error();
+    if let Err(error) = command_policy::validate(&pending.program, &pending.args) {
+        return format!("エラー: {error}");
     }
     if is_protected_edit_path(&cwd) {
         return format!(
@@ -367,21 +321,19 @@ pub async fn execute_with_persistent_approval(
         );
     }
 
+    let state_lock = crate::store::lock_state("command-policy");
     let mut patch = Map::new();
     let mut saved = Vec::new();
-    if !allowed(cfg, &pending.program, &pending.args) {
-        let entry = command_entry(&pending.program, &pending.args);
-        let current = cfg.get("PICOAGENT_COMMAND_ALLOWLIST", DEFAULT_ALLOWLIST);
-        let next = if current.trim().is_empty() {
-            entry.clone()
-        } else {
-            format!("{},{}", current.trim(), entry)
-        };
-        patch.insert(
-            "PICOAGENT_COMMAND_ALLOWLIST".to_string(),
-            Value::String(next),
-        );
-        saved.push(format!("コマンド `{entry}`"));
+    match command_policy::approval_patch(cfg, &pending.program, &pending.args) {
+        Ok(Some((key, value))) => {
+            patch.insert(key, Value::String(value));
+            saved.push(format!(
+                "コマンド `{}`",
+                command_policy::tokens(&pending.program, &pending.args).join(" ")
+            ));
+        }
+        Ok(None) => {}
+        Err(error) => return format!("エラー: {error}"),
     }
     if bounded_cwd(cfg, Some(&pending.cwd)).is_err() {
         let entry = cwd.to_string_lossy().to_string();
@@ -406,6 +358,7 @@ pub async fn execute_with_persistent_approval(
         }
     }
 
+    drop(state_lock);
     let mut result = if saved.is_empty() {
         "永続許可は既に保存済みでした。\n".to_string()
     } else {
@@ -421,8 +374,8 @@ async fn execute_approved(
     cwd: &Path,
     timeout_secs: u64,
 ) -> String {
-    if crate::tools::process::is_physical_delete(program, parsed_args) {
-        return crate::tools::process::physical_delete_error();
+    if let Err(error) = command_policy::validate(program, parsed_args) {
+        return format!("エラー: {error}");
     }
     let mut command = crate::tools::process::command(program);
     command.args(parsed_args).current_dir(cwd);
@@ -453,6 +406,45 @@ mod tests {
     use super::{allowed, bounded_cwd, command_tokens};
     use crate::config::Config;
     use crate::tools::process::is_physical_delete;
+
+    #[tokio::test]
+    async fn 承認後も削除と入力上限を突破できず設定を変更しない() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("keep.txt");
+        std::fs::write(&target, "保持").unwrap();
+        let cfg = Config::new();
+        cfg.set("PICOAGENT_COMMAND_ALLOWLIST", "git status");
+        let program = if cfg!(windows) { "cmd" } else { "rm" };
+        let args = if cfg!(windows) {
+            vec![
+                "/c".into(),
+                "del".into(),
+                target.to_string_lossy().into_owned(),
+            ]
+        } else {
+            vec![target.to_string_lossy().into_owned()]
+        };
+        let mut pending = super::PendingCommandApproval {
+            token: "test".into(),
+            program: program.into(),
+            args,
+            cwd: dir.path().to_string_lossy().into_owned(),
+            timeout_secs: 1,
+            reason: "検査".into(),
+        };
+        for invalid in [false, true] {
+            if invalid {
+                pending.program = "git".into();
+                pending.args = vec!["a".into(); 33];
+            }
+            let once = super::execute_pending(&pending).await;
+            let persistent = super::execute_with_persistent_approval(&cfg, &pending).await;
+            assert!(!once.contains("終了コード"));
+            assert!(!persistent.contains("終了コード"));
+            assert_eq!(std::fs::read_to_string(&target).unwrap(), "保持");
+            assert_eq!(cfg.get("PICOAGENT_COMMAND_ALLOWLIST", ""), "git status");
+        }
+    }
 
     #[test]
     fn コマンドトークンを完全一致比較用に組み立てる() {

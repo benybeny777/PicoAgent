@@ -6,7 +6,7 @@
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Stdio};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
 use serde_json::Map;
@@ -17,7 +17,6 @@ use crate::commands::AppState;
 use crate::providers::local;
 
 static VISION_READY: AtomicBool = AtomicBool::new(false);
-static DOWNLOAD_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 /// 画像を扱う全経路で、管理エンジンの起動完了を確かめる。
 pub fn ensure_vision_available(cfg: &crate::config::Config) -> anyhow::Result<()> {
@@ -150,7 +149,7 @@ fn ensure_executable(path: &Path) -> anyhow::Result<()> {
     }
     permissions.set_mode(permissions.mode() | 0o755);
     if let Err(error) = std::fs::set_permissions(path, permissions) {
-        // フォールバック許可: .app 配下など実行時に chmod できない同梱リソースは spawn 側の成否に委ねる。
+        // .app 配下など実行時に chmod できない同梱リソースは spawn 側の成否に委ねる。
         if error.kind() != std::io::ErrorKind::PermissionDenied {
             return Err(error.into());
         }
@@ -197,7 +196,7 @@ pub fn active_model_filename(app: &AppHandle) -> Option<String> {
 
 async fn running_server_model_ids(app: &AppHandle) -> anyhow::Result<Vec<String>> {
     let state = app.state::<AppState>();
-    let port = local::port(&state.config);
+    let port = local::port(&state.config).map_err(anyhow::Error::msg)?;
     let url = format!("http://127.0.0.1:{port}/v1/models");
     let data: Value = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(2))
@@ -275,23 +274,13 @@ async fn preset_model_matches(
 }
 
 async fn model_file_matches(path: &Path, size_bytes: u64, sha256: &str) -> anyhow::Result<bool> {
-    use sha2::{Digest, Sha256};
-    use tokio::io::AsyncReadExt;
-
     if tokio::fs::metadata(path).await?.len() != size_bytes {
         return Ok(false);
     }
-    let mut file = tokio::fs::File::open(path).await?;
-    let mut digest = Sha256::new();
-    let mut buffer = vec![0_u8; 1024 * 1024];
-    loop {
-        let count = file.read(&mut buffer).await?;
-        if count == 0 {
-            break;
-        }
-        digest.update(&buffer[..count]);
-    }
-    Ok(hex::encode(digest.finalize()) == sha256)
+    let path = path.to_owned();
+    let actual =
+        tokio::task::spawn_blocking(move || crate::installer::fs::sha256_file(&path)).await??;
+    Ok(actual.eq_ignore_ascii_case(sha256))
 }
 
 async fn migrate_legacy_model(app: &AppHandle, dest: &PathBuf) -> anyhow::Result<()> {
@@ -415,153 +404,32 @@ async fn cleanup_obsolete_preset_models(app: &AppHandle, dest: &Path) -> anyhow:
     remove_obsolete_model_files(dest, candidates, preset.size_bytes, preset.sha256).await
 }
 
-fn model_download_path(dest: &Path) -> PathBuf {
-    dest.with_extension(format!(
-        "part-{}-{}",
-        std::process::id(),
-        DOWNLOAD_SEQUENCE.fetch_add(1, Ordering::Relaxed)
-    ))
-}
-
-/// 強制終了・停電で残った同じモデルの取得途中ファイルを回収する。
-/// 一時ファイル名は取得ごとに固有なので、次の取得が上書きせず、放置すると数GBずつ溜まる。
-/// 旧形式の `<名前>.part` と、他のプロセスが作った `<名前>.part-<PID>-<連番>` だけを対象にし、
-/// このプロセスの一時ファイルと別モデルのファイルには触れない。
-fn remove_stale_model_parts(dest: &Path, own_pid: u32) -> anyhow::Result<usize> {
-    use anyhow::Context as _;
-    let (Some(dir), Some(stem)) = (
-        dest.parent(),
-        dest.file_stem().and_then(|stem| stem.to_str()),
-    ) else {
-        return Ok(0);
-    };
-    let legacy = format!("{stem}.part");
-    let unique_prefix = format!("{stem}.part-");
-    let own_prefix = format!("{unique_prefix}{own_pid}-");
-    let mut removed = 0;
-    for entry in std::fs::read_dir(dir)? {
-        let entry = entry?;
-        let name = entry.file_name();
-        let Some(name) = name.to_str() else { continue };
-        let stale =
-            name == legacy || (name.starts_with(&unique_prefix) && !name.starts_with(&own_prefix));
-        if stale && entry.file_type()?.is_file() {
-            std::fs::remove_file(entry.path()).with_context(|| {
-                format!(
-                    "取得途中のモデルを削除できません: {}",
-                    entry.path().display()
-                )
-            })?;
-            removed += 1;
-        }
-    }
-    Ok(removed)
-}
-
 // モデルをストリーミングダウンロード（進捗を emit）。
 async fn download_model(app: &AppHandle, dest: &PathBuf) -> anyhow::Result<()> {
-    use sha2::{Digest, Sha256};
-    use tokio::io::AsyncWriteExt;
-
-    if let Some(parent) = dest.parent() {
-        tokio::fs::create_dir_all(parent).await?;
-    }
     let url = model_url(app);
     let expected = local::preset_by_url(&url);
-    set_status(app, json!({ "phase": "download", "percent": 0 }));
-
-    let mut res = crate::tools::http::client().get(&url).send().await?;
-    if !res.status().is_success() {
-        anyhow::bail!("モデル取得に失敗: {} {}", res.status(), url);
-    }
-    let total = res.content_length().unwrap_or(0);
-    let tmp = model_download_path(dest);
-    // 起動世代の取消でfutureが破棄された場合も、取得途中のファイルを残さない。
-    struct CancelledDownloadCleanup {
-        path: PathBuf,
-        active: bool,
-    }
-    impl Drop for CancelledDownloadCleanup {
-        fn drop(&mut self) {
-            if self.active {
-                if let Err(error) = std::fs::remove_file(&self.path) {
-                    if error.kind() != std::io::ErrorKind::NotFound {
-                        crate::log_paths::log_detached(&format!(
-                            "中断したモデル取得の一時ファイルを削除できません: {} ({error})",
-                            self.path.display()
-                        ));
-                    }
-                }
-            }
-        }
-    }
-    let mut cancelled_cleanup = CancelledDownloadCleanup {
-        path: tmp.clone(),
-        active: true,
+    // カスタムGGUFの互換性を任意の固定容量で制限せず、開始時の利用可能容量を上限にする。
+    // 旧モデルは検証済み一時ファイルの公開まで保持するため、その分は空き容量に含めない。
+    let max_size = crate::installer::disk::available_bytes(dest)?;
+    let spec = crate::installer::download::FetchSpec {
+        url: &url,
+        destination: dest,
+        expected_size: expected.map(|preset| preset.size_bytes),
+        max_size,
+        sha256: expected.map(|preset| preset.sha256),
     };
-    let result: anyhow::Result<()> = async {
-        // 作成・公開は同期完了させ、取消後にファイルが現れることを防ぐ。
-        // 書込は非同期のまま固有の一時ファイルへ隔離し、次の取得と競合させない。
-        let mut file = tokio::fs::File::from_std(std::fs::File::create(&tmp)?);
-        let mut received: u64 = 0;
-        let mut digest = Sha256::new();
-        let mut last_emit: i64 = -1;
-
-        while let Some(chunk) = res.chunk().await? {
-            file.write_all(&chunk).await?;
-            digest.update(&chunk);
-            received += chunk.len() as u64;
-            if let Some(pct) = received.saturating_mul(100).checked_div(total) {
-                let pct = pct as i64;
-                if pct != last_emit {
-                    last_emit = pct;
-                    // 数GBの取得は10分以上かかることがある。割合だけだと「どれくらい待つのか」
-                    // が分からず、止まっているようにも見えるので実サイズも渡す。
-                    set_status(
-                        app,
-                        json!({
-                            "phase": "download",
-                            "percent": pct,
-                            "receivedBytes": received,
-                            "totalBytes": total
-                        }),
-                    );
-                }
-            }
-        }
-        file.flush().await?;
-        drop(file);
-        if let Some(preset) = expected {
-            let actual_sha256 = hex::encode(digest.finalize());
-            anyhow::ensure!(
-                received == preset.size_bytes && actual_sha256 == preset.sha256,
-                "モデル検証に失敗: size={received}/{} sha256={actual_sha256}/{}",
-                preset.size_bytes,
-                preset.sha256
-            );
-        }
-        std::fs::rename(&tmp, dest)?;
-        Ok(())
-    }
-    .await;
-    cancelled_cleanup.active = false;
-    if let Err(error) = result {
-        match std::fs::remove_file(&tmp) {
-            Ok(()) => return Err(error),
-            Err(cleanup) if cleanup.kind() == std::io::ErrorKind::NotFound => return Err(error),
-            Err(cleanup) => {
-                anyhow::bail!(
-                    "モデル取得に失敗し、一時ファイルも削除できません: {} ({cleanup}); 元のエラー: {error}",
-                    tmp.display()
-                );
-            }
-        }
-    }
-    // 取得と検証は済んでいるので、回収に失敗しても起動は止めず理由を残す。
-    // フォールバック許可: 残った一時ファイルは次の取得成功時に再び回収を試みる。
-    if let Err(error) = remove_stale_model_parts(dest, std::process::id()) {
-        crate::log_paths::append_app_log(app, &format!("警告: {error:#}"));
-    }
+    let mut progress = |received: u64, total: u64| {
+        let percent = if total == 0 {
+            0
+        } else {
+            ((received as u128 * 100) / total as u128) as u64
+        };
+        set_status(
+            app,
+            json!({ "phase": "download", "percent": percent, "receivedBytes": received, "totalBytes": total }),
+        );
+    };
+    crate::installer::download::fetch_fixed(spec, &mut progress).await?;
     Ok(())
 }
 
@@ -640,7 +508,7 @@ async fn gpu_vram_bytes() -> Option<u64> {
     {
         let mut command = crate::tools::process::command("nvidia-smi.exe");
         command.args(["--query-gpu=memory.total", "--format=csv,noheader,nounits"]);
-        // フォールバック許可: nvidia-smi が無い、または3秒以内に応答しないPCでは
+        // nvidia-smi が無い、または3秒以内に応答しないPCでは
         // 専用VRAMを不明としてRAMだけで候補を案内する。
         let output = crate::tools::process::output(command, 3, "NVIDIA GPUメモリ量の確認")
             .await
@@ -754,10 +622,13 @@ fn spawn_server(
     let server = &candidate.server;
     ensure_executable(server)?;
     let state = app.state::<AppState>();
-    let port = local::port(&state.config).to_string();
-    // 保存値が旧既定（8,192）のままでも下限まで引き上げて起動する。狭いコンテキストだと
-    // スキル定義が入らず、モデルが道具を選べなくなる。
-    let ctx = local::context_length(&state.config).to_string();
+    let port = local::port(&state.config)
+        .map_err(anyhow::Error::msg)?
+        .to_string();
+    // 設定値を起動前に検証し、不正な文脈長のままサーバを起動しない。
+    let ctx = local::context_length(&state.config)
+        .map_err(anyhow::Error::msg)?
+        .to_string();
     // GPU 優先: 既定で全レイヤを GPU へオフロード（999）。GPU 非対応ビルド/環境では
     // llama-server が自動で CPU にフォールバックする。CPU 強制は 0 を設定する。
     let ngl = &candidate.ngl;
@@ -887,6 +758,20 @@ fn start_generation_is_current(engine: &EngineState, generation: u64) -> bool {
 }
 
 async fn ensure_and_start_inner(app: AppHandle, start_generation: u64) {
+    // 不正設定がある場合は、資産の移行・取得や既存サーバへの接続より前に止める。
+    let config = &app.state::<AppState>().config;
+    let validated = config.int(&crate::config::ints::LOCAL_NGL).and_then(|ngl| {
+        local::port(config)?;
+        local::context_length(config)?;
+        Ok(ngl.to_string())
+    });
+    let configured_ngl = match validated {
+        Ok(value) => value,
+        Err(error) => {
+            set_status(&app, json!({"phase":"error", "message":error}));
+            return;
+        }
+    };
     if let Err(error) = ensure_local_model_selection(&app).await {
         set_status(
             &app,
@@ -922,7 +807,7 @@ async fn ensure_and_start_inner(app: AppHandle, start_generation: u64) {
             &format!("検証済み現行版へ移行し、旧ローカルモデル{removed}件を削除しました"),
         ),
         Ok(_) => {}
-        // フォールバック許可: 旧ファイルの掃除失敗だけで検証済み現行モデルの起動を止めない。失敗はログへ残す。
+        // 旧ファイルの掃除失敗だけで検証済み現行モデルの起動を止めない。失敗はログへ残す。
         Err(error) => crate::log_paths::append_app_log(
             &app,
             &format!("旧ローカルモデルの掃除に失敗しました: {error}"),
@@ -942,7 +827,13 @@ async fn ensure_and_start_inner(app: AppHandle, start_generation: u64) {
     // 要求モデルまで一致する場合だけ再利用する。モデル変更後の古いプロセスを誤用しないため。
     if let Some(provider) = crate::providers::get("local") {
         let state = app.state::<AppState>();
-        if provider.is_up(&state.config).await {
+        if match provider.is_up(&state.config).await {
+            Ok(ready) => ready,
+            Err(error) => {
+                set_status(&app, json!({"phase":"error", "message":error}));
+                return;
+            }
+        } {
             if running_server_uses_model(&app, &model).await
                 && (projector.is_none() || VISION_READY.load(Ordering::SeqCst))
             {
@@ -960,10 +851,6 @@ async fn ensure_and_start_inner(app: AppHandle, start_generation: u64) {
         }
     }
     let bundled_server = server_path(&app);
-    let configured_ngl = app
-        .state::<AppState>()
-        .config
-        .get("PICOAGENT_LOCAL_NGL", "999");
     let candidates = existing_backend_candidates(
         crate::engine_backend::candidates(&app, bundled_server, configured_ngl).await,
     );
@@ -1007,7 +894,13 @@ async fn ensure_and_start_inner(app: AppHandle, start_generation: u64) {
         }
         let mut failed = None;
         for _ in 0..300 {
-            if provider.is_up(&state.config).await {
+            if match provider.is_up(&state.config).await {
+                Ok(ready) => ready,
+                Err(error) => {
+                    set_status(&app, json!({"phase":"error", "message":error}));
+                    return;
+                }
+            } {
                 VISION_READY.store(projector.is_some(), Ordering::SeqCst);
                 crate::log_paths::append_app_log(
                     &app,
@@ -1170,60 +1063,6 @@ mod tests {
             &engine,
             *engine.start_generation.borrow()
         ));
-    }
-
-    #[test]
-    fn 同じモデルの再取得でも一時ファイルは共有しない() {
-        let model = std::path::Path::new("models/model.gguf");
-        let first = super::model_download_path(model);
-        let second = super::model_download_path(model);
-        assert_ne!(first, second);
-        assert_eq!(first.parent(), model.parent());
-        assert!(first
-            .file_name()
-            .unwrap()
-            .to_string_lossy()
-            .starts_with("model.part-"));
-    }
-
-    #[test]
-    fn 取得成功後は他プロセスと旧形式の取得途中ファイルだけを回収する() {
-        let dir = std::env::temp_dir().join(format!(
-            "picoagent-stale-parts-{}-{}",
-            std::process::id(),
-            chrono::Local::now()
-                .timestamp_nanos_opt()
-                .unwrap_or_default()
-        ));
-        std::fs::create_dir_all(&dir).unwrap();
-        let own = 4242;
-        for name in [
-            "model.gguf",
-            "model.part",
-            "model.part-111-0",
-            "model.part-4242-3",
-            "other.part-111-0",
-            "other.part",
-        ] {
-            std::fs::write(dir.join(name), b"x").unwrap();
-        }
-        let removed = super::remove_stale_model_parts(&dir.join("model.gguf"), own).unwrap();
-        assert_eq!(removed, 2);
-        let mut left: Vec<_> = std::fs::read_dir(&dir)
-            .unwrap()
-            .map(|entry| entry.unwrap().file_name().into_string().unwrap())
-            .collect();
-        left.sort();
-        assert_eq!(
-            left,
-            [
-                "model.gguf",
-                "model.part-4242-3",
-                "other.part",
-                "other.part-111-0"
-            ]
-        );
-        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[tokio::test]

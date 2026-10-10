@@ -6,8 +6,8 @@
 //
 // 走査は上限（深さ・件数）付きで、シンボリックリンクは辿らない。
 
-use std::path::{Path, PathBuf};
-use std::time::SystemTime;
+use crate::tools::walk;
+use std::path::Path;
 
 use async_trait::async_trait;
 use serde_json::{json, Value};
@@ -16,25 +16,10 @@ use super::{Tool, ToolReg};
 use crate::config::Config;
 use crate::permissions;
 
-const MAX_DEPTH: usize = 12;
-/// 走査を打ち切るファイル数（ホーム直下など巨大なルートでも暴走させない安全弁）。
-const MAX_SCAN_FILES: usize = 20_000;
 const DEFAULT_LIMIT: usize = 100;
 const MAX_LIMIT: usize = 500;
-/// 走査から除外するディレクトリ名（巨大・生成物）。隠しディレクトリも既定で除外する。
-const SKIP_DIRS: [&str; 8] = [
-    "node_modules",
-    "target",
-    ".git",
-    "dist",
-    "build",
-    "__pycache__",
-    ".venv",
-    "venv",
-];
 
 /// 1階層分のワイルドカード一致（`*` は任意長、`?` は1文字。大文字小文字は区別しない）。
-/// `grep_search` の内蔵走査でも同じ判定を使う（glob の解釈を2箇所に持たない）。
 ///
 /// バックトラックせずに済むよう、「パターンを1文字ずつ進めながら、名前のどこまで
 /// 一致し得るか」を真偽値の表で持ち回る（`*` が複数あっても指数時間にならない）。
@@ -97,75 +82,6 @@ fn matches(pattern: &str, relative: &Path) -> bool {
         .collect();
     let parts: Vec<&str> = parts.iter().map(String::as_str).collect();
     match_segments(&pattern, &parts)
-}
-
-struct Hit {
-    relative: PathBuf,
-    modified: SystemTime,
-    size: u64,
-}
-
-fn should_skip_dir(name: &str) -> bool {
-    name.starts_with('.') || SKIP_DIRS.contains(&name)
-}
-
-/// ルート配下を走査して、パターンに一致するファイルを集める。
-/// 戻り値の bool は「上限で打ち切ったか」。
-///
-/// 上限は**見たファイル数**で数える（一致件数で数えると、一致が少ないまま巨大な
-/// ツリーを最後まで歩き続けてしまう）。
-fn collect(
-    root: &Path,
-    dir: &Path,
-    pattern: &str,
-    depth: usize,
-    scanned: &mut usize,
-    hits: &mut Vec<Hit>,
-) -> bool {
-    if depth > MAX_DEPTH {
-        return true;
-    }
-    if *scanned >= MAX_SCAN_FILES {
-        return true;
-    }
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        // フォールバック許可: 読めないフォルダ（権限なし等）は結果から除くだけで走査は続ける。
-        return false;
-    };
-    let mut truncated = false;
-    for entry in entries.flatten() {
-        if *scanned >= MAX_SCAN_FILES {
-            return true;
-        }
-        let path = entry.path();
-        // シンボリックリンク／ジャンクションは辿らない（許可ルート外へ出るのを防ぐ）。
-        let Ok(meta) = std::fs::symlink_metadata(&path) else {
-            continue;
-        };
-        if meta.file_type().is_symlink() {
-            continue;
-        }
-        let name = entry.file_name().to_string_lossy().to_string();
-        if meta.is_dir() {
-            if should_skip_dir(&name) {
-                continue;
-            }
-            truncated |= collect(root, &path, pattern, depth + 1, scanned, hits);
-            continue;
-        }
-        *scanned += 1;
-        let Ok(relative) = path.strip_prefix(root) else {
-            continue;
-        };
-        if matches(pattern, relative) {
-            hits.push(Hit {
-                relative: relative.to_path_buf(),
-                modified: meta.modified().unwrap_or(SystemTime::UNIX_EPOCH),
-                size: meta.len(),
-            });
-        }
-    }
-    truncated
 }
 
 pub struct GlobFilesTool;
@@ -256,22 +172,19 @@ impl Tool for GlobFilesTool {
             .unwrap_or(DEFAULT_LIMIT);
         let sort_by_path = args.get("sort").and_then(Value::as_str) == Some("path");
 
-        let mut hits = Vec::new();
-        let mut scanned = 0usize;
-        let truncated = collect(
-            root.as_path(),
-            root.as_path(),
-            &pattern,
-            0,
-            &mut scanned,
-            &mut hits,
-        );
+        let walked = walk::files(cfg, &root);
+        let mut hits: Vec<_> = walked
+            .files
+            .iter()
+            .filter(|file| matches(&pattern, &file.relative))
+            .collect();
+        let diagnostic = walked.diagnostic();
         if hits.is_empty() {
             return format!(
                 "一致するファイルはありませんでした（{} 配下 / パターン {}）。",
                 root.display(),
                 pattern
-            );
+            ) + &diagnostic;
         }
         if sort_by_path {
             hits.sort_by(|a, b| a.relative.cmp(&b.relative));
@@ -280,16 +193,11 @@ impl Tool for GlobFilesTool {
         }
         let total = hits.len();
         let mut out = format!("{} 配下の一致: {} 件", root.display(), total);
-        if truncated {
-            out.push_str(&format!(
-                "（走査上限 {MAX_SCAN_FILES} 件で打ち切ったため、これ以上ある可能性があります）"
-            ));
-        }
         for hit in hits.iter().take(limit) {
             out.push_str(&format!(
-                "\n{}\t{} バイト",
+                "\n{}\t{:.6} MB",
                 hit.relative.to_string_lossy(),
-                hit.size
+                hit.size as f64 / 1_000_000.0
             ));
         }
         if total > limit {
@@ -297,7 +205,7 @@ impl Tool for GlobFilesTool {
                 "\n…（{limit} 件で表示を打ち切り。limit で増やせます）"
             ));
         }
-        out
+        out + &diagnostic
     }
 }
 
@@ -307,6 +215,23 @@ inventory::submit! { ToolReg { make: || Box::new(GlobFilesTool) } }
 mod tests {
     use super::{match_name, matches};
     use std::path::Path;
+
+    #[tokio::test]
+    async fn 一致なしでも拒否で欠けた走査結果の理由を表示する() {
+        use crate::tools::Tool;
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("secret.txt");
+        std::fs::write(&file, "秘密").unwrap();
+        let cfg = crate::config::Config::new();
+        cfg.set("PICOAGENT_ALLOWED_ROOT", &dir.path().to_string_lossy());
+        cfg.set("PICOAGENT_DENIED_PATHS", &file.to_string_lossy());
+        let output = super::GlobFilesTool
+            .run(&cfg, serde_json::json!({"pattern":"**/*.txt"}))
+            .await;
+        assert!(output.contains("一致するファイルはありません"));
+        assert!(output.contains("読めずに飛ばした: 1件"));
+        assert!(output.contains("secret.txt"));
+    }
 
     #[test]
     fn ワイルドカードが1階層に一致する() {

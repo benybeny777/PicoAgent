@@ -27,21 +27,20 @@ pub async fn settings_memory_delete(
     app: AppHandle,
 ) -> Result<Value, String> {
     let store = crate::memory_embedding::reset_for_edit(|| {
-        crate::memory::invalidate_cache(&app)?;
-        crate::memory::delete_item(&app, &category, &text, &updated_at)
+        // 削除と会話文脈の確定を同じ境界で行い、古いターンの再保存を割り込ませない。
+        state.edit_memory_context(|| {
+            crate::memory::invalidate_cache(&app)?;
+            let store = crate::memory::delete_item(&app, &category, &text, &updated_at)?;
+            let next_context = if state.config.get_bool("PICOAGENT_MEMORY_ENABLED", true) {
+                crate::memory::context_from_store(&store)
+            } else {
+                String::new()
+            };
+            Ok((store, next_context))
+        })
     })
     .await
     .map_err(|error| command_error(&app, "長期メモリを削除できません", error))?;
-
-    let next_context = if state.config.get_bool("PICOAGENT_MEMORY_ENABLED", true) {
-        crate::memory::context_from_store(&store)
-    } else {
-        String::new()
-    };
-    *state.memory_context.lock().unwrap() = next_context;
-    // 削除前のsystem文脈で進行中だった応答に、削除済みの記憶を再び書き戻させない。
-    state.bump_conversation_epoch();
-    state.reset_conversation();
 
     Ok(json!({ "items": store.items }))
 }

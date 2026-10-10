@@ -162,8 +162,11 @@ pub trait Tool: Send + Sync {
     async fn run(&self, cfg: &Config, args: Value) -> String;
 }
 
+pub mod cli_detection;
 pub mod http;
 pub mod process;
+pub mod walk;
+pub mod whisper;
 
 pub struct ToolReg {
     pub make: fn() -> Box<dyn Tool>,
@@ -179,46 +182,94 @@ fn bundled_tool_dirs(tool: &str) -> Vec<PathBuf> {
     crate::components::runtime_dirs(&format!("tools/{tool}"))
 }
 
-/// ディレクトリ配下から実行ファイルを再帰探索する（アーカイブの展開レイアウト差異に強くする）。
-fn find_bundled_exe(dir: &Path, exe_name: &str, depth: usize) -> Option<PathBuf> {
-    if depth > 7 {
-        return None;
-    }
-    let entries = std::fs::read_dir(dir).ok()?;
-    let mut subdirs = Vec::new();
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.is_file() && path.file_name().and_then(|n| n.to_str()) == Some(exe_name) {
-            return Some(path);
-        }
-        if path.is_dir() {
-            subdirs.push(path);
-        }
-    }
-    subdirs
-        .into_iter()
-        .find_map(|sub| find_bundled_exe(&sub, exe_name, depth + 1))
+/// 明示設定か管理同梱物だけを使う。設定されたコマンド名だけはPATH検索を許可する。
+pub fn resolve_cli_path(
+    cfg: &Config,
+    config_key: &str,
+    tool_dir: &str,
+    exe: &str,
+) -> Result<PathBuf, String> {
+    resolve_cli_in(
+        &cfg.get(config_key, ""),
+        &bundled_tool_dirs(tool_dir),
+        config_key,
+        exe,
+    )
 }
 
-/// CLI ツールの実行パスを解決する。優先順: 明示設定（config_key）→ 同梱（setup tools）→ PATH。
-/// `exe` は拡張子なしの実行ファイル名（Windows では自動で .exe を付ける）。
-pub fn resolve_cli_path(cfg: &Config, config_key: &str, tool_dir: &str, exe: &str) -> String {
-    let configured = cfg.get(config_key, "");
-    let trimmed = configured.trim();
-    if !trimmed.is_empty() && trimmed != exe {
-        return trimmed.to_string();
+fn resolve_cli_in(
+    configured: &str,
+    dirs: &[PathBuf],
+    key: &str,
+    exe: &str,
+) -> Result<PathBuf, String> {
+    let configured = configured.trim();
+    if !configured.is_empty() {
+        let path = Path::new(configured);
+        if path.is_absolute() || path.components().count() > 1 {
+            if !process::is_executable_file(path) {
+                return Err(format!(
+                    "{key} で指定した実行ファイルがありません: {}",
+                    path.display()
+                ));
+            }
+            return std::path::absolute(path)
+                .map_err(|error| format!("実行パスを解決できません: {error}"));
+        }
+        // フォールバック許可: PR #472の利用者決定。明示したコマンド名だけPATHで解決する。（根拠: PR #472）
+        return process::resolve_executable(configured)
+            .ok_or_else(|| format!("{key} で指定したコマンドがPATHにありません"));
     }
     let exe_name = if cfg!(windows) {
         format!("{exe}.exe")
     } else {
         exe.to_string()
     };
-    for dir in bundled_tool_dirs(tool_dir) {
-        if let Some(found) = find_bundled_exe(&dir, &exe_name, 0) {
-            return found.to_string_lossy().to_string();
+    for dir in dirs {
+        if !dir.exists() {
+            continue;
+        }
+        let found = find_bundled_exe(dir, &exe_name, 0)?;
+        return found.ok_or_else(|| {
+            format!("{exe} の同梱配置が不完全です。設定 → 追加機能・更新 から修復してください")
+        });
+    }
+    Err(format!("{exe} が見つかりません。設定 → 追加機能・更新 から導入するか、{key} にパスを指定してください"))
+}
+
+fn find_bundled_exe(dir: &Path, exe_name: &str, depth: usize) -> Result<Option<PathBuf>, String> {
+    // 実行ファイルの配置を深さ7まで検査する。対象外のFrameworks等は欠損候補にしない。
+    if depth > 7 {
+        return Ok(None);
+    }
+    let mut found = None;
+    for entry in
+        std::fs::read_dir(dir).map_err(|error| format!("同梱ツールを読めません: {error}"))?
+    {
+        let path = entry
+            .map_err(|error| format!("同梱ツールの項目を読めません: {error}"))?
+            .path();
+        let candidate =
+            if path.is_file() && path.file_name().and_then(|n| n.to_str()) == Some(exe_name) {
+                if !process::is_executable_file(&path) {
+                    return Err(format!(
+                        "同梱実行ファイルに実行権限がありません: {}",
+                        path.display()
+                    ));
+                }
+                Some(path)
+            } else if path.is_dir() {
+                find_bundled_exe(&path, exe_name, depth + 1)?
+            } else {
+                None
+            };
+        if let Some(candidate) = candidate {
+            if found.replace(candidate).is_some() {
+                return Err("同梱の実行ファイルが重複しています。修復してください".into());
+            }
         }
     }
-    exe.to_string()
+    Ok(found)
 }
 
 pub fn config_guide(tool_label: &str, keys: &[&str], note: &str) -> String {
@@ -235,6 +286,47 @@ pub fn config_guide(tool_label: &str, keys: &[&str], note: &str) -> String {
     }
     out.push_str("\n保存後、もう一度同じ依頼をしてください。APIキーやトークンの値はチャット・ログ・ドキュメントへ貼らないでください。");
     out
+}
+
+#[cfg(test)]
+mod cli_resolution_tests {
+    #[test]
+    fn 設定と同梱が欠損したら別候補へ進まない() {
+        let dir = tempfile::tempdir().unwrap();
+        let installed = dir.path().join("installed");
+        let packaged = dir.path().join("packaged");
+        std::fs::create_dir(&packaged).unwrap();
+        let exe = if cfg!(windows) { "tool.exe" } else { "tool" };
+        let target = packaged.join(exe);
+        std::fs::write(&target, []).unwrap();
+        // 正しいCLIと併存する無関係な深い資産は、配置不完全にしない。
+        std::fs::create_dir_all(packaged.join("a/b/c/d/e/f/g/h/i")).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert!(
+                super::resolve_cli_in(&target.to_string_lossy(), &[], "TEST_PATH", "tool").is_err()
+            );
+            assert!(super::resolve_cli_in("", &[packaged.clone()], "TEST_PATH", "tool").is_err());
+            std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let dirs = [installed.clone(), packaged];
+        assert_eq!(
+            super::resolve_cli_in("", &dirs, "TEST_PATH", "tool").unwrap(),
+            target
+        );
+        let missing = dir.path().join("missing.exe");
+        assert!(
+            super::resolve_cli_in(&missing.to_string_lossy(), &dirs, "TEST_PATH", "tool").is_err()
+        );
+        std::fs::create_dir(&installed).unwrap();
+        assert!(super::resolve_cli_in("", &dirs, "TEST_PATH", "tool")
+            .unwrap_err()
+            .contains("不完全"));
+        assert!(super::resolve_cli_in("", &[], "TEST_PATH", "tool").is_err());
+        let command = if cfg!(windows) { "cmd" } else { "sh" };
+        assert!(super::resolve_cli_in(command, &[], "TEST_PATH", "tool").is_ok());
+    }
 }
 
 static TOOLS: OnceLock<Vec<Box<dyn Tool>>> = OnceLock::new();
@@ -372,13 +464,15 @@ fn keyword_score(index: usize, normalized: &str) -> usize {
 /// 食い潰さないようコンテキスト長の35%までに収める。定義そのものは削らない
 /// （説明や引数の説明を削ると、モデルが引数を組み立てられずスキルの精度が落ちる）。
 /// クラウドは十分広いので全件入る値を返す。
-fn schema_budget_chars(cfg: &Config) -> usize {
+fn schema_budget_chars(cfg: &Config) -> Result<usize, String> {
     if cfg.get("PICOAGENT_PROVIDER", "local") != "local" {
-        return usize::MAX;
+        return Ok(usize::MAX);
     }
-    let ctx = crate::providers::local::context_length(cfg);
+    let ctx = crate::providers::local::context_length(cfg)?;
     // 1トークンあたり約3文字として見積もる（日本語混じりのJSON定義での実測値）。
-    (ctx * 35 / 100 * 3).max(4_000)
+    Ok((ctx as u128 * 35 / 100 * 3)
+        .max(4_000)
+        .min(usize::MAX as u128) as usize)
 }
 
 /// スキルが返した文字列が失敗を表すか。
@@ -479,10 +573,6 @@ fn push_schema_by_name(out: &mut Vec<Value>, name: &str) {
 
 /// ユーザー発話に応じて、LLMへ渡す function schema を絞り込む。
 /// 実行自体は dispatch で全スキルを呼べるため、これはモデルに見せる候補の圧縮だけを担う。
-pub fn schemas_for_text(text: &str) -> Vec<Value> {
-    schemas_for_conversation(&Config::new(), text, &[])
-}
-
 /// 直前までの利用者発話も見て、LLMへ渡す function schema を絞り込む。
 ///
 /// 現在の発話だけで選ぶと、「今日の天気は？」→「神奈川県でよろー」のように地名だけを返す
@@ -492,13 +582,9 @@ pub fn schemas_for_conversation(
     cfg: &Config,
     text: &str,
     earlier_user_texts: &[&str],
-) -> Vec<Value> {
+) -> Result<Vec<Value>, String> {
     // 見る過去発話の件数。0ですべての発話を見る。
-    let turns = cfg
-        .get("PICOAGENT_TOOL_CONTEXT_TURNS", "5")
-        .trim()
-        .parse::<usize>()
-        .unwrap_or(5);
+    let turns = cfg.int(&crate::config::ints::TOOL_CONTEXT_TURNS)? as usize;
     let context = earlier_user_texts
         .iter()
         .take(if turns == 0 {
@@ -537,7 +623,7 @@ pub fn schemas_for_conversation(
             .then_with(|| right.2.cmp(&left.2))
             .then_with(|| left.3.cmp(right.3))
     });
-    let budget = schema_budget_chars(cfg);
+    let budget = schema_budget_chars(cfg)?;
     let mut used: usize = CORE_AGENT_TOOLS
         .iter()
         .filter_map(|name| schema_index().get(name))
@@ -564,13 +650,13 @@ pub fn schemas_for_conversation(
         }
         selected.push(schema);
     }
-    selected
+    Ok(selected)
 }
 
 /// 自動計算時の下限。小さいコンテキストでも system・履歴・生成枠を残す。
-const MIN_TOOL_OUTPUT_CHARS: usize = 1_000;
+const MIN_TOOL_OUTPUT_CHARS: usize = crate::config::ints::TOOL_OUTPUT_MAX_CHARS.min as usize;
 /// ツール出力の上限（設定でこれ以上は広げない。1回の出力で文脈を食い潰さないための天井）。
-const MAX_TOOL_OUTPUT_CHARS: usize = 60_000;
+const MAX_TOOL_OUTPUT_CHARS: usize = crate::config::ints::TOOL_OUTPUT_MAX_CHARS.max as usize;
 /// クラウドプロバイダ利用時の既定（コンテキストが十分広いので固定値でよい）。
 const CLOUD_TOOL_OUTPUT_CHARS: usize = 24_000;
 
@@ -578,23 +664,20 @@ const CLOUD_TOOL_OUTPUT_CHARS: usize = 24_000;
 ///
 /// 既定（`auto`）は使用中のコンテキスト長の45%から算出する。
 /// ローカルの未設定時は32,768なので14,745文字となり、人格・履歴・回答生成の枠を残す。
-/// 保存済みの小さいコンテキスト長にも追従し、下限1,000文字・上限60,000文字に収める。
-pub fn tool_output_limit(cfg: &Config) -> usize {
-    let configured = cfg.get("PICOAGENT_TOOL_OUTPUT_MAX_CHARS", "auto");
-    let trimmed = configured.trim();
-    if !trimmed.eq_ignore_ascii_case("auto") {
-        if let Ok(value) = trimmed.parse::<usize>() {
-            return value.clamp(1_000, MAX_TOOL_OUTPUT_CHARS);
-        }
+/// auto計算を下限1,000文字・上限60,000文字に収め、明示値は共通設定宣言で検証する。
+pub fn tool_output_limit(cfg: &Config) -> Result<usize, String> {
+    if let Some(value) = cfg.int_or_auto(&crate::config::ints::TOOL_OUTPUT_MAX_CHARS)? {
+        return Ok(value as usize);
     }
     if cfg.get("PICOAGENT_PROVIDER", "local") != "local" {
-        return CLOUD_TOOL_OUTPUT_CHARS;
+        return Ok(CLOUD_TOOL_OUTPUT_CHARS);
     }
-    let ctx = crate::providers::local::context_length(cfg);
-    // 人格 system・長期メモリ・会話履歴・ツール定義・生成分を残し、ツール出力へ 45% を配分する。
-    // 旧実装は下限を8,000にしたため、既定 ctx=8,192 でも計算結果3,686を8,000へ
-    // 戻してしまい、自動計算が実質機能していなかった。
-    (ctx * 45 / 100).clamp(MIN_TOOL_OUTPUT_CHARS, MAX_TOOL_OUTPUT_CHARS)
+    let ctx = crate::providers::local::context_length(cfg)?;
+    // 明示整数を補正せず、autoの予算だけモデルの文脈長から計算する。
+    Ok(
+        (ctx as u128 * 45 / 100).clamp(MIN_TOOL_OUTPUT_CHARS as u128, MAX_TOOL_OUTPUT_CHARS as u128)
+            as usize,
+    )
 }
 
 /// ツール出力にプロンプトインジェクション試行パターンが含まれるか検査する。
@@ -666,8 +749,11 @@ pub async fn dispatch_final(cfg: &Config, name: &str, args: Value) -> String {
 /// 承認マーカーをそのまま返すため、**呼び出し側が承認フローを実装している場合のみ**使う。
 /// 失敗は例外にせず文字列で返す。出力が長すぎる場合は MAX_TOOL_OUTPUT_CHARS で打ち切る。
 pub async fn dispatch_interactive(cfg: &Config, name: &str, args: Value) -> String {
+    let limit = match tool_output_limit(cfg) {
+        Ok(limit) => limit,
+        Err(error) => return format!("エラー: {error}"),
+    };
     let result = run_tool(cfg, name, args).await;
-    let limit = tool_output_limit(cfg);
     if result.chars().count() > limit {
         let truncated: String = result.chars().take(limit).collect();
         format!(
@@ -681,7 +767,7 @@ pub async fn dispatch_interactive(cfg: &Config, name: &str, args: Value) -> Stri
 
 #[cfg(test)]
 mod tests {
-    use super::{is_failure_text, schemas_for_text};
+    use super::is_failure_text;
 
     #[test]
     fn スキルの失敗文を見分ける() {
@@ -1063,7 +1149,8 @@ mod tests {
     }
 
     fn schema_names(text: &str) -> Vec<String> {
-        schemas_for_text(text)
+        super::schemas_for_conversation(&crate::config::Config::new(), text, &[])
+            .unwrap()
             .iter()
             .filter_map(|schema| {
                 schema
@@ -1154,36 +1241,60 @@ mod tests {
         assert!(names.contains(&"browser_control".to_string()));
     }
 
+    #[tokio::test]
+    async fn 不正な出力予算ではツールを実行しない() {
+        let cfg = crate::config::Config::new();
+        for value in ["999", "60001", "bad", "1.5", "-1"] {
+            cfg.set("PICOAGENT_TOOL_OUTPUT_MAX_CHARS", value);
+            // 未登録の呼出も設定エラーより先へ進めず、実行経路を共通で止める。
+            let reply =
+                super::dispatch_interactive(&cfg, "未登録テスト", serde_json::json!({})).await;
+            assert!(reply.contains("PICOAGENT_TOOL_OUTPUT_MAX_CHARS"));
+            assert!(!reply.contains("未登録のツール"));
+        }
+        cfg.set("PICOAGENT_TOOL_CONTEXT_TURNS", "-1");
+        assert!(super::schemas_for_conversation(&cfg, "天気", &[])
+            .unwrap_err()
+            .contains("PICOAGENT_TOOL_CONTEXT_TURNS"));
+    }
+
     #[test]
     fn ツール出力の上限はコンテキスト長に追随する() {
         use crate::config::Config;
-        // 旧既定の 8,192 が保存されていても下限 32,768 まで引き上げて計算する。
         let narrow = Config::new();
-        narrow.set("PICOAGENT_LOCAL_CTX", "8192");
-        assert_eq!(
-            super::tool_output_limit(&narrow),
-            14_745,
-            "下限未満の保存値は 32,768 として扱う"
-        );
+        narrow.set("PICOAGENT_LOCAL_CTX", "32768");
+        assert_eq!(super::tool_output_limit(&narrow).unwrap(), 14_745);
+        let invalid = Config::new();
+        invalid.set("PICOAGENT_LOCAL_CTX", "8192");
+        assert!(super::tool_output_limit(&invalid)
+            .unwrap_err()
+            .contains("PICOAGENT_LOCAL_CTX"));
 
         let wide = Config::new();
         wide.set("PICOAGENT_LOCAL_CTX", "65536");
         assert!(
-            super::tool_output_limit(&wide) > super::tool_output_limit(&narrow),
+            super::tool_output_limit(&wide).unwrap() > super::tool_output_limit(&narrow).unwrap(),
             "コンテキストを広げた分だけ多く読める"
         );
 
         let huge = Config::new();
         huge.set("PICOAGENT_LOCAL_CTX", "1000000");
         assert_eq!(
-            super::tool_output_limit(&huge),
+            super::tool_output_limit(&huge).unwrap(),
             super::MAX_TOOL_OUTPUT_CHARS,
             "天井は超えない"
         );
 
+        huge.set("PICOAGENT_LOCAL_CTX", &i64::MAX.to_string());
+        assert_eq!(
+            super::tool_output_limit(&huge).unwrap(),
+            super::MAX_TOOL_OUTPUT_CHARS
+        );
+        assert!(super::schema_budget_chars(&huge).unwrap() > 0);
+
         let explicit = Config::new();
         explicit.set("PICOAGENT_TOOL_OUTPUT_MAX_CHARS", "12000");
-        assert_eq!(super::tool_output_limit(&explicit), 12_000);
+        assert_eq!(super::tool_output_limit(&explicit).unwrap(), 12_000);
     }
 
     #[test]
@@ -1224,4 +1335,15 @@ mod tests {
         assert!(names.contains(&"meeting_recorder".to_string()));
         assert!(names.contains(&"whisper_transcribe".to_string()));
     }
+}
+
+/// ToolのString戻り値へ、実行前の失敗を伝える。
+#[macro_export]
+macro_rules! tool_try {
+    ($value:expr) => {
+        match $value {
+            Ok(value) => value,
+            Err(error) => return format!("エラー: {error}"),
+        }
+    };
 }
