@@ -84,7 +84,8 @@ impl Tool for XTwitterTool {
                     Ok(text) => text,
                     Err(error) => return format!("エラー: {}", error),
                 };
-                handle_text_response(
+                crate::tools::http::service_reply(
+                    cfg,
                     client
                         .post(format!("{}/tweets", X_API_BASE))
                         .bearer_auth(token)
@@ -101,7 +102,8 @@ impl Tool for XTwitterTool {
                     Err(error) => return format!("エラー: {}", error),
                 };
                 let max_results = max_results(&args, 10, 100, 10).to_string();
-                handle_text_response(
+                crate::tools::http::service_reply(
+                    cfg,
                     client
                         .get(format!("{}/tweets/search/recent", X_API_BASE))
                         .bearer_auth(token)
@@ -128,7 +130,8 @@ impl Tool for XTwitterTool {
                     );
                 }
                 let max_results = max_results(&args, 5, 100, 10).to_string();
-                handle_text_response(
+                crate::tools::http::service_reply(
+                    cfg,
                     client
                         .get(format!("{}/users/{}/tweets", X_API_BASE, user_id))
                         .bearer_auth(token)
@@ -174,23 +177,6 @@ fn max_results(args: &Value, min: u64, max: u64, fallback: u64) -> u64 {
         .and_then(Value::as_u64)
         .filter(|value| (min..=max).contains(value))
         .unwrap_or(fallback)
-}
-
-async fn handle_text_response(
-    response: Result<reqwest::Response, reqwest::Error>,
-    label: &str,
-) -> String {
-    let response = match response {
-        Ok(response) => response,
-        Err(error) => return format!("エラー: {} への接続に失敗しました: {}", label, error),
-    };
-    let status = response.status();
-    let body = crate::tool_response_text!(response);
-    if status.is_success() {
-        body
-    } else {
-        format!("エラー: {} が HTTP {} を返しました。", label, status)
-    }
 }
 
 inventory::submit! { ToolReg { make: || Box::new(XTwitterTool) } }

@@ -1,10 +1,8 @@
 // skills/image_tools/mod.rs - ImageMagick による画像ファイル変換・情報取得スキル。
 // PSD/XCF/HEIC/TIFF/WebP など WebView やモデルが直接扱えない画像形式を PNG/JPG 等へ
-// 変換する。実行ファイルは「明示設定 → 同梱（setup tools）→ PATH」の順で解決し、
-// PATH では v7（magick）→ v6（convert / identify）の順にフォールバックする。
+// 変換する。実行ファイルは明示設定または同梱（setup tools）だけを使う。
 
 use std::path::Path;
-use std::process::Stdio;
 
 use async_trait::async_trait;
 use serde_json::{json, Value};
@@ -35,46 +33,8 @@ fn resolve_path(cfg: &Config, args: &Value, key: &str) -> Result<SafePath, Strin
 // レイヤー・複数フレームを持ちうる形式（変換時は [0]＝統合ビューだけを使う）。
 const MULTI_LAYER_EXTS: [&str; 5] = ["psd", "xcf", "tif", "tiff", "gif"];
 
-/// ImageMagick の実行プログラムを解決する。
-/// 明示設定・同梱があればそれ（v7 の magick）を、PATH フォールバック時は
-/// `magick -version` が通れば v7、通らなければ v6 の `legacy`（convert / identify）を使う。
-/// `<program> -version` が **ImageMagick 自身**だと名乗るか確かめる。
-///
-/// 起動できたかどうか（`is_ok()` / 終了コード）だけで判定してはならない。Windows には
-/// `C:\Windows\System32\convert.exe`（FAT→NTFS 変換ユーティリティ）が標準で存在するため、
-/// コマンド名 `convert` は ImageMagick が無い環境でも必ず起動に成功してしまう。
-/// 名前が同じだけの無関係なシステムユーティリティへ画像変換の引数を渡さないよう、
-/// 出力に `ImageMagick` が含まれることまで確認する。
-async fn is_imagemagick(program: &str) -> bool {
-    let mut command = crate::tools::process::command(program);
-    command.arg("-version").stdin(Stdio::null());
-    // 名乗りの確認だけなので短い上限で打ち切る。共通層を通さず `.output().await` を
-    // 直接呼ぶと上限が無くなり、壊れた実行ファイルを掴んだときに変換全体が止まる。
-    match crate::tools::process::output(command, 10, "ImageMagick の確認").await {
-        Ok(output) if output.status.success() => {
-            String::from_utf8_lossy(&output.stdout).contains("ImageMagick")
-        }
-        _ => false,
-    }
-}
-
-async fn magick_program(cfg: &Config, legacy: &str) -> String {
-    let resolved =
-        crate::tools::resolve_cli_path(cfg, "PICOAGENT_MAGICK_PATH", "imagemagick", "magick");
-    if resolved != "magick" {
-        return resolved;
-    }
-    if is_imagemagick("magick").await {
-        return "magick".to_string();
-    }
-    // フォールバック許可: apt の ImageMagick v6 はコマンド名が convert / identify。
-    // ただし名乗りを確認できたときだけ使う（同名の別物を掴まないため）。
-    if is_imagemagick(legacy).await {
-        return legacy.to_string();
-    }
-    // どちらも ImageMagick ではない＝未導入。正式名で返し、`run_magick` のエラーメッセージが
-    // 「ImageMagick が入っていない」という本当の原因を指すようにする。
-    "magick".to_string()
+fn magick_program(cfg: &Config) -> Result<std::path::PathBuf, String> {
+    crate::tools::resolve_cli_path(cfg, "PICOAGENT_MAGICK_PATH", "imagemagick", "magick")
 }
 
 /// ImageMagick を実行する。打ち切り時に子プロセスをツリーごと回収させるため、
@@ -110,7 +70,7 @@ async fn run_convert(cfg: &Config, args: &Value, timeout: u64) -> String {
     if let Err(error) = crate::permissions::fs::create_dir_all(&output.parent_or_root(cfg)) {
         return format!("エラー: 出力フォルダ作成に失敗しました: {}", error);
     }
-    let program = magick_program(cfg, "convert").await;
+    let program = crate::tool_try!(magick_program(cfg));
     let mut command = crate::tools::process::command(&program);
     // レイヤーを持つ形式は [0]（統合ビュー）だけを読み、複数ファイル出力を避ける。
     let input_display = input.as_path().to_string_lossy().to_string();
@@ -175,7 +135,7 @@ async fn run_info(cfg: &Config, args: &Value, timeout: u64) -> String {
     if !input.exists() {
         return format!("エラー: 入力画像が見つかりません: {}", input.display());
     }
-    let program = magick_program(cfg, "identify").await;
+    let program = crate::tool_try!(magick_program(cfg));
     let mut command = crate::tools::process::command(&program);
     // v7（magick）はサブコマンドで identify を呼ぶ。v6 の identify や、明示設定で
     // identify 実行ファイルを直接指定した場合はサブコマンドを付けない。
@@ -253,7 +213,7 @@ impl Tool for ImageToolsTool {
     }
 
     fn description(&self) -> String {
-        "ImageMagick（同梱→PATH。cargo xtask setup tools）で PSD/XCF/HEIC/TIFF/WebP/AVIF 等の画像を PNG/JPG などへ変換し、寸法・レイヤー等の情報も取得する。PSD はレイヤー統合ビューを変換。".to_string()
+        "ImageMagick（明示設定または同梱。cargo xtask setup tools）で PSD/XCF/HEIC/TIFF/WebP/AVIF 等の画像を PNG/JPG などへ変換し、寸法・レイヤー等の情報も取得する。PSD はレイヤー統合ビューを変換。".to_string()
     }
 
     fn examples(&self) -> Vec<&'static str> {
@@ -282,7 +242,7 @@ impl Tool for ImageToolsTool {
         vec![
             Field::new(
                 "PICOAGENT_MAGICK_PATH",
-                "ImageMagick 実行ファイルパス（空ならPicoAgent内→PATH の magick/convert）",
+                "ImageMagick 実行ファイルパス（空ならPicoAgent管理下 の magick/convert）",
                 "text",
                 "",
             ),
@@ -314,18 +274,12 @@ impl Tool for ImageToolsTool {
 mod tests {
     use serde_json::json;
 
-    /// 実行に使う ImageMagick を、**スキル本体とまったく同じ解決順**（設定 → 同梱 → PATH）で決める。
+    /// 実行に使う ImageMagick を、**スキル本体とまったく同じ解決順**（設定 → 同梱）で決める。
     ///
-    /// 以前は素の `magick` / `convert` を PATH から探していたため、このプロジェクトの
-    /// 既定構成（`cargo xtask setup tools` で `resources/bundled/tools/imagemagick/` へ同梱）
-    /// では**常にスキップされ、E2E が一度も走っていなかった**。
-    /// 名乗りの確認は `is_imagemagick` に任せる（Windows の `System32\convert.exe` 対策）。
     fn resolve_imagemagick(cfg: &crate::config::Config) -> Option<String> {
-        let runtime = tokio::runtime::Runtime::new().unwrap();
-        runtime.block_on(async {
-            let program = super::magick_program(cfg, "convert").await;
-            super::is_imagemagick(&program).await.then_some(program)
-        })
+        super::magick_program(cfg)
+            .ok()
+            .map(|path| path.to_string_lossy().into_owned())
     }
 
     // ImageMagick がある環境だけで走る E2E（無ければ即成功で抜ける）。
@@ -343,7 +297,7 @@ mod tests {
         };
         let runtime = tokio::runtime::Runtime::new().unwrap();
 
-        // テスト用 PSD を ImageMagick 自身で生成する（v7 magick → v6 convert の順）。
+        // スキルと同じ明示設定・同梱のImageMagickでテスト用PSDを生成する。
         let psd = dir.join("sample.psd");
         let status = std::process::Command::new(&program)
             .args(["-size", "16x16", "xc:red"])

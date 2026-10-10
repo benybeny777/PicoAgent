@@ -266,7 +266,7 @@ impl Tool for WeatherTool {
             (lat, lon, format!("{},{}", lat, lon))
         } else if let Some(location) = &explicit_location {
             // 利用者が明示した地点を別地点へ黙って置き換えない。
-            match geocode(&client, location).await {
+            match geocode(cfg, &client, location).await {
                 Ok(found) => {
                     // 会話で言われた地点は既定として覚え、次から地名を聞き直さない。
                     // 「読んで比べてから書き戻す」ので、同時に複数の問い合わせが走っても
@@ -295,7 +295,7 @@ impl Tool for WeatherTool {
             // 新版では未設定として一度だけ現在地推定へ戻す。東京を固定したい場合は
             // 日本語の「東京都」等を保存すれば正本として扱われる。
             if let Some(saved_location) = configured_location(&saved_location) {
-                match geocode(&client, saved_location).await {
+                match geocode(cfg, &client, saved_location).await {
                     Ok(found) => found,
                     Err(error) => return format!("エラー: {}", error),
                 }
@@ -325,12 +325,15 @@ impl Tool for WeatherTool {
             .await
         {
             Ok(response) => response,
-            Err(error) => return format!("エラー: 天気APIへの接続に失敗しました: {}", error),
+            Err(error) => return format!("エラー: 天気APIへの接続に失敗しました: {}", error.without_url()),
         };
         let status = response.status();
         let body = crate::tool_response_text!(response);
         if !status.is_success() {
-            return format!("エラー: 天気APIが HTTP {} を返しました。", status);
+            return format!(
+                "エラー: {}",
+                crate::tools::http::safe_service_error(cfg, "天気API", status, &body)
+            );
         }
         let parsed: Value = crate::tool_response_json!(&body);
         summarize_weather(&name, &parsed)
@@ -382,7 +385,11 @@ fn pick_location(query: &str, candidates: &[Value]) -> Option<(f64, f64, String)
     Some((lat, lon, label))
 }
 
-async fn fetch_candidates(client: &reqwest::Client, name: &str) -> Result<Vec<Value>, String> {
+async fn fetch_candidates(
+    cfg: &Config,
+    client: &reqwest::Client,
+    name: &str,
+) -> Result<Vec<Value>, String> {
     let response = client
         .get(GEOCODE_URL)
         .query(&[
@@ -393,11 +400,16 @@ async fn fetch_candidates(client: &reqwest::Client, name: &str) -> Result<Vec<Va
         ])
         .send()
         .await
-        .map_err(|error| format!("地名検索に失敗しました: {}", error))?;
+        .map_err(|error| format!("地名検索に失敗しました: {}", error.without_url()))?;
     let status = response.status();
     let body = crate::tools::http::response_text(response).await?;
     if !status.is_success() {
-        return Err(format!("地名検索APIが HTTP {} を返しました。", status));
+        return Err(crate::tools::http::safe_service_error(
+            cfg,
+            "地名検索API",
+            status,
+            &body,
+        ));
     }
     let parsed: Value = serde_json::from_str(&body)
         .map_err(|error| format!("地名検索結果を解析できません: {}", error))?;
@@ -408,14 +420,18 @@ async fn fetch_candidates(client: &reqwest::Client, name: &str) -> Result<Vec<Va
         .unwrap_or_default())
 }
 
-async fn geocode(client: &reqwest::Client, location: &str) -> Result<(f64, f64, String), String> {
+async fn geocode(
+    cfg: &Config,
+    client: &reqwest::Client,
+    location: &str,
+) -> Result<(f64, f64, String), String> {
     // 都道府県名は候補が返らないので県庁所在地へ読み替える。
     let location = resolvable_location(location);
-    let mut candidates = fetch_candidates(client, location).await?;
+    let mut candidates = fetch_candidates(cfg, client, location).await?;
     // 「横浜」のように自治体の種別を省いた言い方では、小さな同名の町が先に来る。
     // 「市」を補った候補も集めてから人口で選ぶ。
     if !location.ends_with(['市', '区', '町', '村']) {
-        if let Ok(extra) = fetch_candidates(client, &format!("{location}市")).await {
+        if let Ok(extra) = fetch_candidates(cfg, client, &format!("{location}市")).await {
             candidates.extend(extra);
         }
     }

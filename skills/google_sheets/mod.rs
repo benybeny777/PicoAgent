@@ -127,7 +127,7 @@ impl Tool for GoogleSheetsTool {
                     .bearer_auth(token)
                     .send()
                     .await;
-                handle_text_response(response, "Google Sheets API").await
+                crate::tools::http::service_reply(cfg, response, "Google Sheets API").await
             }
             "update" | "append" => {
                 let values = match args.get("values").and_then(Value::as_array) {
@@ -173,27 +173,10 @@ impl Tool for GoogleSheetsTool {
                         .send()
                         .await
                 };
-                handle_text_response(response, "Google Sheets API").await
+                crate::tools::http::service_reply(cfg, response, "Google Sheets API").await
             }
             _ => "エラー: action は read/update/append のいずれかを指定してください。".to_string(),
         }
-    }
-}
-
-async fn handle_text_response(
-    response: Result<reqwest::Response, reqwest::Error>,
-    label: &str,
-) -> String {
-    let response = match response {
-        Ok(response) => response,
-        Err(error) => return format!("エラー: {} への接続に失敗しました: {}", label, error),
-    };
-    let status = response.status();
-    let body = crate::tool_response_text!(response);
-    if status.is_success() {
-        body
-    } else {
-        format!("エラー: {} が HTTP {} を返しました。", label, status)
     }
 }
 

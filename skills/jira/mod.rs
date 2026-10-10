@@ -124,7 +124,8 @@ impl Tool for JiraTool {
                     .get("jql")
                     .and_then(Value::as_str)
                     .unwrap_or("ORDER BY updated DESC");
-                handle_text_response(
+                crate::tools::http::service_reply(
+                    cfg,
                     client
                         .get(format!("{}/rest/api/3/search", base))
                         .header("Authorization", auth_header(&email, &token))
@@ -181,7 +182,8 @@ impl Tool for JiraTool {
                         }
                     }
                 });
-                handle_text_response(
+                crate::tools::http::service_reply(
+                    cfg,
                     client
                         .post(format!("{}/rest/api/3/issue", base))
                         .header("Authorization", auth_header(&email, &token))
@@ -194,23 +196,6 @@ impl Tool for JiraTool {
             }
             _ => "エラー: action は search または create_issue を指定してください。".to_string(),
         }
-    }
-}
-
-async fn handle_text_response(
-    response: Result<reqwest::Response, reqwest::Error>,
-    label: &str,
-) -> String {
-    let response = match response {
-        Ok(response) => response,
-        Err(error) => return format!("エラー: {} への接続に失敗しました: {}", label, error),
-    };
-    let status = response.status();
-    let body = crate::tool_response_text!(response);
-    if status.is_success() {
-        body
-    } else {
-        format!("エラー: {} が HTTP {} を返しました。", label, status)
     }
 }
 

@@ -326,6 +326,12 @@ NSIS アンインストーラは、インストール先またはPicoAgent管理
 
 ## 📄 主要ファイル
 
+外部HTTP取得の安全経路は `src-tauri/src/tools/http.rs` の `fetch_guarded` に集約する。全ホップの用途別URL方針・公開IP確認、検査済みDNS解決先固定、秘密ヘッダ除去、時間・本文・転送上限を一緒に保つ。DNS固定のため `no_proxy()` で直接接続し、プロキシ必須環境ではこの経路を使えない。`web_fetch` の先頭取得＋打切り表示と、API・RSSの上限超過エラーを区別する。通常の外向きHTTPは共有クライアントを使い、API応答は `service_reply` / `service_body` で短い理由とHTTP状態コードを返す。既知の設定秘密値を切詰め前に伏せ、本文取得失敗を空へ降格しない。
+
+外部CLIは `tools::resolve_cli_path` で明示指定、未設定時だけ管理下の同梱物を解決する。コマンド名だけの明示指定時に限り共通探索を使う（macOSではPATHの後に既存Homebrew配置 `/opt/homebrew/bin`・`/usr/local/bin` も確認）。指定先や優先する管理配置の欠損は修復エラーにする。Whisperの2スキルは `tools::whisper` で解決し、固定モデル名は取得側と共通の `crates/picoagent-core/src/paths.rs` を正本とする。別名の導入モデルは `PICOAGENT_TRANSCRIBE_MODEL` へ明示し、`.bin` の名前順探索はしない。
+
+コマンド許可の所有者は `tools::process::command_policy` とする。チャットと予約実行は同じ `check` を呼び、引数制限と物理削除禁止を承認前後でも適用する。スキル側へ許可リストや検査の写しを作らない。ripgrepの欠損・実行失敗時の内蔵検索は撤去し、`doc_search` の正常な0一致時のファイル名検索だけを維持する。
+
 | ファイル | 役割 |
 |---|---|
 | `src-tauri/src/main.rs` / `lib.rs` | エントリ・Builder（state・command・menu イベント・setup） |

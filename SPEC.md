@@ -277,6 +277,7 @@ inventory::submit! { ProviderReg { make: || Box::new(MyProvider) } }
 
 - 実行ファイルとモデルはリポジトリに含めない。開発版は `cargo xtask setup whisper` で `src-tauri/resources/bundled/whisper/` に、軽量販売版は公式 Release と公式モデル配布から利用者データ側へ取得する。
 - `PICOAGENT_TRANSCRIBE_PROGRAM` / `PICOAGENT_TRANSCRIBE_MODEL` が設定されていれば手動導入物を最優先し、空のときだけ同梱物を使う。
+- `meeting_recorder` と `whisper_transcribe` は `tools::whisper` で実行ファイル・モデルを共通解決する。既定モデルは `crates/picoagent-core/src/paths.rs` の固定 `models/ggml-small.bin` で、取得・管理・実行が同じ定義を使う。別の `WHISPER_MODEL` で導入したモデルを使うときは `PICOAGENT_TRANSCRIBE_MODEL` に明示する。任意の `.bin` を名前順で選ばず、欠損は修復エラーにする。
 - 文字起こしごとに1回だけ起動し、完了・失敗・タイムアウト（`PICOAGENT_TRANSCRIBE_TIMEOUT_SECS`）で終える。標準入力は使わない。
 - `diarize=true` のときだけ `PICOAGENT_TRANSCRIBE_DIARIZE_ARGS`（既定は tinydiarize の `-tdrz`）を足す。精度とマーカー形式はローカル実装とモデルに依存する。
 - 設定画面から消せるのは利用者データ側の管理領域だけで、手動導入物や開発用同梱物は消さない。
@@ -421,7 +422,17 @@ PicoAgent 自身と Git 管理するベンダの JavaScript は `eval()`／`Func
 
 ### 同梱ツール
 
-同梱 OSS CLI（Pandoc / ripgrep / ffmpeg / qpdf / Poppler / ImageMagick）は、`tools::fetch_all` を `cargo xtask setup tools` または製品 `build` の前処理から実行して `src-tauri/resources/bundled/tools/` へ取得する（`cargo xtask dev` は取得しない。再取得は `TOOLS_FORCE=1`、対象を絞るなら `PICOAGENT_SETUP_TOOLS=pandoc,ripgrep`）。各スキルは `PICOAGENT_*_PATH` の明示設定 → 同梱 → PATH の順に実行ファイルを解決する。
+同梱 OSS CLI（Pandoc / ripgrep / ffmpeg / qpdf / Poppler / ImageMagick）は、明示した `cargo xtask setup tools` で `src-tauri/resources/bundled/tools/` へ取得する（通常の `dev` / `build` は取得しない。再取得は `TOOLS_FORCE=1`、対象を絞るなら `PICOAGENT_SETUP_TOOLS=pandoc,ripgrep`）。実行ファイルは `tools::resolve_cli_path` で明示設定、未設定の場合だけPicoAgent管理下の同梱物を使う。設定にコマンド名だけ（例 `ffmpeg`）を入れた場合に限り、共通探索でその名前を解決する（macOSではPATHの後に既存Homebrew配置 `/opt/homebrew/bin`・`/usr/local/bin` も確認）。明示指定先や優先する管理配置が欠けた場合は別配置へ降格せず修復を案内し、未導入は導入方法を返す。ImageMagick v6の `convert` / `identify` は明示指定時だけ使う。
+
+PR #472の利用者決定により、既定のPATH探索とripgrep欠損時の内蔵検索を撤去する。設定されていない別ツールの実行や、正規表現検索を固定文字列検索へ変える方式は、許可・検索結果が変わるため採用しない。旧版でPATHに頼っていた環境は対応する設定へパスまたはコマンド名を明示する。
+
+外部URLの取得（`web_fetch` / `rss_feed` / `http_api`）は `tools::http::fetch_guarded` を通す。初回と全リダイレクト先のHTTP(S) URL、公開IP、用途別の許可ドメインを確認し、検査したDNS解決先へ接続を固定する。私有・ループバック等の非公開IP、HTTPSからHTTPへの降格を拒否する。全工程に時間・本文量・リダイレクト回数の上限を設ける。`web_fetch` は先頭約0.066MBを取得し、超過時は打切りを明記する。完全本文が必要なAPI・RSSの上限超過はエラーにする。異なるオリジンへ移るときはAuthorization、Cookie、Proxy-Authorization、X-API-Keyと呼出側が指定した秘密ヘッダを除く。303（HEADを除く）とPOSTの301/302は本文を捨てGETへ変え、307/308はメソッドと本文を保つ。
+
+この取得経路は `no_proxy()` で直接接続し、環境のプロキシを使わない。プロキシ側の再名前解決ではDNS固定を保証できないため、プロキシ必須環境ではこの3スキルの取得は利用できない。社内IP許可は追加しない。他の標準的な外向きHTTPは共有クライアントを使う。
+
+外部API応答は `tools::http::service_reply` / `service_body` で共通処理する。成功は上限内の本文、失敗はサービス名・HTTP状態コードと本文先頭200文字までの理由を返す。設定・環境の既知の秘密値は切詰め前に伏せ、接続エラーへURLを含めない。本文読取失敗や不正UTF-8を空本文へ降格させない。
+
+チャットの `run_command` と予約実行は `tools::process::command_policy::check` で同じ許可判定を使う。引数の個数・長さ・NULと物理削除禁止も共通化し、承認前後に検査する。許可リストへの登録や「今回だけ」の承認でも物理削除を許可しない。`doc_search` の内容検索もripgrepの欠損・実行失敗では停止するが、正常に0一致となった場合のファイル名検索は通常の検索として維持する。
 
 外部サービス連携の共通の安全策: 秘密値（token・API key・webhook・app password）は設定から都度読み、出力しない。本文・件数・サイズに上限を持ち、timeout を付ける。以下の表では個別の事項だけを書く。
 
@@ -436,7 +447,7 @@ PicoAgent 自身と Git 管理するベンダの JavaScript は `eval()`／`Func
 | `news_scrape` | Google News / Yahoo!ニュースのHTMLから最新の見出し候補を取得。一般ニュースの要約で先に使う | 対象ドメインを限定、HTML 1MB上限、件数上限、User-Agent 指定 |
 | `rss_feed` | RSS/Atom の最新記事取得 | 各リダイレクト先を含む公開HTTP(S)宛先検査、DNS解決先固定、最大5回、1MB上限 |
 | `web_search` | 検索結果のタイトル・URL・概要。事実確認・最新情報・明示依頼では回答前に先回り実行 | 検索語500文字、1〜8件、待ち時間3〜60秒、応答32KB |
-| `web_fetch` | 指定URLの本文取得 | http/https のみ、許可ドメイン設定、応答64KB。取得内容は信頼できない外部データとして扱う |
+| `web_fetch` | 指定URLの本文取得 | 各リダイレクト先を含む公開HTTP(S)宛先検査、DNS解決先固定、許可ドメイン設定、最大5回、先頭約0.066MB（超過時は打切りを明記）。取得内容は信頼できない外部データとして扱う |
 | `browser_control` | 実ブラウザ（Chrome / Edge）を CDP で操作してページを読む（JS 描画・ログインが要るページ向け） | 既定無効。CDP は127.0.0.1限定かつ自分が起動した子だけを操作、http/https のみ、許可ドメインは入力時・リダイレクト後・再読込時に検査、専用プロファイル、読み取り専用（open / read / pages / close）。内容は `check_injection` を通す |
 | `research_report` | 複数観点のWeb検索を束ねて出典付きMarkdownレポートを作る。`save=true` または `save_path` 指定で保存し、そのときは既定で `.brief.md`、`.dashboard.html`、`.slides.md`、`.sources.csv`、`.sources.json` も作る | 検索待ち3〜60秒、観点最大6件、各5件、レポート96KB、保存は共通許可ルート配下の `.md` のみ |
 | `clipboard_text` | クリップボードのテキストを要約・返信文・TODO化の素材として返す | `arboard` で OS API を直接使う。`PICOAGENT_CLIPBOARD_MAX_CHARS` で制限 |
@@ -450,7 +461,7 @@ PicoAgent 自身と Git 管理するベンダの JavaScript は `eval()`／`Func
 | `read_file` | 行番号つきで読む（`offset` / `limit`） | ファイル4MB・既定800行（最大2000）・1行800文字・出力128KB。続きの `offset` を案内する |
 | `view_image` | 画像をモデルへ見せる（png / jpg / gif / webp / bmp、最大3枚） | 1枚4MB。ツール結果には画像を載せず、`agent.rs` が画像付き user メッセージを差し込む（OpenAI 互換は `image_url`、Ollama は `images`、Anthropic は image ブロック）。非対応モデルでは無視される旨を結果に書く |
 | `glob_files` | glob パターン（`**/*.rs` など）でパス一覧（既定は更新の新しい順） | シンボリックリンク／ジャンクションを辿らない。深さ12・走査20,000件・表示既定100件（最大500）。`node_modules` / `target` / `.git` など生成物と隠しフォルダを除く |
-| `grep_search` | 正規表現で内容検索し、一致行・一致ファイル・件数を返す（`output_mode`） | 同梱 ripgrep → PATH。無ければ内蔵走査（固定文字列一致）に落ち、その旨を先頭に書く。1ファイル2MB・深さ12・走査5,000件・1行400文字・表示既定60行（最大300）、30秒 |
+| `grep_search` | 正規表現で内容検索し、一致行・一致ファイル・件数を返す（`output_mode`） | 明示設定または同梱ripgrepが必要。未導入・実行失敗は理由を返し、内蔵検索へ切り替えない。1ファイル約2.1MB・深さ12・1行400文字・表示既定60行（最大300）、30秒 |
 | `workspace_files` | 一覧、読込、書込、追記、フォルダ作成、情報取得、直前変更の取り消し | 変更はプロセス内で直列化。`write` / `append` は `preview=true` で無変更確認でき、成功した直近20件を1件1MBまでメモリに持つ。`undo` は実行時点の許可を再検証してから戻し、新規ファイルはゴミ箱へ移す。再起動後は取り消せない |
 | `edit_file` | 既存ファイルの一部を厳密一致で置換（`edits` で複数箇所） | 既存ファイルのみ、512KB、1回20件。一致0件と（`replace_all` なしの）複数一致はエラーで、1件でも失敗したら全件書かない。`preview=true` 可。ロックと取り消し履歴は `workspace_files` と共有 |
 | `notebook_edit` | Jupyter ノートブック（.ipynb）をセル単位で読み・差し替え・挿入・削除 | `.ipynb` のみ、8MB・1セル128KB・500セル。書き換えたコードセルの `outputs` / `execution_count` を消す。`delete` は `confirm=true`。実行はしない。取り消し履歴は `workspace_files` と共有 |
@@ -527,7 +538,7 @@ PicoAgent 自身と Git 管理するベンダの JavaScript は `eval()`／`Func
 | `github_issue` / `notion` / `jira` / `linear` / `trello` / `todoist` | Issue 一覧・作成 / ページ検索・DBページ作成 / 課題検索・作成 / Issue 一覧・作成 / カード一覧・作成 / タスク一覧・作成・完了 | GitHub の作成は token 必須 |
 | `discord_send_message` | Webhook で送信 | 本文2000文字 |
 | `x_twitter` / `mastodon` / `bluesky` / `reddit` / `linkedin` / `misskey` | 投稿・検索・タイムライン等 | X 280文字、Bluesky 300文字（identifier/app password でセッション作成）、Reddit は User-Agent 設定 |
-| `http_api` | 個別スキルのない SaaS や Webhook への汎用 HTTP 呼び出し | 許可ドメイン必須、任意 Bearer/API key |
+| `http_api` | 個別スキルのない SaaS や Webhook への汎用 HTTP 呼び出し | 全リダイレクト先で許可ドメイン・公開IPを検査、DNS解決先固定、任意 Bearer/API key。要求JSON・テキスト本文は約0.13MB、応答本文は約0.066MBまで。超過はエラー |
 | `subagent` | 単独委譲と、複数AIの `consensus`（同じ質問を統合）/ `collaborate`（割り振って統合）/ `divide`（個別に返す） | `agents` ごとに provider / model / 任意の focus（2〜8件）。まとめ役 judge も別指定でき、`persona` に選択中キャラの人格を渡すと本人の口調で返す。候補は宣言順に並べる。local 候補は直列、その他は最大同時数まで並行。AppHandle は渡さず、`AGENT_DEPTH` と最大深さ（既定2）で再帰を制限。`agent::cancel_flag()` の中断は分担計画・統合の通信中にも効く（`agent::cancel_while` に一本化）。計画と統合には直前の会話文脈を渡し、失敗・JSON不正・件数不一致では重複実行へ逃げず理由を返して止める |
 | `chitchat` | アイドル時の自発雑談の指示文を返す内部スキル（`agent_callable=false`） | `pet_idle_chatter` 経由で使う（詳細は[自発雑談](#自発雑談)） |
 
@@ -834,7 +845,7 @@ JSON-RPC 2.0、プロトコルバージョン `2024-11-05`。
 - **許可（`permissions.rs`）**: 許可判定を通ったパスは専用型 **`SafePath`** で表し、生成経路を `resolve()` / `SafePath::join()` / `SafePath::sibling()` に限る（内部 `PathBuf` は非公開。派生パスも再検証する）。ファイル操作は `SafePath` だけを受ける `permissions::fs` を使い、アプリ内部が決めたパスだけ `SafePath::app_owned` を使う。**スキル側での許可判定の再実装は禁止**で、`permissions::guard` が `skills/**/mod.rs` を走査して自前判定（`fn bounded_path(base:` 等）と `resolve` を通さないパス引数を検出する（例外は独自の追加制約を持つ `run_command` / `code_runner` / `trash_file`）。
   - **正本キーは `PICOAGENT_ALLOWED_ROOT`（主ルート、既定はホーム）／`PICOAGENT_ALLOWED_PATHS`（追加許可ルート）／`PICOAGENT_DENIED_PATHS`（追加拒否）**で、設定「安全・許可」で編集する。`C:\Windows` / `C:\Program Files` / `C:\Program Files (x86)` は常に拒否する（`is_system_protected`）。既存の最深祖先を実体化し、シンボリックリンクやジャンクション経由のルート外到達も拒否する。
   - 対象: `read_file` / `workspace_files` / `trash_file` / `ms_office` / `document_convert` / `pdf_tools` / `image_tools` / `research_report` / `spark_workspace` / `genspark_suite` / `artifact_pipeline` / `ai_drive` / `meeting_recorder` / `whisper_transcribe` / `run_command` / `code_runner` / `scheduler` とドロップファイルの読込。
-- **コマンド実行の承認（`run_command`）**: `PICOAGENT_COMMAND_ENABLED=true` が必要。コマンドが `PICOAGENT_COMMAND_ALLOWLIST` に無い、または `cwd` が許可ルート外なら、チャットへ確認を返す。「許可」で保留中の1件だけ実行し、「永続許可」でコマンド prefix を `PICOAGENT_COMMAND_ALLOWLIST` へ、必要なら cwd を `PICOAGENT_ALLOWED_PATHS` へ保存してから実行する。「キャンセル」で破棄する。`C:\Windows` と `C:\Program Files*` 配下はチャットで許可されても実行先や編集先にしない（`workspace_files` の `write` / `append` / `mkdir` も同じ）。
+- **コマンド実行の承認（`run_command`）**: `PICOAGENT_COMMAND_ENABLED=true` が必要。コマンドが `PICOAGENT_COMMAND_ALLOWLIST` に完全一致しない、または `cwd` が許可ルート外なら、チャットへ確認を返す。「許可」で保留中の1件だけ実行し、「永続許可」で引数を含むコマンド全体を `PICOAGENT_COMMAND_ALLOWLIST` へ、必要なら cwd を `PICOAGENT_ALLOWED_PATHS` へ保存してから実行する。「キャンセル」で破棄する。`git diff` の許可に後続引数は含まれず、`git diff --stat` は別登録が必要。`C:\Windows` と `C:\Program Files*` 配下はチャットで許可されても実行先や編集先にしない（`workspace_files` の `write` / `append` / `mkdir` も同じ）。
 - **ユーザーへの確認（`ask_user`）**: `run_command` の承認カードと同じマーカー方式で、`agent.rs` がループを止め、`commands.rs` が質問と `choices` を返す（クイック操作欄が選択肢ボタンになる）。保留中の質問は `AppState.pending_question` が1件だけ持ち、次の発話で必ず解除する。
 - **自力実行（`code_runner`）**: cwd 検査と文字列 denylist ではスクリプト内部のルート外アクセスや難読化された物理削除を防げないため、OSレベルの隔離実行を用意するまで `agent_callable=false` でモデルへ公開しない。
 - **プロジェクト文脈**: `pet_send` のたびに `project::project_context()` が選択中プロジェクトの未完了課題（上位5件）と直近の記録（4件）を1,200文字までにまとめ、`apply_project_context()` が system の `[プロジェクト文脈]`〜`[/プロジェクト文脈]` ブロックを**入れ替える**。台帳が読めないときは差し込まずに続ける。

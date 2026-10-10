@@ -133,7 +133,8 @@ impl Tool for LinearTool {
                     .to_string()
             }
         };
-        handle_text_response(
+        crate::tools::http::service_reply(
+            cfg,
             client
                 .post(LINEAR_URL)
                 .bearer_auth(token)
@@ -143,23 +144,6 @@ impl Tool for LinearTool {
             "Linear API",
         )
         .await
-    }
-}
-
-async fn handle_text_response(
-    response: Result<reqwest::Response, reqwest::Error>,
-    label: &str,
-) -> String {
-    let response = match response {
-        Ok(response) => response,
-        Err(error) => return format!("エラー: {} への接続に失敗しました: {}", label, error),
-    };
-    let status = response.status();
-    let body = crate::tool_response_text!(response);
-    if status.is_success() {
-        body
-    } else {
-        format!("エラー: {} が HTTP {} を返しました。", label, status)
     }
 }
 

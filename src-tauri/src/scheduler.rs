@@ -19,9 +19,6 @@ pub const CONFIG_KEY: &str = "PICOAGENT_SCHEDULED_TASKS";
 pub const STATE_KEY: &str = "PICOAGENT_SCHEDULED_TASK_STATE";
 pub const TOOL_ALLOWLIST_KEY: &str = "PICOAGENT_SCHEDULED_TOOL_ALLOWLIST";
 const DEFAULT_TOOL_ALLOWLIST: &str = "time,weather,web_fetch";
-const DEFAULT_ALLOWLIST: &str = "git status,git diff,npm test,cargo test";
-const MAX_ARGS: usize = 32;
-const MAX_ARG_CHARS: usize = 500;
 const MAX_OUTPUT_BYTES: usize = 16 * 1024;
 const MAX_RUN_HISTORY: usize = 100;
 const MAX_CATCH_UP_MINUTES: i64 = 24 * 60;
@@ -381,51 +378,6 @@ fn is_protected_edit_path(path: &Path) -> bool {
     crate::permissions::is_system_protected(path)
 }
 
-fn command_tokens(program: &str, args: &[String]) -> Vec<String> {
-    let mut tokens = Vec::with_capacity(args.len() + 1);
-    tokens.push(program.to_string());
-    tokens.extend(args.iter().cloned());
-    tokens
-}
-
-fn allowlist_entries(cfg: &Config) -> Vec<Vec<String>> {
-    cfg.get("PICOAGENT_COMMAND_ALLOWLIST", DEFAULT_ALLOWLIST)
-        .split(',')
-        .filter_map(|entry| {
-            let tokens: Vec<String> = entry
-                .split_whitespace()
-                .filter(|token| !token.is_empty())
-                .map(ToString::to_string)
-                .collect();
-            if tokens.is_empty() {
-                None
-            } else {
-                Some(tokens)
-            }
-        })
-        .collect()
-}
-
-fn allowed(cfg: &Config, program: &str, args: &[String]) -> bool {
-    let tokens = command_tokens(program, args);
-    allowlist_entries(cfg).iter().any(|entry| entry == &tokens)
-}
-
-fn validate_args(args: &[String]) -> Result<(), String> {
-    if args.len() > MAX_ARGS {
-        return Err(format!("args は {} 個以内で指定してください。", MAX_ARGS));
-    }
-    for arg in args {
-        if arg.chars().count() > MAX_ARG_CHARS {
-            return Err(format!(
-                "各 arg は {} 文字以内で指定してください。",
-                MAX_ARG_CHARS
-            ));
-        }
-    }
-    Ok(())
-}
-
 pub fn validate_task(cfg: &Config, task: &ScheduledTask) -> Result<(), String> {
     if !task.cron.trim().is_empty() {
         validate_cron(&task.cron)?;
@@ -442,18 +394,7 @@ pub fn validate_task(cfg: &Config, task: &ScheduledTask) -> Result<(), String> {
             if task.program.trim().is_empty() {
                 return Err("program が指定されていません。".to_string());
             }
-            validate_args(&task.args)?;
-            // 物理削除は run_command と同じ規則で拒否する（allowlist を通っても実行しない）。
-            if crate::tools::process::is_physical_delete(&task.program, &task.args) {
-                return Err(crate::tools::process::physical_delete_error());
-            }
-            if !allowed(cfg, &task.program, &task.args) {
-                return Err(format!(
-                    "許可されていないコマンドです: {} {}",
-                    task.program,
-                    task.args.join(" ")
-                ));
-            }
+            crate::tools::process::command_policy::check(cfg, &task.program, &task.args)?;
         }
         "tool" => {
             if task.tool_name.trim().is_empty() {

@@ -250,7 +250,7 @@ impl Tool for MarketIndicesTool {
         };
         let status = response.status();
         if !status.is_success() {
-            return format!("エラー: 市場指数APIが HTTP {status} を返しました。");
+            return crate::tools::http::service_reply(cfg, Ok(response), "市場指数API").await;
         }
         let data: Value = match response.json().await {
             Ok(data) => data,
