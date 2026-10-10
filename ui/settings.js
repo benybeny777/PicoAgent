@@ -2247,84 +2247,113 @@ async function loadCharacterManifestForSettings(character) {
   return manifest;
 }
 
-// 画像を実際に読み込めたURLだけを返す。存在しない候補を <img> へ渡すと壊れた画像になる。
-function firstLoadableImage(urls) {
-  return urls.reduce((previous, url) => previous.then(found => found || new Promise(resolve => {
-    const image = new Image();
-    image.onload = () => resolve(url);
-    image.onerror = () => resolve("");
-    image.src = url;
-  })), Promise.resolve(""));
+// 定義から画像を一つ確定する。存在しない画像を別候補へ切り替えない。
+const characterIconRigCache = new Map();
+async function loadIconRig(rigUrl, version) {
+  const url = `${rigUrl}${version}`;
+  if (!characterIconRigCache.has(url)) {
+    const pending = (async () => {
+      const response = await fetch(url, { cache: "no-store" });
+      if (!response.ok) throw new Error(`アイコンのリグ定義: HTTP ${response.status}`);
+      return await response.json();
+    })();
+    characterIconRigCache.set(url, pending);
+    pending.catch(() => characterIconRigCache.delete(url));
+  }
+  return await characterIconRigCache.get(url);
 }
 
-// メッシュのリグ定義にある顔の位置で、合成画像（neutral.png）から顔の周りだけを切り出す。
-// 全身画像を丸へ縮めると頭が数pxになり、誰のアイコンか分からなかった。
-async function meshFaceIconUrl(rigUrl, version) {
+function characterIconSource(manifest, rig = null) {
+  if (["live2d", "mmd"].includes(characterRenderKind(manifest))) return { kind: "none" };
+  if (manifest.meshRig) {
+    if (!manifest.meshRig.rig || !rig) throw new Error("アイコンのリグ定義が不正です");
+    if (rig.schema_version === 3 && rig.profile === "lvs-anime25d-v1") return { kind: "mesh", path: manifest.meshRig.rig };
+    if (rig.mode !== "layered-grid-v2") throw new Error("アイコンのリグ形式に対応していません");
+    if (![rig.sourceCanvas, rig.canvas].every(value => Array.isArray(value) && value.length === 2
+      && value.every(size => Number.isFinite(size) && size > 0))) throw new Error("アイコンのリグ寸法が不正です");
+  }
+  const idle = manifest.animations?.idle;
+  const path = idle?.framePaths?.[0] || (idle?.path ? `${idle.path}/00.png` : "");
+  if (path) return { kind: "image", path };
+  throw new Error("アイコン用の待機画像定義がありません");
+}
+
+function loadIconImage(url) {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    const timer = setTimeout(() => finish(new Error(`アイコン画像の読込が時間切れです: ${url}`)), 5000);
+    const finish = error => {
+      clearTimeout(timer);
+      image.onload = null;
+      image.onerror = null;
+      if (error) { image.removeAttribute("src"); reject(error); }
+      else resolve(image);
+    };
+    image.onload = () => finish(Number.isFinite(image.naturalWidth) && image.naturalWidth > 0
+      && Number.isFinite(image.naturalHeight) && image.naturalHeight > 0 ? null : new Error("アイコン画像の寸法が不正です"));
+    image.onerror = () => finish(new Error(`アイコン画像を読み込めません: ${url}`));
+    image.src = url;
+  });
+}
+
+function iconBox(value, label) {
+  if (!Array.isArray(value) || value.length !== 4 || !value.every(Number.isFinite)
+    || value[2] <= value[0] || value[3] <= value[1]) throw new Error(`${label}の範囲が不正です`);
+  return value;
+}
+
+// メッシュの宣言した合成画像を読む。構図用も同じ画像を使い、顔の切出しだけ省く。
+async function meshFaceIconUrl(rigUrl, version, { face = true, rig } = {}) {
+  if (!rig) throw new Error("確定したアイコンのリグ定義がありません");
+  const neutral = rig.layers?.neutral;
+  if (typeof neutral?.url !== "string" || !neutral.url.trim()) throw new Error("アイコンの合成画像定義がありません");
+  const box = iconBox(neutral.texture_box, "合成画像");
+  const partUrl = `${rigUrl.replace(/[^/]+$/, "")}${neutral.url.replace(/^.*\/parts\//, "parts/")}${version}`;
+  const image = await loadIconImage(partUrl);
+  if (!face) return partUrl;
+  const [left, top, right, bottom] = iconBox(rig.layers?.face?.bbox || rig.layers?.scene_face?.texture_box, "顔");
+  const size = Math.max(right - left, bottom - top) * 1.7;
+  const centerX = (left + right) / 2 - box[0];
+  const centerY = (top + bottom) / 2 - box[1];
+  if (!Number.isFinite(size) || size <= 0 || !Number.isFinite(centerX) || !Number.isFinite(centerY)
+    || left < box[0] || top < box[1] || right > box[2] || bottom > box[3]
+    || centerX < 0 || centerY < 0 || centerX > image.naturalWidth || centerY > image.naturalHeight) {
+    throw new Error("顔の切出し位置が合成画像の範囲外です");
+  }
+  const canvas = document.createElement("canvas");
+  canvas.width = 128;
+  canvas.height = 128;
   try {
-    const response = await fetch(`${rigUrl}${version}`, { cache: "no-store" });
-    if (!response.ok) return "";
-    const rig = await response.json();
-    const face = rig.layers?.face?.bbox || rig.layers?.scene_face?.texture_box;
-    const neutral = rig.layers?.neutral;
-    if (!Array.isArray(face) || !neutral?.url || !Array.isArray(neutral.texture_box)) return "";
-    const partUrl = `${rigUrl.replace(/[^/]+$/, "")}${String(neutral.url).replace(/^.*\/parts\//, "parts/")}${version}`;
-    const image = await new Promise((resolve, reject) => {
-      const loaded = new Image();
-      loaded.onload = () => resolve(loaded);
-      loaded.onerror = reject;
-      loaded.src = partUrl;
-    });
-    // 顔の外接枠を中心に、髪と肩が少し入る大きさの正方形で切り出す。
-    const [left, top, right, bottom] = face;
-    const size = Math.max(right - left, bottom - top) * 1.7;
-    const centerX = (left + right) / 2 - neutral.texture_box[0];
-    const centerY = (top + bottom) / 2 - neutral.texture_box[1];
-    const canvas = document.createElement("canvas");
-    canvas.width = 128;
-    canvas.height = 128;
-    canvas.getContext("2d").drawImage(image, centerX - size / 2, centerY - size / 2, size, size, 0, 0, 128, 128);
-    return canvas.toDataURL("image/png");
-  } catch (error) {
-    // 顔の切り出しに失敗しても、呼び出し側の通常の画像候補で表示できる。
-    logApp("warn", "キャラクターアイコンの顔切り出しに失敗しました", errorDetail(error));
-    return "";
+    const context = canvas.getContext("2d");
+    if (!context) throw new Error("アイコンの canvas を準備できません");
+    context.drawImage(image, centerX - size / 2, centerY - size / 2, size, size, 0, 0, 128, 128);
+    const url = canvas.toDataURL("image/png");
+    if (!url.startsWith("data:image/png;")) throw new Error("アイコン画像の書き出しに失敗しました");
+    return url;
+  } finally {
+    canvas.width = 0;
+    canvas.height = 0;
   }
 }
 
-// `face: false` は構図プレビュー用。全身の配置を見るため顔の切り出しをしない。
+// face:false は同じ宣言画像による構図プレビュー。画像なしの宣言と失敗を区別する。
 async function characterIconUrl(character, { face = true } = {}) {
   try {
     const manifest = await loadCharacterManifestForSettings(character);
-    const root = character.root;
-    const idle = manifest.animations?.idle;
-    if (!face) {
-      // 構図プレビューは本体と同じ画像で描く。メッシュのキャラは本体の2D退避と同じ preview.png。
-      // 以前は寝姿（boot.sleeping）へ落ち、構図の確認に寝転んだ絵が出ていた。
-      const imagePath = idle?.path ? `${idle.path}/00.png`
-        : manifest.meshRig ? "preview.png" : manifest.boot?.sleeping;
-      if (!imagePath) return "assets/characters/_preview-placeholder.png";
-      const version = manifest.assetVersion ? `?v=${encodeURIComponent(manifest.assetVersion)}` : "";
-      return `${root}/${imagePath}${version}`;
-    }
-    // Live2D・MMDの同梱画像は宣伝用の横長画像で、丸へ切り取っても顔にならない。
-    // 画像を出さず、呼び出し側の頭文字表示に任せる。
-    if (["live2d", "mmd"].includes(characterRenderKind(manifest))) return "";
-    // メッシュ化したキャラ（#193以降）は待機アニメーションを持たず、以前は同梱の仮画像になっていた。
-    // 待機画像 → 余白を詰めたメッシュの合成画像 → preview → 原画 → 寝姿の順で実在するものを使う。
-    const candidates = [
-      idle?.framePaths?.[0] || (idle?.path ? `${idle.path}/00.png` : ""),
-      manifest.meshRig?.rig ? `${String(manifest.meshRig.rig).replace(/[^/]+$/, "")}parts/neutral.png` : "",
-      "preview.png",
-      "source.png",
-      manifest.boot?.sleeping,
-    ].filter(Boolean);
     const version = manifest.assetVersion ? `?v=${encodeURIComponent(manifest.assetVersion)}` : "";
-    const faceIcon = face && manifest.meshRig?.rig ? await meshFaceIconUrl(`${root}/${manifest.meshRig.rig}`, version) : "";
-    if (faceIcon) return faceIcon;
-    return await firstLoadableImage(candidates.map(path => `${root}/${path}${version}`));
+    const rig = !["live2d", "mmd"].includes(characterRenderKind(manifest)) && manifest.meshRig
+      ? await loadIconRig(`${character.root}/${manifest.meshRig.rig}`, version) : null;
+    const source = characterIconSource(manifest, rig);
+    if (source.kind === "none") return { ok: true, url: null, imageAbsent: true };
+    const url = source.kind === "mesh"
+      ? await meshFaceIconUrl(`${character.root}/${source.path}`, version, { face, rig })
+      : `${character.root}/${source.path}${version}`;
+    if (source.kind === "image") await loadIconImage(url);
+    return { ok: true, url, imageAbsent: false };
   } catch (error) {
-    logApp("warn", "キャラクターアイコンの読込に失敗しました", `${character.id}: ${errorDetail(error)}`);
-    return "";
+    const reason = errorDetail(error);
+    logApp("warn", "キャラクターアイコンの読込に失敗しました", `${character.id}: ${reason}`);
+    return { ok: false, reason };
   }
 }
 
@@ -3697,12 +3726,21 @@ async function render() {
     // 先頭1文字。`slice(0, 1)` は絵文字始まりの名前を半分で切って壊すため、
     // コードポイント単位で取る。
     const initial = Array.from(String(character.name || character.id || "?"))[0] || "?";
-    const fallback = el("div", { className: "character-icon-fallback", textContent: initial });
+    const fallback = el("div", { className: "character-icon-fallback", textContent: "" });
     const icon = el("img", { className: "character-icon", alt: `${character.name}のアイコン`, draggable: false });
     icon.hidden = true;
-    characterIconUrl(character).then(url => {
-      if (!url) return;
-      icon.src = url;
+    const showIconFailure = reason => {
+      icon.hidden = true;
+      fallback.hidden = false;
+      fallback.className = "character-icon-error";
+      fallback.textContent = "アイコンを作れません";
+      fallback.title = reason;
+    };
+    icon.onerror = () => showIconFailure("確定したアイコン画像を表示できません");
+    characterIconUrl(character).then(result => {
+      if (!result.ok) { showIconFailure(result.reason); return; }
+      if (result.imageAbsent) { fallback.textContent = initial; return; }
+      icon.src = result.url;
       icon.hidden = false;
       fallback.hidden = true;
     });

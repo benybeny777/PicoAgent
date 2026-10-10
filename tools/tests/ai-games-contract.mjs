@@ -38,10 +38,9 @@ test("採点待ちの間に閉じても、閉じた後の画面を書き換え�
 
 test("記録と効果音の保存は失敗しても画面を止めない", () => {
   // 読み取りだけ包んで書き込みを裸にすると、保存に失敗しただけで結末画面が出ない。
-  assert.match(game, /const readStorage = key => \{[\s\S]*?try \{ return localStorage\.getItem/);
-  assert.match(game, /const writeStorage = \(key, value\) => \{[\s\S]*?try \{ localStorage\.setItem/);
-  assert.equal(game.match(/localStorage\.getItem\(/g)?.length, 1);
-  assert.equal(game.match(/localStorage\.setItem\(/g)?.length, 1);
+  assert.match(game, /import \{ read, readJson, write \} from "\.\/ui-store\.js"/);
+  assert.doesNotMatch(game, /localStorage\.(?:get|set|remove)Item/);
+  assert.match(game, /if \(!saveValue\(RECORDS_KEY,/);
   // 記録は難易度別に持ち、最高点か最長生存を伸ばしたときだけ書き戻す。
   assert.match(game, /const saveRecord = \(difficulty, score, rounds\) => \{[\s\S]*?if \(score <= current\.score && rounds <= current\.rounds\) return false;/);
 });
@@ -83,7 +82,7 @@ test("信用度が尽きるまで出題が続き、点数で称号が決まる",
   const ranks = [...game.matchAll(/^\s*\[(\d+), "([a-z-]+)", "/gm)].map(match => Number(match[1]));
   assert.deepEqual(ranks, [2000, 1200, 700, 300, 0]);
   assert.match(game, /const rankFor = score => RANKS\.find\(\(\[threshold\]\) => score >= threshold\);/);
-  assert.match(game, /writeStorage\(RANKS_KEY,/);
+  assert.match(game, /saveValue\(RANKS_KEY,/);
   assert.match(game, /speakGame\(`信用度、マイナス/);
 });
 

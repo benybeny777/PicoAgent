@@ -10,7 +10,7 @@ function deferred() {
   return { promise, resolve, reject };
 }
 const main = readFileSync(new URL("../../ui/app/main.js", import.meta.url), "utf8").replace(/\r\n/g, "\n");
-const loadFunction = main.slice(main.indexOf("async function loadCharacter("), main.indexOf("\nfunction localStorageVariant("));
+const loadFunction = main.slice(main.indexOf("async function loadCharacter("), main.indexOf("\n// ── 表示形式"));
 const hostSource = readFileSync(new URL("../../ui/character/index.js", import.meta.url), "utf8")
   .replace(/^import[\s\S]*?;\r?\n/gm, "").replace(/export (function|const|class)/g, "$1");
 

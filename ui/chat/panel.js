@@ -46,8 +46,9 @@ export function createChatSource(context) {
   const previewBox = el("div", { className: "image-preview", hidden: true });
   const suggestions = el("div", { className: "attachment-suggestions", hidden: true }, [], { role: "group", "aria-label": "添付ファイルのおすすめ操作" });
   const quickActions = el("div", { className: "quick-actions" }, [], { role: "group", "aria-label": "クイック操作" });
+  const diagnostics = el("div", { className: "composer-diagnostics" }, [previewBox, suggestions, quickActions]);
   const form = el("form", { id: "composer", className: "composer", hidden: true }, [
-    previewBox, suggestions, quickActions, input,
+    diagnostics, input,
     el("div", { className: "composer-actions" }, [voiceLoopButton, micButton, sendButton]),
   ]);
 
@@ -117,7 +118,7 @@ export function createChatSource(context) {
     onExported: path => context.notices?.push({ kind: "export", ok: true, title: "会話履歴を書き出しました", body: path, at: new Date().toISOString() }),
   });
   history.attachTaskPanel(taskRun);
-  const composer = createComposer({ form, input, preview: previewBox, suggestions, quickActions, sendButton, status });
+  const composer = createComposer({ form, input, preview: previewBox, suggestions, quickActions, diagnostics, sendButton, status });
 
   const reusable = () => context.sources?.get("subtitle")?.element;
   const pager = createPager({

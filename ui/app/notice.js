@@ -5,8 +5,10 @@
 // 直近50件は localStorage に持つ。
 
 import * as bridge from "./bridge.js";
-import { clearBackgroundFailure, notifyBackgroundFailure } from "./toast.js";
-import { el, errorDetail, errorMessage, logApp } from "./util.js";
+import { clearBackgroundFailure, notifyBackgroundFailure, createBackgroundFailureReporter } from "./toast.js";
+import { el, errorMessage } from "./util.js";
+
+import { readJson, write, remove } from "./ui-store.js";
 
 const STORAGE_KEY = "picoagent.actionCenter.v1";
 const LIMIT = 50;
@@ -16,17 +18,12 @@ const JOB_LABELS = { running: "実行中", failed: "失敗", cancelled: "中断"
 /** 中止ボタンを出すかどうかの判定。待機中もまだ止められる。 */
 const durableStatus = state => (state === "queued" || state === "running" ? "running" : String(state || "completed"));
 
-function loadStored() {
-  try {
-    const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]");
-    if (!Array.isArray(parsed)) return [];
-    // 前回の終了時に実行中だった会話は、結果を確認できなかったものとして残す。
-    return parsed.slice(0, LIMIT).map(entry => (entry?.kind === "job" && entry.status === "running"
-      ? { ...entry, status: "failed", ok: false, body: "アプリ終了により処理結果を確認できませんでした。" }
-      : entry));
-  } catch {
-    return []; // 破損したUIキャッシュは空のアクションセンターとして再構築する。
-  }
+function validEntries(value) {
+  return Array.isArray(value) && value.every(entry => entry && typeof entry === "object" && !Array.isArray(entry)
+    && typeof entry.kind === "string" && typeof entry.title === "string" && typeof entry.body === "string"
+    && typeof entry.at === "string" && typeof entry.ok === "boolean"
+    && ["taskId", "runId", "jobId", "rule", "status", "prompt", "state"].every(key => entry[key] === undefined || typeof entry[key] === "string")
+    && (entry.progress === undefined || Number.isFinite(entry.progress)));
 }
 
 function durableEntry(notice) {
@@ -51,16 +48,79 @@ function staleDurable(previous, next) {
 }
 
 export function createNotices({ panel, button, status, onRetryPrompt, onCancelJob }) {
-  const entries = loadStored();
+  const storageFailures = createBackgroundFailureReporter("notice-storage");
+  const entries = [];
+  const storageProblems = new Map();
+  let savingBlocked = false;
   let unread = 0;
   let clearRevision = 0;
   const list = el("div", { className: "notice-list" });
   const clear = el("button", { type: "button", className: "chip", textContent: "消去" });
-  panel.replaceChildren(el("div", { className: "notice-head" }, [el("strong", { textContent: "アクションセンター" }), clear]), list);
+  const storageReason = el("div", { className: "notice-body", role: "alert", hidden: true });
+  const reload = el("button", { type: "button", className: "chip", textContent: "通知履歴を再読込", hidden: true });
+  panel.replaceChildren(el("div", { className: "notice-head" }, [el("strong", { textContent: "アクションセンター" }), clear]), storageReason, reload, list);
+
+  function updateStorageReason() {
+    storageReason.textContent = [...storageProblems.values()].join(" / ");
+    storageReason.hidden = storageProblems.size === 0;
+    reload.hidden = storageProblems.size === 0;
+  }
+  function storageFailure(operation, reason, message) {
+    storageProblems.set(operation, message);
+    updateStorageReason();
+    storageFailures.failure(operation, reason, message);
+  }
+  function storageRecovery(operation) {
+    storageProblems.delete(operation);
+    updateStorageReason();
+    storageFailures.recover(operation);
+  }
+  function storedIdentity(entry) {
+    if (entry.kind === "schedule" && entry.runId) return `schedule:${entry.runId}`;
+    if (["job", "durable_job"].includes(entry.kind) && entry.jobId) return `${entry.kind}:${entry.jobId}`;
+    return JSON.stringify([entry.kind, entry.title, entry.body, entry.at]);
+  }
+  function reloadStored() {
+    const loaded = readJson(STORAGE_KEY, validEntries);
+    let restored;
+    let removedCorruption = false;
+    if (!loaded.ok) {
+      if (!loaded.corrupted) {
+        savingBlocked = true;
+        storageFailure("read", loaded.reason, `通知履歴を読み込めず保存を停止しました: ${loaded.reason}`);
+        return;
+      }
+      const deleted = remove(STORAGE_KEY);
+      if (!deleted.ok) {
+        savingBlocked = true;
+        storageFailure("remove", deleted.reason, `通知履歴の原本を保持し保存を停止しました: ${deleted.reason}`);
+        return;
+      }
+      removedCorruption = true;
+      restored = [];
+    } else restored = loaded.value ?? [];
+    savingBlocked = false;
+    storageRecovery("read");
+    storageRecovery("remove");
+    // 新着を先に置き、同時刻では新着を優先する。未読数は再読込で変更しない。
+    const merged = new Map(entries.map(entry => [storedIdentity(entry), entry]));
+    for (const original of restored.slice(0, LIMIT)) {
+      const entry = original.kind === "job" && original.status === "running"
+        ? { ...original, status: "failed", ok: false, body: "アプリ終了により処理結果を確認できませんでした。" } : original;
+      const identity = storedIdentity(entry);
+      const previous = merged.get(identity);
+      if (!previous || (String(entry.at) > String(previous.at) && !(entry.kind === "durable_job" && staleDurable(previous, entry)))) merged.set(identity, entry);
+    }
+    entries.splice(0, entries.length, ...[...merged.values()].sort((a, b) => String(b.at).localeCompare(String(a.at))).slice(0, LIMIT));
+    if (removedCorruption) notices.push({ kind: "通知", title: "通知履歴を消しました", body: "保存された通知履歴の形式が壊れていたため消しました。" });
+    else changed();
+  }
 
   const persistNow = () => {
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(entries.slice(0, LIMIT))); }
-    catch (error) { logApp("warn", "アクションセンターの保存に失敗しました", errorDetail(error)); }
+    if (savingBlocked) return;
+    const result = write(STORAGE_KEY, JSON.stringify(entries.slice(0, LIMIT)));
+    if (result.ok) storageRecovery("write");
+    else storageFailure("write", result.reason, `通知履歴を保存できません: ${result.reason}`);
   };
   // エージェント実行中は進捗のたびに呼ばれるため、保存は1フレーム1回へまとめる。
   const persistScheduler = window.PicoFrameScheduler.create(persistNow);
@@ -288,12 +348,25 @@ export function createNotices({ panel, button, status, onRetryPrompt, onCancelJo
   });
   clear.addEventListener("click", event => {
     event.stopPropagation();
+    const deleted = remove(STORAGE_KEY);
+    if (!deleted.ok) {
+      storageFailure("remove", deleted.reason, `通知履歴を消去できません: ${deleted.reason}`);
+      return;
+    }
+    storageRecovery("remove");
+    storageRecovery("read");
+    storageRecovery("write");
+    savingBlocked = false;
     clearRevision += 1;
     entries.length = 0;
     unread = 0;
     changed();
   });
-  persistNow();
+  reload.addEventListener("click", event => {
+    event.stopPropagation();
+    reloadStored();
+  });
+  reloadStored();
   updateBadge();
   return notices;
 }

@@ -44,3 +44,20 @@ export function notifyBackgroundFailure(key, message, error) {
 export function clearBackgroundFailure(key) {
   notifiedFailures.delete(key);
 }
+
+// 保存などの複数操作は、原因別の通知と成功時の解除をここで統一する。
+export function createBackgroundFailureReporter(namespace) {
+  const operations = new Map();
+  return {
+    failure(operation, reason, message) {
+      const key = `${namespace}:${operation}:${reason}`;
+      if (!operations.has(operation)) operations.set(operation, new Set());
+      operations.get(operation).add(key);
+      notifyBackgroundFailure(key, message, new Error(reason));
+    },
+    recover(operation) {
+      for (const key of operations.get(operation) || []) clearBackgroundFailure(key);
+      operations.delete(operation);
+    },
+  };
+}

@@ -23,7 +23,7 @@ import { copyText, el, errorDetail, errorMessage, fetchJson, isImeComposing, log
 import { createVoice } from "./voice.js";
 import { createWindowChrome } from "./window-chrome.js";
 import { createCharacterHost } from "../character/index.js";
-import { listCharacters, personaText, rememberVariant } from "../character/manifest.js";
+import { listCharacters, personaText, rememberVariant, savedVariant } from "../character/manifest.js";
 import { createSender } from "../chat/send.js";
 import { openExternalUrl } from "../chat/markdown.js";
 import { createSources } from "../sources/index.js";
@@ -351,17 +351,18 @@ function renderCharacterOptions(pack) {
     select.addEventListener("change", async () => {
       const previous = pack.variantId;
       select.disabled = true;
-      rememberVariant(pack.id, select.value);
-      loadedSignature = "";
+      let saved = false;
       try {
+        rememberVariant(pack.id, select.value);
+        saved = true;
+        loadedSignature = "";
         await loadCharacter(pack.id, { speakGreeting: false });
         motion.react("pleased", 900);
       } catch (error) {
         logApp("error", "雰囲気の切替に失敗しました", errorDetail(error));
-        rememberVariant(pack.id, previous);
-        loadedSignature = "";
-        await loadCharacter(pack.id, { speakGreeting: false }).catch(restoreError => logApp("error", "雰囲気の切替失敗後に元の表示へ戻せませんでした", errorDetail(restoreError)));
-        toast("雰囲気を切り替えられませんでした", "error");
+        // 保存不能なら現在の確定表示を保つ。保存後の読込失敗は同じ選択の診断と再試行へ流す。
+        if (!saved) select.value = previous;
+        toast(`雰囲気を切り替えられません: ${errorMessage(error)}`, "error");
       } finally {
         select.disabled = false;
       }
@@ -380,7 +381,7 @@ function renderCharacterOptions(pack) {
 
 /** 見た目・人格・Live2D の世代・雰囲気のどれかが変わったときだけ描画を作り直す。 */
 function signatureOf(characterId) {
-  return [characterId, JSON.stringify(characterOverrides[characterId] || ""), sdkOverrides[characterId] || "", rendererOverrides[characterId] || "", localStorageVariant(characterId)].join("\n");
+  return [characterId, JSON.stringify(characterOverrides[characterId] || ""), sdkOverrides[characterId] || "", rendererOverrides[characterId] || "", savedVariant(characterId)].join("\n");
 }
 
 async function loadCharacter(characterId, { speakGreeting = true } = {}) {
@@ -434,11 +435,6 @@ async function loadCharacter(characterId, { speakGreeting = true } = {}) {
   } finally {
     characterLoads--;
   }
-}
-
-function localStorageVariant(characterId) {
-  try { return localStorage.getItem(`picoagent.variant.${characterId}`) || ""; }
-  catch { return ""; } // 保存領域を読めない環境では既定の見た目として扱う。
 }
 
 // ── 表示形式 ─────────────────────────────────────────────────
