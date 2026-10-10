@@ -64,8 +64,28 @@ fn block_saving(character_id: &str) {
 }
 
 /// 原本の中身が分かった（読めた・退避した・利用者が消した）ので保存を再開する。
-fn allow_saving(character_id: &str) {
-    unreadable().lock().unwrap().remove(&sanitize(character_id));
+///
+/// 保存停止はキャラごとだが、画面の警告は1つ。止めているキャラが残っている間は解除を
+/// 知らせない（別キャラの保存成功で「解除」と出すと、止まったままのキャラを見誤る）。
+/// 最後の1体が解除されたときだけ `true` を返す。
+fn allow_saving(character_id: &str) -> bool {
+    release(&mut unreadable().lock().unwrap(), character_id)
+}
+
+fn release(blocked: &mut HashSet<String>, character_id: &str) -> bool {
+    blocked.remove(&sanitize(character_id)) && blocked.is_empty()
+}
+
+fn resume_saving(app: &AppHandle, character_id: &str) {
+    if allow_saving(character_id) {
+        BLOCKED.report(
+            app,
+            "history-save-blocked",
+            "会話履歴の保存",
+            Ok(()),
+            "会話履歴の保存停止が解除されました",
+        );
+    }
 }
 
 /// 保存を止めているか。止めている間の会話はどこにも残らないため、
@@ -208,7 +228,7 @@ pub fn load_recent(app: &AppHandle, character_id: &str) -> anyhow::Result<Vec<Me
     let text = match std::fs::read_to_string(&target) {
         Ok(text) => text,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            allow_saving(character_id);
+            resume_saving(app, character_id);
             return Ok(Vec::new());
         }
         Err(error) => {
@@ -246,7 +266,7 @@ pub fn load_recent(app: &AppHandle, character_id: &str) -> anyhow::Result<Vec<Me
         }
     };
     // ここまで来たら原本の中身は分かっている（読めた／退避済み）ので保存を再開してよい。
-    allow_saving(character_id);
+    resume_saving(app, character_id);
     let start = all.len().saturating_sub(MAX_CONTEXT_LOAD);
     Ok(all[start..]
         .iter()
@@ -301,13 +321,6 @@ pub fn save(app: &AppHandle, character_id: &str, messages: &[Message]) {
         Ok(())
     })();
     // フォールバック許可: PR #463 採用案。保存失敗を通知して会話を継続する。
-    BLOCKED.report(
-        app,
-        "history-save-blocked",
-        "会話履歴の保存",
-        Ok(()),
-        "会話履歴の保存停止が解除されました",
-    );
     SAVE_FAILED.report(
         app,
         "history-save",
@@ -341,11 +354,11 @@ pub fn clear(app: &AppHandle, character_id: &str) -> anyhow::Result<()> {
     match std::fs::remove_file(target) {
         // 利用者自身が消したので、読めなかった原本を守る必要も無くなる。
         Ok(()) => {
-            allow_saving(character_id);
+            resume_saving(app, character_id);
             Ok(())
         }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            allow_saving(character_id);
+            resume_saving(app, character_id);
             Ok(())
         }
         Err(error) => Err(error.into()),
@@ -355,8 +368,9 @@ pub fn clear(app: &AppHandle, character_id: &str) -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::{
-        allow_saving, block_saving, clean_legacy_greeting_guidance, remove_known_prompt_leaks,
-        saving_blocked, strip_legacy_label, LEGACY_CHAT_GUIDANCE, LEGACY_GREETING_GUIDANCE,
+        allow_saving, block_saving, clean_legacy_greeting_guidance, release,
+        remove_known_prompt_leaks, saving_blocked, strip_legacy_label, LEGACY_CHAT_GUIDANCE,
+        LEGACY_GREETING_GUIDANCE,
     };
     use crate::message::Message;
 
@@ -395,6 +409,24 @@ mod tests {
         assert!(!saving_blocked("test-readable"));
         allow_saving("test-unreadable");
         assert!(!saving_blocked("test-unreadable"));
+    }
+
+    #[test]
+    fn 別キャラの保存停止が残る間は解除を知らせない() {
+        // 共有の保存停止表は並列テストと共有するので、判定関数を手元の表で確かめる。
+        let mut blocked = std::collections::HashSet::from(["a".to_string(), "b".to_string()]);
+        assert!(
+            !release(&mut blocked, "a"),
+            "Bが止まったままなら解除と知らせない"
+        );
+        assert!(
+            !release(&mut blocked, "a"),
+            "止めていないキャラの解除では知らせない"
+        );
+        assert!(
+            release(&mut blocked, "b"),
+            "最後の1体の解除で復旧を知らせる"
+        );
     }
 
     #[test]

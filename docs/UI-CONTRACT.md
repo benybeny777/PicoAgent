@@ -147,4 +147,4 @@
 
 学習input.asrDeviceはcuda/cpu。新規画面はcudaを既定に送信し、旧保存ジョブの省略だけcpuとして解釈する。URL・音声ファイルは同じ選択を使い、GPU失敗時の自動CPU切替は行わない。
 
-通知の組み立てと送信は `notice.rs` が所有し、`at` はローカル時刻のRFC 3339。種類固有のキーは維持する。起動中の通知は待機し、メイン画面が `pet:notice` の購読完了を待ってから `pet_init` の末尾で待機通知を `pet:notice` へ順番に送る。待機列と新着通知は同じロック内で直列化し、失敗と復旧の順序を守る。画面の再読込時は未復旧の失敗も再送する。`relationshipError` は `relationship-load` の原因キーで画面へ知らせる。
+通知の組み立てと送信は `notice.rs` が所有し、`at` はローカル時刻のRFC 3339。種類固有のキーは維持する。起動中の通知は待機し、メイン画面が `pet:notice` の購読完了を待ってから `pet_init` の末尾で待機通知を `pet:notice` へ順番に送る。待機列と新着通知は同じロック内で直列化し、失敗と復旧の順序を守る。画面の再読込時は未復旧の失敗も再送する。復旧の無い一度きりの出来事（状態ファイルの破損退避 `kind=state_quarantined`、起動時の更新確認の失敗 `kind=update` の `ok=false`）は `background_failure` にせず、通知一覧へ1件残す。会話履歴の保存停止はキャラごとに管理し、止めているキャラが1体も無くなったときだけ解除（`ok=true`）を送る。`relationshipError` は `relationship-load` の原因キーで画面へ知らせる。
