@@ -3,14 +3,14 @@
 <h1>🐾 PicoAgent</h1>
 
 <p><strong>ローカルで完結する、キャラクター型 AI エージェント。</strong><br />
-透明ウィンドウに常駐するデスクトップペットへ、<b>75 種のスキル</b>と<b>9 系統の叩く AI</b> をぶら下げた Rust / Tauri 製の常駐アプリです。<br />
+透明ウィンドウに常駐するデスクトップペットへ、<b>74 種のスキル</b>と<b>9 系統の叩く AI</b> をぶら下げた Rust / Tauri 製の常駐アプリです。<br />
 叩く AI もエージェント機能もコネクタを足すだけで増え、1 体で決めきれない依頼は複数の AI へ合議・分担させられます。</p>
 
 ![Tauri](https://img.shields.io/badge/Tauri-2-FFC131?style=for-the-badge&logo=tauri)
 ![Rust](https://img.shields.io/badge/backend-Rust-000000?style=for-the-badge&logo=rust)
 ![ローカル LLM](https://img.shields.io/badge/LLM-%E3%83%AD%E3%83%BC%E3%82%AB%E3%83%AB%E5%AE%8C%E7%B5%90-14b8a6?style=for-the-badge)
 ![マルチ AI](https://img.shields.io/badge/AI-%E5%90%88%E8%AD%B0%EF%BC%8F%E5%88%86%E6%8B%85-f97316?style=for-the-badge)
-![スキル 75 種](https://img.shields.io/badge/%E3%82%B9%E3%82%AD%E3%83%AB-75%E7%A8%AE-8b5cf6?style=for-the-badge)
+![スキル 74 種](https://img.shields.io/badge/%E3%82%B9%E3%82%AD%E3%83%AB-74%E7%A8%AE-8b5cf6?style=for-the-badge)
 
 <table>
   <tr>
@@ -36,7 +36,7 @@
 
 - **ローカルAIを同梱。** 初回起動時にPCのVRAM／RAMからモデルを選んで取得し、以後はオフラインでも動きます。Ollama やクラウドAIにも切り替えられます。
 - **叩く AI は差し替え式。** `local` / Ollama / OpenAI 互換 / Claude / Gemini / DeepSeek / xAI Grok / Mistral / 手元の CLI エージェントの 9 系統。2〜8 体へ**合議・分担**させて 1 つの答えにまとめることもできます。
-- **75種の機能を会話から実行。** Web検索、PC操作、画像・動画生成、文書処理、業務サービス連携まで、必要なツールをAIが選んで組み合わせます。
+- **74種の機能を会話から実行。** Web検索、PC操作、画像・動画生成、文書処理、業務サービス連携まで、必要なツールをAIが選んで組み合わせます。
 
 ## 📑 目次
 
@@ -259,7 +259,7 @@ metadata:
 事実が足りない項目は推測せず「未確認」と書く。
 ```
 
-Markdownスキルは手順をモデルへ渡すだけで、任意コードや新しい権限は追加しません。ファイル操作・外部送信・コマンド実行は既存の75種のToolを使い、それぞれの許可と確認に従います（`allowed-tools` からも実行権限は得られません）。使える項目は `name`・`description`・`when_to_use`・`metadata.tags`・`disable-model-invocation` と Agent Skills 互換の `license`・`compatibility`・`allowed-tools`。最大32件です。
+Markdownスキルは手順をモデルへ渡すだけで、任意コードや新しい権限は追加しません。ファイル操作・外部送信・コマンド実行は既存の74種のToolを使い、それぞれの許可と確認に従います（`allowed-tools` からも実行権限は得られません）。使える項目は `name`・`description`・`when_to_use`・`metadata.tags`・`disable-model-invocation` と Agent Skills 互換の `license`・`compatibility`・`allowed-tools`。最大32件です。
 
 </details>
 
@@ -380,7 +380,7 @@ flowchart LR
   LOOP["エージェントループ<br/>計画 → 多段ツール実行 → 自己評価"] --> AI
   AI["叩く AI 9 系統<br/>単一 / 合議 / 分担 + まとめ役"] --> LOOP
   LOOP --> GUARD["ガード<br/>許可ルート・ゴミ箱・allowlist"]
-  GUARD --> SKILLS["スキル 75 種<br/>ツールコネクタ"]
+  GUARD --> SKILLS["スキル 74 種<br/>ツールコネクタ"]
   SKILLS --> LOOP
   MCPIN["外部 MCP サーバー"] --> SKILLS
   LOOP --> OUT["回答 + 出典 + 読み上げ"]

@@ -124,6 +124,91 @@ pub fn sparkline(values: &[f64]) -> Result<String, String> {
 mod guard {
     use crate::guard_scan;
 
+    /// 行頭の関数宣言だけを読む。呼出やコメント・文字列中の例示は宣言にしない。
+    fn function_header(line: &str) -> Option<&str> {
+        let mut rest = line.trim_start();
+        if let Some(after) = rest.strip_prefix("pub") {
+            if let Some(scope) = after.strip_prefix('(') {
+                let close = scope.find(')')?;
+                rest = scope[close + 1..].trim_start();
+            } else if after.starts_with(char::is_whitespace) {
+                rest = after.trim_start();
+            } else {
+                return None;
+            }
+        }
+        if let Some(after) = rest.strip_prefix("async") {
+            if !after.starts_with(char::is_whitespace) {
+                return None;
+            }
+            rest = after.trim_start();
+        }
+        rest = rest.strip_prefix("fn")?;
+        if !rest.starts_with(char::is_whitespace) {
+            return None;
+        }
+        rest = rest.trim_start();
+        let first = rest.chars().next()?;
+        if !(first.is_alphabetic() || first == '_') {
+            return None;
+        }
+        let end = rest
+            .char_indices()
+            .find(|(_, ch)| !(ch.is_alphanumeric() || *ch == '_'))
+            .map_or(rest.len(), |(index, _)| index);
+        let tail = rest[end..].trim_start();
+        (tail.starts_with('(') || tail.starts_with('<')).then_some(&rest[..end])
+    }
+
+    fn function_headers(body: &str) -> Vec<(usize, &str)> {
+        let mut result = Vec::new();
+        let mut offset = 0;
+        for line in body.split_inclusive('\n') {
+            if let Some(name) = function_header(line) {
+                result.push((offset, name));
+            }
+            offset += line.len();
+        }
+        result
+    }
+
+    #[test]
+    fn 関数宣言は公開範囲と非同期とgenericを読み無関係な文字列を除く() {
+        for (line, expected) in [
+            ("fn first() {}", "first"),
+            ("  pub(crate) async fn load<T>(", "load"),
+            ("pub fn generic <T>(", "generic"),
+            ("pub(super) fn 内部()", "内部"),
+            ("pub(in crate::module) fn scoped()", "scoped"),
+        ] {
+            assert_eq!(function_header(line), Some(expected));
+        }
+        for line in [
+            "// fn fake()",
+            "let text = \"fn fake()\";",
+            "\"fn fake()\"",
+            "fnname()",
+            "pubfn name()",
+            "async fnname()",
+            "pub(crate fn wrong()",
+            "fn 123()",
+            "fn macro!()",
+        ] {
+            assert_eq!(function_header(line), None, "{line}");
+        }
+        let source = "// fn fake()\r\nfn one<T>() {}\r\n  pub async fn two() {}\n";
+        let headers = function_headers(source);
+        assert_eq!(
+            headers.iter().map(|(_, name)| *name).collect::<Vec<_>>(),
+            ["one", "two"]
+        );
+        for (offset, name) in headers {
+            assert!(source[offset..]
+                .trim_start()
+                .contains(&format!("fn {name}")));
+        }
+    }
+
     #[test]
     fn 小道具の定義は責務の持ち主以外へ複写しない() {
         let owners = [
@@ -149,8 +234,9 @@ mod guard {
             .into_iter()
             .chain(guard_scan::xtask_sources())
         {
+            let definitions = function_headers(source.body());
             for (name, owner) in owners {
-                if source.body().contains(&format!("fn {name}("))
+                if definitions.iter().any(|(_, defined)| *defined == name)
                     && source.path != std::path::Path::new(owner)
                 {
                     offenders.push(format!("{}: {name}", source.path.display()));
@@ -188,23 +274,18 @@ mod guard {
                 "CLI用のメモリ人格識別子",
             ),
         ];
-        let definitions =
-            regex::Regex::new(r"(?m)^\s*(?:pub(?:\([^)]*\))?\s+)?(?:async\s+)?fn\s+(\w+)\s*[<(]")
-                .unwrap();
         let mut violations = Vec::new();
         for source in guard_scan::all_sources()
             .into_iter()
             .chain(guard_scan::xtask_sources())
         {
             let body = source.body();
-            let functions: Vec<_> = definitions.captures_iter(body).collect();
+            let functions = function_headers(body);
             for (index, function) in functions.iter().enumerate() {
-                let start = function.get(0).unwrap().start();
-                let end = functions
-                    .get(index + 1)
-                    .map_or(body.len(), |next| next.get(0).unwrap().start());
+                let start = function.0;
+                let end = functions.get(index + 1).map_or(body.len(), |next| next.0);
                 let section = &body[start..end];
-                let name = &function[1];
+                let name = function.1;
                 if section.contains("Sha256::new()")
                     && !exceptions.iter().any(|(path, allowed, reason)| {
                         source.path == std::path::Path::new(path)

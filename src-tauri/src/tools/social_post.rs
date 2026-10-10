@@ -107,7 +107,8 @@ mod tests {
                 );
             }
             for value in [json!(null), json!(true), json!(""), json!("secret-invalid")] {
-                let result = visibility(&json!({"visibility":value}), allowed, "public");
+                let args = json!({"visibility":value});
+                let result = visibility(&args, allowed, "public");
                 assert!(result.is_err());
                 assert!(!result.unwrap_err().contains("secret-invalid"));
             }

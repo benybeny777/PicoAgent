@@ -969,10 +969,11 @@ mod tests {
 
     fn write_image_pack(path: &std::path::Path, id: &str, name: &str) {
         std::fs::create_dir_all(path).unwrap();
-        std::fs::write(path.join("idle.png"), [0u8; 8]).unwrap();
+        std::fs::create_dir_all(path.join("idle")).unwrap();
+        std::fs::write(path.join("idle/00.png"), [0u8; 8]).unwrap();
         std::fs::write(
             path.join("character.json"),
-            json!({"id":id,"name":name,"animations":{"idle":{"path":"idle.png","frames":1}}})
+            json!({"id":id,"name":name,"animations":{"idle":{"path":"idle","frames":1}}})
                 .to_string(),
         )
         .unwrap();
@@ -1101,7 +1102,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(result, ("image-id".into(), "画像パック".into()));
-        assert!(root.join("image-id/idle.png").is_file());
+        assert!(root.join("image-id/idle/00.png").is_file());
     }
 
     /// 更新中に落ちて退避先だけが残ったキャラは、再起動後（別のプロセスID）に元の場所へ戻る。
