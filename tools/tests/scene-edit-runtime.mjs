@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import { runInNewContext } from "node:vm";
 import * as model from "../../ui/app/scene-model.js";
+import { frameBudget } from "../../ui/character/frame-budget.js";
 
 function emitter() {
   const listeners = new Map();
@@ -74,12 +75,14 @@ test("キャラ非表示中に描画器を読み替えても停止状態を保�
     setMotion() {}
     setSpeaking() {}
     setActive(value) { this.active = value; }
+    setFrameBudget(value) { this.fps = value; }
     dispose() {}
   }
   class Unsupported { static supports() { return false; } }
   const source = readFileSync(new URL("../../ui/character/index.js", import.meta.url), "utf8")
     .replace(/^import[\s\S]*?;\r?\n/gm, "").replace(/export (function|const|class)/g, "$1");
   const factory = runInNewContext(`${source}\ncreateCharacterHost`, {
+    frameBudget,
     ImageRenderer: Renderer, MmdRenderer: Unsupported, MeshRenderer: Unsupported, Live2dRenderer: Unsupported,
     loadPack: async id => ({ id, manifest: {} }), personaText: () => "", bridge: {},
     createEmitter: emitter, el: () => new Element(), errorMessage: String, errorDetail: String, logApp() {},
@@ -98,6 +101,7 @@ test("キャラ非表示中に描画器を読み替えても停止状態を保�
 
 function editorFixture() {
   const commits = [];
+  const dragStates = [];
   const previews = new Map();
   const events = emitter();
   const stage = {
@@ -119,11 +123,25 @@ function editorFixture() {
     clearTimeout: id => timers.delete(id),
   });
   const editor = factory({ layer: new Element(), toolbar: new Element(), stageElement: new Element(), stage,
-    host: { maxHeight: () => Infinity } });
+    host: { maxHeight: () => Infinity, setDragging: value => dragStates.push(value) } });
   editor.start("all");
   const wheel = name => editor.wheel({ deltaY: -1, preventDefault() {} }, name);
-  return { editor, wheel, commits, previews, timers, events };
+  return { editor, wheel, commits, previews, timers, events, dragStates };
 }
+
+test("配置ドラッグの完了中止と編集終了は共通上限の動作状態を解除する", async () => {
+  for (const end of ["pointerup", "pointercancel", "stop"]) {
+    const fixture = editorFixture();
+    const grip = new Element(); fixture.editor.attachGrip("character", grip);
+    const event = { button: 0, pointerId: 1, clientX: 40, clientY: 40, preventDefault() {}, stopPropagation() {} };
+    grip.listeners.get("pointerdown")(event);
+    assert.deepEqual(fixture.dragStates, [true]);
+    if (end === "stop") fixture.editor.stop();
+    else await grip.listeners.get(end)({ ...event, type: end });
+    assert.deepEqual(fixture.dragStates, [true, false]);
+    assert.equal(grip.hasPointerCapture(1), false);
+  }
+});
 
 test("ホイール直後に編集を閉じても最後のサイズを保存する", () => {
   const fixture = editorFixture();

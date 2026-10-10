@@ -15,9 +15,9 @@ test("上端メニューのボタン操作をウィンドウドラッグが奪�
     read("src-tauri/capabilities/default.json"),
   ]);
   // ボタン・入力欄の上ではウィンドウ移動を始めない（押したボタンが効かなくなる）。
-  const drag = menu.slice(menu.indexOf("function beginWindowDrag(event)"), menu.indexOf("/** 押した位置に"));
+  const drag = menu.slice(menu.indexOf("function beginWindowDrag("), menu.indexOf("/** 押した位置に"));
   assert.match(drag, /if \(event\.target instanceof Element && event\.target\.closest\("button,input,textarea,select,a,\[contenteditable\]"\)\) return;/);
-  assert.match(menu, /menu\.addEventListener\("pointerdown", beginWindowDrag\);/);
+  assert.match(menu, /menu\.addEventListener\("pointerdown", event => beginWindowDrag\(event, host\)\);/);
   // 設定は二度押しで二重に開かない。
   assert.match(menu, /settingsButton\.disabled = true;\s*\n\s*try \{ await bridge\.openSettings\(\); \}/);
   assert.match(menu, /finally \{ settingsButton\.disabled = false; \}/);

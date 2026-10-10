@@ -514,6 +514,8 @@
       // モデル座標（create に渡した width × height）上で、キャラの可視範囲が占める矩形。
       this.contentRect = contentRect || { x: 0, y: 0, w: app.screen.width, h: app.screen.height };
       this.active = false;
+      this.frameBudget = 0;
+      this.disposed = false;
       this.reducedMotion = false;
       this.mouth = 0;
       this.mouthForm = 0;
@@ -542,7 +544,9 @@
       this.lastAt = 0;
       this.tick = this.tick.bind(this);
       this.app.ticker.add(this.tick);
-      this.app.ticker.stop();
+      this.budgetController = root.PicoFrameScheduler.createPixiBudget(this.app.ticker, () => {
+        this.lastAt = 0;
+      }, "メッシュ");
     }
 
     // 表示する大きさ（CSS px）と画素密度、モデル座標上の切り出し矩形を受け取り、
@@ -566,19 +570,15 @@
     }
 
     setActive(active) {
-      const next = Boolean(active);
-      // 同じメッシュ内の状態遷移でtickerを再起動すると、WebGLの次回描画まで
-      // キャンバスが空になる瞬間がある。表示状態が変わるときだけ開始・停止する。
-      if (this.active === next) return;
-      this.active = next;
-      this.canvas.style.display = this.active ? "" : "none";
-      if (this.active) {
-        this.lastAt = 0;
-        this.app.ticker.start();
-        this.tick();
-      } else {
-        this.app.ticker.stop();
-      }
+      if (this.disposed) return;
+      this.active = Boolean(active);
+      this.budgetController.setActive(this.active);
+    }
+
+    setFrameBudget(fps) {
+      if (this.disposed) return;
+      this.frameBudget = fps;
+      this.budgetController.setBudget(fps);
     }
 
     setReducedMotion(reduced) {
@@ -1037,7 +1037,7 @@
     }
 
     tick() {
-      if (!this.active) return;
+      if (this.disposed || !this.active || !this.frameBudget) return;
       const now = performance.now();
       const dt = this.lastAt ? clamp((now - this.lastAt) / 1000, 1 / 240, 1 / 30) : 1 / 60;
       this.lastAt = now;
@@ -1052,6 +1052,9 @@
     }
 
     destroy() {
+      this.disposed = true;
+      this.active = false;
+      this.budgetController.setActive(false);
       this.app.ticker.remove(this.tick);
       this.app.destroy(false, { children: true, texture: true, baseTexture: true });
       if (this.lvsFace) {
@@ -1267,6 +1270,7 @@
       antialias: true,
       resolution: renderResolution,
       autoDensity: true,
+      autoStart: false,
     });
     const definitions = anime25d || lvsAnime25d
       ? (rig.layers || []).map((item, index) => [

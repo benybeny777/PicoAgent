@@ -24,6 +24,7 @@ export class MeshRenderer {
     this.element = this.canvas;
     this.reducedMotion = reducedMotion;
     this.active = false;
+    this.frameBudget = 0;
     this.framing = "bust";
     this.speaking = false;
     this.timers = new Set();
@@ -56,8 +57,10 @@ export class MeshRenderer {
       width: modelWidth,
       height: modelHeight,
     });
+    if (this.disposed) { this.controller.destroy(); this.controller = null; return; }
     this.controller.setReducedMotion(this.reducedMotion);
-    this.controller.setActive(false);
+    this.controller.setActive(this.active);
+    this.controller.setFrameBudget(this.frameBudget);
     this.content = this.controller.contentRect;
     this.framingRects = framingRectsFor(this.content, pack);
     this.sourceScale = contentHeight / this.content.h;
@@ -103,11 +106,19 @@ export class MeshRenderer {
   }
 
   setActive(active) {
+    if (this.disposed) return;
     const next = Boolean(active);
     if (this.active === next) return;
     this.active = next;
     this.controller?.setActive(next);
-    if (next) this.scheduleBlink();
+    if (next && this.frameBudget) this.scheduleBlink();
+  }
+
+  setFrameBudget(fps) {
+    if (this.disposed) return;
+    this.frameBudget = fps;
+    this.controller?.setFrameBudget(fps);
+    if (this.active && fps) this.scheduleBlink();
   }
 
   setReducedMotion(reduced) {
@@ -117,7 +128,7 @@ export class MeshRenderer {
 
   /** まばたき: 全閉まで連続補間し、閉眼保持後に開く（確認ツールと同じ動き）。 */
   scheduleBlink() {
-    if (this.blinkTimer || this.disposed) return;
+    if (this.blinkTimer || this.disposed || !this.active || !this.frameBudget) return;
     const hour = new Date().getHours();
     const sleepy = hour >= 23 || hour < 5;
     const timings = sleepy ? BLINK_TIMINGS.sleepy : BLINK_TIMINGS.normal;
@@ -125,13 +136,14 @@ export class MeshRenderer {
     const id = setTimeout(async () => {
       this.timers.delete(id);
       this.blinkTimer = 0;
-      if (this.disposed || !this.active) return;
+      if (this.disposed || !this.active || !this.frameBudget) return;
       try {
         this.controller.setBlink(0, timings.closing);
         await sleep(timings.closing);
+        if (this.disposed || !this.active || !this.frameBudget) return;
         this.controller.setEyeOpen(0, 0);
         await sleep(timings.closed);
-        if (this.disposed) return;
+        if (this.disposed || !this.active || !this.frameBudget) return;
         this.controller.setBlink(1, timings.opening);
         await sleep(timings.opening);
       } catch (error) {

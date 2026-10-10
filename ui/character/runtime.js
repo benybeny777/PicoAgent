@@ -62,6 +62,7 @@ export function createTransparentApp(PIXI, canvas, width, height, resolution) {
     antialias: true,
     resolution,
     autoDensity: true,
+    autoStart: false,
   });
   canvas.style.background = "transparent";
   if (app.renderer.background) app.renderer.background.alpha = 0;

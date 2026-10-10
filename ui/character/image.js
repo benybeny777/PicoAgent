@@ -4,6 +4,7 @@
 // 構図の切り出し範囲を縦横比を保って収める（CSS の拡大を使わない）。差分レイヤー（runtimeLayers）が
 // 揃っていれば、待機・発話中は差分を切り替えてまばたき・口パク・よそ見をする（PNGTuber 方式）。
 
+import { createFrameGate } from "./frame-budget.js";
 import { packUrl } from "./manifest.js";
 import { backingResolution, defaultFramingFor, fitTransform, framingRectsFor } from "./framing.js";
 import { clamp, el } from "../app/util.js";
@@ -109,6 +110,11 @@ export class ImageRenderer {
     this.lastFrameAt = 0;
     this.reducedMotion = reducedMotion;
     this.active = true;
+    this.frameBudget = 0;
+    this.frameGate = createFrameGate();
+    this.drawPending = false;
+    this.blinkGeneration = 0;
+    this.sleepGeneration = 0;
     this.mouthLevel = 0;
     this.mouthOpen = false;
     this.blinkPhase = null;
@@ -198,7 +204,7 @@ export class ImageRenderer {
 
   setFraming(name) {
     this.framing = name;
-    this.draw();
+    this.requestDraw();
   }
 
   currentImage() {
@@ -218,11 +224,13 @@ export class ImageRenderer {
   }
 
   draw(now = performance.now()) {
+    if (this.disposed) return;
     const image = this.currentImage();
     const context = this.context;
     context.setTransform(1, 0, 0, 1, 0, 0);
     context.clearRect(0, 0, this.canvas.width, this.canvas.height);
     if (!image || !this.framingRects) return;
+    window.PicoFrameScheduler.recordCharacterFrame?.("2D画像");
     const frame = this.framingRect(this.framing);
     const fit = fitTransform(frame, this.cssWidth, this.cssHeight);
     const bodyY = this.bodyOffset(now);
@@ -318,7 +326,7 @@ export class ImageRenderer {
     }
     this.canvas.dataset.motion = name;
     this.scheduleBlink();
-    this.wake();
+    this.requestDraw();
   }
 
   setMouth(level) {
@@ -327,66 +335,112 @@ export class ImageRenderer {
     const open = this.mouthLevel > (this.mouthOpen ? MOUTH_CLOSE_THRESHOLD : MOUTH_OPEN_THRESHOLD);
     if (open !== this.mouthOpen) {
       this.mouthOpen = open;
-      this.draw();
+      this.requestDraw();
     }
   }
 
   setSpeaking(speaking) {
-    this.speaking = Boolean(speaking);
+    speaking = Boolean(speaking);
+    if (this.disposed || speaking === this.speaking) return;
+    this.speaking = speaking;
     if (!this.speaking) this.setMouth(0);
+    this.stopBlink();
+    this.scheduleBlink();
   }
 
   setGaze(x) {
     const direction = x < -0.38 ? -1 : x > 0.38 ? 1 : 0;
     if (direction === this.lookDirection) return;
     this.lookDirection = direction;
-    this.draw();
+    this.requestDraw();
   }
 
   setSleeping(relative) {
+    const generation = ++this.sleepGeneration;
     this.sleepingImage = null;
     if (relative) {
       this.preload(relative).then(image => {
-        if (!image) return;
+        if (!image || this.disposed || generation !== this.sleepGeneration) return;
         this.sleepingImage = image;
-        this.draw();
+        this.requestDraw();
       });
     }
-    this.draw();
+    this.requestDraw();
+  }
+
+  setFrameBudget(fps) {
+    if (this.disposed || fps === this.frameBudget) return;
+    this.frameGate.setBudget(fps);
+    this.frameBudget = fps;
+    this.resetElapsed();
+    if (fps === 0) {
+      this.loop.stop();
+      this.stopBlink();
+    } else {
+      this.scheduleBlink();
+      this.requestDraw();
+    }
   }
 
   setActive(active) {
-    this.active = Boolean(active);
-    if (this.active) this.wake();
-    else this.loop.stop();
+    active = Boolean(active);
+    if (this.disposed || active === this.active) return;
+    this.active = active;
+    this.resetElapsed();
+    if (active) {
+      this.scheduleBlink();
+      this.requestDraw();
+    } else {
+      ++this.sleepGeneration;
+      this.loop.stop();
+      this.stopBlink();
+    }
+  }
+
+  resetElapsed() {
+    this.frameGate.reset();
+    this.lastFrameAt = 0;
+    this.springLastAt = 0;
   }
 
   setReducedMotion(reduced) {
-    this.reducedMotion = Boolean(reduced);
-    this.wake();
+    reduced = Boolean(reduced);
+    if (this.disposed || reduced === this.reducedMotion) return;
+    this.reducedMotion = reduced;
+    this.stopBlink();
+    this.scheduleBlink();
+    this.requestDraw();
   }
 
-  /** まばたき: half → closed → half の段階表示（閉じ側を詰め、開き側を伸ばした非対称の配分）。 */
+  stopBlink() {
+    ++this.blinkGeneration;
+    if (this.blinkTimer) {
+      clearTimeout(this.blinkTimer);
+      this.timers.delete(this.blinkTimer);
+    }
+    this.blinkTimer = 0;
+    this.blinkPhase = null;
+  }
+
+  /** 段階表示は1本のタイマーで進め、停止前の段階を復帰後へ持ち越さない。 */
   scheduleBlink() {
-    if (this.blinkTimer || !this.layersAvailable) return;
+    if (this.disposed || !this.active || !this.frameBudget || this.blinkTimer || !this.layersAvailable
+      || (this.reducedMotion && !this.speaking)) return;
+    const generation = this.blinkGeneration;
     const hour = new Date().getHours();
     const sleepy = hour >= 23 || hour < 5;
     const timings = sleepy ? BLINK_TIMINGS.sleepy : BLINK_TIMINGS.normal;
     const interval = sleepy ? 900 + Math.random() * 1600 : 1400 + Math.random() * 2800;
-    this.blinkTimer = this.later(async () => {
-      const step = (phase, ms) => new Promise(resolve => {
-        this.blinkPhase = phase;
-        this.draw();
-        this.later(resolve, ms);
-      });
-      await step("blink_half", timings.closing);
-      await step("blink_closed", timings.closed);
-      await step("blink_half", timings.opening);
-      this.blinkPhase = null;
-      this.draw();
+    const phases = [["blink_half", timings.closing], ["blink_closed", timings.closed], ["blink_half", timings.opening]];
+    const advance = index => {
+      if (this.disposed || !this.active || !this.frameBudget || generation !== this.blinkGeneration) return;
       this.blinkTimer = 0;
-      if (!this.disposed) this.scheduleBlink();
-    }, interval);
+      this.blinkPhase = phases[index]?.[0] || null;
+      this.requestDraw();
+      if (index < phases.length) this.blinkTimer = this.later(() => advance(index + 1), phases[index][1]);
+      else this.scheduleBlink();
+    };
+    this.blinkTimer = this.later(() => advance(0), interval);
   }
 
   later(callback, ms) {
@@ -399,23 +453,27 @@ export class ImageRenderer {
     return id;
   }
 
+  requestDraw() {
+    if (this.disposed) return;
+    this.drawPending = true;
+    this.wake();
+  }
+
   wake() {
-    if (!this.disposed) this.loop.start();
+    if (!this.disposed && this.active && this.frameBudget > 0) this.loop.start();
   }
 
   step(now) {
-    if (this.disposed || !this.active || document.hidden) return false;
+    if (this.disposed || !this.active || !this.frameBudget || document.hidden || !this.animations) return false;
+    if (!this.frameGate.allow(now)) return true;
     const animation = this.animations[this.animationName] || this.animations.idle;
     const paths = framePaths(animation);
     const layered = this.layersAvailable && (this.animationName === "idle" || this.animationName === "talking");
-    const springing = this.springs.length > 0 || Boolean(this.bodyMotion);
-    // 「アニメーションを減らす」でも、発話中の口パクは状態を伝える機能なので残す。
-    if (this.reducedMotion && this.animationName !== "talking") {
-      this.frame = 0;
-      this.draw(now);
-      return false;
-    }
-    if (!layered && !this.sleepingImage && paths.length > 1) {
+    const passiveReduced = this.reducedMotion && !this.speaking && this.animationName !== "talking";
+    const animated = !passiveReduced && !layered && !this.sleepingImage && paths.length > 1;
+    const springing = !this.reducedMotion && !this.sleepingImage && (this.springs.length > 0 || Boolean(this.bodyMotion));
+    if (passiveReduced) this.frame = 0;
+    if (animated) {
       const duration = Number(animation.frameDurations?.[this.frame]) > 0
         ? Number(animation.frameDurations[this.frame])
         : 1000 / (Number(animation.fps) || 6);
@@ -424,23 +482,18 @@ export class ImageRenderer {
         this.frame = (this.frame + 1) % paths.length;
         this.lastFrameAt = now;
       }
+    }
+    if (this.drawPending || animated || springing) {
+      this.drawPending = false;
       this.draw(now);
-      return true;
     }
-    if (springing && !this.sleepingImage) {
-      // 揺れは30fpsで足りる。大判の原画を毎フレーム描き直さない。
-      if (now - (this.lastSpringDrawAt || 0) >= 1000 / 30) {
-        this.lastSpringDrawAt = now;
-        this.draw(now);
-      }
-      return true;
-    }
-    this.draw(now);
-    return false;
+    return animated || springing;
   }
 
   dispose() {
     this.disposed = true;
+    this.stopBlink();
+    ++this.sleepGeneration;
     this.abort.abort();
     this.loop.stop();
     for (const id of this.timers) clearTimeout(id);

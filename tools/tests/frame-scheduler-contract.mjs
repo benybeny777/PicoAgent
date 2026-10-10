@@ -124,6 +124,6 @@ test("1枚絵を表示できたら描画ループを休ませる", () => {
   // true を返し続けると、変化の無い画面のために毎フレーム予約が続く。
   const start = imageRenderer.indexOf("  step(now) {");
   const body = imageRenderer.slice(start, imageRenderer.indexOf("\n  }\n", start));
-  assert.match(body, /if \(this\.disposed \|\| !this\.active \|\| document\.hidden\) return false;/);
+  assert.match(body, /if \(this\.disposed \|\| !this\.active \|\| !this\.frameBudget \|\| document\.hidden \|\| !this\.animations\) return false;/);
   assert.match(body, /paths\.length > 1/);
 });

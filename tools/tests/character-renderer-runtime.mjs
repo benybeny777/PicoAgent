@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { runInNewContext } from "node:vm";
 import test from "node:test";
+import { frameBudget, createFrameGate } from "../../ui/character/frame-budget.js";
 
 const read = path => readFileSync(new URL(`../../${path}`, import.meta.url), "utf8");
 const strip = source => source.replace(/^import[\s\S]*?;\r?\n/gm, "").replace(/export (function|const|class)/g, "$1");
@@ -22,11 +23,12 @@ function hostSetup({ loadPack = async id => ({ id, manifest: {}, modes: ["mmd", 
       static supports(pack) { return pack.modes.includes(kind); }
       constructor() { this.kind = kind; this.element = { style: {} }; instances.push(this); }
       async load(pack) { attempts.push([kind, pack.id]); await loads[kind]?.(pack); }
-      setFraming() {} setMotion() {} setSpeaking() {} setActive() {}
+      setFraming() {} setMotion() {} setSpeaking() {} setActive() {} setFrameBudget() {}
       dispose() { this.disposed = true; }
     };
   }
   const factory = runInNewContext(`${hostSource}\ncreateCharacterHost`, {
+    frameBudget,
     MmdRenderer: renderer("mmd"), Live2dRenderer: renderer("live2d"), MeshRenderer: renderer("mesh-rig"),
     ImageRenderer: imageRenderer || renderer("2d"), loadPack, personaText: () => "人格",
     window: { matchMedia: () => ({ matches: false, addEventListener() {} }) },
@@ -111,6 +113,7 @@ test("実2D描画器は生成preview画像が欠損したら診断へ戻り別�
     removeAttribute() {}
   }
   const ImageRenderer = runInNewContext(`${strip(read("ui/character/image.js"))}\nImageRenderer`, {
+    createFrameGate,
     el: () => canvas, window: { PicoFrameScheduler: { createLoop: () => ({ stop() {} }) } },
     AbortController, Image: MissingImage, setTimeout, clearTimeout, queueMicrotask,
     packUrl: (pack, path) => `${pack.root}/${path}`,
