@@ -370,9 +370,10 @@ async function loadCharacter(characterId, { speakGreeting = true } = {}) {
     renderCharacterOptions(pack);
     motion.rest();
     // 挨拶も渡す（短い挨拶へモデルを呼ばず返すとき、全キャラ共通の定型文にしないため）。
-    const appearance = await bridge.setCharacterProfile(pack.id, personaText(pack.manifest, characterOverrides[pack.id]), greeting);
+    const appearance = await bridge.setCharacterProfile(pack.id, personaText(pack.manifest, characterOverrides[pack.id]), greeting, pack.manifest.voice ?? null);
     if (generation !== characterLoadGeneration) return null;
     // 人格登録まで確定したキャラの背景へ切り替え、直前のキャラ用背景を残さない。
+    voice.setCharacter(pack);
     if (appearance) applyStreamAppearance(appearance);
     loadedSignature = signature;
     host.setDisplayReady(true);
@@ -564,7 +565,7 @@ async function loadSceneDefinitions() {
       if (voice.enabled) {
         status.set("声を準備中…", "boot");
         try {
-          await bridge.prepareVoiceModel();
+          await voice.prepareModel();
           if (startupGreeting) preparedGreeting = await voice.prepare(startupGreeting);
         } catch (error) {
           logApp("error", "音声モデルの準備に失敗しました", errorDetail(error));

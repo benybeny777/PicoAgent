@@ -5,6 +5,7 @@
 // ここへ来る本文は、どれも Rust 側の公開検査（`agent::guard_public_answer`）を通ったものだけ。
 
 import * as bridge from "./bridge.js";
+import { clearBackgroundFailure, notifyBackgroundFailure } from "./toast.js";
 import { errorDetail, errorMessage, logApp } from "./util.js";
 
 /** 読み上げ用に本文を整える（参考リンク・URL・記号だけの行を落とす）。 */
@@ -63,7 +64,8 @@ export function createVoice({ motion, lipSync, pager, status, onCancelVisible, o
   let current = null;
   let cancelPlayback = null;
   let session = 0;
-  let failureNotified = false;
+  let character = { id: "", name: "キャラクター", manifest: {} };
+  const failures = new Map();
   let streamSpeech = null;
 
   // 画面の0〜100は人が感じる音量として扱う。振幅へ直線変換すると1%でも大きく聞こえるため二乗する。
@@ -73,14 +75,45 @@ export function createVoice({ motion, lipSync, pager, status, onCancelVisible, o
     return Boolean(audio && audio === current && enabled !== false && volume > 0.001 && !audio.paused && !audio.ended);
   }
 
-  function notifyFailure(error) {
-    logApp("warn", "音声の事前合成に失敗しました", errorDetail(error));
-    if (failureNotified) return;
-    failureNotified = true;
-    const detail = String(error?.message || error || "").trim();
-    status.set(detail
-      ? `読み上げできません: ${detail}`
-      : "読み上げできません。設定の「追加機能」から音声読み上げを導入してください");
+  function clearFailures(characterId, phase) {
+    const causes = failures.get(characterId);
+    if (!causes) return;
+    for (const [key, phases] of causes) {
+      if (phase) phases.delete(phase);
+      if (!phase || !phases.size) {
+        clearBackgroundFailure(key);
+        causes.delete(key);
+      }
+    }
+    if (!causes.size) failures.delete(characterId);
+  }
+
+  function notifyFailure(error, selected = character, phase = "synthesis") {
+    const detail = errorMessage(error);
+    const key = `tts-voice:${selected.id}:${detail}`;
+    if (!failures.has(selected.id)) failures.set(selected.id, new Map());
+    const causes = failures.get(selected.id);
+    if (!causes.has(key)) causes.set(key, new Set());
+    causes.get(key).add(phase);
+    const prefix = `${selected.id}の声`;
+    const message = detail.startsWith(prefix)
+      ? `${selected.name}の声${detail.slice(prefix.length)}`
+      : `${selected.name}の声を準備できません: ${detail}`;
+    notifyBackgroundFailure(key, message, error);
+    status.set(message);
+  }
+
+  async function prepareModel() {
+    const selected = character;
+    const voiceSession = session;
+    try {
+      const result = await bridge.prepareVoiceModel();
+      if (voiceSession === session && result?.enabled && result?.ready) clearFailures(selected.id, "preparation");
+      return result;
+    } catch (error) {
+      if (voiceSession === session) notifyFailure(error, selected, "preparation");
+      throw error;
+    }
   }
 
   /** 合成だけ行い、再生はしない。失敗・無効・空は null。 */
@@ -88,16 +121,20 @@ export function createVoice({ motion, lipSync, pager, status, onCancelVisible, o
     const speech = String(text ?? "").trim();
     if (!speech) return null;
     const voiceSession = session;
+    const selected = character;
     try {
       const result = await bridge.speak(speech);
       if (voiceSession !== session) return null;
       if (result?.enabled === false) enabled = false;
-      else if (result?.enabled) { enabled = true; failureNotified = false; }
+      else if (result?.enabled) {
+        enabled = true;
+        if (result.audio?.length) clearFailures(selected.id);
+      }
       if (!result?.enabled || result.skipped || !result.audio?.length) return null;
       return result;
     } catch (error) {
       if (voiceSession !== session) return null;
-      notifyFailure(error);
+      notifyFailure(error, selected);
       return null;
     }
   }
@@ -324,6 +361,8 @@ export function createVoice({ motion, lipSync, pager, status, onCancelVisible, o
   }
 
   return {
+    prepareModel,
+    setCharacter(pack) { character = pack; },
     prepare,
     playPrepared,
     speak,
