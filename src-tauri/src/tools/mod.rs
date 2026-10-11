@@ -7,7 +7,7 @@
 
 use async_trait::async_trait;
 use serde_json::{json, Value};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
@@ -349,7 +349,6 @@ static TOOL_KEYWORDS_LOWER: OnceLock<Vec<Vec<(String, usize)>>> = OnceLock::new(
 // `user_skill` の小さな管理schemaだけは常に提示し、毎ターン差し込む一覧から必要な
 // SKILL.mdを読み出せるようにする。
 const CORE_AGENT_TOOLS: [&str; 4] = ["get_time", "web_search", "web_fetch", "user_skill"];
-const MAX_SELECTED_SCHEMAS: usize = 12;
 const TOOL_ROUTES: &[(&str, &[&str])] = &[];
 
 /// 登録済みスキルを優先度・一致語長・名前順で走査し、最初の先回り実行だけを返す（文脈なしの検査用）。
@@ -590,6 +589,20 @@ pub fn schemas_for_conversation(
     text: &str,
     earlier_user_texts: &[&str],
 ) -> Result<Vec<Value>, String> {
+    select_conversation_schemas(
+        cfg,
+        text,
+        earlier_user_texts,
+        &crate::mcp::client::schemas(),
+    )
+}
+
+fn select_conversation_schemas(
+    cfg: &Config,
+    text: &str,
+    earlier_user_texts: &[&str],
+    external: &[Value],
+) -> Result<Vec<Value>, String> {
     // 見る過去発話の件数。0ですべての発話を見る。
     let turns = cfg.int(&crate::config::ints::TOOL_CONTEXT_TURNS)? as usize;
     let context = earlier_user_texts
@@ -621,7 +634,7 @@ pub fn schemas_for_conversation(
         })
         .collect();
     // 一致あり → 申告した優先度 → 一致語の長さ → 名前、の順で安定させる。
-    // 予算に収まる限り全件渡すので、この順序は「入り切らないとき何を先に積むか」を決める。
+    // 文字予算で入り切らないとき、何を先に積むかを決める。
     ranked.sort_unstable_by(|left, right| {
         right
             .0
@@ -650,14 +663,318 @@ pub fn schemas_for_conversation(
             used = used.saturating_add(cost);
         }
     }
-    // 外部 MCP サーバのツール（ユーザーが明示設定したもの）は常に候補へ加える。
-    for schema in crate::mcp::client::schemas() {
-        if selected.len() >= MAX_SELECTED_SCHEMAS + 8 {
-            break;
-        }
-        selected.push(schema);
-    }
+    // 明示登録したMCPを標準候補の件数で欠落させない。登録表を正本として全定義を渡す。
+    selected.extend(external.iter().cloned());
     Ok(selected)
+}
+
+/// 会話epoch内で既存の順序を保持し、新規候補だけ末尾へ足す所有者。
+#[derive(Default, Clone)]
+pub struct ToolSchemaSet {
+    epoch: Option<u64>,
+    schemas: Vec<Value>,
+    budget: Option<usize>,
+    reset_reason: Option<String>,
+}
+
+fn schema_name(schema: &Value) -> Result<&str, String> {
+    schema
+        .get("function")
+        .and_then(|function| function.get("name"))
+        .and_then(Value::as_str)
+        .filter(|name| !name.is_empty())
+        .ok_or_else(|| "ツール定義に名前がありません".to_string())
+}
+
+impl ToolSchemaSet {
+    pub fn reset_reason(&self) -> Option<&str> {
+        self.reset_reason.as_deref()
+    }
+
+    pub fn update(
+        &mut self,
+        epoch: u64,
+        cfg: &Config,
+        text: &str,
+        earlier: &[&str],
+    ) -> Result<Vec<Value>, String> {
+        // 検証と候補作成が成功するまで、保存済みの集合とreset理由を変更しない。
+        let budget = schema_budget_chars(cfg)?;
+        let external = crate::mcp::client::schemas();
+        let candidates = select_conversation_schemas(cfg, text, earlier, &external)?;
+        self.update_candidates(epoch, budget, build_schemas(), &external, &candidates)
+    }
+
+    fn update_candidates(
+        &mut self,
+        epoch: u64,
+        budget: usize,
+        builtin: &[Value],
+        external: &[Value],
+        candidates: &[Value],
+    ) -> Result<Vec<Value>, String> {
+        let registry: Vec<_> = builtin.iter().chain(external).collect();
+        let mut available = HashMap::new();
+        for schema in &registry {
+            let name = schema_name(schema)?;
+            if available.insert(name, *schema).is_some() {
+                return Err(format!("ツール定義の名前が重複しています: {name}"));
+            }
+        }
+        let desired: HashSet<_> = candidates
+            .iter()
+            .map(schema_name)
+            .collect::<Result<_, _>>()?;
+        if desired.iter().any(|name| !available.contains_key(name)) {
+            return Err("候補のツール定義が現在の登録表にありません".to_string());
+        }
+        let builtin_names: HashSet<_> =
+            builtin.iter().map(schema_name).collect::<Result<_, _>>()?;
+        let cost = |schemas: &[Value]| -> Result<usize, String> {
+            let mut chars = 0usize;
+            for schema in schemas {
+                let name = schema_name(schema)?;
+                if builtin_names.contains(name) {
+                    // 起動後に不変の標準定義は既存の直列化済み文字数を再利用する。
+                    let cached = schema_index()
+                        .get(name)
+                        .filter(|index| &build_schemas()[**index] == schema);
+                    let count = if let Some(index) = cached {
+                        schema_chars_at(*index)
+                    } else {
+                        serde_json::to_string(schema)
+                            .map_err(|error| format!("ツール定義の予算を計算できません: {error}"))?
+                            .chars()
+                            .count()
+                    };
+                    chars = chars.saturating_add(count);
+                }
+            }
+            Ok(chars)
+        };
+        let rebuild = || {
+            registry
+                .iter()
+                .filter(|schema| desired.contains(schema_name(schema).expect("検証済みの名前")))
+                .map(|schema| (*schema).clone())
+                .collect::<Vec<_>>()
+        };
+        let mut reason = if self.epoch.is_some_and(|old| old != epoch) {
+            Some("会話の世代が変わりました".to_string())
+        } else if self.budget.is_some_and(|old| old != budget) {
+            Some("ツール定義の文字予算が変わりました".to_string())
+        } else {
+            None
+        };
+        if reason.is_none() {
+            for schema in &self.schemas {
+                let name = schema_name(schema)?;
+                match available.get(name) {
+                    None => {
+                        reason = Some(format!("ツールの登録または許可が取り消されました: {name}"));
+                        break;
+                    }
+                    Some(current) if *current != schema => {
+                        reason = Some(format!("ツール定義が変更されました: {name}"));
+                        break;
+                    }
+                    _ => {}
+                }
+            }
+        }
+        let mut next = if self.epoch.is_none() || reason.is_some() {
+            rebuild()
+        } else {
+            self.schemas.clone()
+        };
+        if reason.is_none() && self.epoch.is_some() {
+            let previous: HashSet<String> = next
+                .iter()
+                .map(|schema| schema_name(schema).map(str::to_owned))
+                .collect::<Result<_, _>>()?;
+            next.extend(
+                registry
+                    .iter()
+                    .filter(|schema| {
+                        let name = schema_name(schema).expect("検証済みの名前");
+                        desired.contains(name) && !previous.contains(name)
+                    })
+                    .map(|schema| (*schema).clone()),
+            );
+        }
+        if cost(&next)? > budget {
+            reason = Some("ツール定義の文字予算を超えました".to_string());
+            next = rebuild();
+        }
+        if cost(&next)? > budget {
+            return Err("現在の標準候補がツール定義の文字予算を超えています".to_string());
+        }
+        self.epoch = Some(epoch);
+        self.budget = Some(budget);
+        self.schemas = next;
+        self.reset_reason = reason;
+        Ok(self.schemas.clone())
+    }
+}
+
+#[cfg(test)]
+mod schema_set_tests {
+    use super::*;
+
+    fn definition(name: &str, description: &str) -> Value {
+        json!({"type":"function", "function":{"name":name,"description":description,"parameters":{"type":"object"}}})
+    }
+    fn choose(registry: &[Value], names: &[&str]) -> Vec<Value> {
+        names
+            .iter()
+            .map(|name| {
+                registry
+                    .iter()
+                    .find(|schema| schema_name(schema).unwrap() == *name)
+                    .unwrap()
+                    .clone()
+            })
+            .collect()
+    }
+    fn names(schemas: &[Value]) -> Vec<&str> {
+        schemas
+            .iter()
+            .map(|schema| schema_name(schema).unwrap())
+            .collect()
+    }
+
+    #[test]
+    fn 初回登録順を保持し新候補だけ末尾へ足して旧要素の直列化を変えない() {
+        let registry: Vec<_> = ["a", "b", "c"]
+            .into_iter()
+            .map(|name| definition(name, "定義"))
+            .collect();
+        let mut set = ToolSchemaSet::default();
+        let first = set
+            .update_candidates(1, 10000, &registry, &[], &choose(&registry, &["c", "a"]))
+            .unwrap();
+        assert_eq!(names(&first), ["a", "c"]);
+        assert!(set.reset_reason().is_none());
+        let second = set
+            .update_candidates(1, 10000, &registry, &[], &choose(&registry, &["b", "c"]))
+            .unwrap();
+        assert_eq!(names(&second), ["a", "c", "b"]);
+        assert_eq!(
+            serde_json::to_string(&first).unwrap(),
+            serde_json::to_string(&second[..first.len()]).unwrap()
+        );
+        let third = set
+            .update_candidates(1, 10000, &registry, &[], &choose(&registry, &["a"]))
+            .unwrap();
+        assert_eq!(second, third);
+        assert!(set.reset_reason().is_none());
+    }
+
+    #[test]
+    fn epochと予算変更と予算超過だけ現在候補へ集合を再構築する() {
+        let registry = vec![definition("a", "定義"), definition("b", "定義")];
+        let one_cost = serde_json::to_string(&registry[0]).unwrap().chars().count();
+        for (next_epoch, next_budget, expected) in [
+            (2, one_cost, "世代"),
+            (1, one_cost + 1, "文字予算が変わり"),
+            (1, one_cost, "文字予算を超え"),
+        ] {
+            let mut set = ToolSchemaSet::default();
+            set.update_candidates(1, one_cost, &registry, &[], &choose(&registry, &["a"]))
+                .unwrap();
+            let next = set
+                .update_candidates(
+                    next_epoch,
+                    next_budget,
+                    &registry,
+                    &[],
+                    &choose(&registry, &["b"]),
+                )
+                .unwrap();
+            assert_eq!(names(&next), ["b"]);
+            assert!(set.reset_reason().unwrap().contains(expected));
+        }
+    }
+
+    #[test]
+    fn 標準候補が三十件以上でも明示mcpを欠落させず八件へ切り詰めない() {
+        let registry: Vec<_> = (0..31)
+            .map(|n| definition(&format!("tool{n}"), "定義"))
+            .collect();
+        let external: Vec<_> = (0..25)
+            .map(|n| definition(&format!("mcp__server__tool{n}"), "外部"))
+            .collect();
+        let selected =
+            select_conversation_schemas(&Config::new(), "こんにちは", &[], &external).unwrap();
+        assert!(selected.len() - external.len() >= 30);
+        assert_eq!(&selected[selected.len() - external.len()..], external);
+        let candidates = [registry.clone(), external.clone()].concat();
+        let mut set = ToolSchemaSet::default();
+        let first = set
+            .update_candidates(1, 100000, &registry, &external, &candidates)
+            .unwrap();
+        assert_eq!(first, candidates);
+        let next = set
+            .update_candidates(1, 100000, &registry, &external, &external)
+            .unwrap();
+        assert_eq!(next, first);
+        assert!(set.reset_reason().is_none());
+    }
+
+    #[test]
+    fn 同名定義の変更とmcp失効を現在の登録表で判定し削除resetを明示する() {
+        let registry = vec![definition("a", "標準")];
+        let external = vec![definition("mcp__one__tool", "旧定義")];
+        let initial = [registry.clone(), external.clone()].concat();
+        for changed in [true, false] {
+            let mut set = ToolSchemaSet::default();
+            set.update_candidates(1, 10000, &registry, &external, &initial)
+                .unwrap();
+            let current = if changed {
+                vec![definition("mcp__one__tool", "新定義")]
+            } else {
+                vec![]
+            };
+            let selected = [registry.clone(), current.clone()].concat();
+            assert_eq!(
+                set.update_candidates(1, 10000, &registry, &current, &selected)
+                    .unwrap(),
+                selected
+            );
+            assert!(set.reset_reason().unwrap().contains(if changed {
+                "定義が変更"
+            } else {
+                "取り消され"
+            }));
+        }
+    }
+
+    #[test]
+    fn 数値不正と登録表不正では集合と世代と理由を変更しない() {
+        let cfg = Config::new();
+        let mut set = ToolSchemaSet::default();
+        let previous = set.update(1, &cfg, "天気", &[]).unwrap();
+        for (key, value) in [
+            ("PICOAGENT_TOOL_CONTEXT_TURNS", "-1"),
+            ("PICOAGENT_LOCAL_CTX", "bad"),
+        ] {
+            let cfg = Config::new();
+            cfg.set(key, value);
+            assert!(set
+                .update(2, &cfg, "画像変換", &[])
+                .unwrap_err()
+                .contains(key));
+            assert_eq!(set.schemas, previous);
+            assert_eq!(set.epoch, Some(1));
+            assert!(set.reset_reason().is_none());
+        }
+        let duplicate = vec![definition("same", "一つ"), definition("same", "二つ")];
+        assert!(set
+            .update_candidates(2, 10000, &duplicate, &[], &duplicate)
+            .is_err());
+        assert_eq!(set.schemas, previous);
+        assert_eq!(set.epoch, Some(1));
+    }
 }
 
 /// 自動計算時の下限。小さいコンテキストでも system・履歴・生成枠を残す。

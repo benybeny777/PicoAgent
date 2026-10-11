@@ -57,6 +57,32 @@ fn fixture() -> Arc<AppState> {
     state
 }
 
+#[test]
+fn 恒久人格が変わらない受付は自動要約と会話世代を保持する() {
+    let _lock = crate::agent::PRIVATE_CONTEXT_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    let state = fixture();
+    state.character.lock().unwrap().profile.push('\n');
+    let first = state.request_receipt();
+    assert_eq!(first.epoch, state.request_receipt().epoch);
+    let mut messages = state.messages.lock().unwrap();
+    messages[0].content = replace_auto_summary(&messages[0].content, "以前に緑茶を選んだ");
+    let expected = messages[0].content.clone();
+    drop(messages);
+    let second = state.request_receipt();
+    assert_eq!(first.epoch, second.epoch);
+    assert_eq!(state.messages.lock().unwrap()[0].content, expected);
+    state
+        .config
+        .set("PICOAGENT_SYSTEM_PROMPT", "恒久人格を変更した");
+    let changed = state.request_receipt();
+    assert!(changed.epoch > second.epoch);
+    assert!(state.messages.lock().unwrap()[0]
+        .content
+        .contains("恒久人格を変更した"));
+}
+
 async fn mock_user_turn(state: Arc<AppState>, provider: Arc<DelayedProvider>) {
     let receipt = state.request_receipt();
     let turn = state.turn.acquire().await;

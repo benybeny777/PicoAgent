@@ -8,8 +8,6 @@ use std::path::{Path, PathBuf};
 
 use crate::config::Config;
 
-pub const CONTEXT_BEGIN: &str = "[利用者追加スキル]\n";
-pub const CONTEXT_END: &str = "\n[/利用者追加スキル]";
 const FILE_NAME: &str = "SKILL.md";
 const STATE_LOCK: &str = "user-skills";
 const MAX_SKILLS: usize = 32;
@@ -613,17 +611,6 @@ pub fn prompt_context(config: &Config) -> String {
             "利用者追加スキルの一覧を読み込めません: {error}。追加スキルについて尋ねられた場合だけ、この理由を利用者へ伝えてください。"
         ),
     }
-}
-
-pub fn append_prompt_context(prompt: &mut String, config: &Config) {
-    let context = prompt_context(config);
-    if context.trim().is_empty() {
-        return;
-    }
-    prompt.push_str("\n\n");
-    prompt.push_str(CONTEXT_BEGIN);
-    prompt.push_str(&context);
-    prompt.push_str(CONTEXT_END);
 }
 
 #[cfg(test)]

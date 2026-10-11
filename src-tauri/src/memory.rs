@@ -1,7 +1,7 @@
 // memory.rs - 暗黙的な長期メモリ。
 //
 // 直近履歴とは別に、ユーザーの好み・自己情報・継続指示だけを保守的に
-// app_data_dir/memory.json へ保存し、system 文脈へ短く差し込む。
+// app_data_dir/memory.json へ保存し、利用者主体のターン資料へ短く差し込む。
 
 use std::path::PathBuf;
 
@@ -157,15 +157,11 @@ pub fn context_from_store(store: &MemoryStore) -> String {
             .cmp(&a.hits)
             .then_with(|| b.updated_at.cmp(&a.updated_at))
     });
-    let lines: Vec<String> = items
-        .into_iter()
-        .take(MAX_CONTEXT_ITEMS)
-        .map(|item| format!("- [{}] {}", item.category, item.text))
-        .collect();
-    format!(
-        "ユーザーについて会話から暗黙的に覚えた長期メモリです。回答の参考にしてください。古い内容と今回の発話が矛盾する場合は今回の発話を優先してください。\n{}",
-        lines.join("\n")
-    )
+    let unresolved = items
+        .iter()
+        .filter(|item| memory_subject(&item.text) == MemorySubject::Unresolved)
+        .count();
+    format_memory_context(items.iter(), unresolved, false)
 }
 
 /// 意味の近い記憶をEmbeddingGemma 2で順位付けする。原本はRust側で保持する。
@@ -182,25 +178,22 @@ pub async fn context_for_query(
     if store.items.is_empty() {
         return Ok(String::new());
     }
-    let docs: Vec<String> = store.items.iter().map(|item| item.text.clone()).collect();
+    let items: Vec<&MemoryItem> = store
+        .items
+        .iter()
+        .filter(|item| memory_subject(&item.text) != MemorySubject::Unresolved)
+        .collect();
+    let unresolved = store.items.len() - items.len();
+    if items.is_empty() {
+        return Ok(format_memory_context(items, unresolved, true));
+    }
+    let docs: Vec<String> = items.iter().map(|item| item.text.clone()).collect();
     let order = crate::memory_embedding::search(app, cfg, &docs, query, generation).await?;
     if generation != crate::memory_embedding::generation() {
         return Err(crate::memory_embedding::interrupted());
     }
-    let lines: Vec<String> = order
-        .into_iter()
-        .take(MAX_CONTEXT_ITEMS)
-        .map(|index| {
-            format!(
-                "- [{}] {}",
-                store.items[index].category, store.items[index].text
-            )
-        })
-        .collect();
-    Ok(format!(
-        "ユーザーについて会話から暗黙的に覚えた長期メモリです（意味の近い順）。関連しない記憶を回答へ無理に使わないでください。古い内容と今回の発話が矛盾する場合は今回の発話を優先してください。\n{}",
-        lines.join("\n")
-    ))
+    let ordered = order.into_iter().map(|index| items[index]);
+    Ok(format_memory_context(ordered, unresolved, true))
 }
 
 pub fn update_from_turn(
@@ -281,9 +274,398 @@ fn merge_candidates(store: &mut MemoryStore, candidates: Vec<(String, String)>, 
     }
 }
 
-fn extract_candidates(text: &str) -> Vec<(String, String)> {
-    split_sentences(text)
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum MemorySubject {
+    UserFact,
+    Instruction,
+    Unresolved,
+}
+
+const SENTENCE_SEPARATORS: [char; 7] = ['\n', '。', '！', '？', '!', '?', '\r'];
+
+// 「私の」は所有者だけを示す。「私の兄」の述語を利用者自身の事実へ移さない。
+fn user_owned_attribute(body: &str) -> bool {
+    let Some((attribute, value)) = body.split_once('は') else {
+        return false;
+    };
+    let direct = [
+        "名前",
+        "年齢",
+        "職業",
+        "出身",
+        "住所",
+        "誕生日",
+        "好み",
+        "趣味",
+    ]
+    .contains(&attribute);
+    let qualified = [
+        "好きな",
+        "嫌いな",
+        "苦手な",
+        "得意な",
+        "普段使う",
+        "よく使う",
+    ]
+    .into_iter()
+    .find_map(|prefix| attribute.strip_prefix(prefix));
+    // 好みの参照先が人か物か不明な場合は、名詞＋ですだけで名前と属性を推定しない。
+    // 飲み物等の直接の好み、または参照先の「名前」という明示同定だけを扱う。
+    let explicit_reference = qualified.is_some_and(|reference| {
+        [
+            "飲み物",
+            "食べ物",
+            "料理",
+            "色",
+            "音楽",
+            "本",
+            "作品",
+            "場所",
+            "ゲーム",
+            "言語",
+            "ツール",
+            "ソフト",
+            "アプリ",
+            "道具",
+        ]
+        .contains(&reference)
+            || reference
+                .strip_suffix("の名前")
+                .is_some_and(|referent| !referent.is_empty() && !referent.contains('の'))
+    });
+    (direct || explicit_reference) && !value.trim().is_empty()
+        // 属性の値が更に別人の好み等を述べるなら、確定した利用者の属性とは扱わない。
+        && !contains_any(value, &["好き", "嫌い", "苦手", "得意", "住んで", "勤めて", "働いて"])
+}
+
+// 報告する人の一人称だけでは、報告内の事実の主体を確定できない。
+fn reported_or_uncertain(text: &str) -> bool {
+    // 並列助詞の「と」や名詞の一文字を、報告の文形・動詞として扱わない。
+    let reporting_verb = |rest: &str| {
+        [
+            "聞く",
+            "聞き",
+            "聞い",
+            "聞け",
+            "聞か",
+            "知る",
+            "知り",
+            "知っ",
+            "知れ",
+            "知ら",
+            "思う",
+            "思い",
+            "思っ",
+            "思え",
+            "思わ",
+            "考える",
+            "考えた",
+            "考えて",
+            "考えます",
+            "言う",
+            "言い",
+            "言っ",
+            "言え",
+            "言わ",
+            "話す",
+            "話し",
+            "話せ",
+            "話さ",
+            "見る",
+            "見た",
+            "見て",
+            "見ます",
+            "読む",
+            "読み",
+            "読ん",
+            "読め",
+            "読ま",
+            "理解する",
+            "理解し",
+            "認識する",
+            "認識し",
+            "記憶する",
+            "記憶し",
+            "覚える",
+            "覚えた",
+            "覚えて",
+            "覚えます",
+            "教わる",
+            "教わり",
+            "教わっ",
+            "教えられ",
+            "感じる",
+            "感じた",
+            "感じて",
+            "頼む",
+            "頼み",
+            "頼ん",
+            "依頼する",
+            "依頼し",
+            "求める",
+            "求めた",
+            "求めて",
+            "要求する",
+            "要求し",
+        ]
         .into_iter()
+        .any(|verb| rest.starts_with(verb))
+    };
+    ["だと", "ですと", "ことを", "のを"]
+        .into_iter()
+        .any(|link| text.split(link).skip(1).any(reporting_verb))
+        // 好みや依頼の引用を報告と判定し、「人と話す」の並列・相手の助詞と区別する。
+        || text.match_indices('と').any(|(index, link)| {
+            let (before, after) = text.split_at(index);
+            [
+                "好き", "嫌い", "得意", "苦手", "ほしい", "ください", "しないで",
+                "読まないで", "読み上げないで", "参照して", "優先して", "覚えて",
+            ]
+                .into_iter()
+                .any(|predicate| before.ends_with(predicate))
+                && reporting_verb(&after[link.len()..])
+        })
+        || contains_any(
+            text,
+            &[
+                "とのこと",
+                "という",
+                "らしい",
+                "そうです",
+                "そうだ",
+                "ようです",
+                "ようだ",
+            ],
+        )
+}
+
+// 属性値だけの引用を判定用の名詞へ置く。原文は保存・表示のため変更しない。
+// 発言の引用は「と言った」等へ続くため許可せず、自己申告の値と混同しない。
+fn memory_subject_text(text: &str) -> Option<String> {
+    let mut quotes = crate::text::QuoteState::default();
+    let mut output = String::with_capacity(text.len());
+    for (index, character) in text.char_indices() {
+        let depth = quotes.depth();
+        let quoted = quotes.enter(character);
+        if quotes.in_code() {
+            return None;
+        }
+        if depth == 0 && quotes.depth() == 1 {
+            output.push_str("引用値");
+        } else if depth == 1 && quotes.depth() == 0 {
+            let rest = &text[index + character.len_utf8()..];
+            let value_end = rest.is_empty()
+                || ["です", "だ", "が好き", "が嫌い", "が苦手", "が得意"]
+                    .iter()
+                    .any(|ending| rest.starts_with(ending));
+            if !value_end {
+                return None;
+            }
+        } else if !quoted {
+            output.push(character);
+        } else if depth == 0 {
+            // 対応する開始がない閉じ引用符は、属性値として補完しない。
+            return None;
+        }
+    }
+    (quotes.depth() == 0).then_some(output)
+}
+
+// 保存時と旧記録の参照時で同じ主体判定を使い、発話者と事実の主体を混同しない。
+fn memory_subject(text: &str) -> MemorySubject {
+    let Some(subject_text) = memory_subject_text(text.trim()) else {
+        return MemorySubject::Unresolved;
+    };
+    let text = subject_text.as_str();
+    if reported_or_uncertain(text) {
+        return MemorySubject::Unresolved;
+    }
+    if text.contains([
+        '「', '」', '『', '』', '"', '“', '”', '‘', '’', '\'', '`', '?', '？',
+    ]) || contains_any(
+        text,
+        &[
+            "あなた",
+            "キャラクター",
+            "友人",
+            "友達",
+            "家族",
+            "同僚",
+            "上司",
+            "部下",
+            "彼の",
+            "彼は",
+            "彼が",
+            "彼女",
+            "君は",
+            "君の",
+            "母は",
+            "母の",
+            "父は",
+            "父の",
+            "妻は",
+            "夫は",
+            "教えて",
+            "知りたい",
+            "どんな",
+            "何が",
+            "ですか",
+            "ますか",
+            "なのですか",
+            "でしょうか",
+        ],
+    ) {
+        return MemorySubject::Unresolved;
+    }
+    let subject = [
+        "私は",
+        "僕は",
+        "俺は",
+        "自分は",
+        "わたしは",
+        "ぼくは",
+        "私の",
+        "僕の",
+        "俺の",
+        "自分の",
+        "わたしの",
+        "ぼくの",
+        "利用者は",
+        "利用者の",
+        "ユーザーは",
+        "ユーザーの",
+    ]
+    .into_iter()
+    .find_map(|prefix| text.strip_prefix(prefix).map(|body| (prefix, body)));
+    if let Some((prefix, body)) = subject {
+        if prefix.ends_with('の') && !user_owned_attribute(body) {
+            return MemorySubject::Unresolved;
+        }
+    }
+    let subject = subject.map(|(_, body)| body);
+    if let Some(body) = subject {
+        // 複数の節を丸ごと一人の事実へ認定しない。本文は変更せず保存候補から外す。
+        if body.contains(['、', ',', ';', '；'])
+            || contains_any(
+                body,
+                &["私は", "僕は", "俺は", "自分は", "わたしは", "ぼくは"],
+            )
+            || [
+                "好きで",
+                "嫌いで",
+                "苦手で",
+                "得意で",
+                "ですが",
+                "だけど",
+                "一方",
+            ]
+            .into_iter()
+            .any(|connector| {
+                body.split_once(connector)
+                    .is_some_and(|(_, tail)| tail.contains(['は', 'が']))
+            })
+        {
+            return MemorySubject::Unresolved;
+        }
+    }
+    // 「覚えて」が添えられても、他人の好みを純粋な継続指示へ格上げしない。
+    if subject.is_none()
+        && contains_any(text, &["好き", "嫌い", "苦手", "得意", "名前は", "住んで"])
+    {
+        return MemorySubject::Unresolved;
+    }
+    let instruction = contains_any(
+        text,
+        &[
+            "覚えて",
+            "今後",
+            "これから",
+            "してほしい",
+            "しないで",
+            "読まないで",
+            "読み上げないで",
+            "参照して",
+            "優先して",
+        ],
+    ) && contains_any(
+        text,
+        &[
+            "ほしい",
+            "ください",
+            "覚えて",
+            "しないで",
+            "読まないで",
+            "読み上げないで",
+            "参照して",
+            "優先して",
+        ],
+    );
+    if instruction {
+        MemorySubject::Instruction
+    } else if subject.is_some() {
+        MemorySubject::UserFact
+    } else {
+        MemorySubject::Unresolved
+    }
+}
+
+fn format_memory_context<'a>(
+    items: impl IntoIterator<Item = &'a MemoryItem>,
+    unresolved: usize,
+    semantic: bool,
+) -> String {
+    let lines: Vec<String> = items
+        .into_iter()
+        .filter_map(|item| {
+            let owner = match memory_subject(&item.text) {
+                MemorySubject::UserFact => "利用者の情報",
+                MemorySubject::Instruction => "利用者の継続指示",
+                MemorySubject::Unresolved => return None,
+            };
+            Some(format!("- [{owner}] [{}] {}", item.category, item.text))
+        })
+        .take(MAX_CONTEXT_ITEMS)
+        .collect();
+    if lines.is_empty() && unresolved == 0 {
+        return String::new();
+    }
+    let order = if semantic {
+        "（意味の近い順）"
+    } else {
+        ""
+    };
+    let mut context = format!("長期メモリ{order}です。利用者の情報と継続指示を区別し、キャラクター自身の人格や好みへ移さないでください。関連しない記録を回答へ無理に使わず、今回の発話を優先してください。\n{}", lines.join("\n"));
+    if unresolved > 0 {
+        context.push_str(&format!("\n主体を確認できない旧記録{unresolved}件は原本を保持し、確定した利用者情報として参照していません。"));
+    }
+    context
+}
+
+fn extract_candidates(text: &str) -> Vec<(String, String)> {
+    // 引用内の句点で分割して「私は…」だけを取り出さない。共通の分割規則は維持する。
+    let mut chunks = Vec::new();
+    let mut chunk = String::new();
+    let mut quotes = crate::text::QuoteState::default();
+    for character in text.chars() {
+        let quoted = quotes.enter(character);
+        if SENTENCE_SEPARATORS.contains(&character) && !quoted {
+            chunks.push(std::mem::take(&mut chunk));
+            // 疑問符も主体判定まで保持する。
+            if matches!(character, '?' | '？') {
+                if let Some(last) = chunks.last_mut() {
+                    last.push(character);
+                }
+            }
+            continue;
+        }
+        chunk.push(character);
+    }
+    chunks.push(chunk);
+    chunks
+        .into_iter()
+        .filter(|chunk| memory_subject(chunk) != MemorySubject::Unresolved)
+        // 引用内の句点を再分割せず、既に確定した文境界を使う。
+        .filter_map(|chunk| memory_sentence(&chunk, true))
         .filter_map(|sentence| classify_sentence(&sentence).map(|category| (category, sentence)))
         .collect()
 }
@@ -292,33 +674,31 @@ fn extract_candidates(text: &str) -> Vec<(String, String)> {
 /// （別に実装すると、片方だけが箇条書きや改行の扱いを取りこぼす）。
 pub(crate) fn split_sentences(text: &str) -> Vec<String> {
     let normalized = text.replace('\r', "\n");
-    let mut out = Vec::new();
-    for chunk in normalized.split(['\n', '。', '！', '？', '!', '?']) {
-        let sentence = chunk
-            .trim()
-            .trim_matches(|c: char| c.is_whitespace() || "、，,.：:「」『』（）()[]".contains(c));
-        let count = sentence.chars().count();
-        if (4..=MAX_ITEM_CHARS).contains(&count) {
-            out.push(sentence.to_string());
-        }
-    }
-    out
+    normalized
+        .split(SENTENCE_SEPARATORS)
+        .filter_map(|chunk| memory_sentence(chunk, false))
+        .collect()
+}
+
+fn memory_sentence(chunk: &str, quoted_values: bool) -> Option<String> {
+    let sentence = chunk.trim().trim_matches(|c: char| {
+        c.is_whitespace()
+            || "、，,.：:（）()[]".contains(c)
+            || (!quoted_values && "「」『』".contains(c))
+    });
+    (4..=MAX_ITEM_CHARS)
+        .contains(&sentence.chars().count())
+        .then(|| sentence.to_string())
 }
 
 fn classify_sentence(sentence: &str) -> Option<String> {
     if sentence.contains("http://") || sentence.contains("https://") || sentence.contains("```") {
         return None;
     }
-    let user_markers = [
-        "私は",
-        "僕は",
-        "俺は",
-        "自分は",
-        "わたしは",
-        "ぼくは",
-        "名前は",
-        "呼んで",
-    ];
+    let subject = memory_subject(sentence);
+    if subject == MemorySubject::Unresolved {
+        return None;
+    }
     let preference_markers = [
         "好き",
         "嫌い",
@@ -330,28 +710,14 @@ fn classify_sentence(sentence: &str) -> Option<String> {
         "いつも",
         "デフォルト",
     ];
-    let instruction_markers = [
-        "覚えて",
-        "今後",
-        "これから",
-        "してほしい",
-        "しないで",
-        "読まないで",
-        "読み上げないで",
-        "参照して",
-        "優先して",
-    ];
-    if contains_any(sentence, &instruction_markers) {
+    if subject == MemorySubject::Instruction {
         return Some("継続指示".to_string());
     }
-    if contains_any(sentence, &user_markers) && contains_any(sentence, &preference_markers) {
+    if contains_any(sentence, &preference_markers) {
         return Some("好み".to_string());
     }
-    if contains_any(sentence, &user_markers) {
+    if subject == MemorySubject::UserFact {
         return Some("ユーザー情報".to_string());
-    }
-    if contains_any(sentence, &preference_markers) && sentence.contains("ほしい") {
-        return Some("好み".to_string());
     }
     None
 }
@@ -439,6 +805,264 @@ mod tests {
         assert_eq!(items.len(), 2);
         assert!(items.iter().any(|(_, text)| text == "私はRustをよく使う"));
         assert!(items.iter().any(|(category, _)| category == "継続指示"));
+    }
+
+    #[test]
+    fn 第三者の依頼や伝聞を継続指示へ移さず本人の直接指示だけを保存する() {
+        for (text, accepted) in [
+            ("太郎は今後結論から話してほしいと言った", false),
+            ("太郎は今後結論から話してほしいと頼んだ", false),
+            ("太郎は今後結論から話してほしいと依頼した", false),
+            ("太郎は今後結論から話してほしいと求めた", false),
+            ("太郎は結論を優先してと要求した", false),
+            ("太郎は今後結論から話してくださいと言った", false),
+            ("太郎は「今後結論から話してほしい」と言った", false),
+            ("私は結論を優先してと頼みました", false),
+            ("今後は結論から話してほしい", true),
+            ("私は今後結論から話してほしい", true),
+            ("結論を優先して", true),
+        ] {
+            let expected = if accepted {
+                vec![("継続指示".to_string(), text.to_string())]
+            } else {
+                Vec::new()
+            };
+            assert_eq!(extract_candidates(text), expected, "{text}");
+            assert_eq!(
+                super::memory_subject(text) == super::MemorySubject::Instruction,
+                accepted,
+                "旧記録も同じ主体で扱う: {text}"
+            );
+        }
+    }
+
+    #[test]
+    fn 本人の属性値の引用を保ち発話の引用とは区別する() {
+        for (text, category) in [
+            ("私の名前は「太郎」です", Some("ユーザー情報")),
+            ("私の名前は「太郎」", Some("ユーザー情報")),
+            ("私は「緑茶」が好きです", Some("好み")),
+            ("私は『吾輩は猫である。』が好きです", Some("好み")),
+            ("私は\"緑茶\"が好きです", Some("好み")),
+            ("私は「太郎は緑茶好き」と言った", None),
+            ("友人が「私は緑茶が好き」と話した", None),
+            ("「私は緑茶が好き」です", None),
+            ("私は「緑茶が好きです", None),
+            ("私は`緑茶`が好きです", None),
+        ] {
+            let expected = category
+                .map(|category| vec![(category.to_string(), text.to_string())])
+                .unwrap_or_default();
+            assert_eq!(extract_candidates(text), expected, "{text}");
+            let store = MemoryStore {
+                items: vec![MemoryItem {
+                    category: category.unwrap_or("好み").to_string(),
+                    text: text.to_string(),
+                    updated_at: "2026-10-11T00:00:00Z".to_string(),
+                    hits: 1,
+                }],
+            };
+            let context = context_from_store(&store);
+            assert_eq!(context.contains(text), category.is_some(), "{text}");
+        }
+    }
+
+    #[test]
+    fn 引用と他人への質問と複数主体を利用者の事実として抽出しない() {
+        for text in [
+            "友人が「私は緑茶が好き」と話した",
+            "「私は緑茶が好き。私はコーヒーが苦手」と友人が言った",
+            "あなたの名前はむぎ",
+            "あなたは緑茶が好きなのですか？",
+            "私は緑茶が好きですか？",
+            "私の好きな飲み物を教えて",
+            "私は緑茶が好きで、友人はコーヒーが好き",
+            "私は緑茶が好きで、太郎はコーヒーが好き",
+            "彼の名前は太郎で、覚えてほしい",
+            "太郎は緑茶が好きなので今後覚えてほしい",
+        ] {
+            assert!(
+                extract_candidates(text).is_empty(),
+                "誤った主体を保存した: {text}"
+            );
+        }
+        let items = extract_candidates("私は緑茶が好きです。友人が「私はコーヒーが好き」と言った。今後は結論から話してほしい。");
+        assert_eq!(items.len(), 2);
+        assert_eq!(
+            items[0],
+            ("好み".to_string(), "私は緑茶が好きです".to_string())
+        );
+        assert_eq!(items[1].0, "継続指示");
+    }
+
+    #[test]
+    fn 私の所有物と第三者の述語を区別し明示した自分の属性だけを覚える() {
+        for text in [
+            "私の兄はコーヒーが好き",
+            "私の母が緑茶好き",
+            "僕の同級生は緑茶好き",
+            "私の好きな作家は太郎です",
+            "私の好きな作家は東京出身です",
+            "私の好きな歌手は花子です",
+            "私の好きな先生の兄の名前は太郎です",
+            "私の好きな作家はコーヒーが好き",
+            "私の好きな作家はコーヒー好き",
+            "私の好きな作家の妹は緑茶好き",
+            "私の趣味の先生は緑茶が好き",
+            "利用者の父はコーヒーが好き",
+        ] {
+            assert!(
+                extract_candidates(text).is_empty(),
+                "所有名詞の第三者を利用者とした: {text}"
+            );
+            assert!(
+                super::memory_subject(text) == super::MemorySubject::Unresolved,
+                "旧記録でも同じ主体を拒否する: {text}"
+            );
+        }
+        for text in [
+            "私の好きな飲み物は緑茶です",
+            "僕の名前は太郎です",
+            "私の好きな作家の名前は太郎です",
+            "私の好きな歌手の名前は花子です",
+            "私の趣味は読書です",
+        ] {
+            assert_eq!(
+                extract_candidates(text).len(),
+                1,
+                "明示属性を失った: {text}"
+            );
+        }
+    }
+
+    #[test]
+    fn コード引用内の自己紹介を保存せず引用外の独立した自己情報だけを保存する() {
+        for text in [
+            "`私は緑茶が好き。私はコーヒーが苦手`",
+            "``私は緑茶が好き。`私は紅茶が好き``",
+            "```text\n私は緑茶が好き。私はコーヒーが苦手\n```",
+        ] {
+            assert!(
+                extract_candidates(text).is_empty(),
+                "コード資料を本人の情報とした: {text}"
+            );
+        }
+        let items = extract_candidates("```text\n私は緑茶が好き\n```。私はRustが好きです。");
+        assert_eq!(
+            items,
+            vec![("好み".to_string(), "私はRustが好きです".to_string())]
+        );
+    }
+
+    #[test]
+    fn 自己主語の報告や伝聞を本人の好みへ移さず直接の自己申告を保持する() {
+        for text in [
+            "私は兄がコーヒー好きだと聞いた",
+            "私は兄がコーヒー好きと聞きました",
+            "私は兄が緑茶好きだと記憶しています",
+            "私は兄が緑茶好きなのを覚えている",
+            "私はあおいが料理得意とのことを記憶した",
+            "私はあおいが緑茶嫌いと知りました",
+            "私はあおいが料理得意と聞きました",
+            "私はあおいが運動苦手と聞いています",
+            "私はあおいが緑茶好きだと知っています",
+            "僕はあおいが緑茶を好きだと聞きました",
+            "私はあおいがコーヒーが好きだと知りました",
+            "私はあおいが緑茶好きらしいと思います",
+            "私はあおいが緑茶好きとのことを聞いています",
+            "私はあおいが緑茶好きなことを知っている",
+            "私はあおいが緑茶好きという話を覚えてほしい",
+        ] {
+            assert!(
+                extract_candidates(text).is_empty(),
+                "報告の主体と事実の主体を混同した: {text}"
+            );
+            assert!(
+                super::memory_subject(text) == super::MemorySubject::Unresolved,
+                "旧記録でも伝聞を確定しない: {text}"
+            );
+        }
+        for text in [
+            "私は緑茶が好きです",
+            "私は散歩と思索が好きです",
+            "私は人と話すのが好きです",
+            "私は人の名前を覚えるのが得意です",
+        ] {
+            assert_eq!(
+                extract_candidates(text),
+                vec![("好み".to_string(), text.to_string())],
+                "直接の自己申告を伝聞へ読み替えない: {text}"
+            );
+        }
+    }
+
+    #[test]
+    fn 旧記憶は原本を保持し確認できた主体と指示だけを区別して参考へ渡す() {
+        let texts = [
+            ("好み", "私は緑茶が好き"),
+            ("継続指示", "今後は結論から話してほしい"),
+            ("ユーザー情報", "あなたの名前はむぎ"),
+            ("好み", "私は緑茶が好きで、太郎はコーヒーが好き"),
+            ("好み", "「私は紅茶が好き」と友人が言った"),
+            ("好み", "緑茶が好き"),
+        ];
+        let store = MemoryStore {
+            items: texts
+                .into_iter()
+                .map(|(category, text)| MemoryItem {
+                    category: category.into(),
+                    text: text.into(),
+                    updated_at: "2026-10-11T00:00:00Z".into(),
+                    hits: 1,
+                })
+                .collect(),
+        };
+        let before = serde_json::to_string(&store).unwrap();
+        let context = context_from_store(&store);
+        assert!(context.contains("[利用者の情報] [好み] 私は緑茶が好き"));
+        assert!(context.contains("[利用者の継続指示] [継続指示] 今後は結論から話してほしい"));
+        for excluded in ["あなたの名前はむぎ", "太郎", "紅茶", "- [好み] 緑茶が好き"]
+        {
+            assert!(
+                !context.contains(excluded),
+                "未確認の主体を資料へ出した: {excluded}"
+            );
+        }
+        assert_eq!(serde_json::to_string(&store).unwrap(), before);
+    }
+
+    #[test]
+    fn 通常と意味検索の資料は同じ主体整形を使い不明主体で保存を始めない() {
+        let store = MemoryStore {
+            items: vec![MemoryItem {
+                category: "好み".into(),
+                text: "私は緑茶が好き".into(),
+                updated_at: "2026-10-11T00:00:00Z".into(),
+                hits: 1,
+            }],
+        };
+        let normal = context_from_store(&store);
+        let semantic = super::format_memory_context(store.items.iter(), 0, true);
+        assert_eq!(
+            normal.lines().skip(1).collect::<Vec<_>>(),
+            semantic.lines().skip(1).collect::<Vec<_>>()
+        );
+        let cfg = crate::config::Config::new();
+        for text in [
+            "あなたの名前はむぎ",
+            "友人が「私は緑茶が好き」と言った",
+            "私は緑茶が好きで、太郎はコーヒーが好き",
+        ] {
+            assert!(matches!(
+                super::update_with(
+                    &cfg,
+                    text,
+                    || panic!("未確定の主体で原本を読まない"),
+                    |_| panic!("未確定の主体を保存しない")
+                ),
+                Ok(None)
+            ));
+        }
     }
 
     #[test]

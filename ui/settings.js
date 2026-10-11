@@ -935,7 +935,7 @@ function localModelPresetField(key, label, value) {
 }
 
 function localModelPresetHint(value) {
-  if (value === "auto") return "初回起動時に連続ツール利用を検証済みのLFM2.5 2.6Bを選び、以後は選定結果を保存します。上のPC向け候補からいつでも変更できます。";
+  if (value === "auto") return "初回起動時に既定のローカルモデルを選び、以後は選定結果を保存します。上のPC向け候補からいつでも変更できます。";
   if (value === "custom") return "下のカスタムモデルURLを使います。GGUFファイルの直接URLを指定してください。";
   const preset = (data.localModelPresets || []).find(item => item.id === value);
   if (!preset) return "";
@@ -4230,8 +4230,7 @@ async function render() {
     // CLIからローカルAIへ戻った際に作り直される入力にも、モデル同期を接続する。
     inputs.get("PICOAGENT_LOCAL_MODEL_PRESET")?.addEventListener("change", () => {
       if (providerSelect.value !== "local" || !modelInput) return;
-      const preset = inputs.get("PICOAGENT_LOCAL_MODEL_PRESET").value;
-      modelInput.value = preset === "auto" ? providerDefaultModel("local") : preset;
+      loadModels("local", true);
       updateDirtyState();
     });
   }
@@ -4289,6 +4288,15 @@ function rememberProviderModelDraft(providerId) {
 }
 
 function providerDefaultModel(providerId) {
+  if (providerId === "local") {
+    const preset = inputs.get("PICOAGENT_LOCAL_MODEL_PRESET")?.value;
+    if (preset && preset !== "auto") return preset;
+    const defaultPreset = data.defaultLocalModelPreset;
+    if (typeof defaultPreset !== "string" || !defaultPreset.trim() || defaultPreset === "auto") {
+      throw new Error("ローカルモデルの既定値を取得できません。設定画面を再読み込みしてください。");
+    }
+    return defaultPreset;
+  }
   if (Object.hasOwn(providerModelDraftValues, providerId)) return providerModelDraftValues[providerId];
   const provider = data.providers.find(p => p.id === providerId);
   if (!provider) return "";
@@ -4299,18 +4307,23 @@ function providerDefaultModel(providerId) {
   if (providerId === "gemini") return inputs.get("PICOAGENT_GEMINI_MODEL")?.value || provider.defaultModel || "";
   if (providerId === "xai") return inputs.get("PICOAGENT_XAI_MODEL")?.value || provider.defaultModel || "";
   if (providerId === "mistral") return inputs.get("PICOAGENT_MISTRAL_MODEL")?.value || provider.defaultModel || "";
-  if (providerId === "local") {
-    const fallback = data.defaultLocalModelPreset || provider.defaultModel || "lfm25_2_6b";
-    const preset = inputs.get("PICOAGENT_LOCAL_MODEL_PRESET")?.value || fallback;
-    return preset === "auto" ? fallback : preset;
-  }
   return provider.defaultModel || "";
 }
 
 async function loadModels(providerId, applyProviderDefault = false) {
   const generation = ++modelLoadGeneration;
   const targetInput = modelInput;
-  const preferred = providerDefaultModel(providerId);
+  let preferred;
+  try {
+    preferred = providerDefaultModel(providerId);
+  } catch (error) {
+    if (applyProviderDefault && targetInput) targetInput.value = "";
+    modelOptions.innerHTML = "";
+    statusEl.textContent = errorMessage(error);
+    logApp("warn", "モデルの既定値を取得できませんでした", errorDetail(error));
+    updateDirtyState();
+    return;
+  }
   const preserveProviderDraft = Object.hasOwn(providerModelDraftValues, providerId);
   // 切替直後に保存しても前のAIのモデル名を送らない。一覧取得の成功を待たず、
   // 描画済みスキーマの保存値・既定値で新しいAIのモデルを確定する。
@@ -4346,6 +4359,9 @@ async function loadModels(providerId, applyProviderDefault = false) {
   if (!modelInput) return;
   if (modelInput.value !== initialModel) {
     // 一覧の取得中に手入力したモデル名は利用者の編集を優先する。
+  } else if (providerId === "local") {
+    // 未取得の選択モデルも保持し、一覧の先頭を別モデルとして選ばない。
+    if (applyProviderDefault || providerId === data.active.providerId) modelInput.value = preferred;
   } else if (applyProviderDefault) {
     if (!preserveProviderDraft) modelInput.value = models.includes(preferred) ? preferred : (models[0] || preferred || modelInput.value);
   } else if (providerId !== "agent_cli" && providerId === data.active.providerId && !models.includes(modelInput.value)) {

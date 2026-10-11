@@ -241,7 +241,7 @@ cargo xtask license issue --customer "購入者名" --purchase-id "BOOTH注文�
 
 ゲート通過後は `src-tauri/target/release/bundle/` に各 OS の標準バンドル（WindowsはNSIS、macOSは`.app`／`.dmg`、Ubuntu Linux x64は`.deb`／AppImage）が生成されます。同梱物の未取得分は自動で取得してからビルドします。
 
-通常の開発用製品ビルドは **`ui-dist/`** と **`src-tauri/resources/bundled/`** を使います。販売用の軽量ビルドは `tauri.distribution.conf.json` で本体に必要なローカルAIエンジンと公式取得元マニフェストだけを入れます。Aivis・Whisperは初回起動後に公式配布から直接取得し、LibreOffice・PDF/画像ツールは利用者による公式導入を案内します。開発用のツール・ドキュメント・README用画像は含まれません。
+通常の開発用製品ビルドは **`ui-dist/`** と **`src-tauri/resources/bundled/`** を使います。販売用の軽量ビルドは `tauri.distribution.conf.json` で本体に必要なローカルAIエンジン・公式取得元マニフェスト・JP履歴テンプレートのライセンス全文など、配布ガードで許可した資産を入れます。Aivis・Whisperは初回起動後に公式配布から直接取得し、LibreOffice・PDF/画像ツールは利用者による公式導入を案内します。開発用のツール・ドキュメント・README用画像は含まれません。
 
 <details>
 <summary>同梱物・制作ツールの扱い（エンジン / Aivis / Whisper / Live2D）</summary>
@@ -350,6 +350,7 @@ NSIS アンインストーラは、インストール先またはPicoAgent管理
 |---|---|
 | `src-tauri/src/main.rs` / `lib.rs` | エントリ・Builder（state・command・menu イベント・setup） |
 | `src-tauri/src/commands.rs` | Tauri command（`pet_*` / `settings_*`）と共有状態 `AppState`。会話入口はターン所有後に文脈を読み、後処理と履歴保存まで直列化する。雑談は混雑なら生成せず、目覚ましは取得後の生成だけ20秒を上限とする |
+| `src-tauri/src/agent/context.rs` | 非公開資料、モデル送信用履歴、世代・圧縮による再構築、全プロバイダ共通の資料配置。公開履歴と別に会話中だけ保持する |
 | `src-tauri/src/conversation_turn.rs` | 会話ターンの直列化と現在ターンの停止旗・RAII解放。会話状態と世代照合の書き戻し確定は状態所有者の `commands.rs` が担当 |
 | `src-tauri/src/menu.rs` | 右クリックネイティブメニューと選択イベント処理 |
 | `src-tauri/src/config.rs` | 設定の正本（`app_config_dir/config.json`）。`get()` でシークレットを透過復号 |
@@ -362,6 +363,8 @@ NSIS アンインストーラは、インストール先またはPicoAgent管理
 | `src-tauri/src/notice.rs` | 画面通知の形式・送信・失敗と復旧の間引き。購読前の待機列と新着を直列化し、画面の再読込時は未復旧の失敗を再表示 |
 | `src-tauri/src/alarm.rs` | 目覚まし時計の保存（config `PICOAGENT_ALARMS`）と曜日・時刻の正規化。発火はフロント時刻監視 → `pet_alarm_wake` |
 | `src-tauri/src/engine.rs` | 同梱 llama-server とモデル GGUF のライフサイクル（DL・spawn・状態通知） |
+| `src-tauri/src/providers/templates/lfm25-jp-history.jinja` | 検証済みLFM2.5 1.2B JPだけに適用するツール履歴テンプレート。公式JP書式とQADの呼出直列化から作成し、`include_str!`で本体に組み込む。実行時のテンプレートファイルは生成しない |
+| `src-tauri/resources/licenses/LFM-Open-License.txt` | JP履歴テンプレートのLFM Open License全文の正本。通常版・販売版とも`resources/licenses/`へ同梱し、両配布設定の許可範囲を`bundle_scope.rs`で固定する。公式出典と改変内容は`docs/THIRD-PARTY-NOTICES.md`に記す |
 | `src-tauri/src/agent.rs` / `agent/{prompt,feedback}.rs` | エージェント実行ループ／systemルールと文脈の合成／任意の計画・自己評価。スキルとメモリは既存の各正本を使い、実体のないhooks層は作らない |
 | `src-tauri/src/api_server.rs` | Ollama 風ローカル HTTP API（既定無効・127.0.0.1 のみ・`PICOAGENT_API_KEY` で Bearer 認証。`/api/chat` `/api/generate` `/v1/chat/completions` `/mcp` ほか） |
 | `src-tauri/src/mcp/{mod,client,server}.rs` | MCP 層（agent / skills / mcp の3層構成の相互運用部）。client: `PICOAGENT_MCP_SERVERS` の stdio サーバを起動し `mcp__<サーバ>__<ツール>` として動的登録（tools::dispatch / schemas_for_conversation から候補として参照）。server: `/mcp` でスキルを MCP ツールとして公開 |

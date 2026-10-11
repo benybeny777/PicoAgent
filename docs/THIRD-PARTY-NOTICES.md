@@ -39,3 +39,13 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+## Liquid AI 日本語モデル用チャットテンプレート
+
+`src-tauri/src/providers/templates/lfm25-jp-history.jinja` はLiquid AI公式JPテンプレートへ公式QADのツール履歴直列化を追加した改変版です。元のツール一覧・結果と会話区切りを保持しています。
+
+- JP原典: https://huggingface.co/LiquidAI/LFM2.5-1.2B-JP-202606/raw/52b8b4475311a63bf839c6494f78f8ad59d13515/chat_template.jinja
+- マクロ原典: https://huggingface.co/LiquidAI/LFM2.5-2.6B-GGUF/raw/e7caca5d835a3901a8e0d63e94009429bafafdfc/qad/chat_template.jinja
+- ライセンス原典: https://huggingface.co/LiquidAI/LFM2.5-1.2B-JP-202606/raw/52b8b4475311a63bf839c6494f78f8ad59d13515/LICENSE
+
+ライセンス全文の正本は [LFM Open License v1.0](../src-tauri/resources/licenses/LFM-Open-License.txt) です。通常版・販売版の両方で `resources/licenses/LFM-Open-License.txt` として同梱します。

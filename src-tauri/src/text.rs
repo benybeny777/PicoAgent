@@ -11,6 +11,79 @@ pub use picoagent_core::text::{
     preview, truncate_bytes, truncate_bytes_with_notice, Utf8Stream,
 };
 
+/// 引用内と引用境界を判定する。引用内の句点や一人称を別の文として扱わない。
+#[derive(Default)]
+pub(crate) struct QuoteState {
+    stack: Vec<char>,
+    escaped: bool,
+    code_delimiter: usize,
+    pending_ticks: usize,
+}
+
+impl QuoteState {
+    pub(crate) fn depth(&self) -> usize {
+        self.stack.len()
+    }
+
+    pub(crate) fn in_code(&self) -> bool {
+        self.code_delimiter > 0 || self.pending_ticks > 0
+    }
+
+    /// 引用の開始・終了文字自身もtrue。エスケープしたASCII引用符は境界にしない。
+    pub(crate) fn enter(&mut self, character: char) -> bool {
+        // 連続するバッククォートの幅は次の文字で確定する。短い内部tickは閉じない。
+        if character != '`' && self.pending_ticks > 0 {
+            let width = std::mem::take(&mut self.pending_ticks);
+            if self.code_delimiter == 0 {
+                self.code_delimiter = width;
+            } else if width == self.code_delimiter
+                || (self.code_delimiter >= 3 && width >= self.code_delimiter)
+            {
+                self.code_delimiter = 0;
+            }
+        }
+        let inside = !self.stack.is_empty() || self.code_delimiter > 0;
+        if self.escaped {
+            self.escaped = false;
+            return inside;
+        }
+        if character == '`' && self.stack.is_empty() {
+            self.pending_ticks += 1;
+            return true;
+        }
+        // コード引用内では他の引用符やbackslashを文字のまま扱う。
+        if self.code_delimiter > 0 {
+            return true;
+        }
+        if character == '\\' {
+            self.escaped = true;
+            return inside;
+        }
+        if self.stack.last() == Some(&character) {
+            self.stack.pop();
+            return true;
+        }
+        // ASCII引用内の別種の引用符は文字として扱う（"don't"の途中で入れ子を作らない）。
+        if matches!(character, '"' | '\'') && matches!(self.stack.last(), Some('"' | '\'')) {
+            return true;
+        }
+        let closing = match character {
+            '「' => Some('」'),
+            '『' => Some('』'),
+            '“' => Some('”'),
+            '‘' => Some('’'),
+            '"' => Some('"'),
+            '\'' => Some('\''),
+            _ => None,
+        };
+        if let Some(closing) = closing {
+            self.stack.push(closing);
+            return true;
+        }
+        inside || matches!(character, '」' | '』' | '”' | '’')
+    }
+}
+
 /// 名前の文字種と、既存の入力・出力上限を保つ生成方針。
 #[derive(Clone, Copy)]
 pub enum SlugPolicy {
@@ -525,6 +598,34 @@ mod guard {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn 引用の入れ子と境界とエスケープを同じ状態機械で判定する() {
+        for (text, expected) in [
+            ("a「b『c』d」e", "011111110"),
+            ("a“b‘c’d”e", "011111110"),
+            (r#"a"b\"c"d"#, "01111110"),
+            (r#"a\"b"#, "0000"),
+            (r#"a"b\\"c"d"#, "011111011"),
+            ("a「b。c", "01111"),
+            ("a」b", "010"),
+            ("a'b'c", "01110"),
+            (r#"a"don't"b"#, "011111110"),
+            ("a`b`c", "01110"),
+            ("a``b`c``d", "011111110"),
+            ("a```b`c```d", "01111111110"),
+            ("a```b\nc```d", "01111111110"),
+            ("a`b", "011"),
+            ("a`\"b`c", "011110"),
+        ] {
+            let mut quote = super::QuoteState::default();
+            let actual: String = text
+                .chars()
+                .map(|character| if quote.enter(character) { '1' } else { '0' })
+                .collect();
+            assert_eq!(actual, expected, "{text}");
+        }
+    }
+
     use super::{preview, truncate_bytes};
 
     #[test]

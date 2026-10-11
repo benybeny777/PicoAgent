@@ -75,7 +75,7 @@ fn bounded(body: String) -> String {
     }
 }
 
-/// systemプロンプトへ作法を足す。`prompt::base()` から毎回呼ぶ
+/// systemプロンプトへ作法を足す。promptの共通本文組立から毎回呼ぶ
 /// （`cfg.get()` の都度読みと同じで、編集しても再起動なしで反映する）。
 pub fn append_prompt_context(prompt: &mut String, cfg: &Config) {
     let Some(body) = load(cfg) else {

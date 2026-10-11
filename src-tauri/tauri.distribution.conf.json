@@ -1,6 +1,7 @@
 {
   "bundle": {
     "resources": [
+      "resources/licenses/LFM-Open-License.txt",
       "resources/bundled/engine/**/*",
       "resources/component-manifest.json",
       "../scripts/character-learning-worker.py",

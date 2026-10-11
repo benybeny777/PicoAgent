@@ -250,6 +250,25 @@ async fn preset_model_matches(
     model_file_matches(path, preset.size_bytes, preset.sha256).await
 }
 
+const JP_HISTORY_TEMPLATE: &str = include_str!("providers/templates/lfm25-jp-history.jinja");
+
+/// 検証を通った起動だけが専用テンプレートを渡せる。バックエンド再試行では再読込しない。
+struct VerifiedHistoryTemplate(&'static str);
+
+async fn verified_history_template(
+    model: &Path,
+    preset: Option<&local::LocalModelPreset>,
+) -> anyhow::Result<Option<VerifiedHistoryTemplate>> {
+    let Some(preset) = preset else {
+        return Ok(None);
+    };
+    anyhow::ensure!(
+        preset_model_matches(model, preset).await?,
+        "日本語モデルのサイズまたはSHA-256が検証済みプリセットと一致しません。モデルを再取得してください"
+    );
+    Ok(Some(VerifiedHistoryTemplate(JP_HISTORY_TEMPLATE)))
+}
+
 async fn model_file_matches(path: &Path, size_bytes: u64, sha256: &str) -> anyhow::Result<bool> {
     if tokio::fs::metadata(path).await?.len() != size_bytes {
         return Ok(false);
@@ -594,6 +613,7 @@ fn spawn_server(
     model: &PathBuf,
     candidate: &crate::engine_backend::BackendCandidate,
     projector: Option<&Path>,
+    history_template: Option<&VerifiedHistoryTemplate>,
     start_generation: u64,
 ) -> anyhow::Result<()> {
     let server = &candidate.server;
@@ -626,6 +646,9 @@ fn spawn_server(
         .arg("-ngl")
         .arg(ngl)
         .arg("--jinja");
+    if let Some(template) = history_template {
+        cmd.arg("--chat-template").arg(template.0);
+    }
     if let Some(projector) = projector {
         cmd.arg("--mmproj").arg(projector);
         if ngl.trim() == "0" {
@@ -778,6 +801,20 @@ async fn ensure_and_start_inner(app: AppHandle, start_generation: u64) {
             return;
         }
     }
+    let history_preset = local::history_template_preset(config);
+    if history_preset.is_some() {
+        set_status(&app, json!({ "phase": "verify" }));
+    }
+    let history_template = match verified_history_template(&model, history_preset).await {
+        Ok(template) => template,
+        Err(error) => {
+            set_status(
+                &app,
+                json!({ "phase": "error", "message": error.to_string() }),
+            );
+            return;
+        }
+    };
     match cleanup_obsolete_preset_models(&app, &model).await {
         Ok(removed) if removed > 0 => crate::log_paths::append_app_log(
             &app,
@@ -864,6 +901,7 @@ async fn ensure_and_start_inner(app: AppHandle, start_generation: u64) {
             &model,
             &candidate,
             projector.as_deref(),
+            history_template.as_ref(),
             start_generation,
         ) {
             failures.push(format!("{}: {error}", candidate.label));
@@ -1022,6 +1060,183 @@ mod tests {
         remove_obsolete_model_files,
     };
     use crate::providers::local;
+
+    #[tokio::test]
+    #[ignore = "製品JPテンプレートで起動した検証用llama-serverのURLをJP_TEMPLATE_TEST_URLへ指定して実行"]
+    async fn 実エンジンで日本語モデルのツール呼出と結果を三往復後も順序通り保持する() {
+        use serde_json::json;
+        async fn render(client: &reqwest::Client, url: &str, body: &serde_json::Value) -> String {
+            let rendered: serde_json::Value = client
+                .post(format!("{url}/apply-template"))
+                .json(body)
+                .timeout(std::time::Duration::from_secs(15))
+                .send()
+                .await
+                .unwrap()
+                .error_for_status()
+                .unwrap()
+                .json()
+                .await
+                .unwrap();
+            rendered["prompt"].as_str().unwrap().to_owned()
+        }
+        let url = std::env::var("JP_TEMPLATE_TEST_URL").expect("専用検証サーバURLが必要です");
+        let client = crate::tools::http::client().unwrap();
+        let props: serde_json::Value = client
+            .get(format!("{url}/props"))
+            .timeout(std::time::Duration::from_secs(15))
+            .send()
+            .await
+            .unwrap()
+            .error_for_status()
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(
+            props["chat_template"].as_str(),
+            // llama-serverは起動引数の末尾空白を除いてpropsへ返す。
+            Some(super::JP_HISTORY_TEMPLATE.trim_end())
+        );
+        let body = json!({
+            "messages": [
+                {"role":"user","content":"東京の気温を調べて3倍して"},
+                {"role":"assistant","content":"","tool_calls":[{"id":"weather_1","type":"function","function":{"name":"weather","arguments":"{\"location\":\"Tokyo\"}"}}]},
+                {"role":"tool","tool_call_id":"weather_1","content":"気温28度"},
+                {"role":"assistant","content":"","tool_calls":[{"id":"calc_1","type":"function","function":{"name":"calculate","arguments":"{\"expression\":\"28*3\"}"}}]},
+                {"role":"tool","tool_call_id":"calc_1","content":"84"},
+                {"role":"assistant","content":"東京は28度、3倍は84です。"},
+                {"role":"user","content":"その数に16を足して"},
+                {"role":"assistant","content":"","tool_calls":[{"id":"calc_2","type":"function","function":{"name":"calculate","arguments":"{\"expression\":\"84+16\"}"}}]},
+                {"role":"tool","tool_call_id":"calc_2","content":"100"},
+                {"role":"assistant","content":"100です。"},
+                {"role":"user","content":"これまでの結果をまとめて"}
+            ],
+            "tools": [
+                {"type":"function","function":{"name":"weather","parameters":{"type":"object","properties":{"location":{"type":"string"}}}}},
+                {"type":"function","function":{"name":"calculate","parameters":{"type":"object","properties":{"expression":{"type":"string"}}}}}
+            ],
+            "add_generation_prompt": true
+        });
+        let rendered = render(client, &url, &body).await;
+        let mut remaining = rendered.as_str();
+        for expected in [
+            "<|tool_call_start|>[weather(location='Tokyo')]<|tool_call_end|>",
+            "<|tool_response_start|>気温28度<|tool_response_end|>",
+            "<|tool_call_start|>[calculate(expression='28*3')]<|tool_call_end|>",
+            "<|tool_response_start|>84<|tool_response_end|>",
+            "<|tool_call_start|>[calculate(expression='84+16')]<|tool_call_end|>",
+            "<|tool_response_start|>100<|tool_response_end|>",
+            "これまでの結果をまとめて",
+        ] {
+            remaining = remaining
+                .split_once(expected)
+                .unwrap_or_else(|| panic!("履歴が欠落または逆転: {expected}"))
+                .1;
+        }
+        assert!(remaining.ends_with("<|im_start|>assistant\n"));
+
+        // JSON複合値は空白ではなく構造を比較し、文字列とスカラーは型を含む表記を固定する。
+        for (name, value, expected) in [
+            (
+                "引用符と逆斜線と改行",
+                json!("O'Brien\\日本\n次\r行"),
+                Some(r#"'O\'Brien\\日本\n次\r行'"#),
+            ),
+            ("空文字", json!(""), Some("''")),
+            ("配列", json!(["日本語", 2, true, {"x": false}]), None),
+            (
+                "辞書",
+                json!({"a": [1, "二"], "b": {"enabled": true}}),
+                None,
+            ),
+            ("真", json!(true), Some("True")),
+            ("偽", json!(false), Some("False")),
+            ("負整数", json!(-7), Some("-7")),
+            ("小数", json!(1.25), Some("1.25")),
+        ] {
+            let body = json!({
+                "messages": [
+                    {"role":"user","content":"二つの処理を実行して"},
+                    {"role":"assistant","content":"","tool_calls":[
+                        {"id":"inspect_1","type":"function","function":{"name":"inspect","arguments":json!({"value":value}).to_string()}},
+                        {"id":"finish_1","type":"function","function":{"name":"finish","arguments":"{}"}}
+                    ]},
+                    {"role":"tool","tool_call_id":"inspect_1","content":"検査完了"},
+                    {"role":"tool","tool_call_id":"finish_1","content":"処理完了"}
+                ],
+                "tools": [
+                    {"type":"function","function":{"name":"inspect","parameters":{"type":"object","properties":{"value":{}}}}},
+                    {"type":"function","function":{"name":"finish","parameters":{"type":"object","properties":{}}}}
+                ],
+                "add_generation_prompt": true
+            });
+            let rendered = render(client, &url, &body).await;
+            let (_, calls) = rendered
+                .split_once("<|tool_call_start|>[inspect(value=")
+                .unwrap_or_else(|| panic!("{name}: 最初のツール呼出が欠落"));
+            let (argument, results) = calls
+                .split_once("), finish()]<|tool_call_end|>")
+                .unwrap_or_else(|| panic!("{name}: 同時呼出の順序または区切りが不正"));
+            if let Some(expected) = expected {
+                assert_eq!(argument, expected, "{name}");
+            } else {
+                assert_eq!(
+                    serde_json::from_str::<serde_json::Value>(argument).unwrap(),
+                    value,
+                    "{name}"
+                );
+            }
+            let (_, second_result) = results
+                .split_once("<|tool_response_start|>検査完了<|tool_response_end|>")
+                .unwrap();
+            assert!(
+                second_result.contains("<|tool_response_start|>処理完了<|tool_response_end|>"),
+                "{name}"
+            );
+            assert!(second_result.ends_with("<|im_start|>assistant\n"), "{name}");
+        }
+    }
+
+    #[tokio::test]
+    async fn 日本語履歴テンプレートはモデル実体の照合成功後だけ起動引数を渡す() {
+        std::fs::create_dir_all(concat!(env!("CARGO_MANIFEST_DIR"), "/../temp")).unwrap();
+        let root = tempfile::tempdir_in(concat!(env!("CARGO_MANIFEST_DIR"), "/../temp")).unwrap();
+        let path = root.path().join("model.gguf");
+        std::fs::write(&path, b"picoagent").unwrap();
+        let mut preset = local::preset("lfm25_1_2b_jp").unwrap().clone();
+        preset.size_bytes = 9;
+        // 起動可否の検証には小さな既知の実体を使い、固定モデル全体の再取得は不要にする。
+        preset.sha256 = "39c726ff772e4c69697409f2eb77d478bfd820c4fe6f6fd861e22f93bfac071e";
+        let verified = super::verified_history_template(&path, Some(&preset))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(verified.0, super::JP_HISTORY_TEMPLATE);
+        std::fs::write(&path, b"different").unwrap();
+        for candidate in [Some(&preset), None] {
+            let result = super::verified_history_template(&path, candidate).await;
+            if candidate.is_some() {
+                // 同容量でもhashが異なるため、spawn_serverへ渡せる検証済み値を作れない。
+                assert!(result.is_err());
+            } else {
+                assert!(result.unwrap().is_none());
+            }
+        }
+        std::fs::write(&path, b"broken").unwrap();
+        assert!(super::verified_history_template(&path, Some(&preset))
+            .await
+            .is_err());
+        std::fs::remove_file(&path).unwrap();
+        assert!(super::verified_history_template(&path, Some(&preset))
+            .await
+            .is_err());
+        // 対象外のモデルには存在確認・hash計算も追加しない。
+        assert!(super::verified_history_template(&path, None)
+            .await
+            .unwrap()
+            .is_none());
+    }
 
     #[test]
     fn 停止フラグ解除後も旧世代の子プロセス登録を拒否する() {

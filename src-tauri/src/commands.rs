@@ -89,6 +89,10 @@ pub struct AppState {
     pub provider_id: Mutex<String>,
     pub model: Mutex<String>,
     pub messages: Mutex<Vec<Message>>,
+    /// 公開履歴とは別に、同じ会話世代の送信用入力だけを保持する。
+    protocol_history: Mutex<agent::context::ProtocolHistory>,
+    /// 一度渡したツール定義の並びを会話世代中に保持する。
+    tool_schemas: Arc<Mutex<tools::ToolSchemaSet>>,
     pub character: Mutex<LoadedCharacter>,
     pub memory_context: Mutex<String>,
     /// キャラクターごとの関係性と共有した出来事。数値は見せず自然な距離感へ反映する。
@@ -132,6 +136,8 @@ impl AppState {
             provider_id: Mutex::new("local".to_string()),
             model: Mutex::new(String::new()),
             messages: Mutex::new(Vec::new()),
+            protocol_history: Mutex::new(agent::context::ProtocolHistory::default()),
+            tool_schemas: Arc::new(Mutex::new(tools::ToolSchemaSet::default())),
             character: Mutex::new(LoadedCharacter::default()),
             memory_context: Mutex::new(String::new()),
             relationship_context: Mutex::new(String::new()),
@@ -153,6 +159,13 @@ impl AppState {
     pub fn bump_conversation_epoch(&self) {
         let _commit = self.conversation_commit.lock().unwrap();
         self.conversation_epoch.fetch_add(1, Ordering::Relaxed);
+        self.clear_protocol_context();
+    }
+
+    /// 確定ゲート内で呼び、旧人格の資料と道具を次の世代へ持ち越さない。
+    fn clear_protocol_context(&self) {
+        *self.protocol_history.lock().unwrap() = agent::context::ProtocolHistory::default();
+        *self.tool_schemas.lock().unwrap() = tools::ToolSchemaSet::default();
     }
 
     /// character→確定ゲートで世代を再検査し、同期の書戻しと履歴保存を一体にする。
@@ -179,6 +192,26 @@ impl AppState {
     fn request_receipt(&self) -> RequestReceipt {
         let character = self.character.lock().unwrap();
         let _commit = self.conversation_commit.lock().unwrap();
+        // 外部で書き換えた恒久ルールも受付時に反映する。変化のない先頭は保持する。
+        let prompt = agent::prompt::compose(&self.config, &character.profile, &character.id);
+        let mut messages = self.messages.lock().unwrap();
+        let changed = messages.first().is_none_or(|message| {
+            message.role != "system"
+                || replace_auto_summary(&message.content, "") != prompt.trim_end()
+        });
+        if changed {
+            self.conversation_epoch.fetch_add(1, Ordering::Relaxed);
+            self.clear_protocol_context();
+            let mut next = vec![Message::new("system", prompt)];
+            next.extend(
+                messages
+                    .iter()
+                    .filter(|message| message.role != "system")
+                    .cloned(),
+            );
+            *messages = next;
+        }
+        drop(messages);
         RequestReceipt {
             id: if character.id.is_empty() {
                 self.config.get("PICOAGENT_CHARACTER", "mugi")
@@ -222,16 +255,16 @@ impl AppState {
         &self,
         edit: impl FnOnce() -> Result<(R, String), E>,
     ) -> Result<R, E> {
-        let character = self.character.lock().unwrap();
+        let _character = self.character.lock().unwrap();
         let _commit = self.conversation_commit.lock().unwrap();
         self.conversation_epoch.fetch_add(1, Ordering::Relaxed);
         let (result, next) = edit()?;
         *self.memory_context.lock().unwrap() = next;
-        self.rebuild_from_character(&character, false);
+        self.clear_protocol_context();
         Ok(result)
     }
 
-    /// 外部メモリ編集は現在のターンを無効化し、文脈更新と再構成を一体にする。
+    /// 外部メモリ編集は現在のターンと非公開履歴を無効化し、資料を更新する。
     pub fn replace_memory_context(&self, next: String) {
         let result: Result<(), std::convert::Infallible> =
             self.edit_memory_context(|| Ok(((), next)));
@@ -278,14 +311,7 @@ impl AppState {
         let changed = !current.id.is_empty() && current.id != next.id;
         // この後に失敗しうる読み込みは残さない。失敗時は旧スナップショットも会話も温存する。
         let (relationship, recent) = prepare(changed)?;
-        let memory = self.memory_context.lock().unwrap().clone();
-        let prompt = agent::prompt::compose(
-            &self.config,
-            &next.profile,
-            &next.id,
-            &memory,
-            &relationship,
-        );
+        let prompt = agent::prompt::compose(&self.config, &next.profile, &next.id);
         self.bump_conversation_epoch();
         let mut relationship_context = self.relationship_context.lock().unwrap();
         let mut messages = self.messages.lock().unwrap();
@@ -312,9 +338,7 @@ impl AppState {
 
     /// 関係性の文脈を更新する。**中身が変わったときだけ true を返す。**
     ///
-    /// system プロンプトの作り直しは、それ自体が同梱エンジンのプロンプトキャッシュを
-    /// 捨てる操作になる。会話やふれあいのたびに無条件で作り直すと毎ターン全文の
-    /// 再評価が走るため、実際に文面が変わったときだけ呼び出し側が作り直す。
+    /// 会話から増えた資料は次のターンへ渡す。外部編集だけが非公開履歴を無効化する。
     pub fn set_relationship_context(&self, next: String) -> bool {
         let mut current = self.relationship_context.lock().unwrap();
         if *current == next {
@@ -340,7 +364,7 @@ impl AppState {
         let relationship = edit(&id, &mode)?;
         if self.set_relationship_context(relationship_prompt_context(&self.config, &relationship)) {
             self.conversation_epoch.fetch_add(1, Ordering::Relaxed);
-            self.rebuild_from_character(&character, false);
+            self.clear_protocol_context();
         }
         Ok(relationship)
     }
@@ -363,15 +387,8 @@ impl AppState {
 
     /// 保持中のcharacterを使う。turn自身のメモリ更新は世代を変えない。
     fn rebuild_from_character(&self, character: &LoadedCharacter, clear: bool) {
-        let memory_context = self.memory_context.lock().unwrap().clone();
-        let relationship_context = self.relationship_context.lock().unwrap().clone();
-        let prompt = agent::prompt::compose(
-            &self.config,
-            &character.profile,
-            &character.id,
-            &memory_context,
-            &relationship_context,
-        );
+        self.clear_protocol_context();
+        let prompt = agent::prompt::compose(&self.config, &character.profile, &character.id);
         let mut messages = self.messages.lock().unwrap();
         let mut next = vec![Message::new("system", prompt)];
         if !clear {
@@ -386,48 +403,42 @@ impl AppState {
     }
 }
 
-/// プロジェクト文脈のブロックを system メッセージへ入れ直す。
-///
-/// 差し込み位置に依存せず「前回のブロックを消してから新しいものを足す」形にする
-/// （追記だけだと、課題を1件足すたびに古いまとめが積み重なって文脈を食い潰す）。
-const PROJECT_CONTEXT_BEGIN: &str = "[プロジェクト文脈]\n";
-const PROJECT_CONTEXT_END: &str = "\n[/プロジェクト文脈]";
-
-fn apply_system_context(convo: &mut [Message], block: &str, begin: &str, end_marker: &str) {
-    let Some(system) = convo.iter_mut().find(|message| message.role == "system") else {
-        return;
-    };
-    if let Some(start) = system.content.find(begin) {
-        // 終端が見つからない（手で編集された等）ときは触らない。消し過ぎるより残すほうが安全。
-        if let Some(offset) = system.content[start..].find(end_marker) {
-            let end = start + offset + end_marker.len();
-            system.content.replace_range(start..end, "");
-            let trimmed = system.content.trim_end().to_string();
-            system.content = trimmed;
+/// 毎回変わる資料だけを集め、人格や利用者の原文を書き換えない。
+async fn prepare_turn_context(
+    app: &AppHandle,
+    state: &AppState,
+    text: &str,
+) -> Result<agent::context::TurnContext, String> {
+    let mut context = agent::context::TurnContext::default();
+    let base = state.memory_context.lock().unwrap().clone();
+    // フォールバック許可: 意味検索を使えない間の通常メモリ（根拠: PR #428）。
+    let memory = match crate::memory::context_for_query(app, &state.config, text).await {
+        Ok(memory) if !memory.is_empty() => memory,
+        Ok(_) => base,
+        Err(error) => {
+            crate::memory_embedding::report_fallback(app, &error);
+            base
         }
-    }
-    if block.trim().is_empty() {
-        return;
-    }
-    system.content.push_str("\n\n");
-    system.content.push_str(begin);
-    system.content.push_str(block);
-    system.content.push_str(end_marker);
-}
-
-fn apply_project_context(convo: &mut [Message], block: &str) {
-    apply_system_context(convo, block, PROJECT_CONTEXT_BEGIN, PROJECT_CONTEXT_END);
-}
-
-fn apply_user_skill_context(convo: &mut [Message], block: &str) {
-    apply_system_context(
-        convo,
-        block,
-        crate::user_skills::CONTEXT_BEGIN,
-        crate::user_skills::CONTEXT_END,
+    };
+    use agent::context::ContextSubject;
+    context.push_owned(ContextSubject::UserMemory, "記憶", memory);
+    context.push_owned(
+        ContextSubject::Relationship,
+        "関係性",
+        state.relationship_context.lock().unwrap().clone(),
     );
+    context.push_owned(
+        ContextSubject::Project,
+        "プロジェクト文脈",
+        crate::tools::project::project_context(&state.config)?,
+    );
+    context.push_owned(
+        ContextSubject::Skills,
+        "利用者追加スキル",
+        crate::user_skills::prompt_context(&state.config),
+    );
+    Ok(context)
 }
-
 // 完了したターンから、文脈・履歴に残す「発話」だけを取り出す（user と、本文のある
 // assistant のみ）。途中の tool 呼び出し/結果は残すとメッセージ順序が壊れるため落とす。
 fn clean_turns(messages: &[Message]) -> Vec<Message> {
@@ -455,15 +466,25 @@ fn compacted_conversation(convo: &[Message], budget: usize) -> Vec<Message> {
         .sum();
     let turn_budget = budget.saturating_sub(system_tokens);
     if total > turn_budget {
-        // 先頭から削除する件数を先に計算し、drain で O(n) 一括除去する（remove(0) ループは O(n²)）。
-        let mut excess = total.saturating_sub(turn_budget);
+        // 上限ぎりぎりまで戻すと次の発話ですぐ削るため、予算の70%まで空きを作る。
+        const RETAIN_PERCENT: usize = 70;
+        let target = (budget / 100 * RETAIN_PERCENT + budget % 100 * RETAIN_PERCENT / 100)
+            .saturating_sub(system_tokens);
+        let last_user = turns
+            .iter()
+            .rposition(|turn| turn.role == "user")
+            .unwrap_or_else(|| turns.len().saturating_sub(2));
+        let mut remaining = total;
         let mut remove_count = 0;
-        for t in turns.iter() {
-            if excess == 0 || turns.len().saturating_sub(remove_count) <= 2 {
-                break;
+        for (index, turn) in turns[..last_user].iter().enumerate() {
+            remaining = remaining.saturating_sub(estimate_tokens(turn));
+            // 公開履歴も完了した往復の境界で削り、assistantだけを先頭に残さない。
+            if turns[index + 1].role == "user" {
+                remove_count = index + 1;
+                if remaining <= target {
+                    break;
+                }
             }
-            excess = excess.saturating_sub(estimate_tokens(t));
-            remove_count += 1;
         }
         if remove_count > 0 {
             turns.drain(0..remove_count);
@@ -661,17 +682,26 @@ async fn run_agent_and_persist(
     provider: &'static dyn providers::Provider,
     model: &str,
     convo: &mut Vec<Message>,
-    character_id: &str,
-    epoch: u64,
+    (character_id, epoch): (&str, u64),
+    turn_context: agent::context::TurnContext,
 ) -> anyhow::Result<PersistedReply> {
     let cancel = agent::cancel_flag();
+    let session = agent::context::TurnContextSession::new(
+        state.protocol_history.lock().unwrap().clone(),
+        convo,
+        turn_context,
+        conversation_token_budget(&state.config).map_err(anyhow::Error::msg)?,
+        Arc::clone(&state.tool_schemas),
+        epoch,
+    );
+    if let Some(reason) = session.reset_reason() {
+        crate::log_paths::append_app_log(app, &format!("送信用履歴を再構築しました: {reason}"));
+    }
     // ツール経由で起こす子エージェント（サブエージェント／マルチAI）も同じ停止ボタンで
     // 止められるよう、中断フラグをタスクローカルへ載せて配下へ伝播させる。
     let run = async {
         let cli_session = if provider.id() == "agent_cli" {
-            // 会話のsystemはリクエストごとに検索連動の長期メモリとプロジェクト文脈で
-            // 書き換わるため、それを鍵にすると毎ターン別セッション扱いになり再開が働かず、
-            // 明示IDのCLIセッションを1ターンごとに残す。人格・設定など安定した要素だけで作る。
+            // ターンごとの資料を鍵へ混ぜず、人格・設定など安定した要素から作る。
             let mut prompt_hash = Sha256::new();
             prompt_hash.update(stable_persona_prompt(state).as_bytes());
             let key = format!(
@@ -697,17 +727,79 @@ async fn run_agent_and_persist(
         }
         task.await
     };
-    let reply = run.await?;
+    let run = agent::with_turn_context(Arc::clone(&session), run);
+    let reply = if provider.id() == "local" {
+        let handle = app.clone();
+        let sink: crate::providers::local::TimingSink = Arc::new(move |report| {
+            let detail = match report.timings {
+                Ok(Some(timings)) => {
+                    let total = timings.cache_n.saturating_add(timings.prompt_n);
+                    let ratio = if total == 0 {
+                        "未取得".to_string()
+                    } else {
+                        format!("{:.4}", timings.cache_n as f64 / total as f64)
+                    };
+                    format!(
+                        "cache_n={} prompt_n={} キャッシュ比率={ratio} 入力処理={}ms 出力数={}",
+                        timings.cache_n, timings.prompt_n, timings.prompt_ms, timings.predicted_n
+                    )
+                }
+                Ok(None) => "計測値=未取得".to_string(),
+                Err(reason) => format!("計測値=不正 理由={reason}"),
+            };
+            let first = report
+                .first_text
+                .map(|time| format!("{:.1}ms", time.as_secs_f64() * 1000.0))
+                .unwrap_or_else(|| "未取得".to_string());
+            crate::log_paths::append_app_log(
+                &handle,
+                &format!(
+                    "ローカルAI計測 完了={} ストリーム={} 最初の本文={first} 全体={:.1}ms {detail}",
+                    report.completed,
+                    report.stream,
+                    report.elapsed.as_secs_f64() * 1000.0
+                ),
+            );
+        });
+        crate::providers::local::with_timings(run, sink).await?
+    } else {
+        run.await?
+    };
+    if let Some(reason) = state.tool_schemas.lock().unwrap().reset_reason() {
+        crate::log_paths::append_app_log(app, &format!("ツール宣言を再構築しました: {reason}"));
+    }
     // 会話文脈を圧縮（system + クリーンな直近発話）して保持し、ファイルへ永続化する。
     let compacted = compacted_conversation(
         convo,
         conversation_token_budget(&state.config).map_err(anyhow::Error::msg)?,
     );
-    if persist_conversation(state, app, character_id, epoch, compacted) {
-        Ok(PersistedReply::Current(reply))
-    } else {
-        crate::log_paths::append_app_log(app, "古いAI応答の会話履歴書き戻しを破棄しました。");
-        Ok(PersistedReply::Stale)
+    match state.with_current(character_id, epoch, |_| -> anyhow::Result<()> {
+        // 停止本文は従来どおり公開履歴へ残すが、未完了の送信用履歴は次へ持ち越さない。
+        let protocol = if cancel
+            .as_deref()
+            .is_some_and(|flag| flag.load(Ordering::Relaxed))
+        {
+            agent::context::ProtocolHistory::default()
+        } else {
+            session.finish(convo, &compacted)?
+        };
+        *state.protocol_history.lock().unwrap() = protocol;
+        *state.messages.lock().unwrap() = compacted.clone();
+        crate::history::save(app, character_id, &compacted);
+        if let Some(reason) = session.reset_reason() {
+            crate::log_paths::append_app_log(
+                app,
+                &format!("送信用履歴の確定時に再構築しました: {reason}"),
+            );
+        }
+        Ok(())
+    }) {
+        Some(Ok(())) => Ok(PersistedReply::Current(reply)),
+        Some(Err(error)) => Err(error),
+        None => {
+            crate::log_paths::append_app_log(app, "古いAI応答の会話履歴書き戻しを破棄しました。");
+            Ok(PersistedReply::Stale)
+        }
     }
 }
 
@@ -752,19 +844,8 @@ fn resolved_judge_model(
 /// 会話中の system には長期メモリやプロジェクト文脈も差し込まれるため、その全文を
 /// `persona` として複製すると、統合AIが内部文脈を回答へ復唱する経路を増やしてしまう。
 fn stable_persona_prompt(state: &AppState) -> String {
-    let mut persona = agent::prompt::base(&state.config);
     let character = state.character.lock().unwrap().clone();
-    let character_profile = character.profile;
-    if !character_profile.is_empty() {
-        persona.push_str("\n\n選択中キャラクターの人格設定:\n");
-        persona.push_str(&character_profile);
-        let character_id = character.id;
-        persona.push_str(&crate::relationship_preset::profile_suffix(
-            &state.config,
-            &character_id,
-        ));
-    }
-    persona
+    agent::prompt::compose_content(&state.config, &character.profile, &character.id)
 }
 
 fn configured_multi_ai_args(
@@ -772,6 +853,7 @@ fn configured_multi_ai_args(
     state: &AppState,
     task: &str,
     convo: &[Message],
+    turn_context: &agent::context::TurnContext,
 ) -> Result<Option<Value>, String> {
     let mode = state.config.get("PICOAGENT_MULTI_AI_MODE", "single");
     let tool_mode = match mode.as_str() {
@@ -809,7 +891,7 @@ fn configured_multi_ai_args(
     );
     Ok(Some(json!({
         "task": task,
-        "context": multi_ai_context(convo),
+        "context": format!("{}\n\n{}", multi_ai_context(convo), turn_context.material()),
         "mode": tool_mode,
         "agents": agents,
         "judge": {
@@ -830,6 +912,7 @@ async fn run_multi_ai_and_persist(
     convo: &mut Vec<Message>,
     character_id: &str,
     epoch: u64,
+    turn_context: &agent::context::TurnContext,
 ) -> anyhow::Result<PersistedReply> {
     // 設定由来のこの経路は `agent::run` を通らないため、そのままだとネスト深さが0から
     // 始まり、チャット経由より1段深く委譲できてしまう。深さ1のスコープを張って
@@ -837,7 +920,11 @@ async fn run_multi_ai_and_persist(
     // 戻り値はツール出力ではなく利用者への最終返信なので、ツール出力上限で打ち切らない。
     let raw_reply =
         agent::with_agent_depth(1, tools::dispatch_final(&state.config, "subagent", args)).await;
-    let private_context = stable_persona_prompt(state);
+    let private_context = format!(
+        "{}\n\n{}",
+        stable_persona_prompt(state),
+        turn_context.material()
+    );
     let reply = agent::safe_public_answer_or_fallback(raw_reply, &private_context);
     convo.push(Message::new("assistant", reply.clone()));
     let compacted = compacted_conversation(
@@ -2054,48 +2141,10 @@ pub async fn pet_send(
 
     // std Mutex を await 跨ぎで保持しないよう、会話をクローンして処理し書き戻す。
     let mut convo = state.messages.lock().unwrap().clone();
-    // セマンティックメモリ: クエリに関連するメモリを今回のリクエスト向けに絞り込み、
-    // 今回の convo の system メッセージのみ更新する（state.memory_context は変えない）。
-    {
-        // フォールバック許可: 意味検索を使えない間（初回導入中・オフライン・非対応構成）も（根拠: PR #428 意味検索を使えない間の通常メモリ）
-        // 会話は止めず、system文脈に入っている言及回数順の記憶で応答し、理由を画面へ出す。
-        let semantic_ctx = match crate::memory::context_for_query(&app, &state.config, &text).await
-        {
-            Ok(context) => context,
-            Err(error) => {
-                crate::memory_embedding::report_fallback(&app, &error);
-                String::new()
-            }
-        };
-        let base_ctx = state.memory_context.lock().unwrap().clone();
-        if !semantic_ctx.is_empty() && semantic_ctx != base_ctx {
-            if let Some(sys) = convo.iter_mut().find(|m| m.role == "system") {
-                if base_ctx.is_empty() {
-                    sys.content.push_str("\n\n");
-                    sys.content.push_str(&semantic_ctx);
-                } else {
-                    sys.content = sys
-                        .content
-                        .replacen(base_ctx.as_str(), semantic_ctx.as_str(), 1);
-                }
-            }
-        }
-    }
-    // 選択中プロジェクトの課題・記録を system 文脈へ差し込む。台帳は会話中にも変わるので、
-    // 起動時ではなく毎回作り直して古い内容が残らないようにする。
-    apply_project_context(
-        &mut convo,
-        &crate::tools::project::project_context(&state.config)?,
-    );
-    // SKILL.mdは利用者が会話中や外部エディタから変更できるため、索引を毎ターン
-    // 入れ替える。本文は必要になったときだけuser_skillツールで読み、systemを肥大化させない。
-    apply_user_skill_context(
-        &mut convo,
-        &crate::user_skills::prompt_context(&state.config),
-    );
+    let turn_context = prepare_turn_context(&app, &state, &text).await?;
     convo.push(Message::new("user", text));
 
-    let multi_ai_args = match configured_multi_ai_args(&app, &state, &user_text, &convo) {
+    let multi_ai_args = match configured_multi_ai_args(&app, &state, &user_text, &convo, &turn_context) {
         Ok(args) => args,
         Err(reply) => {
             return record_turn(
@@ -2129,6 +2178,7 @@ pub async fn pet_send(
                 &mut convo,
                 &request_character_id,
                 request_epoch,
+                &turn_context,
             )
             .await
         }
@@ -2139,14 +2189,14 @@ pub async fn pet_send(
                 provider,
                 &model,
                 &mut convo,
-                &request_character_id,
-                request_epoch,
+                (&request_character_id, request_epoch),
+                turn_context,
             )
             .await
         }
     };
     if matches!(result, Ok(PersistedReply::Current(_))) {
-        let current = state.with_current(&request_character_id, request_epoch, |character| {
+        let current = state.with_current(&request_character_id, request_epoch, |_character| {
         if state
             .config
             .get_bool("PICOAGENT_RELATIONSHIP_MEMORY_ENABLED", true)
@@ -2163,17 +2213,17 @@ pub async fn pet_send(
                 relationship_result.as_ref().map(|_| ()).map_err(|error| format!("関係性を保存できないため、この会話の出来事を反映できません: {error}")),
                 "関係性の保存が復旧しました");
             if let Ok(relationship) = relationship_result {
-                // 文面が変わったときだけ system を作り直す（毎ターンだとプロンプト
-                // キャッシュが無効化され、全文の再評価が走る）。
-                if state.set_relationship_context(relationship_prompt_context(
+                // 次のターンの資料だけを更新し、固定人格と公開履歴の先頭を保つ。
+                state.set_relationship_context(relationship_prompt_context(
                     &state.config,
                     &relationship,
-                )) {
-                    state.rebuild_from_character(character, false);
-                }
+                ));
             }
         }
-        capture_project_rules(&app, &state.config, &user_text);
+        if capture_project_rules(&app, &state.config, &user_text) {
+            // 恒久ルールの変更だけは固定人格へ反映し、送信用履歴を作り直す。
+            state.rebuild_from_character(_character, false);
+        }
         let memory_result = crate::memory::update_from_turn(&app, &state.config, &user_text);
         static MEMORY_SAVE: crate::notice::FailureLatch = crate::notice::FailureLatch::new();
         // 候補なしのターンはI/Oを試していないため復旧とは扱わない。
@@ -2190,9 +2240,7 @@ pub async fn pet_send(
         }
         if let Ok(Some(memory_context)) = memory_result {
             *state.memory_context.lock().unwrap() = memory_context;
-            state.rebuild_from_character(character, false);
-            let refreshed = state.messages.lock().unwrap().clone();
-            crate::history::save(&app, &request_character_id, &refreshed);
+
         }
         });
         if current.is_none() { return Ok(json!({ "stale": true, "reply": "" })); }
@@ -3634,8 +3682,11 @@ pub async fn settings_save(
         restart_engine || restart_aivis || character_changed || live2d_sdk_changed;
 
     // 人格プロンプト・メモリは軽いので常に即反映する（再起動対象外）。
-    if system_context_changed || memory_setting_changed {
+    if memory_setting_changed {
         state.replace_memory_context(crate::memory::context(&app, &state.config));
+    }
+    if system_context_changed {
+        state.reset_conversation();
     }
     if companion_mode_changed || relationship_memory_changed {
         state
@@ -3798,15 +3849,17 @@ pub async fn pet_rerun_schedule_task(
 ///
 /// 書いたことを黙らせない。利用者のフォルダにあるファイルを変えるので、
 /// 何を足したかと取り消し先を画面へ出す（`renderer.js` の通知パネル）。
-fn capture_project_rules(app: &AppHandle, config: &crate::config::Config, user_text: &str) {
+fn capture_project_rules(app: &AppHandle, config: &crate::config::Config, user_text: &str) -> bool {
     if !crate::project_rules::auto_capture_enabled(config) {
-        return;
+        return false;
     }
+    let mut changed = false;
     for rule in crate::project_rules::emphasized_rules(user_text) {
         match crate::project_rules::append_captured(config, &rule) {
             // 既に書いてある作法は静かに飛ばす（同じ通知を毎回出さない）。
             Ok(None) => {}
             Ok(Some(path)) => {
+                changed = true;
                 crate::notice::emit(
                     app,
                     crate::notice::Notice::info(
@@ -3825,12 +3878,17 @@ fn capture_project_rules(app: &AppHandle, config: &crate::config::Config, user_t
             ),
         }
     }
+    changed
 }
 
 /// 通知の「取り消し」から、自動追記した1行を消す。
 #[tauri::command]
 pub fn pet_project_rule_undo(state: State<'_, AppState>, rule: String) -> Result<bool, String> {
-    crate::project_rules::remove_captured(&state.config, &rule)
+    let changed = crate::project_rules::remove_captured(&state.config, &rule)?;
+    if changed {
+        state.reset_conversation();
+    }
+    Ok(changed)
 }
 
 /// 永続ジョブの一覧。通知パネルが起動直後に「実行中・失敗のまま残っているもの」を
@@ -4959,6 +5017,7 @@ pub async fn pet_send_image(
         } else {
             text.clone()
         };
+        let turn_context = prepare_turn_context(&app, &state, &user_text).await?;
         convo.push(crate::message::Message::user_with_images(
             user_text.clone(),
             images,
@@ -4976,8 +5035,8 @@ pub async fn pet_send_image(
             provider,
             &model,
             &mut convo,
-            &request_character_id,
-            request_epoch,
+            (&request_character_id, request_epoch),
+            turn_context,
         )
         .await;
 
@@ -6165,16 +6224,15 @@ mod tests {
     }
 
     #[test]
-    fn 会話圧縮はsystemも予算へ含めて直近二件を残す() {
+    fn 会話圧縮はsystemも予算へ含めて現在の利用者発話を残す() {
         let mut messages = vec![Message::new("system", "人格".repeat(80))];
         for index in 0..6 {
             messages.push(Message::new("user", format!("発話{index}")));
         }
         let compacted = compacted_conversation(&messages, 100);
-        assert_eq!(compacted.len(), 3);
+        assert_eq!(compacted.len(), 2);
         assert_eq!(compacted[0].role, "system");
-        assert_eq!(compacted[1].content, "発話4");
-        assert_eq!(compacted[2].content, "発話5");
+        assert_eq!(compacted[1].content, "発話5");
     }
 
     #[test]
@@ -6193,6 +6251,24 @@ mod tests {
         assert!(compacted
             .iter()
             .all(|message| message.name.as_deref() != Some("picoagent_private_context")));
+    }
+
+    #[test]
+    fn 会話圧縮は七割まで完了往復を削り次の短い発話では維持する() {
+        let mut messages = vec![Message::new("system", "固定人格")];
+        for _ in 0..10 {
+            messages.push(Message::new("user", "x".repeat(40)));
+            messages.push(Message::new("assistant", "y".repeat(40)));
+        }
+        let compacted = compacted_conversation(&messages, 180);
+        let size: usize = compacted.iter().map(super::estimate_tokens).sum();
+        assert!(size <= 126, "七割を超えています: {size}");
+        assert_eq!(compacted[1].role, "user");
+        assert_eq!(compacted.last().unwrap().role, "assistant");
+        let mut next = compacted.clone();
+        next.push(Message::new("user", "次"));
+        next.push(Message::new("assistant", "はい"));
+        assert_eq!(compacted_conversation(&next, 180).len(), next.len());
     }
 
     #[test]
@@ -6235,6 +6311,12 @@ mod tests {
 
         let persona = stable_persona_prompt(&state);
         assert!(persona.contains("むぎとして柔らかく話す。"));
+        let character = state.character.lock().unwrap().clone();
+        assert_eq!(
+            persona,
+            crate::agent::prompt::compose_content(&state.config, &character.profile, &character.id)
+        );
+        assert_eq!(persona.matches("選択中キャラクターの人格設定:").count(), 1);
         assert!(!persona.contains("外へ重ねて渡さない長期メモリ"));
         assert!(!persona.contains("外へ重ねて渡さない課題"));
         assert!(!persona.contains("[プロジェクト文脈]"));
@@ -6459,63 +6541,6 @@ mod tests {
 }
 
 #[cfg(test)]
-mod project_context_tests {
-    use super::{apply_project_context, apply_user_skill_context};
-    use crate::message::Message;
-
-    fn convo(system: &str) -> Vec<Message> {
-        vec![Message::new("system", system), Message::new("user", "やあ")]
-    }
-
-    /// 何度差し込んでも1ブロックだけになること（積み重なると文脈を食い潰す）。
-    #[test]
-    fn プロジェクト文脈は入れ替わり積み重ならない() {
-        let mut messages = convo("人格設定");
-        apply_project_context(&mut messages, "課題A");
-        apply_project_context(&mut messages, "課題B");
-        let system = &messages[0].content;
-        assert_eq!(
-            system.matches("[プロジェクト文脈]").count(),
-            1,
-            "system: {system}"
-        );
-        assert!(system.contains("課題B"), "system: {system}");
-        assert!(!system.contains("課題A"), "system: {system}");
-        assert!(system.starts_with("人格設定"), "system: {system}");
-    }
-
-    /// 空ブロックなら前回の内容を消して何も足さない（プロジェクトを空にしたとき残らない）。
-    #[test]
-    fn 空のときは差し込まず前回分も消す() {
-        let mut messages = convo("人格設定");
-        apply_project_context(&mut messages, "課題A");
-        apply_project_context(&mut messages, "");
-        assert_eq!(messages[0].content, "人格設定");
-        assert_eq!(messages[1].content, "やあ", "user メッセージを触っている");
-    }
-
-    #[test]
-    fn system_が無ければ何もしない() {
-        let mut messages = vec![Message::new("user", "やあ")];
-        apply_project_context(&mut messages, "課題A");
-        assert_eq!(messages[0].content, "やあ");
-    }
-
-    #[test]
-    fn プロジェクト文脈と利用者スキル索引は別々に更新する() {
-        let mut messages = convo("人格設定");
-        apply_project_context(&mut messages, "課題A");
-        apply_user_skill_context(&mut messages, "weekly-report: 週報を整える");
-        apply_user_skill_context(&mut messages, "meeting-note: 議事録を整える");
-        let system = &messages[0].content;
-        assert!(system.contains("課題A"), "system: {system}");
-        assert!(system.contains("meeting-note"), "system: {system}");
-        assert!(!system.contains("weekly-report"), "system: {system}");
-        assert_eq!(system.matches("[利用者追加スキル]").count(), 1);
-    }
-}
-
-#[cfg(test)]
 mod guard {
     #[test]
     fn 選択肢へ展開した本文は要約や複数aiへ渡す前に話題を照合する() {
@@ -6579,3 +6604,45 @@ mod guard {
 #[cfg(test)]
 #[path = "conversation_turn_tests.rs"]
 mod conversation_turn_tests;
+
+#[cfg(test)]
+mod キャッシュ計測準備 {
+    use super::*;
+
+    #[test]
+    fn 五往復の変動資料でも送信先頭を保持する() {
+        let mut rows = Vec::new();
+        let mut reasons = Vec::new();
+        for (messages, tools, reason) in agent::context::cache_measurement_fixture() {
+            eprintln!(
+                "計測{}往復目: ツール数={} 再構築={reason:?}",
+                rows.len() + 1,
+                tools.len()
+            );
+            reasons.push(reason);
+            let normalized = crate::providers::local::normalize_for_local(&messages).unwrap();
+            rows.push(json!({"model":"cache-measurement", "messages":crate::providers::openai::to_wire(&normalized), "tools":tools, "temperature":0, "seed":42, "max_tokens":96, "stream":true,"stream_options":{"include_usage":true}}));
+        }
+        assert_eq!(rows.len(), 5);
+        for (index, pair) in rows.windows(2).enumerate() {
+            let earlier = pair[0]["messages"].as_array().unwrap();
+            let next = pair[1]["messages"].as_array().unwrap();
+            assert!(next.starts_with(earlier), "前の依頼の先頭が変わりました");
+            if !pair[1]["tools"]
+                .as_array()
+                .unwrap()
+                .starts_with(pair[0]["tools"].as_array().unwrap())
+            {
+                assert_eq!(
+                    reasons[index + 1].as_deref(),
+                    Some("ツール定義の文字予算を超えました")
+                );
+            }
+        }
+        if let Ok(path) = std::env::var("PICO_CACHE_AFTER_OUT") {
+            let path = std::path::PathBuf::from(path);
+            assert!(path.is_absolute());
+            crate::store::write_atomic(&path, &serde_json::to_vec_pretty(&rows).unwrap()).unwrap();
+        }
+    }
+}

@@ -226,7 +226,8 @@ impl Provider for Anthropic {
                 .collect());
         }
         let url = format!("{}/models", base_url(cfg));
-        let res = crate::tools::http::client().map_err(anyhow::Error::msg)?
+        let res = crate::tools::http::client()
+            .map_err(anyhow::Error::msg)?
             .get(&url)
             .header("x-api-key", key)
             .header("anthropic-version", ANTHROPIC_VERSION)
@@ -298,7 +299,8 @@ impl Provider for Anthropic {
             body["tools"] = json!(anthropic_tools);
         }
         let url = format!("{}/messages", base_url(cfg));
-        let res = crate::tools::http::client().map_err(anyhow::Error::msg)?
+        let res = crate::tools::http::client()
+            .map_err(anyhow::Error::msg)?
             .post(&url)
             .header("x-api-key", key)
             .header("anthropic-version", ANTHROPIC_VERSION)
@@ -317,6 +319,34 @@ inventory::submit! { ProviderReg { make: || Box::new(Anthropic) } }
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn 共通protocolの固定systemと画像と呼出pairを変えず新資料を末尾へ送る() {
+        let (before, after, _) = crate::agent::context::protocol_fixture();
+        let (system, earlier) = to_anthropic_messages(&before);
+        let (next_system, later) = to_anthropic_messages(&after);
+        assert_eq!(system, next_system);
+        assert_eq!(system.as_deref(), Some(after[0].content.as_str()));
+        assert_eq!(earlier, later[..earlier.len()]);
+        assert_eq!(later[0]["content"][0]["source"]["data"], "aW1hZ2U=");
+        assert_eq!(later[0]["content"][1]["text"], after[1].content);
+        assert_eq!(
+            later[1]["content"][0]["id"],
+            after[2].tool_calls.as_ref().unwrap()[0].id
+        );
+        assert_eq!(
+            later[1]["content"][0]["input"],
+            after[2].tool_calls.as_ref().unwrap()[0].arguments
+        );
+        assert_eq!(
+            later[2]["content"][0]["tool_use_id"],
+            after[3].tool_call_id.as_ref().unwrap().as_str()
+        );
+        assert_eq!(
+            later.last().unwrap()["content"],
+            after.last().unwrap().content
+        );
+    }
 
     fn assistant_with_call(arguments: Value) -> Message {
         Message {

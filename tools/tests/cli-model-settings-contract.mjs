@@ -27,6 +27,35 @@ function harness(listModels, value = "codex") {
   return context;
 }
 
+test("ローカル既定はバックエンド正本だけを使い明示選択を保持し欠損を画面へ返す", async () => {
+  for (const [saved, backendDefault, expected] of [
+    ["", "lfm25_1_2b_jp", "lfm25_1_2b_jp"],
+    ["auto", "lfm25_1_2b_jp", "lfm25_1_2b_jp"],
+    ["lfm25_2_6b", "lfm25_1_2b_jp", "lfm25_2_6b"],
+    ["lfm25_2_6b", undefined, "lfm25_2_6b"],
+    ["auto", undefined, null],
+    ["", undefined, null],
+  ]) {
+    let listed = false;
+    const ctx = harness(async () => { listed = true; return ["一覧の先頭モデル"]; }, "前のAIのモデル");
+    ctx.inputs = new Map([["PICOAGENT_LOCAL_MODEL_PRESET", { value: saved }]]);
+    ctx.data.defaultLocalModelPreset = backendDefault;
+    ctx.data.providers = [{ id: "local", defaultModel: "旧既定モデル" }];
+    ctx.data.active.providerId = "local";
+    const start = settings.indexOf("function providerDefaultModel(");
+    vm.runInContext(settings.slice(start, settings.indexOf("async function loadModels(", start)), ctx);
+    await ctx.loadModels("local", true);
+    if (expected === null) {
+      assert.equal(listed, false);
+      assert.equal(ctx.modelInput.value, "");
+      assert.match(ctx.statusEl.textContent, /ローカルモデルの既定値を取得できません/);
+    } else {
+      assert.equal(ctx.modelInput.value, expected);
+      assert.equal(ctx.statusEl.textContent, "");
+    }
+  }
+});
+
 function renderedProvider(values, activeProviderId) {
   const start = settings.indexOf('  const providerSelect = el("select");', settings.indexOf("async function render()"));
   const end = settings.indexOf('  aiSec.append(registerInput(', start);
