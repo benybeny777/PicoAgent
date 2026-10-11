@@ -280,6 +280,9 @@ body.is-editing .font-size-panel { display: none; }
   line-height: 1.5;
   font-size: var(--chat-font-size);
 }
+.composer textarea { background: var(--input-surface); border-color: var(--input-border); }
+.composer textarea::placeholder { color: var(--text-muted); opacity: 1; }
+.composer textarea:focus { border-color: var(--accent); }
 .composer.drag-over textarea { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 .composer-actions { display: flex; justify-content: flex-end; gap: 6px; }
 .composer-actions button {

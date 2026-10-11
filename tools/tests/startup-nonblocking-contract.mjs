@@ -9,6 +9,7 @@ import { mainScript } from "./lib/ui-source.mjs";
 const main = (await readFile(new URL("../../ui/app/main.js", import.meta.url), "utf8")).replace(/\r\n/g, "\n");
 const boot = await readFile(new URL("../../ui/app/boot.js", import.meta.url), "utf8");
 const engine = await readFile(new URL("../../ui/app/engine.js", import.meta.url), "utf8");
+const managedEngine = await readFile(new URL("../../src-tauri/src/engine.rs", import.meta.url), "utf8");
 const allMain = mainScript();
 const commands = await readFile(new URL("../../src-tauri/src/commands.rs", import.meta.url), "utf8");
 const layout = await readFile(new URL("../../src-tauri/src/layout.rs", import.meta.url), "utf8");
@@ -30,6 +31,11 @@ test("セットアップ済みのlocal選択はAIと音声の準備完了まで�
   // 初期化前・ローカルAIの準備前は送信させない。
   assert.match(engine, /if \(!initialized\) return "初期化完了後に送信できます";/);
   assert.match(engine, /if \(required && !ready\) return "ローカルAIの準備完了後に送信できます";/);
+});
+
+test("起動した管理エンジンの疎通失敗は子を回収してから診断する", () => {
+  const polling = managedEngine.slice(managedEngine.indexOf("let mut failed = None;"), managedEngine.indexOf("fn managed_child_exit_status"));
+  assert.match(polling, /Err\(error\) => \{\s*terminate_managed_child\(&app\);\s*set_status\([\s\S]*?return;/);
 });
 
 test("初回セットアップはローカルAIの取得完了を待たない", () => {

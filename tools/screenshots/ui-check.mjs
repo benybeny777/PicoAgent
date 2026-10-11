@@ -18,6 +18,15 @@ import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { composerContrast, composerContrastIssues } from "./composer-contrast.mjs";
+
+async function verifyComposerContrast(page, label) {
+  await page.locator("#input").evaluate(node => node.blur());
+  await page.waitForTimeout(250); // 選択枠の色が戻るまで待ち、確定色で検査する。
+  const issues = composerContrastIssues(await composerContrast(page));
+  if (issues.length) fail(`${label}/composer`, issues.join(" / "));
+  else ok(`${label} 入力欄の背景・枠・文字の可読性`);
+}
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const uiDir = path.join(root, "ui");
@@ -440,6 +449,9 @@ for (const characterId of characters) {
       else if (name === "character" && call.args.context?.character !== true) fail(`${label}/contextmenu`, `キャラの文脈が渡りません ${JSON.stringify(call.args)}`);
       else ok(`${label} 右クリック（${name}）`);
     }
+    await page.evaluate(() => document.querySelector("[data-source=chat]").click());
+    await verifyComposerContrast(page, label);
+    await page.screenshot({ path: path.join(outDir, `${characterId}-${layout}-composer.png`), omitBackground: true });
     await context.close();
   }
 }
@@ -553,6 +565,7 @@ for (const [layout, [width, height]] of Object.entries(LAYOUTS)) {
 // 保存後のイベントだけでUIモードが切り替わり、再起動せず形と色が変わることを確かめる。
 for (const [layout, [width, height]] of Object.entries(LAYOUTS)) {
   const { context, page, errors } = await openApp({ layout, width, height, characterId: "mugi" });
+  await page.evaluate(() => document.querySelector("[data-source=chat]").click());
   for (const [mode, theme] of [["pastel", "system"], ["glass", "system"], ["glass", "light"], ["pastel", "light"], ["pastel", "dark"], ["pastel", "system"]]) {
     await page.evaluate(({ uiTheme, theme }) => window.__emit("pet:ui", { theme, uiTheme }), { uiTheme: mode, theme });
     const actual = await page.locator("[data-source=chat]").evaluate(node => ({
@@ -564,6 +577,7 @@ for (const [layout, [width, height]] of Object.entries(LAYOUTS)) {
     if (actual.mode !== mode || actual.radius !== radius) fail(`${layout}/${mode}`, `モード即反映が不一致 ${JSON.stringify(actual)}`);
     else ok(`${layout}/${mode} UIモードを即反映`);
     await page.waitForTimeout(300); // 色の切替アニメーション完了後の確定した見た目を撮る。
+    await verifyComposerContrast(page, `${layout}/${mode}/${theme}`);
     await page.screenshot({ path: path.join(outDir, `mode-${mode}-${layout}.png`), omitBackground: true });
     await page.screenshot({ path: path.join(outDir, `mode-${mode}-${theme}-${layout}.png`), omitBackground: true });
   }

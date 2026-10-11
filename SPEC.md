@@ -255,7 +255,7 @@ inventory::submit! { ProviderReg { make: || Box::new(MyProvider) } }
   4. **起動**: `llama-server` は `PicoAgent/bundled/engine/`、`resources/bundled/engine/`、`resources/engine/`、開発時の `src-tauri/resources/bundled/engine/` / `src-tauri/resources/engine/` の順に探す。`cargo xtask dev` / `cargo xtask build` は事前に `bundled::fetch_engine` で同梱配置を確認してから Tauri を起動する。
      - `llama-server -m <model> --host 127.0.0.1 --port <PICOAGENT_LOCAL_PORT> -c <PICOAGENT_LOCAL_CTX> -ngl <PICOAGENT_LOCAL_NGL> --jinja` を起動する（Windows は CREATE_NO_WINDOW）。`PICOAGENT_LOCAL_GPU_DEVICE`（`Vulkan1` / `CUDA0` など）は、名前が示すバックエンドと起動候補が一致するときだけ `--device <値>` を足す。
      - Qwen3.5 だけは内部推論を発話へ混ぜないよう `--chat-template-kwargs {"enable_thinking":false} --reasoning-budget 0` を足す。
-     - 既定の同梱ビルドは Vulkan 版で、`-ngl 999` により全レイヤを GPU へ載せる（非対応環境では CPU へ落ちる）。`/health` が 200 になったら `engine:status {phase:"ready"}`。同じポートに既存の `llama-server` が残っていれば、`/v1/models` のモデルIDが要求中の GGUF と一致するときだけ再利用し、違えばエラーにして停止を促す。
+     - 既定の同梱ビルドは Vulkan 版で、`-ngl 999` により全レイヤを GPU へ載せる（非対応環境では CPU へ落ちる）。管理エンジンの`/health`は、接続拒否を停止中、503をモデル読込中として扱い、起動・準備待ちを続ける。200になったら`engine:status {phase:"ready"}`。認証失敗・その他のHTTP失敗・応答待ち期限・壊れた応答は理由を表示し、起動した管理子を回収する。外部AIの疎通失敗はこの未準備判定へ読み替えない。同じポートに既存の `llama-server` が残っていれば、`/v1/models` のモデルIDが要求中の GGUF と一致するときだけ再利用し、違えばエラーにして停止を促す。
 - 子プロセスは `RunEvent::Exit` で止める（`engine::stop`）。状態は `engine_status` でも取れる。停止・再起動時は旧取得と起動監視を取り消し、旧処理の資源解放後だけ次の取得・起動を進める。
 - **設定画面**: 「モデル」欄（`PICOAGENT_MODEL`）でプリセットを選ぶと `local::model_url` が取得URLへ反映する。「AIモデル」は設定読込時だけ RAM を取得し、Windows NVIDIA では `nvidia-smi` で専用VRAM総量も取る（WMI `AdapterRAM` は uint32 で飽和するため使わない。NVIDIA 以外の VRAM は不明表示にして RAM で判定）。macOS は統合メモリとして RAM で、Ubuntu は `/proc/meminfo` で判定する。候補カードと系列／サイズ選択は `groupedModelField.setValue()` を共通入口にする。`settings_save` はローカル関連の変更（`PICOAGENT_MODEL` / `PICOAGENT_LOCAL_MODEL_PRESET` / `PICOAGENT_MODEL_URL` など）を再起動対象とし、再起動後に `ensure_and_start` を行う。
 
@@ -840,7 +840,7 @@ OSの「動きを減らす」はキャラ読込完了時にも最新値を同期
 
 - **文字サイズ**: 回答操作の「Aa」で −／＋／標準 の1行を開き、その場で変える。パネル上の Ctrl（⌘）+ホイール、Ctrl + + / - / 0 も同じ。`bubble` は `PICOAGENT_BUBBLE_FONT_PX`（10〜28、1px刻み）、`column` は `PICOAGENT_STREAM_CHAT_FONT_PX`（18〜48、2px刻み）を変え、見た目は即時、保存は操作が0.6秒落ち着いてから `pet_save_ui_pref` で行う。範囲の正本はバックエンドの `checked_main_ui_pref()`。
 - **位置と大きさ**: 会話パネルは `chat` ソースの矩形そのもので、配置編集中だけ動かす。配置編集中は矩形の右下のつまみでも大きさを変えられ、確定時だけ `pet_save_scene` で保存する。`pet` ではキャラ矩形のある側へ向けた尻尾を付ける。パネルが窓より大きいときは表示だけ窓内へ収め、保存値は書き換えない。
-- **入力欄**: 全形式で列幅を100%使い、送信・音声・連続ボタンは入力欄に重ねず `.composer-actions` の独立した下段へ並べる。添付プレビューとクイック操作は入力欄の上。`Enter` / `Ctrl+Enter` / `Cmd+Enter` で送信、`Shift+Enter` で改行、`Esc` で閉じる。送信中と空入力では送信ボタンを無効にし、最大180pxまで自動伸縮する。
+- **入力欄**: 全形式で列幅を100%使い、送信・音声・連続ボタンは入力欄に重ねず `.composer-actions` の独立した下段へ並べる。背景は不透明なテーマ色とし、背景に対する枠のコントラストを3以上、文字と案内文字を4.5以上にする。添付プレビューとクイック操作は入力欄の上。`Enter` / `Ctrl+Enter` / `Cmd+Enter` で送信、`Shift+Enter` で改行、`Esc` で閉じる。送信中と空入力では送信ボタンを無効にし、最大180pxまで自動伸縮する。
   - 連携設定の有無を取得できないクイック操作は理由と再試行を出し、連携のない状態としてボタンを減らさない。再試行や設定変更による古い非同期応答は新しい一覧を上書きしない。最小幅でも確認中・失敗理由・再試行・質問選択肢は省略せず、長い診断は共通の診断領域だけをスクロールして操作できる。最小高さの診断中は履歴・回答が高さを譲り、入力・送信・状態を窓内へ保つ。通常の文字サイズは変えず、上端操作の余白はCSSと位置計算が同じ正本値を読む。
   - 入力履歴は直近40件で、先頭/末尾で `↑` / `↓` を押すと過去入力と編集中の下書きを行き来する。起動時とキャラ切替時に `hydrateHistory()` が会話履歴から組み直す（専用の保存先は無い）。
   - 送らずに閉じた書きかけだけは `localStorage`（`picoagent.composerDraft.v1`）へ残し、次に開いたとき空欄なら戻す。保存不在・24時間の期限切れは正常として復元しない。JSON・型・日時の破損は削除が成功したときだけ「消しました」と表示する。読込・削除が失敗したときは理由と再読込・明示破棄の操作を出し、元の保存値を上書きしない。再試行でも編集中の本文は保持する。`pet:reset` で消す。正規化は `ui/composer-draft.js`（`PicoComposerDraft`）が唯一の定義元。

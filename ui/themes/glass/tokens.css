@@ -11,6 +11,8 @@
   --surface-strong: rgba(11, 13, 21, 0.92);
   --surface-raised: rgba(30, 34, 49, 0.9);
   --surface-sunken: rgba(255, 255, 255, 0.045);
+  --input-surface: #10131f;
+  --input-border: #7187a5;
   --surface-hover: rgba(255, 255, 255, 0.08);
   --border: rgba(255, 255, 255, 0.1);
   --border-strong: rgba(255, 255, 255, 0.2);
@@ -47,6 +49,8 @@
   --surface-strong: rgba(255, 255, 255, 0.95);
   --surface-raised: rgba(255, 255, 255, 0.96);
   --surface-sunken: rgba(20, 26, 48, 0.05);
+  --input-surface: #f5f8ff;
+  --input-border: #6f819f;
   --surface-hover: rgba(20, 26, 48, 0.07);
   --border: rgba(20, 26, 48, 0.1);
   --border-strong: rgba(20, 26, 48, 0.2);
