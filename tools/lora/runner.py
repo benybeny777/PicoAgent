@@ -167,8 +167,9 @@ def server_arguments(args, port, api_key):
                "--api-key", api_key, "--no-webui", "--no-agent", "--perf"]
     if args.adapter is not None:
         command += ["--lora", str(args.adapter.resolve())]
-    if getattr(args, "verbosity", None) is not None:
-        command += ["--verbosity", str(args.verbosity)]
+    # b11429は既定の詳細度3ではdeviceとoffloadの証跡が残らない。
+    verbosity = getattr(args, "verbosity", None)
+    command += ["--verbosity", str(5 if verbosity is None else verbosity)]
     if args.gpu_layers == 0:
         command += ["--device", "none", "--no-kv-offload", "--no-op-offload"]
     elif args.device:

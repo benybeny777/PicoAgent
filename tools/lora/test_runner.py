@@ -83,6 +83,21 @@ HTTPServer(("127.0.0.1", port), Handler).serve_forever()
 
 
 class RunnerTests(unittest.TestCase):
+    def test_起動詳細度は既定5で明示値を優先し引数を重複させない(self):
+        args = runner.parser().parse_args([
+            "evaluate", "--server", "server.exe", "--model", "model.gguf",
+            "--template", "template.jinja", "--input", "cases.json",
+            "--output", "result.json", "--gpu-layers", "99",
+        ])
+        for supplied, expected in (({}, 5), ({"verbosity": None}, 5), ({"verbosity": 0}, 0),
+                                   ({"verbosity": 3}, 3), ({"verbosity": 5}, 5)):
+            with self.subTest(指定=supplied):
+                settings = copy.copy(args)
+                vars(settings).update(supplied)
+                command = runner.server_arguments(settings, 12345, "test-key")
+                self.assertEqual(command.count("--verbosity"), 1)
+                self.assertEqual(command[command.index("--verbosity") + 1], str(expected))
+
     @contextmanager
     def environment(self, mode="evaluate", questions=("質問",), startup="通常", seeds="1,2"):
         directory = Path(__file__).resolve().parents[2] / "temp" / "lora-runner-tests"
