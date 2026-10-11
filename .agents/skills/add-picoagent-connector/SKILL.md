@@ -17,7 +17,7 @@ description: PicoAgentへLLMプロバイダまたはツールコネクタを追�
 2. 発話候補の語彙と優先度は`intent_keywords()`／`intent_priority()`、先回り実行の引数と直接返却／資料差し込みの別は`intent_invocation()`へ置く。`agent.rs`へスキル名分岐を足さない。長文の資料プロンプトは同じスキルの`prompts/*.md`から`include_str!`で読む。
 3. 設定が必要なら`add-picoagent-setting`も使い、`config_schema()`と実行時`cfg.get()`へ接続する。
 4. ユーザーパスは`permissions`、外部プロセスは`tools::process`、文字列は`text`、状態更新は`store`の共通層を使う。独自の許可判定、直接起動、直接上書きを作らない。
-5. 標準HTTPは`tools::http::client()`を共有する。固有のUser-Agent、DNS固定・リダイレクト制御、長時間ストリーム等で個別builderが必要なら、要求全体timeout、または接続timeout＋無通信timeoutを必ず付ける。
+5. 外部APIは`tools::http::service()`の共有接続プールと要求ごとの全体期限を使い、認証・User-Agentを要求単位に付ける。標準profileや配布専用HTTPとの用途境界は`SPEC.md`と`AGENTS.md`を参照し、コネクタ内へ個別builderを増やさない。
 6. Toolの失敗はモデルが回復できる文字列として返し、それ以外は`Result`で伝播する。許可したフォールバックだけ理由コメントを付ける。
 7. 正常、失敗、キャンセルの全経路でプロセス、接続、タイマー、リスナ、オブジェクトURLを解放する。
 

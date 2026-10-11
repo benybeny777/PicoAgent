@@ -492,6 +492,8 @@ scripts/setup-character-learning-runtime.pyは共有Python3.12から専用venv�
 本体の取得・展開・複製・ファイル探索・空き容量・配置復元の正本は`src-tauri/src/installer/`です。用途側は上限と保存先を渡し、共通部品の手順を複製しません。プロセスの生存確認は`tools::process`がOSのAPIで行い、外部コマンドへ無期限に待ちません。音声学習のPython導入・状態保存の原子的移動は、既存の配布共通モジュール`voice_training_common.py`へ集め、Windowsの一時的な共有拒否だけ同じ操作を有限回再試行します。中核crateの最小RustはSHA-256共通化に必要な1.85、本体・xtaskの最小Rustは従来どおり1.88です。Whisperの`WHISPER_RELEASE`は正本マニフェストの`binaryRelease`と一致する指定だけを受け付けます。Macは固定ソースからCMakeでビルドし、他OSのバイナリやSDKを代用取得しません。
 
 
+固定取得の終了時清掃では、取得先そのものを旧 `.part` 残物と判定しません。uv・ComfyUI・Whisperの専用展開先は `components::prepare_cached_extraction` で通常ディレクトリと管理直下を確認してから作り直し、展開後の工程が失敗しても再試行できます。書庫・隣接キャッシュ・公開済みランタイムはこの回収対象に含めません。
+
 ## キャラ描画の負荷確認
 
 フレーム方針と実描画器の0/30/60上限は `node --test tools/tests/character-*-budget-runtime.mjs` で確認する。実アプリの開発者コンソールで `window.PicoCharacterFrameDebug = true` にすると、主画面の実描画回数を約1秒ごとにdebugログへ記録できる。`false`で止まり、恒久設定や常駐タイマーは増やさない。PIXIは描画tick、MMDはscene.render、画像は有効なdrawの境界を数える。GPU/CPUの前後差、髪揺れ・口と音声・復帰の見た目は対象PCで別に確認し、模擬144/240Hzの件数を実機性能へ読み替えない。

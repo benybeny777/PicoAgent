@@ -23,7 +23,7 @@ function hostSetup({ loadPack = async id => ({ id, manifest: {}, modes: ["mmd", 
       static supports(pack) { return pack.modes.includes(kind); }
       constructor() { this.kind = kind; this.element = { style: {} }; instances.push(this); }
       async load(pack) { attempts.push([kind, pack.id]); await loads[kind]?.(pack); }
-      setFraming() {} setMotion() {} setSpeaking() {} setActive() {} setFrameBudget() {}
+      setFraming() {} setMotion() {} setSpeaking() {} setReducedMotion() {} setActive() {} setFrameBudget() {}
       dispose() { this.disposed = true; }
     };
   }

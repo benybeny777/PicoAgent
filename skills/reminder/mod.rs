@@ -1,7 +1,9 @@
 // reminder/mod.rs - 日常リマインダーを追加・一覧・削除するスキル。
 
 use async_trait::async_trait;
+use regex::Regex;
 use serde_json::{json, Value};
+use std::sync::LazyLock;
 
 use super::{Tool, ToolReg};
 use crate::config::Config;
@@ -11,6 +13,12 @@ use crate::tools::datetime_words::number_before;
 pub struct ReminderTool;
 
 const LOCAL_ACTION_PROMPT: &str = include_str!("prompts/local-action.md");
+
+// 時間への言及だけでは予約しない。末尾まで追加依頼として成立する発話だけを受ける。
+static ADD_REQUEST: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"^(?:今から|あと)?[0-9]+(?:分|時間)後(?:に)?[^?？\r\n]*(?:リマインダー(?:を設定)?して|思い出させて|通知して|教えて)(?:ください|下さい)?[。！!]*$")
+        .expect("リマインダー追加依頼の正規表現")
+});
 
 fn render_local_action(user_text: &str, tool_result: &str) -> String {
     crate::tools::render_intent_prompt(LOCAL_ACTION_PROMPT, user_text, tool_result)
@@ -35,13 +43,17 @@ fn str_arg(args: &Value, key: &str) -> String {
         .to_string()
 }
 
-fn due_arg(args: &Value) -> Option<String> {
-    let minutes = args.get("minutes_from_now").and_then(Value::as_i64);
-    if let Some(minutes) = minutes.filter(|m| *m > 0) {
-        return Some(daily::after_minutes(minutes));
+fn due_arg(args: &Value) -> Result<String, String> {
+    if let Some(value) = args.get("minutes_from_now") {
+        let minutes = value
+            .as_i64()
+            .ok_or("minutes_from_now は整数で指定してください")?;
+        return daily::after_minutes(minutes);
     }
     let due_at = str_arg(args, "due_at");
-    daily::parse_local_minute(&due_at).map(|dt| dt.format("%Y-%m-%dT%H:%M").to_string())
+    daily::parse_local_minute(&due_at)
+        .map(|dt| dt.format("%Y-%m-%dT%H:%M").to_string())
+        .ok_or_else(|| "due_at（YYYY-MM-DDTHH:MM）か minutes_from_now を指定してください".into())
 }
 
 fn list_text(events: &[DailyEvent]) -> String {
@@ -86,6 +98,12 @@ impl Tool for ReminderTool {
         if !self.matches_intent(text) {
             return None;
         }
+        if !ADD_REQUEST.is_match(text.trim()) {
+            if crate::tools::web_search::is_explicit_request(text) {
+                return None;
+            }
+            return Some(crate::tools::IntentInvocation::guide(render_local_action));
+        }
         let parsed = match relative_minutes(text) {
             Ok(parsed) => parsed,
             Err(reason) => return Some(crate::tools::IntentInvocation::invalid(reason)),
@@ -96,9 +114,6 @@ impl Tool for ReminderTool {
                 "minutes_from_now": minutes,
                 "text": text
             })));
-        }
-        if crate::tools::web_search::is_explicit_request(text) {
-            return None;
         }
         Some(crate::tools::IntentInvocation::guide(render_local_action))
     }
@@ -148,9 +163,9 @@ impl Tool for ReminderTool {
                 if text.is_empty() {
                     return "エラー: 何を知らせるか指定してね。".to_string();
                 }
-                let Some(due_at) = due_arg(&args) else {
-                    return "エラー: due_at（YYYY-MM-DDTHH:MM）か minutes_from_now を指定してね。"
-                        .to_string();
+                let due_at = match due_arg(&args) {
+                    Ok(due_at) => due_at,
+                    Err(reason) => return format!("エラー: {reason}"),
                 };
                 let event = DailyEvent {
                     id: daily::new_id("rm"),
@@ -194,6 +209,62 @@ inventory::submit! { ToolReg { make: || Box::new(ReminderTool) } }
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    #[test]
+    fn 既存通知の取消や質問を追加依頼として先回りしない() {
+        for text in [
+            "15分後のリマインダーを削除して",
+            "15分後に通知してと言ったけど取り消して",
+            "15分後に通知してほしいわけではない",
+            "15分後のリマインダーは登録されていますか",
+            "15分後に通知してという例文を検索して",
+        ] {
+            assert!(
+                ReminderTool.intent_invocation(text).is_none_or(|value| {
+                    !matches!(value.handling, crate::tools::IntentHandling::Direct)
+                }),
+                "{text}"
+            );
+        }
+        for text in [
+            "15分後に洗濯物をリマインダーして",
+            "15分後に仕事を止めるよう通知してください。",
+        ] {
+            let invocation = ReminderTool.intent_invocation(text).expect(text);
+            assert_eq!(invocation.args["action"], "add", "{text}");
+            assert_eq!(invocation.args["minutes_from_now"], 15, "{text}");
+        }
+    }
+
+    #[tokio::test]
+    async fn 通知の極端な待ち時間は保存せず理由を返す() {
+        let directory = tempfile::tempdir().unwrap();
+        let cfg = Config::new();
+        let path = directory.path().join("config.json");
+        cfg.load(path.clone()).unwrap();
+        daily::save_events(&cfg, &[]).unwrap();
+        let before = std::fs::read(&path).unwrap();
+        for minutes in [
+            json!(i64::MAX),
+            json!(i64::MAX / 60_000),
+            json!(0),
+            json!(-1),
+            json!("5"),
+            Value::Null,
+        ] {
+            let result = ReminderTool
+                .run(
+                    &cfg,
+                    json!({"action": "add", "text": "通知", "minutes_from_now": minutes}),
+                )
+                .await;
+            assert!(result.starts_with("エラー:"), "{result}");
+            assert_eq!(std::fs::read(&path).unwrap(), before);
+        }
+        assert!(daily::load_events(&cfg).unwrap().is_empty());
+    }
+
     #[test]
     fn 相対時刻の換算上限は既存範囲を保ちoverflowは拒否する() {
         for (text, expected) in [
