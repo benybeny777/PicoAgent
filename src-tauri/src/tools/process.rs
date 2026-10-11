@@ -444,14 +444,14 @@ async fn output_worker(
     let mut child = command
         .spawn()
         .map_err(|error| RunFailure::NotStarted(format!("{label}を起動できません: {error}")))?;
-    let stdout_task = tokio::spawn(read_capture(child.stdout.take()));
-    let stderr_task = tokio::spawn(read_capture(child.stderr.take()));
+    let captures = OutputCapture {
+        stdout: tokio::spawn(read_capture(child.stdout.take())),
+        stderr: tokio::spawn(read_capture(child.stderr.take())),
+    };
     let waited = tokio::select! {
         biased;
         _ = &mut abandon => {
             let cleanup_error = terminate_process_tree(&mut child, label).await.err();
-            stdout_task.abort();
-            stderr_task.abort();
             return Err(RunFailure::Interrupted(match cleanup_error {
                 Some(error) => format!("{label}の中断後に子プロセスを回収できません: {error}"),
                 None => format!("{label}を中断しました。"),
@@ -472,8 +472,6 @@ async fn output_worker(
             // 子がさらにプロセスを産む形では、子を kill しても孫がパイプの書き込み端を
             // 握ったままで終端（EOF）が来ない。ここで待つと孫が終わるまで戻れず、
             // タイムアウトを設けた意味がなくなる（実際に1秒指定が30秒待ちになっていた）。
-            stdout_task.abort();
-            stderr_task.abort();
             return Err(RunFailure::Interrupted(match cleanup_error {
                 Some(error) => format!(
                     "{label}が {timeout} 秒でタイムアウトし、子プロセスの回収にも失敗しました: {error}"
@@ -484,10 +482,8 @@ async fn output_worker(
     };
     // 子が正常終了しても、孫がパイプを握っていれば同じ理由で終端が来ない。
     // 終了後の回収にも上限を置き、待ち続けずエラーとして返す。
-    let stdout = collect(stdout_task, label, "標準出力")
-        .await
-        .map_err(RunFailure::Interrupted)?;
-    let stderr = collect(stderr_task, label, "標準エラー")
+    let (stdout, stderr) = captures
+        .collect(label)
         .await
         .map_err(RunFailure::Interrupted)?;
     Ok(Output {
@@ -554,20 +550,41 @@ pub const CAPTURE_DRAIN_SECS: u64 = 5;
 /// プロセスがパイプの書き込み端を握っていると終端（EOF）が来ない。ここで待ち切ると
 /// タイムアウトも中断も効かなくなるため、待ち方を共通化する。
 pub async fn join_capture<T>(
-    mut task: tokio::task::JoinHandle<T>,
+    task: &mut tokio::task::JoinHandle<T>,
 ) -> Option<Result<T, tokio::task::JoinError>> {
-    match tokio::time::timeout(Duration::from_secs(CAPTURE_DRAIN_SECS), &mut task).await {
-        Ok(joined) => Some(joined),
-        Err(_) => {
-            task.abort();
-            None
-        }
+    let joined = tokio::time::timeout(Duration::from_secs(CAPTURE_DRAIN_SECS), &mut *task)
+        .await
+        .ok();
+    if joined.is_none() {
+        task.abort();
+    }
+    joined
+}
+
+/// 片方の失敗・待機の中断・子の終了確認失敗でも、両方の読取タスクを回収する。
+struct OutputCapture {
+    stdout: tokio::task::JoinHandle<Result<Vec<u8>, String>>,
+    stderr: tokio::task::JoinHandle<Result<Vec<u8>, String>>,
+}
+
+impl Drop for OutputCapture {
+    fn drop(&mut self) {
+        self.stdout.abort();
+        self.stderr.abort();
     }
 }
 
-/// 出力回収タスクを上限付きで待つ。上限を超えたらタスクを中断し、握りつぶさずエラーで返す。
+impl OutputCapture {
+    async fn collect(mut self, label: &str) -> Result<(Vec<u8>, Vec<u8>), String> {
+        let stdout = collect(&mut self.stdout, label, "標準出力").await?;
+        let stderr = collect(&mut self.stderr, label, "標準エラー").await?;
+        Ok((stdout, stderr))
+    }
+}
+
+/// タスクの所有者を残したまま上限付きで待ち、失敗は所有者による両系統の回収へ返す。
 async fn collect(
-    task: tokio::task::JoinHandle<Result<Vec<u8>, String>>,
+    task: &mut tokio::task::JoinHandle<Result<Vec<u8>, String>>,
     label: &str,
     kind: &str,
 ) -> Result<Vec<u8>, String> {
@@ -608,6 +625,49 @@ mod tests {
     use super::process_open_error;
     use super::{command, command_sync, output, output_or_install_hint, process_alive};
     use std::process::Stdio;
+
+    #[tokio::test]
+    async fn 出力回収の失敗と中断で両方の読取タスクを残さない() {
+        for mode in ["読取失敗", "回収中断", "終了確認失敗"] {
+            let (released, released_rx) = tokio::sync::oneshot::channel::<()>();
+            let (ready, ready_rx) = tokio::sync::oneshot::channel();
+            let stderr = tokio::spawn(async move {
+                // 書込側が生き続けるパイプと同じく、回収されるまで終わらない。
+                let _released = released;
+                ready.send(()).unwrap();
+                std::future::pending::<Result<Vec<u8>, String>>().await
+            });
+            ready_rx.await.unwrap();
+            let stdout = tokio::spawn(async move {
+                if mode == "読取失敗" {
+                    Err("読取エラー".to_string())
+                } else {
+                    std::future::pending::<Result<Vec<u8>, String>>().await
+                }
+            });
+            let cleanup = [stdout.abort_handle(), stderr.abort_handle()];
+            let captures = super::OutputCapture { stdout, stderr };
+            match mode {
+                "読取失敗" => {
+                    assert_eq!(captures.collect("検査").await.unwrap_err(), "読取エラー")
+                }
+                "回収中断" => {
+                    let task = tokio::spawn(async move { captures.collect("検査").await });
+                    tokio::task::yield_now().await;
+                    task.abort();
+                    assert!(task.await.unwrap_err().is_cancelled());
+                }
+                _ => drop(captures),
+            }
+            let reclaimed =
+                tokio::time::timeout(std::time::Duration::from_secs(1), released_rx).await;
+            // 退行検査が失敗する場合でも、この検査自身の読取タスクは残さない。
+            for task in cleanup {
+                task.abort();
+            }
+            assert!(reclaimed.is_ok(), "{mode}で標準エラーの読取が残りました");
+        }
+    }
 
     #[test]
     fn 実プロセスの生存と終了を確認コマンドなしで問い合わせる() {

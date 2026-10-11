@@ -100,17 +100,40 @@ fn configured_port(
     Ok(port)
 }
 
-pub fn port(app: &tauri::AppHandle, state: &AppState) -> Result<u16, String> {
-    configured_port(&state.config, |next| {
-        state
-            .config
-            .set_string("PICOAGENT_TTS_PORT", next.clone())
+fn migrated_port(
+    config: &crate::config::Config,
+    on_migrated: impl FnOnce(&str),
+) -> Result<u16, String> {
+    const CHANGED_DURING_MIGRATION: &str =
+        "Aivis ポートが移行中に変更されました。もう一度お試しください。";
+    let previous = config.get_runtime_value(crate::config::ints::TTS_PORT.key);
+    configured_port(config, |next| {
+        if config.get_runtime_value(crate::config::ints::TTS_PORT.key) != previous {
+            return Err(CHANGED_DURING_MIGRATION.to_string());
+        }
+        // 実行中の旧ポートだけを正規化し、延期中の別ポートは保存側へ残す。
+        config
+            .replace_value_for_operation(
+                crate::config::ints::TTS_PORT.key,
+                previous.as_ref(),
+                &Value::String(next.clone()),
+                || Ok(()),
+            )
             .map_err(|error| format!("Aivis ポートの旧既定値移行に失敗しました: {error}"))?;
+        if config.int(&crate::config::ints::TTS_PORT)? != i64::from(DEFAULT_PORT) {
+            return Err(CHANGED_DURING_MIGRATION.to_string());
+        }
+        on_migrated(&next);
+        Ok(())
+    })
+}
+
+pub fn port(app: &tauri::AppHandle, state: &AppState) -> Result<u16, String> {
+    migrated_port(&state.config, |next| {
         append_log_best_effort(
             app,
             &format!("Aivis ポートを旧既定値 {LEGACY_DEFAULT_PORT} から {next} へ移行しました。"),
         );
-        Ok(())
     })
 }
 
@@ -1738,6 +1761,66 @@ mod tests {
             "保存先へ書き込めません"
         );
         assert_eq!(cfg.int(&crate::config::ints::TTS_PORT).unwrap(), 10102);
+        assert!(
+            super::migrated_port(&cfg, |_| panic!("保存失敗を移行成功として通知しない"))
+                .unwrap_err()
+                .contains("旧既定値移行に失敗")
+        );
+        assert_eq!(cfg.int(&crate::config::ints::TTS_PORT).unwrap(), 10102);
+    }
+
+    #[test]
+    fn 旧音声ポートの移行は延期中の保存値を上書きしない() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .join("temp");
+        std::fs::create_dir_all(&root).unwrap();
+        let dir = tempfile::tempdir_in(root).unwrap();
+        for pending in [None, Some("12436")] {
+            let cfg = crate::config::Config::new();
+            let path = dir.path().join(if pending.is_some() {
+                "pending.json"
+            } else {
+                "current.json"
+            });
+            cfg.load(path.clone()).unwrap();
+            cfg.set_string("PICOAGENT_TTS_PORT", "10102".to_string())
+                .unwrap();
+            if let Some(pending) = pending {
+                let patch = serde_json::json!({"PICOAGENT_TTS_PORT": pending});
+                cfg.set_all_checked_deferred(
+                    patch.as_object().unwrap().clone(),
+                    &Default::default(),
+                    &["PICOAGENT_TTS_PORT"],
+                    |_, _| Ok(()),
+                )
+                .unwrap();
+            }
+
+            let mut migrations = 0;
+            assert_eq!(
+                super::migrated_port(&cfg, |next| {
+                    assert_eq!(next, "11436");
+                    migrations += 1;
+                })
+                .unwrap(),
+                11436
+            );
+            assert_eq!(migrations, 1);
+            assert_eq!(cfg.int(&crate::config::ints::TTS_PORT).unwrap(), 11436);
+            let saved = pending.unwrap_or("11436");
+            assert_eq!(cfg.get_all()["PICOAGENT_TTS_PORT"], saved);
+            let reloaded = crate::config::Config::new();
+            reloaded.load(path).unwrap();
+            assert_eq!(reloaded.get("PICOAGENT_TTS_PORT", ""), saved);
+            assert_eq!(
+                super::migrated_port(&cfg, |_| panic!("移行済みの実行値を再保存しない")).unwrap(),
+                11436
+            );
+            cfg.activate_saved_values();
+            assert_eq!(cfg.get("PICOAGENT_TTS_PORT", ""), saved);
+        }
     }
 
     #[test]

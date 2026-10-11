@@ -470,7 +470,7 @@ PR #472の利用者決定により、既定のPATH探索とripgrep欠損時の�
 | name | 機能 | 安全策 |
 |---|---|---|
 | `get_time` | 現在の日付・時刻・日本語の曜日（任意で IANA タイムゾーン、`chrono-tz`）。ローカルの現在日時だけを尋ねる質問は検索より優先する。期間・予定・地域指定・複合依頼は通常のツール選択へ渡す | 副作用なし |
-| `weather` | Open-Meteo による現在天気・日別予報を、太字の見出し（アイコン・地点・天気）→いまの気温など→今日の最高/最低と降水確率→日別のMarkdown表（「10/12（日）」形式）で表示。回答欄では `ui/chat/weather-card.js` がこの形を空模様別の天気カード（大きな現在気温・指標チップ・週の気温帯バー）へ組み替える。数値・欠測・日別表を含む正規形全体が一致した場合だけカード化し、不正値や途中の表、非該当文は本文を消費せず通常のMarkdownで描く。今日の行だけでも最高・最低・降水確率を保持し、狭幅の日別行は情報を消さず複数段表示する。欠測は未確認として表示し、日付は今日の行が明示された場合だけ先頭を「今日」と呼ぶ。保存地点を優先し、未設定時だけHTTPSのIP位置情報から現在地を概算。「天気サイトを探して」はWeb検索へ譲る | APIキー不要、自動位置は無効化可 |
+| `weather` | Open-Meteo による現在天気・日別予報を、太字の見出し（アイコン・地点・天気）→いまの気温など→今日の最高/最低と降水確率→日別のMarkdown表（「10/12（日）」形式）で表示。回答欄では `ui/chat/weather-card.js` がこの形を空模様別の天気カード（大きな現在気温・指標チップ・週の気温帯バー）へ組み替える。数値・欠測・日別表を含む正規形全体が一致した場合だけカード化し、不正値や途中の表、非該当文は本文を消費せず通常のMarkdownで描く。今日の行だけでも最高・最低・降水確率を保持し、狭幅の日別行は情報を消さず複数段表示する。欠測は未確認として表示し、日付は今日の行が明示された場合だけ先頭を「今日」と呼ぶ。保存地点を優先し、未設定時だけHTTPSのIP位置情報から現在地を概算。会話の地名は依頼・日時の境界だけを除き、地名内の「今」「は」「の」や空白を保持する。「東京は天気？」「東京って天気は？」の助詞、「教えてね」「天気はどう？」の依頼末尾、「今どんな天気」の疑問部分を地名へ含めない。「市」を補う追加候補も取得に成功してから地点を決め、取得失敗では一部の候補で続行せず設定も変更しない。「天気サイトを探して」はWeb検索へ譲る | APIキー不要、自動位置は無効化可 |
 | `currency_rates` | Frankfurter API による為替レート・換算・推移スパークライン（`chart=true` / `days`） | APIキー不要 |
 | `market_indices` | Yahoo Finance chart API による日経平均・TOPIX・NYダウ・NASDAQ・S&P500 と推移スパークライン | APIキー不要、User-Agent 指定 |
 | `news_scrape` | Google News / Yahoo!ニュースのHTMLから最新の見出し候補を取得。一般ニュースの要約で先に使う | 対象ドメインを限定、HTML 1MB上限、件数上限、User-Agent 指定 |
@@ -590,7 +590,7 @@ PR #472の利用者決定により、既定のPATH探索とripgrep欠損時の�
 ### 設定の正本（`config.rs`）
 
 - 優先順位: **永続ファイル `app_config_dir/config.json` > 環境変数 > ハードコード既定値**。空文字は「未設定」とみなして env → 既定値へ落とす。
-- API: `load(path)` / `get(key, fallback)` / `get_bool(key, fallback)` / `get_all()` / `set_all(patch)`。
+- API: `load(path)` / `get(key, fallback)` / `get_bool(key, fallback)` / `get_all()` / `set_all(patch)`。再初期化が必要なキーは `commands::RESTART_SETTINGS` を正本にし、`set_all_checked_deferred` が保存値と旧実行値を同時に確定する。通常の文字・真偽・数量・存在確認と `get_runtime_value` は旧実行値を保ち、設定画面・競合版・保存候補の検証は保存値を読む。再初期化を承諾した開始時だけ `activate_saved_values` で保存値を実行側へ公開する。
 - `Field` は `{ key, label, type:"text"|"password"|"textarea"|"checkbox", placeholder }`。
 
 ### 設定画面（右クリック →「設定を開く…」）
@@ -601,7 +601,7 @@ PR #472の利用者決定により、既定のPATH探索とripgrep欠損時の�
 
 「画面・操作」のUIモードは「可愛い」「かっこいい」の2種類。可愛いを未設定時の既定とし、ローズ色と控えめな角丸（パネル10px・大きな部品8px・中6px・小4px、丸いバッジ等は維持）、かっこいいはシアン色と引き締まった形をメイン・設定画面の共通トークンへ適用する。パネルの縁取り（`--panel-border`）と上端の光（`--highlight`）もモードの色で描く。配信字幕は利用者が明るい面向けに選ぶ字幕色を読めるよう、両モードとも明るい面のまま色味だけ合わせる（`--subtitle-bg` / `--subtitle-border`）。設定画面はアクセント面の文字に `--on-accent`、角丸にモードの角丸を使い、可愛い固定の桃色を残さない。保存値は既存の `pastel` / `glass` を再利用し、既存の選択を移行や上書きで変更しない。設定画面で選択するとその場でプレビューし、保存後にメインへ即反映する。明暗設定、キャラ、表示形式、配信背景は独立して維持する。
 
-- **保存と競合**: 実際に変更したキーと、読み込んだ時点の値ごとの版だけを保存コマンドへ渡す。バックエンドは同じ原子的保存ロック内で版を照合し、別経路で更新済みなら保存せず競合キーを返す。画面は最新設定を読み直して入力中の差分を載せ直す。スケジュールの `last_run_minute` / `last_checked_minute` は内部キー `PICOAGENT_SCHEDULED_TASK_STATE` が持ち、予約定義や設定画面の保存対象から分ける。
+- **保存と競合**: 実際に変更したキーと、読み込んだ時点の値ごとの版だけを保存コマンドへ渡す。設定保存と再初期化は、再初期化要求→描画設定・予約・目覚ましのストアの順にロックし、会話・目覚まし発火との循環待ちを作らない。バックエンドは同じ原子的保存ロック内で版を照合し、別経路で更新済みなら保存せず競合キーを返す。画面は最新設定を読み直して入力中の差分を載せ直す。読込値と版は同じスナップショットから作り、保存成功時は確定した差分の版だけを返す。画面は今回保存したキーの版だけ更新し、未編集の値とその読込時の版を組にして保持する。スケジュールの `last_run_minute` / `last_checked_minute` は内部キー `PICOAGENT_SCHEDULED_TASK_STATE` が持ち、予約定義や設定画面の保存対象から分ける。
 - **未保存の扱い**: AIサービスを切り替えて非表示にした設定の未保存入力は、DOM とは別の草稿に持って再表示・保存へ引き継ぐ。未保存変更があればフッターの「変更を戻す」を有効にして変更行を薄く強調し、押すと最後に読み込んだ／保存した設定スナップショットから再描画して、キャラ上書き・音声上書き・目覚ましJSON・草稿を含めて未保存状態だけを捨てる。復号不能な秘密の未入力は非表示でも保持指定として扱う。
 - AIサービスの選択欄は保存値または編集中の草稿を表示し、再起動前の実行中AIで上書きしない。競合後の再描画でも非表示の草稿を保持する。キャラ切替の読込に失敗した場合は、人格・声・SDK欄を切替前へ戻し、旧キャラの上書き値へ混入させない。
 - AIサービス切替では、モデル一覧を待つ前に切替先の草稿・保存値・既定モデルを設定する。一覧の遅延・失敗中に保存しても前のAIのモデル名を持ち込まない。Ollama・CLIのモデル名も非表示の草稿へ保持し、一覧取得で手入力や再表示した草稿を上書きしない。保存開始後に届いた古い一覧は反映しない。
@@ -627,12 +627,14 @@ PR #472の利用者決定により、既定のPATH探索とripgrep欠損時の�
 
 追加キャラ一覧はメイン画面と設定画面で取得・形の正規化を共通化し、取得失敗や不正応答を空一覧へ置き換えない。設定画面は保存中・編集中のキャラIDと未保存の草稿を保持し、一覧取得の失敗理由と再取得操作を出す。キャラの選択・人格・声・SDK・描画方式など関連する編集を停止するが、他設定は保存できる。その保存で `PICOAGENT_CHARACTER` やキャラ別草稿を既定値へ書き換えない。取得成功で実際の不在を確認した場合だけ、削除済みキャラの既存移行を適用する。
 
-保存は `config.set_all()` で行い、「軽い設定は即反映」「重い設定は再初期化して反映」に分ける。
+追加キャラを削除するときは、保存済みの次回選択と実行中の選択のうち削除対象を指す値だけを既定キャラへ戻す。別キャラの保留選択と未保存の草稿は保持し、削除失敗時は保存選択も復元する。削除後の設定画面は保存選択とその版を同時に更新し、表示中キャラを削除した場合は再初期化の反映操作を残す。
+
+保存は `Config` の共通保存処理で行い、「軽い設定は即反映」「重い設定は再初期化して反映」に分ける。右クリックの読み上げ切替と、追加機能の導入時に明示した音声有効化は、その項目だけを保存して即反映し、他項目の保留は保持する。旧音声ポートの移行は旧値を参照する保存値・実行値だけを更新し、別の値として保存済みの次回ポートを上書きしない。
 
 - **即反映**: システムプロンプト・長期メモリ・テーマ・常に手前・フキダシの見た目・自発雑談・同一キャラの人格上書き・グローバルホットキー・コネクタ固有設定（`cfg.get()` 都度読み）。`pet:ui` で実行中へ反映する。ホットキーは `hotkey::apply()` が張り直し、登録できなかったキーがあれば `settings_save` が `hotkeyWarning` を返してステータスへ出す。
-- **再初期化して反映**: `PICOAGENT_PROVIDER` / `PICOAGENT_MODEL` / `PICOAGENT_MODEL_URL` / `PICOAGENT_LOCAL_MODEL_PRESET` / `PICOAGENT_LOCAL_PORT` / `PICOAGENT_LOCAL_CTX` / `PICOAGENT_LOCAL_NGL` / `PICOAGENT_LOCAL_GPU_DEVICE` / `PICOAGENT_TTS_ENABLED` / `PICOAGENT_TTS_DEVICE` / `PICOAGENT_TTS_PORT` / `PICOAGENT_CHARACTER` が実際に変わったら、`settings_save` は `{ requiresRestart: true }` を返し、実行中の状態には触らない。設定画面が確認を出し、承諾されたら `restart_app` を呼ぶ。
-  - `restart_app` は **プロセス再起動（`app.restart()`）をしない**（`tauri dev` の配信サーバが落ちて接続拒否になるため）。バックエンドを起動シーケンス相当に再初期化し（選択キャラの履歴を読み直し、`restartEngine` / `restartAivis` に応じて変わった部分だけ停止→再起動）、設定ウィンドウを閉じてからメインへ `pet:reload` を送る。
-  - 「あとで」を選んでも設定は保存済みで、次回起動時に反映する。
+- **再初期化して反映**: `PICOAGENT_PROVIDER` / `PICOAGENT_MODEL` / `PICOAGENT_MODEL_URL` / `PICOAGENT_LOCAL_MODEL_PRESET` / `PICOAGENT_LOCAL_PORT` / `PICOAGENT_LOCAL_CTX` / `PICOAGENT_LOCAL_NGL` / `PICOAGENT_LOCAL_GPU_DEVICE` / `PICOAGENT_LOCAL_VISION_ENABLED` / `PICOAGENT_TTS_ENABLED` / `PICOAGENT_TTS_DEVICE` / `PICOAGENT_TTS_PORT` / `PICOAGENT_TTS_ENDPOINT` / `PICOAGENT_CHARACTER` / `PICOAGENT_LIVE2D_SDK_OVERRIDES` が実際に変わったら、`settings_save` は `{ requiresRestart: true }` を返し、実行中の状態には触らない。設定画面が確認を出し、承諾されたら `restart_app` を呼ぶ。
+  - `restart_app` は **プロセス再起動（`app.restart()`）をしない**（`tauri dev` の配信サーバが落ちて接続拒否になるため）。バックエンドを起動シーケンス相当に再初期化し（選択キャラの履歴を読み直し、`restartEngine` / `restartAivis` に応じて変わった部分だけ停止→再起動）、メインへの `pet:reload` 送信に成功してから設定ウィンドウを閉じる。
+  - 「あとで」を選んでも設定は保存済みで、次回起動時に反映する。未反映のエンジン・音声・キャラの再初期化要求と旧実行値はアプリ内に保持し、別項目を保存しても先行反映しない。設定画面を開き直した場合も保留要求を読み込み、「保存済みの設定を反映」から設定を再保存せず再試行できる。再初期化失敗は保存失敗と分けて表示する。後から再初期化するときは蓄積した要求をすべて反映し、再初期化開始と画面の再読込通知に成功するまで要求を消さない。
 - **起動シーケンス**: フロントが起動画面を組み立てたら窓を表示し、キャラと履歴を隠して読み込む。ローカルAIなら `waitForEngineReady` がモデル取得・照合・起動を完了または明示的な失敗まで監視する。**初回セットアップ未完了（`onboardingDone=false`）のときだけ待たずに案内へ進む**（監視は続け、未準備の間は送信を止めて理由を出す）。読み上げ有効なら Aivis・音声モデル・挨拶がある場合はその音声も準備してから通常画面へ移る。
   - 起動中は上端メニューとウィンドウ操作ボタンを表示せず、起動進捗を窓全体へ中央表示する。通常画面へ切り替えた時点で上端メニューを表示する。
   - 待ち時間: 選択プロバイダの疎通確認3秒、キャラ一覧・定義・PNGレイヤー・Live2Dランタイム4秒、Live2Dモデルは候補ごとに8秒。バックエンドの起動監視は、フロントの読込開始を12秒、開始後は進捗通知の2分の無通信を失敗とし、正常な取得は生存通知で何分でも続ける。通知間隔はしきい値の1/4（1〜10秒）をバックエンドが決めて `pet_init` で渡す。
@@ -908,7 +910,7 @@ OSの「動きを減らす」はキャラ読込完了時にも最新値を同期
 
 ### 共通層
 
-- **プロセス実行（`tools/process.rs`）**: `process::command()` が Windows のコンソール窓抑止（`CREATE_NO_WINDOW`）・`kill_on_drop`・stdio の既定を当てた `Command` を返し、`process::output()` / `output_text()` がタイムアウト付きで実行し、打ち切り時は `terminate_process_tree()` でツリーごと回収する。未導入がありうる外部CLIは `output_or_install_hint()` を使い、**起動できなかったときだけ**導入案内を足す。実行ファイルの存在確認は `process::resolve_executable()`（PATH＋macOS では Homebrew の `/opt/homebrew/bin`・`/usr/local/bin`、Windows では PATHEXT）と `has_executable()` にまとめ、**ログインシェル（`sh -lc "command -v ..."`）で確かめない**（ログインシェルのPATHにはあってもGUIアプリの素のPATHには無く、spawn で失敗するため）。**スキルが `Command::new` を直接使うことと、`tokio::time::timeout(..., command.output())` で自前に包むことは禁止**で、`tools::process::guard` が直接起動・自前 `hide_window` / `CREATE_NO_WINDOW`・自前タイムアウトを検出する。
+- **プロセス実行（`tools/process.rs`）**: `process::command()` が Windows のコンソール窓抑止（`CREATE_NO_WINDOW`）・`kill_on_drop`・stdio の既定を当てた `Command` を返し、`process::output()` / `output_text()` がタイムアウト付きで実行し、打ち切り時は `terminate_process_tree()` でツリーごと回収する。標準出力・標準エラーの読取タスクは組で所有し、片方の読取失敗、終了確認の失敗、回収中断でも両方を中断して残さない。未導入がありうる外部CLIは `output_or_install_hint()` を使い、**起動できなかったときだけ**導入案内を足す。実行ファイルの存在確認は `process::resolve_executable()`（PATH＋macOS では Homebrew の `/opt/homebrew/bin`・`/usr/local/bin`、Windows では PATHEXT）と `has_executable()` にまとめ、**ログインシェル（`sh -lc "command -v ..."`）で確かめない**（ログインシェルのPATHにはあってもGUIアプリの素のPATHには無く、spawn で失敗するため）。**スキルが `Command::new` を直接使うことと、`tokio::time::timeout(..., command.output())` で自前に包むことは禁止**で、`tools::process::guard` が直接起動・自前 `hide_window` / `CREATE_NO_WINDOW`・自前タイムアウトを検出する。
 - **共通ファイル走査（`tools/walk.rs`）**: `glob_files`・`grep_search`・最新音声探索は許可済み`SafePath`からだけ走査する。深さ12・最大2万件で打ち切り、権限・リンク・読込失敗等の省略件数と理由例（最大3件）、上限による不完全さを返す。検索は取得できた結果に診断を添え、最新音声の確定には完全な走査を要求する。
 - **許可（`permissions.rs`）**: 許可判定を通ったパスは専用型 **`SafePath`** で表し、生成経路を `resolve()` / `SafePath::join()` / `SafePath::sibling()` に限る（内部 `PathBuf` は非公開。派生パスも再検証する）。ファイル操作は `SafePath` だけを受ける `permissions::fs` を使い、アプリ内部が決めたパスだけ `SafePath::app_owned` を使う。**スキル側での許可判定の再実装は禁止**で、`permissions::guard` が `skills/**/mod.rs` を走査して自前判定（`fn bounded_path(base:` 等）と `resolve` を通さないパス引数を検出する（例外は独自の追加制約を持つ `run_command` / `code_runner` / `trash_file`）。
   - **正本キーは `PICOAGENT_ALLOWED_ROOT`（主ルート、既定はホーム）／`PICOAGENT_ALLOWED_PATHS`（追加許可ルート）／`PICOAGENT_DENIED_PATHS`（追加拒否）**で、設定「安全・許可」で編集する。`C:\Windows` / `C:\Program Files` / `C:\Program Files (x86)` は常に拒否する（`is_system_protected`）。既存の最深祖先を実体化し、シンボリックリンクやジャンクション経由のルート外到達も拒否する。
