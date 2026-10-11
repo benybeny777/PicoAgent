@@ -16,6 +16,39 @@ pub(crate) use platform::ProcessSnapshot;
 
 const STOP_WAIT: Duration = Duration::from_secs(3);
 
+fn with_root_stop_error(error: String, stop: io::Result<()>) -> String {
+    match stop {
+        Ok(()) => error,
+        Err(cleanup) => format!("{error}。起動した根の停止にも失敗しました: {cleanup}"),
+    }
+}
+
+#[cfg(windows)]
+fn stop_unattached_root<C>(
+    child: &mut C,
+    stop: fn(&mut C) -> io::Result<()>,
+    try_wait: fn(&mut C) -> io::Result<Option<ExitStatus>>,
+) -> Result<(), String> {
+    let observe = |child: &mut C| {
+        try_wait(child).map_err(|error| format!("未登録の根の終了を確認できません: {error}"))
+    };
+    if observe(child)?.is_some() {
+        return Ok(());
+    }
+    // 停止要求に失敗した根をwaitすると、停止中のまま永久に戻らなくなる。
+    stop(child).map_err(|error| format!("未登録の根を停止できません: {error}"))?;
+    let deadline = Instant::now() + STOP_WAIT;
+    loop {
+        if observe(child)?.is_some() {
+            return Ok(());
+        }
+        if Instant::now() >= deadline {
+            return Err("未登録の根の終了を3秒以内に確認できません".into());
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
 pub(crate) enum SpawnFailure {
     Spawn(io::Error),
     Ownership(String),
@@ -35,8 +68,7 @@ impl OwnedChild {
         let mut owned = Self { child, scope };
         if let Err(error) = owned.attach() {
             // Job登録前の失敗でも、停止中の根を先に終了させてから所有者を破棄する。
-            let _ = owned.child.kill();
-            return Err(error);
+            return Err(with_root_stop_error(error, owned.child.kill()));
         }
         Ok(owned)
     }
@@ -48,10 +80,6 @@ impl OwnedChild {
             self.scope.attach(self.child.as_raw_handle())?;
         }
         Ok(())
-    }
-
-    pub(crate) fn id(&self) -> u32 {
-        self.child.id()
     }
 
     pub(crate) fn take_stdout(&mut self) -> Option<std::process::ChildStdout> {
@@ -107,20 +135,21 @@ impl OwnedChild {
 impl Drop for OwnedChild {
     fn drop(&mut self) {
         #[cfg(windows)]
-        if !self.scope.root_attached() && self.child.kill().is_ok() {
-            let _ = self.child.wait();
+        if !self.scope.root_attached() {
+            if let Err(error) = stop_unattached_root(
+                &mut self.child,
+                std::process::Child::kill,
+                std::process::Child::try_wait,
+            ) {
+                crate::log_paths::log_detached(&error);
+            }
+            // 空のJobの停止確認を根の停止確認として扱わない。Jobの解放はscopeへ任せる。
+            return;
         }
         if self.scope.is_owned() {
             if let Err(error) = self.terminate("所有プロセスの回収") {
                 // Dropでは通知先がないため、通常経路は必ずterminateのResultを呼出元へ返す。
                 crate::log_paths::log_detached(&error);
-            }
-        }
-        // 登録前の失敗ではWindowsのJobに入っていない停止中の根も回収する。
-        #[cfg(windows)]
-        if self.child.try_wait().is_ok_and(|exit| exit.is_none()) {
-            if self.child.kill().is_ok() {
-                let _ = self.child.wait();
             }
         }
     }
@@ -144,8 +173,10 @@ impl OwnedAsyncChild {
         scope.set_id(id);
         let mut owned = Self { child, scope };
         if let Err(error) = owned.attach() {
-            let _ = owned.child.start_kill();
-            return Err(SpawnFailure::Ownership(error));
+            return Err(SpawnFailure::Ownership(with_root_stop_error(
+                error,
+                owned.child.start_kill(),
+            )));
         }
         Ok(owned)
     }
@@ -214,7 +245,14 @@ impl Drop for OwnedAsyncChild {
     fn drop(&mut self) {
         #[cfg(windows)]
         if !self.scope.root_attached() {
-            let _ = self.child.start_kill();
+            if let Err(error) = stop_unattached_root(
+                &mut self.child,
+                tokio::process::Child::start_kill,
+                tokio::process::Child::try_wait,
+            ) {
+                crate::log_paths::log_detached(&error);
+            }
+            return;
         }
         if self.scope.is_owned() {
             if let Err(error) = self.scope.terminate() {
@@ -229,8 +267,10 @@ impl Drop for OwnedAsyncChild {
                     Ok(true) => {
                         if let Err(error) = self.scope.release() {
                             crate::log_paths::log_detached(&error);
-                        } else {
-                            let _ = self.child.try_wait();
+                        } else if let Err(error) = self.child.try_wait() {
+                            crate::log_paths::log_detached(&format!(
+                                "所有プロセスの終了状態を回収できません: {error}"
+                            ));
                         }
                         break;
                     }
@@ -250,5 +290,47 @@ impl Drop for OwnedAsyncChild {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+impl OwnedChild {
+    pub(crate) fn id(&self) -> u32 {
+        self.child.id()
+    }
+}
+
+#[cfg(all(test, windows))]
+mod tests {
+    #[test]
+    fn 根の停止要求に失敗したら終了待機へ進まない() {
+        let mut observations = 0;
+        let error = super::stop_unattached_root(
+            &mut observations,
+            |_| {
+                Err(std::io::Error::new(
+                    std::io::ErrorKind::PermissionDenied,
+                    "検査用の停止拒否",
+                ))
+            },
+            |observations| {
+                *observations += 1;
+                assert_eq!(*observations, 1, "停止要求に失敗した根を待機しました");
+                Ok(None)
+            },
+        )
+        .unwrap_err();
+        assert!(error.contains("検査用の停止拒否"));
+    }
+
+    #[test]
+    fn 根が終了済みなら停止要求を再送しない() {
+        use std::os::windows::process::ExitStatusExt;
+        super::stop_unattached_root(
+            &mut (),
+            |_| panic!("終了済みの根へ停止要求を再送しました"),
+            |_| Ok(Some(std::process::ExitStatus::from_raw(0))),
+        )
+        .unwrap();
     }
 }

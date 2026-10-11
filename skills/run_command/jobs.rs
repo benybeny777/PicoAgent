@@ -377,19 +377,16 @@ mod tests {
     use super::{list, output, spawn, stop, Buffer, MAX_BUFFER_BYTES};
 
     // 回帰を注入した検査が途中で失敗しても、自分が起動したプロセスを回収する。
-    struct TestJobs(Vec<super::Job>, Vec<u32>);
+    struct TestJobs(Vec<super::Job>);
 
     impl TestJobs {
         fn new(job: super::Job) -> Self {
-            let mut jobs = Self(Vec::new(), Vec::new());
+            let mut jobs = Self(Vec::new());
             jobs.push(job);
             jobs
         }
 
         fn push(&mut self, job: super::Job) {
-            if let Some(child) = job.child.as_ref() {
-                self.1.push(child.id());
-            }
             self.0.push(job);
         }
     }
@@ -400,26 +397,6 @@ mod tests {
                 if let Some(child) = job.child.as_mut() {
                     if let Err(error) = child.terminate("ジョブ検査の後始末") {
                         eprintln!("ジョブ検査の後始末に失敗しました: {error}");
-                    }
-                }
-            }
-            // 所有ハンドルを失う退行を注入した場合にも、起動時に記録した検査PIDだけを止める。
-            for pid in &self.1 {
-                if crate::tools::process::process_alive(*pid).is_ok_and(|alive| alive) {
-                    #[cfg(windows)]
-                    let mut command = crate::tools::process::command_sync("taskkill.exe");
-                    #[cfg(windows)]
-                    command.args(["/PID", &pid.to_string(), "/T", "/F"]);
-                    #[cfg(not(windows))]
-                    let mut command = crate::tools::process::command_sync("kill");
-                    #[cfg(not(windows))]
-                    command.args(["-KILL", &pid.to_string()]);
-                    if let Err(error) = command
-                        .stdout(super::Stdio::null())
-                        .stderr(super::Stdio::null())
-                        .status()
-                    {
-                        eprintln!("検査PID {pid} の回収に失敗しました: {error}");
                     }
                 }
             }
@@ -530,28 +507,16 @@ mod tests {
     fn 個別停止と一括停止はwindowsで孫プロセスまで回収する() {
         use crate::tools::process::{
             process_alive,
-            tests::{read_marker_ids, tree_test_args},
+            tests::{tree_test_command, TestProcessIds},
         };
         for all in [false, true] {
             let directory = tempfile::tempdir().unwrap();
             let marker = directory.path().join("owned-processes.txt");
-            let mut command = crate::tools::process::command_sync("powershell.exe");
-            command.args(tree_test_args(&marker));
+            let command = tree_test_command(&marker, true, false, 0);
             let mut jobs = TestJobs::new(test_job("ツリー停止対象", Some(command)));
-            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-            let ids = loop {
-                if let Ok(ids) = read_marker_ids(&marker) {
-                    break ids;
-                }
-                assert!(
-                    std::time::Instant::now() < deadline,
-                    "検査用の親子PIDがそろいません"
-                );
-                std::thread::sleep(std::time::Duration::from_millis(25));
-            };
-            jobs.1.extend(&ids);
-            assert_eq!(ids[0], jobs.0[0].child.as_ref().unwrap().id());
-            for pid in &ids {
+            let ids = TestProcessIds::capture(&marker);
+            assert_eq!(ids.0[0], jobs.0[0].child.as_ref().unwrap().id());
+            for pid in &ids.0 {
                 assert!(
                     process_alive(*pid).unwrap(),
                     "停止前に検査PID {pid} が終了しました"
@@ -562,9 +527,9 @@ mod tests {
             } else {
                 assert!(super::stop_job(&mut jobs.0[0], super::Child::terminate).unwrap());
             }
-            for pid in ids {
+            for pid in &ids.0 {
                 assert!(
-                    !process_alive(pid).unwrap(),
+                    !process_alive(*pid).unwrap(),
                     "停止後も検査PID {pid} が残りました"
                 );
             }
@@ -574,7 +539,7 @@ mod tests {
     #[test]
     fn 親が先に終了しても一覧更新と履歴圧縮後に孫を停止できる() {
         use crate::tools::process::tests::{
-            test_process_running, tree_test_command, wait_marker_ids, TestProcessIds,
+            test_process_running, tree_test_command, TestProcessIds,
         };
         let independent_dir = tempfile::tempdir().unwrap();
         let independent_marker = independent_dir.path().join("independent.txt");
@@ -583,13 +548,13 @@ mod tests {
             .stdout(super::Stdio::null())
             .stderr(super::Stdio::null());
         let mut independent = super::Child::spawn(&mut independent_command).unwrap();
-        let independent_ids = TestProcessIds(wait_marker_ids(&independent_marker));
+        let independent_ids = TestProcessIds::capture(&independent_marker);
         for mode in 0..4 {
             let directory = tempfile::tempdir().unwrap();
             let marker = directory.path().join("owned.txt");
             let command = tree_test_command(&marker, false, false, 0);
             let mut jobs = TestJobs::new(test_job("親先行終了", Some(command)));
-            let ids = TestProcessIds(wait_marker_ids(&marker));
+            let ids = TestProcessIds::capture(&marker);
             let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
             while jobs.0[0]
                 .child

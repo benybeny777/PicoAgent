@@ -637,7 +637,7 @@ async fn read_capture<R: tokio::io::AsyncRead + Unpin>(
 pub(crate) mod tests {
     #[cfg(windows)]
     use super::process_open_error;
-    use super::{command, command_sync, output, output_or_install_hint, process_alive};
+    use super::{command, command_sync, output, output_or_install_hint, process_alive, OwnedChild};
     use std::process::Stdio;
 
     #[tokio::test]
@@ -984,13 +984,7 @@ pub(crate) mod tests {
         Ok(values)
     }
 
-    /// 同じ検査実行ファイルで親先行終了とpipe継承を作り、シェル固有の起動仕様を避ける。
-    pub(crate) fn tree_test_command(
-        marker: &std::path::Path,
-        wait_for_child: bool,
-        inherit_output: bool,
-        exit_code: i32,
-    ) -> std::process::Command {
+    pub(crate) fn fixture_command(marker: &std::path::Path, role: &str) -> std::process::Command {
         let mut command = command_sync(std::env::current_exe().unwrap());
         command.args([
             "--exact",
@@ -998,8 +992,24 @@ pub(crate) mod tests {
             "--nocapture",
         ]);
         command
-            .env("PICOAGENT_PROCESS_TEST_ROLE", "root")
-            .env("PICOAGENT_PROCESS_TEST_MARKER", marker)
+            .env("PICOAGENT_PROCESS_TEST_ROLE", role)
+            .env("PICOAGENT_PROCESS_TEST_MARKER", marker);
+        command
+    }
+
+    fn fixture_stop_path(marker: &std::path::Path) -> std::path::PathBuf {
+        marker.with_extension("stop")
+    }
+
+    /// 同じ検査実行ファイルで親先行終了とpipe継承を作り、シェル固有の起動仕様を避ける。
+    pub(crate) fn tree_test_command(
+        marker: &std::path::Path,
+        wait_for_child: bool,
+        inherit_output: bool,
+        exit_code: i32,
+    ) -> std::process::Command {
+        let mut command = fixture_command(marker, "root");
+        command
             .env(
                 "PICOAGENT_PROCESS_TEST_WAIT",
                 if wait_for_child { "1" } else { "0" },
@@ -1017,26 +1027,44 @@ pub(crate) mod tests {
         let Ok(role) = std::env::var("PICOAGENT_PROCESS_TEST_ROLE") else {
             return;
         };
+        let marker =
+            std::path::PathBuf::from(std::env::var_os("PICOAGENT_PROCESS_TEST_MARKER").unwrap());
+        if role == "marker" {
+            std::fs::write(marker, "started").unwrap();
+            return;
+        }
         if role == "leaf" {
-            std::thread::sleep(std::time::Duration::from_secs(30));
+            let stop = fixture_stop_path(&marker);
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+            while !stop.exists() && std::time::Instant::now() < deadline {
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
             return;
         }
         assert_eq!(role, "root");
-        let marker = std::env::var_os("PICOAGENT_PROCESS_TEST_MARKER").unwrap();
-        let mut command = command_sync(std::env::current_exe().unwrap());
-        command
-            .args([
-                "--exact",
-                "tools::process::tests::所有範囲の検査用プロセス",
-                "--nocapture",
-            ])
-            .env("PICOAGENT_PROCESS_TEST_ROLE", "leaf")
-            .stdin(Stdio::null());
+        let mut command = fixture_command(&marker, "leaf");
+        command.stdin(Stdio::null());
         if std::env::var("PICOAGENT_PROCESS_TEST_PIPE").unwrap() == "0" {
+            // 子の標準出力をnullへ変えても、Windowsでは根のpipeハンドルが別途
+            // 継承され得る。専用fixture内だけで継承フラグを外してEOF条件を作る。
+            #[cfg(windows)]
+            {
+                use std::os::windows::io::AsRawHandle;
+                use windows_sys::Win32::Foundation::{SetHandleInformation, HANDLE_FLAG_INHERIT};
+                for handle in [
+                    std::io::stdout().as_raw_handle(),
+                    std::io::stderr().as_raw_handle(),
+                ] {
+                    assert_ne!(
+                        unsafe { SetHandleInformation(handle, HANDLE_FLAG_INHERIT, 0) },
+                        0
+                    );
+                }
+            }
             command.stdout(Stdio::null()).stderr(Stdio::null());
         }
         let mut child = command.spawn().unwrap();
-        std::fs::write(marker, format!("{},{}", std::process::id(), child.id())).unwrap();
+        std::fs::write(&marker, format!("{},{}", std::process::id(), child.id())).unwrap();
         if std::env::var("PICOAGENT_PROCESS_TEST_WAIT").unwrap() == "1" {
             child.wait().unwrap();
         }
@@ -1062,8 +1090,18 @@ pub(crate) mod tests {
         }
     }
 
-    /// 失敗時にも、自分のfixtureが記録した有限寿命のプロセスだけを回収する。
-    pub(crate) struct TestProcessIds(pub(crate) Vec<u32>);
+    /// 起動時に渡した固有の終了要求ファイルだけでfixtureを回収する。
+    /// PIDは観測用であり、終了済みPIDが再利用されても停止操作には使わない。
+    pub(crate) struct TestProcessIds(pub(crate) Vec<u32>, std::path::PathBuf);
+
+    impl TestProcessIds {
+        pub(crate) fn capture(marker: &std::path::Path) -> Self {
+            // markerの待機が失敗しても、Dropで同じfixtureへ終了を要求する。
+            let mut ids = Self(Vec::new(), marker.to_owned());
+            ids.0 = wait_marker_ids(marker);
+            ids
+        }
+    }
 
     pub(crate) fn test_process_running(pid: u32) -> bool {
         #[cfg(target_os = "linux")]
@@ -1096,36 +1134,31 @@ pub(crate) mod tests {
             read == size && info.pbi_status != libc::SZOMB
         }
         #[cfg(windows)]
-        process_alive(pid).unwrap()
+        process_alive(pid).unwrap_or(true)
     }
 
     impl Drop for TestProcessIds {
         fn drop(&mut self) {
-            for pid in &self.0 {
-                if !process_alive(*pid).unwrap_or(false) {
-                    continue;
-                }
-                #[cfg(windows)]
-                {
-                    use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
-                    use windows_sys::Win32::System::Threading::{
-                        OpenProcess, TerminateProcess, WaitForSingleObject, PROCESS_SYNCHRONIZE,
-                        PROCESS_TERMINATE,
-                    };
-                    let raw =
-                        unsafe { OpenProcess(PROCESS_TERMINATE | PROCESS_SYNCHRONIZE, 0, *pid) };
-                    if !raw.is_null() {
-                        let handle = unsafe { OwnedHandle::from_raw_handle(raw) };
-                        unsafe {
-                            TerminateProcess(handle.as_raw_handle(), 1);
-                            WaitForSingleObject(handle.as_raw_handle(), 3_000);
-                        }
+            if let Err(error) = std::fs::write(fixture_stop_path(&self.1), []) {
+                eprintln!("検査プロセスへ終了を要求できません: {error}");
+                return;
+            }
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+            loop {
+                if self.0.is_empty() {
+                    if let Ok(ids) = read_marker_ids(&self.1) {
+                        self.0 = ids;
                     }
                 }
-                #[cfg(unix)]
-                unsafe {
-                    libc::kill(*pid as libc::pid_t, libc::SIGKILL);
+                if !self.0.is_empty() && self.0.iter().all(|pid| !test_process_running(*pid)) {
+                    return;
                 }
+                if std::time::Instant::now() >= deadline {
+                    // 観測失敗やPID再利用の疑いがあっても、番号指定の停止へ切り替えない。
+                    eprintln!("検査プロセスの終了を期限内に確認できません: {:?}", self.1);
+                    return;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(10));
             }
         }
     }
@@ -1140,7 +1173,7 @@ pub(crate) mod tests {
             let mut independent_cmd = tree_test_command(&independent_marker, true, false, 0);
             independent_cmd.stdout(Stdio::null()).stderr(Stdio::null());
             let mut independent = OwnedChild::spawn(&mut independent_cmd).unwrap();
-            let independent_ids = TestProcessIds(wait_marker_ids(&independent_marker));
+            let independent_ids = TestProcessIds::capture(&independent_marker);
             for (inherit_pipe, cancel, exit_code) in [
                 (false, false, 0),
                 (false, false, 7),
@@ -1157,7 +1190,7 @@ pub(crate) mod tests {
                 ));
                 command.stdout(Stdio::piped()).stderr(Stdio::piped());
                 let running = tokio::spawn(output(command, 10, "親先行終了検査"));
-                let ids = TestProcessIds(wait_marker_ids(&marker));
+                let ids = TestProcessIds::capture(&marker);
                 if cancel {
                     // 根の終了後に出力回収中のfutureを破棄する。
                     for _ in 0..200 {
@@ -1166,6 +1199,10 @@ pub(crate) mod tests {
                         }
                         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
                     }
+                    assert!(
+                        !test_process_running(ids.0[0]),
+                        "親退出後の取消検査で根が終了していません"
+                    );
                     running.abort();
                     let _ = running.await;
                 } else {
@@ -1203,98 +1240,34 @@ pub(crate) mod tests {
         });
     }
 
-    /// 同期・非同期の停止検査で、同じ有限寿命の親子と所有PID記録を使う。
-    #[cfg(windows)]
-    pub(crate) fn tree_test_args(marker: &std::path::Path) -> [String; 4] {
-        let escaped = marker.to_string_lossy().replace('\'', "''");
-        let script = format!(
-            "$child = Start-Process -FilePath 'ping.exe' -ArgumentList '-n','31','127.0.0.1' -PassThru -WindowStyle Hidden; \"$PID,$($child.Id)\" | Set-Content -Encoding ascii -LiteralPath '{escaped}'; Wait-Process -Id $child.Id"
-        );
-        [
-            "-NoProfile".into(),
-            "-NonInteractive".into(),
-            "-Command".into(),
-            script,
-        ]
-    }
-
     #[cfg(windows)]
     #[test]
     fn 呼び出しfutureを破棄しても孫プロセスまで回収する() {
         let runtime = tokio::runtime::Runtime::new().unwrap();
         runtime.block_on(async {
-            let marker = std::env::temp_dir().join(format!(
-                "picoagent-process-cancel-{}-{}.txt",
-                std::process::id(),
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap()
-                    .as_nanos()
-            ));
-            let escaped = marker.to_string_lossy().replace('\'', "''");
-            let mut cmd = command("powershell.exe");
-            cmd.args(tree_test_args(&marker));
-            let running = tokio::spawn(output(cmd, 30, "破棄検査"));
-
-            // 存在を待つだけでは足りない。書き手（PowerShell の Set-Content）は作った直後も
-            // ハンドルを持っていて、その一瞬は共有違反で読めず、読めても内容が途中のことがある。
-            // 「期待する形へ読み切れる」までを待機条件にする。
-            let mut last_error = "まだ作られていません".to_string();
-            let mut ids = Vec::new();
-            let marker_deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-            while std::time::Instant::now() < marker_deadline {
-                match read_marker_ids(&marker) {
-                    Ok(values) => {
-                        ids = values;
-                        break;
-                    }
-                    Err(reason) => last_error = reason,
-                }
-                tokio::time::sleep(std::time::Duration::from_millis(25)).await;
-            }
-            // 起動確認に失敗した経路でも、assertする前に呼び出しを破棄して回収する。
+            let directory = tempfile::tempdir().unwrap();
+            let marker = directory.path().join("owned.txt");
+            let mut command =
+                tokio::process::Command::from(tree_test_command(&marker, true, true, 0));
+            command.stdout(Stdio::piped()).stderr(Stdio::piped());
+            let running = tokio::spawn(output(command, 30, "破棄検査"));
+            let ids = TestProcessIds::capture(&marker);
             running.abort();
             let _ = running.await;
-            if ids.is_empty() {
-                // PIDを書き込む前に停止した場合も、自分の固有マーカーを起動引数に持つ
-                // PowerShellだけを探す。名前だけで他のPowerShellを停止しない。
-                let cleanup_script = format!(
-                    "$targets = Get-CimInstance Win32_Process -Filter \"Name='powershell.exe'\" | Where-Object {{ $_.ProcessId -ne $PID -and $_.CommandLine -and $_.CommandLine.Contains('{escaped}') }}; foreach ($target in $targets) {{ & taskkill.exe /PID $target.ProcessId /T /F | Out-Null }}"
-                );
-                let mut cleanup = command("powershell.exe");
-                cleanup.args(["-NoProfile", "-NonInteractive", "-Command", &cleanup_script]);
-                let cleanup_result = output(cleanup, 10, "検査プロセスの回収").await;
-                let _ = std::fs::remove_file(&marker);
-                assert!(
-                    cleanup_result.as_ref().is_ok_and(|result| result.status.success()),
-                    "検査プロセスの回収に失敗しました: {cleanup_result:?}"
-                );
-                panic!("親子PIDを書いた検査ファイルを10秒以内に読み切れませんでした: {last_error}");
+            let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(3);
+            while ids.0.iter().any(|pid| test_process_running(*pid))
+                && tokio::time::Instant::now() < deadline
+            {
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
             }
-            let mut alive = ids.clone();
-            let mut query_errors = Vec::new();
-            for _ in 0..120 {
-                alive.retain(|pid| match process_alive(*pid) {
-                    Ok(exists) => exists,
-                    Err(error) => { query_errors.push(error.to_string()); true }
-                });
-                if alive.is_empty() {
-                    break;
-                }
-                tokio::time::sleep(std::time::Duration::from_millis(25)).await;
-            }
-            if !alive.is_empty() {
-                // テスト失敗でも、自分が起動してPIDを記録したツリーだけを回収する。
-                let _ = std::process::Command::new("taskkill.exe")
-                    .args(["/PID", &ids[0].to_string(), "/T", "/F"])
-                    .output();
-            }
-            let _ = std::fs::remove_file(&marker);
-            assert!(alive.is_empty(), "中断後も残った検査プロセス: {alive:?}、確認失敗: {query_errors:?}");
+            assert!(
+                ids.0.iter().all(|pid| !test_process_running(*pid)),
+                "中断後も検査プロセスが残っています: {:?}",
+                ids.0
+            );
         });
     }
 }
-
 /// 設計ガード: スキルが外部プロセスの起動作法を自前で持ち込んでいないかを検査する。
 ///
 /// 以前は `#[cfg(windows)] fn hide_window` を各スキルへコピーする運用で、7ファイルに
@@ -1396,7 +1369,7 @@ mod guard {
     /// `tokio::time::timeout(..., command.output())` も同じ理由で検出する。上限は付くが、
     /// 打ち切りで `output()` のfutureを捨てても `kill_on_drop` が届くのは**直下の子だけ**で、
     /// 起動直後に本体を立て直す実行ファイル（LibreOffice の `soffice` → `soffice.bin` など）は
-    /// 残り続ける。共通層は `terminate_process_tree()` でツリーごと回収する。
+    /// 残り続ける。共通層は `OwnedAsyncChild` が所有する範囲を回収する。
     /// 実際に `ms_office` / `image_tools` / `pdf_tools` の4箇所がこの形で残っていた。
     #[test]
     fn 一度きりの実行は共通層を通す() {

@@ -203,24 +203,48 @@ mod tests {
 
     #[test]
     fn 登録前には実行せず登録失敗と再開失敗でも停止中の根を回収する() {
-        for fail_resume in [false, true] {
+        use windows_sys::Win32::System::Threading::SuspendThread;
+
+        for mode in 0..3 {
             let directory = tempfile::tempdir().unwrap();
             let marker = directory.path().join("started.txt");
-            let mut command = crate::tools::process::command_sync("cmd.exe");
-            command.args([
-                "/d",
-                "/s",
-                "/c",
-                &format!("echo started>\"{}\"", marker.display()),
-            ]);
+            let mut command = crate::tools::process::tests::fixture_command(&marker, "marker");
+            command
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null());
             let mut scope = ProcessScope::prepare(&mut command).unwrap();
             let child = command.spawn().unwrap();
             scope.set_id(child.id());
             let mut owned = super::super::OwnedChild { child, scope };
             let pid = owned.id();
-            std::thread::sleep(std::time::Duration::from_millis(50));
+            // 実行が遅かっただけで通らないよう、起動スレッドの停止回数も確認する。
+            let thread = suspended_thread(pid).unwrap();
+            let previous = unsafe { SuspendThread(thread.as_raw_handle()) };
+            assert_ne!(previous, u32::MAX);
+            assert_eq!(
+                unsafe { ResumeThread(thread.as_raw_handle()) },
+                previous + 1
+            );
+            assert_eq!(previous, 1, "所有登録前の根が停止状態ではありません");
             assert!(!marker.exists(), "所有登録前に子のコードが実行されました");
-            let result = if fail_resume {
+            if mode == 0 {
+                owned.scope.attach(owned.child.as_raw_handle()).unwrap();
+                let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+                loop {
+                    if let Some(status) = owned.child.try_wait().unwrap() {
+                        assert!(status.success());
+                        break;
+                    }
+                    assert!(
+                        std::time::Instant::now() < deadline,
+                        "登録後のfixtureが終了しません"
+                    );
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+                assert_eq!(std::fs::read_to_string(&marker).unwrap(), "started");
+                continue;
+            }
+            let result = if mode == 2 {
                 owned
                     .scope
                     .attach_with_resume(owned.child.as_raw_handle(), |_| {
