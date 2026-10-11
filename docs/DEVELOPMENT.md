@@ -405,7 +405,7 @@ NSIS アンインストーラは、インストール先またはPicoAgent管理
 | `scripts/manage-character-sources.py` | 制作正本 PNG を内容ハッシュの blob へ格納・展開する（同じ絵を何度も持たないための共有化） |
 | `scripts/finish-2d-character-assets.ps1` | PNG 系キャラの高精細化工程（Photoshop 連携）を通しで実行する Windows 専用スクリプト |
 | `scripts/CharacterAssetImageProcessor.cs` | 上の工程が呼ぶ画像処理（アルファ再適用・境界検査）の C# 実装 |
-| `.claude/hooks/session-start.sh` | **Claude Code on the web のセッション開始フック**（`.claude/settings.json` の `hooks.SessionStart` で登録）。Linux コンテナで `cargo` が通る状態を作る（システムライブラリの apt 導入 → `sync-characters` → `build-ui` で `ui-dist/` 生成 → 依存取得とテストバイナリの事前ビルド）。`sync-characters` は git-lfs 未導入で必ず失敗するため、理由を出して続行し `ui-dist/` の生成を止めない。冪等・非対話で、`CLAUDE_CODE_REMOTE!=true` のローカル環境では即 exit する |
+| `tools/session-start.sh` | Linuxリモートの共通セッション準備。`.claude/hooks/session-start.sh`／`.codex/hooks/session-start.sh` はそれぞれの登録用入口。apt導入 → `sync-characters` → `setup pixi` → `build-ui` → 依存取得 → テスト事前ビルドの順。固定SHAのPIXIが導入済みなら通信せず、取得が必要なら`cdn.jsdelivr.net`の許可が必要。素材同期の失敗は現行仕様どおり理由を出して続行するが、他工程の失敗は非0で終了し準備完了にしない。`SKIP_PREBUILD=1`で事前ビルドだけ明示省略。`CLAUDE_CODE_REMOTE!=true`では何もしない |
 | `.agents/skills/<名前>/SKILL.md` | Codex・Claude Codeなど複数エージェントで共有する作業スキルの正本。Claude Codeの自動認識入口は`.claude/skills/`に置くが、実手順はここだけを更新する |
 | `docs/TASKS.md` | **未完了・条件待ちだけを置く一覧**。完了結果はPRへ残し、一覧から削除する |
 | `tools/screenshots/shoot.mjs` | README 掲載画像（`docs/images/`）の撮影。実物の `ui/` を配信して `window.__TAURI__` だけモックし、ヘッドレス Chromium で描画する。合成ではなく実際の描画結果。使い方は `tools/screenshots/README.md` |

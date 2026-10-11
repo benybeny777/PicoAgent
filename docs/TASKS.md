@@ -299,3 +299,5 @@ Aivisの学習・モデル導入と、元PMXの剛体・制約を使う物理対
 | MPSの必要メモリ実測 | `GENERATION_MODELS`の必要ユニファイドメモリは「最大の重み＋8GB」の暫定値。実機で生成中の最大使用量を測り、暫定値を実測へ置き換える |
 | MPSで検証済みの起動引数 | ComfyUIの省メモリ系オプションはMPSで未検証のため使っていない。実機で効果と安全性を確認できたものだけを、検証結果とともに追加する |
 | Intel GPUの生成対応 | 将来候補。XPU版PyTorch、IPEX、Intel向けモデルの公式安定版と対応GPUが揃ってから、別の目的別PRで検討する。今回は判定だけ行い、取得も表示上の対応もしない |
+
+- Codexセッションhookの固定本体パス: 登録commandの標準実行shell・cwdとWindowsローカル／Linuxリモートの発火を確認してから、workspace内の登録を修正する。bare bashがWindowsAppsのWSL launcherへ向く可能性があるため、実行環境の根拠なしに起動方式を変えない。利用者global設定は対象外。
