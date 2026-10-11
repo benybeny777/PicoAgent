@@ -15,7 +15,8 @@ use image::{ExtendedColorType, ImageReader};
 use sha2::{Digest, Sha256};
 
 use crate::util::{
-    list_files, log, repo_root, sync_dir, sync_dir_with_equivalence, warn, write_atomic,
+    file_sha256, list_files, log, repo_root, sync_dir, sync_dir_with_equivalence, warn,
+    write_atomic,
 };
 
 const DELIVERY_IMAGE_POLICY: &str = "lanczos3-webp-lossless-v1";
@@ -419,20 +420,6 @@ fn image_dimensions(path: &Path) -> Result<(u32, u32)> {
     Ok(ImageReader::open(path)?
         .with_guessed_format()?
         .into_dimensions()?)
-}
-
-fn file_sha256(path: &Path) -> Result<String> {
-    let mut file = fs::File::open(path)?;
-    let mut hasher = Sha256::new();
-    let mut buffer = [0_u8; 64 * 1024];
-    loop {
-        let read = file.read(&mut buffer)?;
-        if read == 0 {
-            break;
-        }
-        hasher.update(&buffer[..read]);
-    }
-    Ok(hex::encode(hasher.finalize()))
 }
 
 fn delivery_image_matches(path: &Path, width: u32, height: u32) -> Result<bool> {

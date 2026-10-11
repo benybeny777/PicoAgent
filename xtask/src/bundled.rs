@@ -4,7 +4,6 @@
 // 実体は巨大なのでリポジトリには含めず、各環境で取得する。
 
 use std::fs;
-use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, bail, Context, Result};
@@ -54,8 +53,8 @@ pub fn fetch_local_vision() -> Result<()> {
 }
 
 use crate::util::{
-    cleanup_dir, cleanup_file, copy_dir, download_to, env_or, exe_name, extract, flag, get_json,
-    list_files, log, make_executable, mb, repo_root, warn,
+    cleanup_dir, cleanup_file, copy_dir, download_to, env_or, exe_name, extract, file_sha256, flag,
+    get_json, list_files, log, make_executable, mb, repo_root, warn,
 };
 
 // ── 共通 ────────────────────────────────────────────────────────────────
@@ -219,17 +218,7 @@ fn verify_release_asset(path: &Path, asset: &ReleaseAsset) -> Result<()> {
         asset.name,
         asset.size
     );
-    let mut file = fs::File::open(path)?;
-    let mut digest = Sha256::new();
-    let mut buffer = vec![0_u8; 1024 * 1024];
-    loop {
-        let count = file.read(&mut buffer)?;
-        if count == 0 {
-            break;
-        }
-        digest.update(&buffer[..count]);
-    }
-    let actual_sha256 = hex::encode(digest.finalize());
+    let actual_sha256 = file_sha256(path)?;
     anyhow::ensure!(
         actual_sha256 == asset.sha256,
         "{} のSHA-256が一致しません",
@@ -1052,6 +1041,41 @@ fn referenced_files(model3: &Value) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn 同梱資産はサイズと共通ハッシュ双方を検証し欠損理由を保つ() {
+        let base = test_dir("asset-hash");
+        let path = base.join("asset.bin");
+        fs::write(&path, b"abc").unwrap();
+        let mut asset = ReleaseAsset {
+            name: "asset.bin".into(),
+            url: String::new(),
+            size: 3,
+            sha256: "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad".into(),
+        };
+        verify_release_asset(&path, &asset).unwrap();
+        asset.size = 4;
+        assert!(verify_release_asset(&path, &asset)
+            .unwrap_err()
+            .to_string()
+            .contains("サイズが一致しません: 3/4"));
+        asset.size = 3;
+        asset.sha256 = "誤ったハッシュ".into();
+        assert!(verify_release_asset(&path, &asset)
+            .unwrap_err()
+            .to_string()
+            .contains("asset.bin のSHA-256が一致しません"));
+        fs::remove_file(&path).unwrap();
+        assert_eq!(
+            verify_release_asset(&path, &asset)
+                .unwrap_err()
+                .downcast_ref::<std::io::Error>()
+                .unwrap()
+                .kind(),
+            std::io::ErrorKind::NotFound
+        );
+        fs::remove_dir_all(base).unwrap();
+    }
 
     fn test_dir(label: &str) -> PathBuf {
         let base = std::env::temp_dir().join(format!(

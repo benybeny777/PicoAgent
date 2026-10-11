@@ -34,7 +34,7 @@ export function createCharacterSource(context) {
     if (event.button !== 0 || event.defaultPrevented) return;
     if (event.target instanceof Element && event.target.closest("button")) return;
     context.markActivity?.();
-    bridge.startWindowDrag().catch(error => {
+    context.host.withDragging(() => bridge.startWindowDrag()).catch(error => {
       logApp("warn", "キャラクターからウィンドウを移動できませんでした", errorDetail(error));
       context.toast?.("画面を移動できませんでした。上部のバーからも移動できます", "error");
     });

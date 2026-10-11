@@ -1,5 +1,7 @@
 "use strict";
 
+import { frameBudget } from "./character/frame-budget.js";
+
 const query = new URLSearchParams(location.search);
 const characterId = query.get("characterId") || "";
 const status = document.getElementById("status");
@@ -10,6 +12,12 @@ let motionGeneration = 0;
 let blinkTimer = 0;
 let talkingTimer = 0;
 let independentEyes = false;
+let previewMotion = "idle";
+
+function syncPreviewBudget() {
+  controller?.setActive(!document.hidden);
+  controller?.setFrameBudget(frameBudget({ active: !document.hidden, motion: previewMotion }));
+}
 
 function stopTalkingPreview() {
   window.clearInterval(talkingTimer);
@@ -19,6 +27,8 @@ function stopTalkingPreview() {
 function setMotionPreview(name) {
   stopTalkingPreview();
   controller?.setMotion(name);
+  previewMotion = name;
+  syncPreviewBudget();
   if (name !== "talking") {
     controller?.setMouth(0, 0);
     return;
@@ -106,6 +116,7 @@ async function loadPreview() {
     height: 760,
   });
   controller.setActive(true);
+  syncPreviewBudget();
   controller.setArmClose(0);
   controller.setGaze(0, 0);
   document.querySelectorAll("[data-wink]").forEach(button => { button.disabled = !independentEyes; });
@@ -156,6 +167,7 @@ window.addEventListener("beforeunload", () => {
   stopTalkingPreview();
   controller?.destroy();
 });
+document.addEventListener("visibilitychange", syncPreviewBudget);
 
 loadPreview().catch(error => {
   status.textContent = `表示できませんでした: ${error?.message || error}`;

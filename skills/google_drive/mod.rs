@@ -69,34 +69,27 @@ impl Tool for GoogleDriveTool {
                 "Google Drive API を使える OAuth access token が必要です。",
             );
         }
-        let client = match reqwest::Client::builder()
-            .timeout(crate::tool_try!(
-                cfg.duration_secs(&crate::config::ints::GOOGLE_DRIVE_TIMEOUT_SECS)
-            ))
-            .user_agent("PicoAgent/1.0 (Google Drive tool)")
-            .build()
-        {
-            Ok(client) => client,
-            Err(error) => {
-                return format!("エラー: Google Drive API の準備に失敗しました: {}", error)
-            }
-        };
+        let request_timeout =
+            crate::tool_try!(cfg.duration_secs(&crate::config::ints::GOOGLE_DRIVE_TIMEOUT_SECS));
         match args.get("action").and_then(Value::as_str).unwrap_or("") {
             "search" => {
                 let query = args
                     .get("query")
                     .and_then(Value::as_str)
                     .unwrap_or("trashed = false");
-                let response = match client
-                    .get(format!("{}/files", DRIVE_BASE))
-                    .bearer_auth(token)
-                    .query(&[
-                        ("q", query),
-                        ("pageSize", "10"),
-                        ("fields", "files(id,name,mimeType,webViewLink,modifiedTime)"),
-                    ])
-                    .send()
-                    .await
+                let response = match crate::tool_try!(crate::tools::http::service(
+                    reqwest::Method::GET,
+                    format!("{}/files", DRIVE_BASE),
+                    request_timeout
+                ))
+                .bearer_auth(token)
+                .query(&[
+                    ("q", query),
+                    ("pageSize", "10"),
+                    ("fields", "files(id,name,mimeType,webViewLink,modifiedTime)"),
+                ])
+                .send()
+                .await
                 {
                     Ok(response) => response,
                     Err(error) => {
@@ -139,12 +132,15 @@ impl Tool for GoogleDriveTool {
                 else {
                     return "エラー: file_id が指定されていません。".to_string();
                 };
-                let response = match client
-                    .get(format!("{}/files/{}", DRIVE_BASE, file_id))
-                    .bearer_auth(token)
-                    .query(&[("fields", "id,name,mimeType,size,webViewLink,modifiedTime")])
-                    .send()
-                    .await
+                let response = match crate::tool_try!(crate::tools::http::service(
+                    reqwest::Method::GET,
+                    format!("{}/files/{}", DRIVE_BASE, file_id),
+                    request_timeout
+                ))
+                .bearer_auth(token)
+                .query(&[("fields", "id,name,mimeType,size,webViewLink,modifiedTime")])
+                .send()
+                .await
                 {
                     Ok(response) => response,
                     Err(error) => {
@@ -196,16 +192,19 @@ impl Tool for GoogleDriveTool {
                     "--{boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n{}\r\n--{boundary}\r\nContent-Type: {mime_type}\r\n\r\n{}\r\n--{boundary}--",
                     metadata, content
                 );
-                let response = match client
-                    .post(format!("{}/files?uploadType=multipart", DRIVE_UPLOAD_BASE))
-                    .bearer_auth(token)
-                    .header(
-                        "Content-Type",
-                        format!("multipart/related; boundary={boundary}"),
-                    )
-                    .body(body)
-                    .send()
-                    .await
+                let response = match crate::tool_try!(crate::tools::http::service(
+                    reqwest::Method::POST,
+                    format!("{}/files?uploadType=multipart", DRIVE_UPLOAD_BASE),
+                    request_timeout
+                ))
+                .bearer_auth(token)
+                .header(
+                    "Content-Type",
+                    format!("multipart/related; boundary={boundary}"),
+                )
+                .body(body)
+                .send()
+                .await
                 {
                     Ok(response) => response,
                     Err(error) => {

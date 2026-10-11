@@ -84,15 +84,24 @@ impl Tool for DiscordTool {
         {
             payload["username"] = json!(username);
         }
-        let client = match reqwest::Client::builder()
-            .timeout(Duration::from_secs(timeout_secs))
-            .user_agent("PicoAgent/1.0 (Discord tool)")
-            .build()
+        let request_timeout = Duration::from_secs(timeout_secs);
+        match crate::tool_try!(crate::tools::http::service(
+            reqwest::Method::POST,
+            webhook,
+            request_timeout
+        ))
+        .header(
+            reqwest::header::USER_AGENT,
+            concat!(
+                "DiscordBot (https://benybeny777.github.io/PicoAgent-Distribution/, ",
+                env!("CARGO_PKG_VERSION"),
+                ")"
+            ),
+        )
+        .json(&payload)
+        .send()
+        .await
         {
-            Ok(client) => client,
-            Err(error) => return format!("エラー: Discord送信の準備に失敗しました: {}", error),
-        };
-        match client.post(webhook).json(&payload).send().await {
             Ok(response) if response.status().is_success() => {
                 "OK: Discord へ送信しました。".to_string()
             }
@@ -108,3 +117,45 @@ impl Tool for DiscordTool {
 }
 
 inventory::submit! { ToolReg { make: || Box::new(DiscordTool) } }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn 最新時間設定の不正値は未送信で停止し正常要求は公式形式の識別と本文を保持する() {
+        use crate::providers::compatible::test_server::Server;
+        let server = Server::json(200, &json!({"ok": true}));
+        let cfg = Config::new();
+        cfg.set("PICOAGENT_DISCORD_WEBHOOK_URL", &server.url);
+        cfg.set("PICOAGENT_DISCORD_TIMEOUT_SECS", "不正な秒数");
+        let failed = DiscordTool
+            .run(&cfg, json!({"content":" 共有取得の本文 "}))
+            .await;
+        assert!(failed.starts_with("エラー:"), "{failed}");
+        cfg.set("PICOAGENT_DISCORD_TIMEOUT_SECS", "30");
+        let reply = DiscordTool
+            .run(
+                &cfg,
+                json!({"content":" 共有取得の本文 ","username":"表示名"}),
+            )
+            .await;
+        assert!(reply.starts_with("OK:"), "{reply}");
+        let requests = server.finish();
+        assert_eq!(requests.len(), 1, "不正設定ではHTTP送信しない");
+        let (headers, body) = requests[0].split_once("\r\n\r\n").unwrap();
+        let expected = format!(
+            "user-agent: DiscordBot (https://benybeny777.github.io/PicoAgent-Distribution/, {})",
+            env!("CARGO_PKG_VERSION")
+        );
+        assert!(
+            headers
+                .to_ascii_lowercase()
+                .contains(&expected.to_ascii_lowercase()),
+            "{headers}"
+        );
+        let body: Value = serde_json::from_str(body).unwrap();
+        assert_eq!(body["content"], "共有取得の本文");
+        assert_eq!(body["username"], "表示名");
+    }
+}

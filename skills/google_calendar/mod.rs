@@ -91,42 +91,32 @@ impl Tool for GoogleCalendarTool {
             .filter(|value| !value.is_empty())
             .map(ToString::to_string)
             .unwrap_or_else(|| cfg.get("PICOAGENT_GOOGLE_CALENDAR_ID", "primary"));
-        let client = match reqwest::Client::builder()
-            .timeout(crate::tool_try!(cfg.duration_secs(
-                &crate::config::ints::GOOGLE_CALENDAR_TIMEOUT_SECS
-            )))
-            .user_agent("PicoAgent/1.0 (Google Calendar tool)")
-            .build()
-        {
-            Ok(client) => client,
-            Err(error) => {
-                return format!(
-                    "エラー: Google Calendar API の準備に失敗しました: {}",
-                    error
-                )
-            }
-        };
+        let request_timeout =
+            crate::tool_try!(cfg.duration_secs(&crate::config::ints::GOOGLE_CALENDAR_TIMEOUT_SECS));
         match action {
             "list" => {
-                let mut request = client
-                    .get(format!(
+                let mut request = crate::tool_try!(crate::tools::http::service(
+                    reqwest::Method::GET,
+                    format!(
                         "{}/calendars/{}/events",
                         CALENDAR_BASE,
                         encode_path(&calendar_id)
-                    ))
-                    .bearer_auth(token)
-                    .query(&[
-                        ("singleEvents", "true".to_string()),
-                        ("orderBy", "startTime".to_string()),
-                        (
-                            "maxResults",
-                            args.get("max_results")
-                                .and_then(Value::as_u64)
-                                .filter(|value| (1..=20).contains(value))
-                                .unwrap_or(10)
-                                .to_string(),
-                        ),
-                    ]);
+                    ),
+                    request_timeout
+                ))
+                .bearer_auth(token)
+                .query(&[
+                    ("singleEvents", "true".to_string()),
+                    ("orderBy", "startTime".to_string()),
+                    (
+                        "maxResults",
+                        args.get("max_results")
+                            .and_then(Value::as_u64)
+                            .filter(|value| (1..=20).contains(value))
+                            .unwrap_or(10)
+                            .to_string(),
+                    ),
+                ]);
                 if let Some(time_min) = args.get("time_min").and_then(Value::as_str) {
                     request = request.query(&[("timeMin", time_min)]);
                 }
@@ -216,16 +206,19 @@ impl Tool for GoogleCalendarTool {
                 if let Some(location) = args.get("location").and_then(Value::as_str) {
                     payload["location"] = json!(location);
                 }
-                let response = match client
-                    .post(format!(
+                let response = match crate::tool_try!(crate::tools::http::service(
+                    reqwest::Method::POST,
+                    format!(
                         "{}/calendars/{}/events",
                         CALENDAR_BASE,
                         encode_path(&calendar_id)
-                    ))
-                    .bearer_auth(token)
-                    .json(&payload)
-                    .send()
-                    .await
+                    ),
+                    request_timeout
+                ))
+                .bearer_auth(token)
+                .json(&payload)
+                .send()
+                .await
                 {
                     Ok(response) => response,
                     Err(error) => {

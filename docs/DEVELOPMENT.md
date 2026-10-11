@@ -84,6 +84,8 @@ Office・Aivis・Whisper・OSS CLIは同梱表で取得対象の組合せに限�
 
 設計ガードのソース走査は `src-tauri/src/guard_scan.rs` に集約する。スキル、バックエンド、内部共通コアを再帰的に列挙し、読み取り・列挙の失敗は対象パス付きで検査失敗にする。同じテストプロセス内では各ソース本文を一度だけ読み、変更できないスナップショットとして共有する。編集後の検査ではテストプロセスを再実行する。
 
+文字列のslug・HTML/XMLエスケープ・sparklineは`text`、検索結果URLは`tools::search_url`、発話の整数と日数は`tools::datetime_words`、SNS入力は`tools::social_post`を正本とする。違いは引数・ポリシー・許可値表で表す。SHA-256は`picoagent_core::hash::sha256_reader`、OS実行権限は`picoagent_core::permissions`を使い、アプリの理由通知とxtaskの厳格な失敗は各側の薄いアダプタで扱う。資料のfull/lightは登録済みの`genspark_suite`で一度だけ入力を整形・保存する。予約移行は`workflow_migration`が原子的に行い、失敗中はschedulerの検出を止め、設定修正後に同じ検出処理で再試行する。
+
 ## 🧩 コネクタで拡張する
 
 ```mermaid
@@ -338,7 +340,7 @@ NSIS アンインストーラは、インストール先またはPicoAgent管理
 
 追加キャラ一覧の取得と正規化は両画面で共通化する。取得失敗を空一覧へ降格せず、元の選択ID・未保存草稿を保持する。関連編集だけを停止し、他設定の保存へキャラの既定値を書き戻さない。理由と再取得操作は復旧まで保持する。Live2DのSDKモデル候補の選択と、描画方式をまたぐ切替を混同しない。
 
-外部HTTP取得の安全経路は `src-tauri/src/tools/http.rs` の `fetch_guarded` に集約する。全ホップの用途別URL方針・公開IP確認、検査済みDNS解決先固定、秘密ヘッダ除去、時間・本文・転送上限を一緒に保つ。DNS固定のため `no_proxy()` で直接接続し、プロキシ必須環境ではこの経路を使えない。`web_fetch` の先頭取得＋打切り表示と、API・RSSの上限超過エラーを区別する。通常の外向きHTTPは共有クライアントを使い、API応答は `service_reply` / `service_body` で短い理由とHTTP状態コードを返す。既知の設定秘密値を切詰め前に伏せ、本文取得失敗を空へ降格しない。
+外部HTTP取得の安全経路は `src-tauri/src/tools/http.rs` の `fetch_guarded` に集約する。全ホップの用途別URL方針・公開IP確認、検査済みDNS解決先固定、秘密ヘッダ除去、時間・本文・転送上限を一緒に保つ。DNS固定のため `no_proxy()` で直接接続し、プロキシ必須環境ではこの経路を使えない。`web_fetch` の先頭取得＋打切り表示と、API・RSSの上限超過エラーを区別する。通常のAPIは `service(method, url, timeout)` と要求ごとの認証・UAを使い、全体期限のみの接続プールを共有する。既存標準profileの接続10秒・無通信120秒と更新確認の5秒・10秒は用途を分けて保持し、全profileは起動時に一回確定する。API応答は `service_reply` / `service_body` で短い理由とHTTP状態コードを返す。既知の設定秘密値を切詰め前に伏せ、本文取得失敗を空へ降格しない。
 
 外部CLIは `tools::resolve_cli_path` で明示指定、未設定時だけ管理下の同梱物を解決する。コマンド名だけの明示指定時に限り共通探索を使う（macOSではPATHの後に既存Homebrew配置 `/opt/homebrew/bin`・`/usr/local/bin` も確認）。指定先や優先する管理配置の欠損は修復エラーにする。Whisperの2スキルは `tools::whisper` で解決し、固定モデル名は取得側と共通の `crates/picoagent-core/src/paths.rs` を正本とする。別名の導入モデルは `PICOAGENT_TRANSCRIBE_MODEL` へ明示し、`.bin` の名前順探索はしない。
 
@@ -485,3 +487,8 @@ scripts/setup-character-learning-runtime.pyは共有Python3.12から専用venv�
 実行画面の数量は正常時の整数と、不正時の`null`・`invalidNumbers`を`readIntegerSetting`で検査する。停止や診断の所有者は音声・会話欄・ambientの各部品であり、既定値への置換はしない。関連するVM検査と`settings-display.mjs`の全角入力・不正保存・復旧検査を変更時に実行する。
 
 本体の取得・展開・複製・ファイル探索・空き容量・配置復元の正本は`src-tauri/src/installer/`です。用途側は上限と保存先を渡し、共通部品の手順を複製しません。プロセスの生存確認は`tools::process`がOSのAPIで行い、外部コマンドへ無期限に待ちません。音声学習のPython導入・状態保存の原子的移動は、既存の配布共通モジュール`voice_training_common.py`へ集め、Windowsの一時的な共有拒否だけ同じ操作を有限回再試行します。中核crateの最小RustはSHA-256共通化に必要な1.85、本体・xtaskの最小Rustは従来どおり1.88です。Whisperの`WHISPER_RELEASE`は正本マニフェストの`binaryRelease`と一致する指定だけを受け付けます。Macは固定ソースからCMakeでビルドし、他OSのバイナリやSDKを代用取得しません。
+
+
+## キャラ描画の負荷確認
+
+フレーム方針と実描画器の0/30/60上限は `node --test tools/tests/character-*-budget-runtime.mjs` で確認する。実アプリの開発者コンソールで `window.PicoCharacterFrameDebug = true` にすると、主画面の実描画回数を約1秒ごとにdebugログへ記録できる。`false`で止まり、恒久設定や常駐タイマーは増やさない。PIXIは描画tick、MMDはscene.render、画像は有効なdrawの境界を数える。GPU/CPUの前後差、髪揺れ・口と音声・復帰の見た目は対象PCで別に確認し、模擬144/240Hzの件数を実機性能へ読み替えない。

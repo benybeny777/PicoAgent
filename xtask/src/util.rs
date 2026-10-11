@@ -449,19 +449,18 @@ fn collect_files(dir: &Path, out: &mut Vec<PathBuf>) {
 
 /// 非 Windows で実行権限を付ける（取得・コピー直後の実行ファイル向け）。
 pub fn make_executable(path: &Path) -> Result<()> {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let mut permissions = fs::metadata(path)
-            .with_context(|| format!("実行権限を読めません: {}", path.display()))?
-            .permissions();
-        permissions.set_mode(permissions.mode() | 0o755);
-        fs::set_permissions(path, permissions)
-            .with_context(|| format!("実行権限を設定できません: {}", path.display()))?;
-    }
-    #[cfg(not(unix))]
-    let _ = path;
+    picoagent_core::permissions::ensure_executable(
+        path,
+        picoagent_core::permissions::ExecutablePolicy::Strict,
+    )
+    .with_context(|| format!("実行権限を設定できません: {}", path.display()))?;
     Ok(())
+}
+
+/// ファイルを開く境界だけを持ち、SHA計算は純粋な共通readerへ渡す。
+pub fn file_sha256(path: &Path) -> Result<String> {
+    let mut file = fs::File::open(path)?;
+    Ok(picoagent_core::hash::sha256_reader(&mut file)?)
 }
 
 /// MB 表記（ログ用）。

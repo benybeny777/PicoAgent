@@ -72,14 +72,7 @@ impl Tool for LinearTool {
             );
         }
         let timeout = crate::tool_try!(cfg.int(&crate::config::ints::LINEAR_TIMEOUT_SECS)) as u64;
-        let client = match reqwest::Client::builder()
-            .timeout(Duration::from_secs(timeout))
-            .user_agent("PicoAgent/1.0 (Linear tool)")
-            .build()
-        {
-            Ok(client) => client,
-            Err(error) => return format!("エラー: Linear API の準備に失敗しました: {}", error),
-        };
+        let request_timeout = Duration::from_secs(timeout);
         let payload = match args.get("action").and_then(Value::as_str).unwrap_or("") {
             "list_issues" => json!({
                 "query": "query { issues(first: 10, orderBy: updatedAt) { nodes { identifier title url state { name } } } }"
@@ -125,12 +118,15 @@ impl Tool for LinearTool {
         };
         crate::tools::http::service_reply(
             cfg,
-            client
-                .post(LINEAR_URL)
-                .bearer_auth(token)
-                .json(&payload)
-                .send()
-                .await,
+            crate::tool_try!(crate::tools::http::service(
+                reqwest::Method::POST,
+                LINEAR_URL,
+                request_timeout
+            ))
+            .bearer_auth(token)
+            .json(&payload)
+            .send()
+            .await,
             "Linear API",
         )
         .await

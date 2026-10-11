@@ -140,28 +140,6 @@ fn existing_backend_candidates(
         .collect()
 }
 
-#[cfg(unix)]
-fn ensure_executable(path: &Path) -> anyhow::Result<()> {
-    use std::os::unix::fs::PermissionsExt;
-    let mut permissions = std::fs::metadata(path)?.permissions();
-    if permissions.mode() & 0o111 != 0 {
-        return Ok(());
-    }
-    permissions.set_mode(permissions.mode() | 0o755);
-    if let Err(error) = std::fs::set_permissions(path, permissions) {
-        // .app 配下など実行時に chmod できない同梱リソースは spawn 側の成否に委ねる。
-        if error.kind() != std::io::ErrorKind::PermissionDenied {
-            return Err(error.into());
-        }
-    }
-    Ok(())
-}
-
-#[cfg(not(unix))]
-fn ensure_executable(_path: &Path) -> anyhow::Result<()> {
-    Ok(())
-}
-
 fn model_url(app: &AppHandle) -> String {
     let state = app.state::<AppState>();
     local::model_url(&state.config)
@@ -198,15 +176,14 @@ async fn running_server_model_ids(app: &AppHandle) -> anyhow::Result<Vec<String>
     let state = app.state::<AppState>();
     let port = local::port(&state.config).map_err(anyhow::Error::msg)?;
     let url = format!("http://127.0.0.1:{port}/v1/models");
-    let data: Value = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(2))
-        .build()?
-        .get(url)
-        .send()
-        .await?
-        .error_for_status()?
-        .json()
-        .await?;
+    let data: Value =
+        crate::tools::http::service(reqwest::Method::GET, url, std::time::Duration::from_secs(2))
+            .map_err(anyhow::Error::msg)?
+            .send()
+            .await?
+            .error_for_status()?
+            .json()
+            .await?;
     Ok(data
         .get("data")
         .and_then(|value| value.as_array())
@@ -620,7 +597,7 @@ fn spawn_server(
     start_generation: u64,
 ) -> anyhow::Result<()> {
     let server = &candidate.server;
-    ensure_executable(server)?;
+    crate::installer::fs::prepare_executable(app, server)?;
     let state = app.state::<AppState>();
     let port = local::port(&state.config)
         .map_err(anyhow::Error::msg)?

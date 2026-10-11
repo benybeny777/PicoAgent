@@ -60,6 +60,7 @@ mod usage;
 mod user_characters;
 mod user_skills;
 mod window_surface;
+mod workflow_migration;
 
 use tauri::{Manager, PhysicalPosition, RunEvent};
 
@@ -278,6 +279,7 @@ pub fn run() {
                     )),
                 ),
             }
+            let scheduler_migration_ready = workflow_migration::prepare(app.handle(), &state.config);
             for invalid in state.config.invalid_int_settings() {
                 if let (Some(key), Some(message)) = (invalid["key"].as_str(), invalid["message"].as_str()) {
                     notice::emit(app.handle(), notice::Notice::background_failure(
@@ -471,7 +473,7 @@ pub fn run() {
             // フロントの準備完了を見張り、時間内に来なければキャラクター付きの案内画面へ切り替える。
             boot_screen::watch(app.handle().clone());
             durable_jobs::start(app.handle().clone());
-            scheduler::start(app.handle().clone());
+            scheduler::start(app.handle().clone(), scheduler_migration_ready);
             // ローカル API サーバ（既定無効。PICOAGENT_API_ENABLED=true で 127.0.0.1 に開く）。
             api_server::start(app.handle().clone());
             // 外部 MCP サーバ（設定 PICOAGENT_MCP_SERVERS があれば起動してツールを動的登録）。

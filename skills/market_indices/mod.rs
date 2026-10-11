@@ -8,35 +8,13 @@ use serde_json::{json, Value};
 use super::{Tool, ToolReg};
 use crate::config::Config;
 use crate::message::Field;
+use crate::tools::datetime_words::parse_days;
 
 const YAHOO_CHART_BASE: &str = "https://query1.finance.yahoo.com/v8/finance/chart";
 
 pub struct MarketIndicesTool;
 
-fn parse_days(text: &str) -> Option<i64> {
-    let chars: Vec<char> = text.chars().collect();
-    for (index, character) in chars.iter().enumerate() {
-        if character.is_ascii_digit() {
-            continue;
-        }
-        let unit_month = *character == 'ヶ' || *character == 'か' || *character == '月';
-        if !unit_month && *character != '日' {
-            continue;
-        }
-        let mut cursor = index;
-        let mut number = String::new();
-        while cursor > 0 && chars[cursor - 1].is_ascii_digit() {
-            number.insert(0, chars[cursor - 1]);
-            cursor -= 1;
-        }
-        if let Ok(number) = number.parse::<i64>() {
-            return Some(if unit_month { number * 30 } else { number }.clamp(2, 365));
-        }
-    }
-    None
-}
-
-fn direct_query(text: &str) -> Option<Value> {
+fn direct_query(text: &str) -> Result<Option<Value>, String> {
     let lower = text.to_lowercase();
     let market_words = [
         "日経平均",
@@ -59,7 +37,7 @@ fn direct_query(text: &str) -> Option<Value> {
         .iter()
         .any(|word| lower.contains(&word.to_lowercase()))
     {
-        return None;
+        return Ok(None);
     }
     let symbol = if lower.contains("topix") || text.contains("トピックス") {
         "topix"
@@ -79,11 +57,11 @@ fn direct_query(text: &str) -> Option<Value> {
     args.insert("symbol".to_string(), json!(symbol));
     if chart {
         args.insert("chart".to_string(), json!(true));
-        if let Some(days) = parse_days(text) {
+        if let Some(days) = parse_days(text)? {
             args.insert("days".to_string(), json!(days));
         }
     }
-    Some(Value::Object(args))
+    Ok(Some(Value::Object(args)))
 }
 
 fn symbol_info(input: &str) -> (&'static str, &'static str) {
@@ -152,7 +130,10 @@ impl Tool for MarketIndicesTool {
     }
 
     fn intent_invocation(&self, text: &str) -> Option<crate::tools::IntentInvocation> {
-        direct_query(text).map(crate::tools::IntentInvocation::direct)
+        match direct_query(text) {
+            Ok(args) => args.map(crate::tools::IntentInvocation::direct),
+            Err(reason) => Some(crate::tools::IntentInvocation::invalid(reason)),
+        }
     }
 
     fn label(&self) -> &'static str {
@@ -204,20 +185,20 @@ impl Tool for MarketIndicesTool {
             "1y".to_string()
         };
         let timeout = crate::tool_try!(cfg.int(&crate::config::ints::MARKET_TIMEOUT_SECS)) as u64;
-        let client = match reqwest::Client::builder()
-            .timeout(Duration::from_secs(timeout))
-            .user_agent("Mozilla/5.0 PicoAgent/1.0 (Market indices tool)")
-            .build()
-        {
-            Ok(client) => client,
-            Err(error) => return format!("エラー: 市場指数APIの準備に失敗しました: {error}"),
-        };
+        let request_timeout = Duration::from_secs(timeout);
         let url = format!("{YAHOO_CHART_BASE}/{}", encoded_symbol(symbol));
-        let response = match client
-            .get(url)
-            .query(&[("range", range.as_str()), ("interval", "1d")])
-            .send()
-            .await
+        let response = match crate::tool_try!(crate::tools::http::service(
+            reqwest::Method::GET,
+            url,
+            request_timeout
+        ))
+        .header(
+            reqwest::header::USER_AGENT,
+            "Mozilla/5.0 PicoAgent/1.0 (Market indices tool)",
+        )
+        .query(&[("range", range.as_str()), ("interval", "1d")])
+        .send()
+        .await
         {
             Ok(response) => response,
             Err(error) => return format!("エラー: 市場指数APIへの接続に失敗しました: {error}"),
@@ -265,7 +246,10 @@ impl Tool for MarketIndicesTool {
                 out.push_str(&format!(
                     "\n直近{}日の推移\n{}\n始値 {:.2} / 終値 {:.2}",
                     days,
-                    crate::text::sparkline(&values),
+                    match crate::text::sparkline(&values) {
+                        Ok(chart) => chart,
+                        Err(reason) => return format!("エラー: {reason}"),
+                    },
                     first,
                     last
                 ));

@@ -3,11 +3,12 @@
 use std::collections::HashSet;
 use std::time::Duration;
 
+use crate::text::html_escape;
+use crate::tools::search_url::direct_url;
 use async_trait::async_trait;
 use chrono::Local;
 use scraper::{Html, Selector};
 use serde_json::{json, Value};
-use url::Url;
 
 use super::{Tool, ToolReg};
 use crate::config::Config;
@@ -44,37 +45,6 @@ struct SavedArtifacts {
 }
 
 pub struct ResearchReportTool;
-
-fn slug(value: &str) -> String {
-    let mut out = String::new();
-    for ch in value.chars().take(48) {
-        if ch.is_ascii_alphanumeric() {
-            out.push(ch.to_ascii_lowercase());
-        } else if (ch.is_whitespace() || "-_.".contains(ch)) && !out.ends_with('-') {
-            out.push('-');
-        }
-    }
-    let trimmed = out.trim_matches('-');
-    if trimmed.is_empty() {
-        "research-report".to_string()
-    } else {
-        trimmed.to_string()
-    }
-}
-
-fn direct_url(href: &str) -> String {
-    let absolute = if href.starts_with("//") {
-        format!("https:{}", href)
-    } else {
-        href.to_string()
-    };
-    if let Ok(parsed) = Url::parse(&absolute) {
-        if let Some((_, destination)) = parsed.query_pairs().find(|(key, _)| key == "uddg") {
-            return destination.into_owned();
-        }
-    }
-    absolute
-}
 
 fn text_from_node<'a>(node: scraper::ElementRef<'a>) -> String {
     node.text()
@@ -169,12 +139,11 @@ fn question_list(topic: &str, args: &Value) -> Vec<String> {
 
 async fn search(
     cfg: &Config,
-    client: &reqwest::Client,
+    request_timeout: std::time::Duration,
     query: &str,
     max_results: usize,
 ) -> Result<Vec<SearchResult>, String> {
-    let response = client
-        .get(SEARCH_URL)
+    let response = crate::tools::http::service(reqwest::Method::GET, SEARCH_URL, request_timeout)?
         .query(&[("q", query)])
         .send()
         .await
@@ -192,15 +161,6 @@ fn csv_cell(value: &str) -> String {
         "\"{}\"",
         value.replace('"', "\"\"").replace(['\r', '\n'], " ")
     )
-}
-
-fn html_escape(value: &str) -> String {
-    value
-        .replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
-        .replace('\'', "&#39;")
 }
 
 fn build_report(
@@ -626,7 +586,12 @@ fn save_report(
     let default_path = format!(
         "reports/{}-{}.md",
         Local::now().format("%Y%m%d-%H%M%S"),
-        slug(topic)
+        crate::text::slug(
+            topic,
+            "research-report",
+            48,
+            crate::text::SlugPolicy::AsciiWordsInput
+        )
     );
     let path = args
         .get("save_path")
@@ -886,19 +851,12 @@ impl Tool for ResearchReportTool {
             .unwrap_or(3);
         let timeout = crate::tool_try!(cfg.int(&crate::config::ints::RESEARCH_TIMEOUT_SECS)) as u64;
         let questions = question_list(topic, &args);
-        let client = match reqwest::Client::builder()
-            .timeout(Duration::from_secs(timeout))
-            .user_agent("PicoAgent/1.0 (Research report tool)")
-            .build()
-        {
-            Ok(client) => client,
-            Err(error) => return format!("エラー: 調査レポートの準備に失敗しました: {}", error),
-        };
+        let request_timeout = Duration::from_secs(timeout);
 
         let mut results = Vec::new();
         let mut failures = Vec::new();
         for question in &questions {
-            match search(cfg, &client, question, max_results).await {
+            match search(cfg, request_timeout, question, max_results).await {
                 Ok(mut items) => results.append(&mut items),
                 Err(error) => failures.push(format!("{question}: {error}")),
             }
@@ -924,14 +882,28 @@ inventory::submit! { ToolReg { make: || Box::new(ResearchReportTool) } }
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        build_dashboard_html, build_sources_csv, build_sources_json, extract_results, slug,
-    };
+    use super::{build_dashboard_html, build_sources_csv, build_sources_json, extract_results};
 
     #[test]
     fn ファイル名向けslugを作る() {
-        assert_eq!(slug("AI Slides / Docs 調査"), "ai-slides-docs");
-        assert_eq!(slug("日本語だけ"), "research-report");
+        assert_eq!(
+            crate::text::slug(
+                "AI Slides / Docs 調査",
+                "research-report",
+                48,
+                crate::text::SlugPolicy::AsciiWordsInput
+            ),
+            "ai-slides-docs"
+        );
+        assert_eq!(
+            crate::text::slug(
+                "日本語だけ",
+                "research-report",
+                48,
+                crate::text::SlugPolicy::AsciiWordsInput
+            ),
+            "research-report"
+        );
     }
 
     #[test]

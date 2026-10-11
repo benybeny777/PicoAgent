@@ -14,11 +14,16 @@ const MAX_CONTENT_CHARS: usize = 2000;
 
 pub struct NotionTool;
 
-fn notion_post(client: &reqwest::Client, token: String, url: String) -> reqwest::RequestBuilder {
-    client
-        .post(url)
-        .bearer_auth(token)
-        .header("Notion-Version", NOTION_VERSION)
+fn notion_post(
+    request_timeout: std::time::Duration,
+    token: String,
+    url: String,
+) -> Result<reqwest::RequestBuilder, String> {
+    Ok(
+        crate::tools::http::service(reqwest::Method::POST, url, request_timeout)?
+            .bearer_auth(token)
+            .header("Notion-Version", NOTION_VERSION),
+    )
 }
 
 #[async_trait]
@@ -77,16 +82,8 @@ impl Tool for NotionTool {
             return super::config_guide("Notion", &["PICOAGENT_NOTION_TOKEN"], "Notion integration token が必要です。対象ページ/DBをintegrationへ共有してください。");
         }
         let action = args.get("action").and_then(Value::as_str).unwrap_or("");
-        let client = match reqwest::Client::builder()
-            .timeout(crate::tool_try!(
-                cfg.duration_secs(&crate::config::ints::NOTION_TIMEOUT_SECS)
-            ))
-            .user_agent("PicoAgent/1.0 (Notion tool)")
-            .build()
-        {
-            Ok(client) => client,
-            Err(error) => return format!("エラー: Notion API の準備に失敗しました: {}", error),
-        };
+        let request_timeout =
+            crate::tool_try!(cfg.duration_secs(&crate::config::ints::NOTION_TIMEOUT_SECS));
         match action {
             "search" => {
                 let query = args
@@ -94,10 +91,14 @@ impl Tool for NotionTool {
                     .and_then(Value::as_str)
                     .unwrap_or("")
                     .trim();
-                let response = match notion_post(&client, token, format!("{}/search", NOTION_BASE))
-                    .json(&json!({ "query": query, "page_size": 10 }))
-                    .send()
-                    .await
+                let response = match crate::tool_try!(notion_post(
+                    request_timeout,
+                    token,
+                    format!("{}/search", NOTION_BASE)
+                ))
+                .json(&json!({ "query": query, "page_size": 10 }))
+                .send()
+                .await
                 {
                     Ok(response) => response,
                     Err(error) => {
@@ -178,10 +179,14 @@ impl Tool for NotionTool {
                         }
                     }]
                 });
-                let response = match notion_post(&client, token, format!("{}/pages", NOTION_BASE))
-                    .json(&payload)
-                    .send()
-                    .await
+                let response = match crate::tool_try!(notion_post(
+                    request_timeout,
+                    token,
+                    format!("{}/pages", NOTION_BASE)
+                ))
+                .json(&payload)
+                .send()
+                .await
                 {
                     Ok(response) => response,
                     Err(error) => {

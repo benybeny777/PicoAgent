@@ -30,21 +30,18 @@ pub async fn topic_brief(cfg: &Config) -> Result<Option<TopicBrief>, String> {
     if mode == "off" || mode == "none" {
         return Ok(None);
     }
-    let client = reqwest::Client::builder()
-        .timeout(timeout)
-        .user_agent("PicoAgent/1.0 (idle chatter topics)")
-        .build()
-        .map_err(|error| format!("話題取得の準備に失敗しました: {error}"))?;
+    let client = crate::tools::http::service_client()?;
 
     if mode != "news" && mode != "trends" {
-        if let Some(topic) = x_topic(cfg, &client).await {
+        if let Some(topic) = x_topic(cfg, client, timeout).await {
             return Ok(Some(topic));
         }
     }
     if mode != "x" && mode != "news" {
         if let Some(topic) = rss_topics(
             cfg,
-            &client,
+            client,
+            timeout,
             "PICOAGENT_CHATTER_TRENDS_RSS_URLS",
             DEFAULT_TRENDS_RSS,
             "急上昇ワード候補",
@@ -57,7 +54,8 @@ pub async fn topic_brief(cfg: &Config) -> Result<Option<TopicBrief>, String> {
     if mode != "x" {
         return Ok(rss_topics(
             cfg,
-            &client,
+            client,
+            timeout,
             "PICOAGENT_CHATTER_NEWS_RSS_URLS",
             DEFAULT_NEWS_RSS,
             "トップニュース候補",
@@ -67,7 +65,11 @@ pub async fn topic_brief(cfg: &Config) -> Result<Option<TopicBrief>, String> {
     Ok(None)
 }
 
-async fn x_topic(cfg: &Config, client: &reqwest::Client) -> Option<TopicBrief> {
+async fn x_topic(
+    cfg: &Config,
+    client: &reqwest::Client,
+    timeout: std::time::Duration,
+) -> Option<TopicBrief> {
     let token = cfg.get("PICOAGENT_X_BEARER_TOKEN", "");
     if token.is_empty() {
         return None;
@@ -78,6 +80,7 @@ async fn x_topic(cfg: &Config, client: &reqwest::Client) -> Option<TopicBrief> {
     );
     let response = client
         .get(X_SEARCH_URL)
+        .timeout(timeout)
         .bearer_auth(token)
         .query(&[
             ("query", query.as_str()),
@@ -122,13 +125,14 @@ async fn x_topic(cfg: &Config, client: &reqwest::Client) -> Option<TopicBrief> {
 async fn rss_topics(
     cfg: &Config,
     client: &reqwest::Client,
+    timeout: std::time::Duration,
     key: &str,
     default_urls: &str,
     heading: &str,
 ) -> Option<TopicBrief> {
     let urls = cfg.get(key, default_urls);
     for url in urls.split(',').map(str::trim).filter(|url| !url.is_empty()) {
-        let response = match client.get(url).send().await {
+        let response = match client.get(url).timeout(timeout).send().await {
             Ok(response) if response.status().is_success() => response,
             _ => continue,
         };

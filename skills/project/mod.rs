@@ -119,23 +119,6 @@ impl Project {
     }
 }
 
-fn slug(value: &str) -> String {
-    value
-        .chars()
-        .map(|c| {
-            if c.is_alphanumeric() {
-                c.to_ascii_lowercase()
-            } else {
-                '-'
-            }
-        })
-        .collect::<String>()
-        .split('-')
-        .filter(|part| !part.is_empty())
-        .collect::<Vec<_>>()
-        .join("-")
-}
-
 /// 選択中のプロジェクトID。未設定なら `default`。
 pub fn active_project(cfg: &Config) -> String {
     let active = cfg.get(ACTIVE_KEY, "");
@@ -187,7 +170,7 @@ fn target_id(cfg: &Config, args: &Value) -> String {
         .and_then(Value::as_str)
         .map(str::trim)
         .filter(|project| !project.is_empty())
-        .map(slug)
+        .map(|value| crate::text::slug(value, "", usize::MAX, crate::text::SlugPolicy::Unicode))
         .filter(|project| !project.is_empty())
         .unwrap_or_else(|| active_project(cfg))
 }
@@ -1017,8 +1000,7 @@ inventory::submit! { ToolReg { make: || Box::new(ProjectTool) } }
 #[cfg(test)]
 mod tests {
     use super::{
-        due_arg, is_overdue, next_note_id, next_task_id, slug, sort_tasks, tags_arg, today,
-        Project, Task,
+        due_arg, is_overdue, next_note_id, next_task_id, sort_tasks, tags_arg, today, Project, Task,
     };
     use crate::config::Config;
     use serde_json::json;
@@ -1050,10 +1032,32 @@ mod tests {
     /// 記号・空白はハイフンへ畳み、日本語はそのまま使える（英数字扱いのため）。
     #[test]
     fn 識別子は記号をハイフンに畳む() {
-        assert_eq!(slug("Video Project"), "video-project");
-        assert_eq!(slug("a__b"), "a-b");
-        assert_eq!(slug("動画 制作"), "動画-制作");
-        assert_eq!(slug("///"), "");
+        assert_eq!(
+            crate::text::slug(
+                "Video Project",
+                "",
+                usize::MAX,
+                crate::text::SlugPolicy::Unicode
+            ),
+            "video-project"
+        );
+        assert_eq!(
+            crate::text::slug("a__b", "", usize::MAX, crate::text::SlugPolicy::Unicode),
+            "a-b"
+        );
+        assert_eq!(
+            crate::text::slug(
+                "動画 制作",
+                "",
+                usize::MAX,
+                crate::text::SlugPolicy::Unicode
+            ),
+            "動画-制作"
+        );
+        assert_eq!(
+            crate::text::slug("///", "", usize::MAX, crate::text::SlugPolicy::Unicode),
+            ""
+        );
     }
 
     #[test]
