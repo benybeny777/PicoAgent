@@ -652,13 +652,15 @@ impl Provider for Local {
 
     async fn is_up(&self, cfg: &Config) -> Result<bool, String> {
         let url = format!("http://127.0.0.1:{}/health", port(cfg)?);
-        super::http_error::provider_probe(
+        super::http_error::managed_health_probe(
             cfg,
             "ローカルAIエンジン",
             "/health",
             crate::tools::http::client()?
                 .get(url)
-                .timeout(std::time::Duration::from_secs(2)),
+                // Windowsはループバックの接続拒否を返すまで約2秒かかる。
+                // 先に期限切れへ変換すると、停止中を判別できず冷間起動を止めてしまう。
+                .timeout(std::time::Duration::from_secs(3)),
         )
         .await
     }
@@ -1077,6 +1079,34 @@ mod tests {
                 .to_string()
                 .contains("PICOAGENT_LOCAL_PORT"));
         }
+    }
+
+    #[tokio::test]
+    async fn 停止中と起動準備中のローカルエンジンは未準備として返す() {
+        use super::Provider;
+        use crate::providers::compatible::test_server::Server;
+        let cfg = crate::config::Config::new();
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        cfg.set("PICOAGENT_LOCAL_PORT", &listener.local_addr().unwrap().port().to_string());
+        drop(listener);
+        assert!(!super::Local.is_up(&cfg).await.unwrap());
+        for status in [200, 503, 401, 500] {
+            let server = Server::json(status, &serde_json::json!({"status":"loading model"}));
+            let port = server.url.rsplit(':').next().unwrap().trim_end_matches('/');
+            cfg.set("PICOAGENT_LOCAL_PORT", port);
+            let result = super::Local.is_up(&cfg).await;
+            match status {
+                200 => assert!(result.unwrap()),
+                503 => assert!(!result.unwrap()),
+                _ => assert!(result.unwrap_err().contains(&format!("HTTP {status}"))),
+            }
+            assert_eq!(server.finish().len(), 1);
+        }
+        let server = Server::raw(Vec::new());
+        let port = server.url.rsplit(':').next().unwrap().trim_end_matches('/');
+        cfg.set("PICOAGENT_LOCAL_PORT", port);
+        assert!(super::Local.is_up(&cfg).await.is_err());
+        assert_eq!(server.finish().len(), 1);
     }
 
     #[test]

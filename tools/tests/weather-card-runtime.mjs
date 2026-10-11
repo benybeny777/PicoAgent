@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import { installFakeDom } from "./lib/fake-dom.mjs";
+import { contrastRatio } from "./lib/color-contrast.mjs";
 
 const document = installFakeDom();
 const { renderMarkdown } = await import("../../ui/chat/markdown.js");
@@ -132,12 +133,10 @@ test("天気カードは狭幅で降水列を消さず複数段表示し明る�
   assert.match(block, /prefers-reduced-motion: reduce/);
   const alpha = Number(block.match(/linear-gradient\(rgba\(0, 0, 0, ([\d.]+)\)/)?.[1]);
   assert.ok(Number.isFinite(alpha));
-  const linear = channel => channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
   for (const match of block.matchAll(/--wx-(?:from|to): #([\da-f]{6})/g)) {
     const channels = [0, 2, 4].map(offset => parseInt(match[1].slice(offset, offset + 2), 16));
     // 白い光沢が最大の角でも、前面の暗幕と白文字の比を確認する。
-    const [r, g, b] = channels.map(channel => linear(((channel * 0.72 + 255 * 0.28) * (1 - alpha)) / 255));
-    const luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b;
-    assert.ok(1.05 / (luminance + 0.05) >= 4.5, `背景#${match[1]}の本文コントラスト`);
+    const background = channels.map(channel => (channel * 0.72 + 255 * 0.28) * (1 - alpha));
+    assert.ok(contrastRatio([255, 255, 255], background) >= 4.5, `背景#${match[1]}の本文コントラスト`);
   }
 });

@@ -160,7 +160,51 @@ pub async fn provider_probe(
     endpoint: &str,
     request: reqwest::RequestBuilder,
 ) -> Result<bool, String> {
-    provider_response(cfg, service, endpoint, request.send().await)
+    probe_response(cfg, service, endpoint, request.send().await).await
+}
+
+/// 管理サービスは接続拒否なら停止中、503なら初期化中として起動監視を続ける。
+pub async fn managed_health_probe(
+    cfg: &crate::config::Config,
+    service: &str,
+    endpoint: &str,
+    request: reqwest::RequestBuilder,
+) -> Result<bool, String> {
+    let response = request.send().await;
+    match &response {
+        Err(error) if connection_refused(error) => return Ok(false),
+        Ok(response) if response.status() == reqwest::StatusCode::SERVICE_UNAVAILABLE => {
+            return Ok(false);
+        }
+        _ => {}
+    }
+    probe_response(cfg, service, endpoint, response)
+        .await
+        .map_err(|error| format!("{service}の疎通確認に失敗しました: {error}"))
+}
+
+fn connection_refused(error: &reqwest::Error) -> bool {
+    use std::error::Error;
+    let mut cause = error.source();
+    while let Some(error) = cause {
+        if error
+            .downcast_ref::<std::io::Error>()
+            .is_some_and(|error| error.kind() == std::io::ErrorKind::ConnectionRefused)
+        {
+            return true;
+        }
+        cause = error.source();
+    }
+    false
+}
+
+async fn probe_response(
+    cfg: &crate::config::Config,
+    service: &str,
+    endpoint: &str,
+    response: Result<reqwest::Response, reqwest::Error>,
+) -> Result<bool, String> {
+    provider_response(cfg, service, endpoint, response)
         .await
         .map(|_| true)
         .map_err(|error| error.to_string())
@@ -282,9 +326,35 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn 管理サービスの応答待ち期限は停止中へ読み替えない() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (_stream, _) = listener.accept().await.unwrap();
+            std::future::pending::<()>().await;
+        });
+        let cfg = crate::config::Config::new();
+        let result = managed_health_probe(
+            &cfg,
+            "検査エンジン",
+            "/health",
+            crate::tools::http::client()
+                .unwrap()
+                .get(format!("http://{address}/health"))
+                .timeout(Duration::from_millis(100)),
+        )
+        .await;
+        server.abort();
+        assert!(server.await.unwrap_err().is_cancelled());
+        let error = result.unwrap_err();
+        assert!(error.contains("検査エンジンの疎通確認に失敗"));
+        assert!(!error.contains(&address.to_string()));
+    }
+
+    #[tokio::test]
     async fn 疎通確認は非成功と接続失敗を理由で返し正常だけ成功する() {
         let cfg = crate::config::Config::new();
-        for status in [200, 401, 500] {
+        for status in [200, 401, 500, 503] {
             let server = Server::json(status, &serde_json::json!({"error":"確認不可"}));
             let result = provider_probe(
                 &cfg,

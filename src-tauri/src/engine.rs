@@ -912,6 +912,7 @@ async fn ensure_and_start_inner(app: AppHandle, start_generation: u64) {
             if match provider.is_up(&state.config).await {
                 Ok(ready) => ready,
                 Err(error) => {
+                    terminate_managed_child(&app);
                     set_status(&app, json!({"phase":"error", "message":error}));
                     return;
                 }
