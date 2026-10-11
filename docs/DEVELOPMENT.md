@@ -346,6 +346,10 @@ NSIS アンインストーラは、インストール先またはPicoAgent管理
 
 外部CLIは `tools::resolve_cli_path` で明示指定、未設定時だけ管理下の同梱物を解決する。コマンド名だけの明示指定時に限り共通探索を使う（macOSではPATHの後に既存Homebrew配置 `/opt/homebrew/bin`・`/usr/local/bin` も確認）。指定先や優先する管理配置の欠損は修復エラーにする。Whisperの2スキルは `tools::whisper` で解決し、固定モデル名は取得側と共通の `crates/picoagent-core/src/paths.rs` を正本とする。別名の導入モデルは `PICOAGENT_TRANSCRIBE_MODEL` へ明示し、`.bin` の名前順探索はしない。
 
+`tools::process::OutputCapture`が出力の両系統と共通の回収期限を所有する。待機は並行にし、失敗・中断では所有者の破棄で両読取タスクを止める。通常の出力回収、`run_command::jobs`、`character_learning`の子プロセスは`tools/process/ownership.rs`の共通所有者を使う。個別停止・一括停止・学習取消で停止に失敗したら、再試行に必要な所有者を残す。通常出力の正常完了では子孫を継続させるが、学習工程は根が終了した時点で残る子孫も回収する。
+
+Windowsは実行前に停止した状態で生成し、Job Objectへ登録してから実行を再開する。Unixは専用process groupを作り、根を`WNOWAIT`で未回収のまま保持して番号の再利用を防ぐ。停止は稼働する子孫の終了を確認してから所有を解放し、根を回収する。OS別の実装は`ownership_windows.rs`と`ownership_unix.rs`に分け、生のChildを呼出元へ公開しない。Unixのプロセス一覧の走査は原子的ではなく、走査中のfork・終了や明示的な`setsid`／`setpgid`での離脱までWindowsのJob Objectと同じ強さで封じ込めるものではない。アプリ起動・更新・専用ブラウザーなど、既に別の所有者を持つ起動経路はこの終了契約へ混ぜない。
+
 コマンド許可の所有者は `tools::process::command_policy` とする。チャットと予約実行は同じ `check` を呼び、引数制限と物理削除禁止を承認前後でも適用する。スキル側へ許可リストや検査の写しを作らない。ripgrepの欠損・実行失敗時の内蔵検索は撤去し、`doc_search` の正常な0一致時のファイル名検索だけを維持する。
 
 | ファイル | 役割 |
