@@ -47,6 +47,8 @@ runnerは自分で起動した127.0.0.1の専用サーバだけを使い、正�
 
 `training.py`には`--input <本番body付きJSON> --base <HF資産> --template <本番Jinja> --output <新規ディレクトリ>`を渡す。既定はrank16、alpha32、dropout0.05、学習率0.0002、2epoch、batch1・勾配累積4。`--prepare-only`で全学習対象の長さと損失対象を先に検査する。`--limit 16 --epochs 1 --max-steps 2 --warmup 0`で少量学習し、GGUF変換と`probe.py`の適用確認を通してから本学習する。長さ超過を切り詰めず停止し、ベース重み・LoRA・勾配のCUDA配置を検査する。epoch完了時のcheckpointと最終adapterを保存し、未完了epochを完了扱いにしない。
 
+保存済みLoRAから追加学習する場合は、`--initial-adapter <adapterディレクトリ> --initial-manifest <前runのmanifest.json>`を対で指定する。同じベース重みのSHA-256、rank・alpha・対象層などの学習構造、manifestに記録された保存完了先を照合してから既存重みを読み込む。不一致・欠損を新規初期化で補わず停止する。これは重みを引き継ぐ新しいrunであり、optimizer・乱数状態の中断再開ではない。前runのmanifest・設定・重みのSHA-256を新manifestへ記録し、出力先を分けて旧成果を保持する。
+
 Python 3.12を基準に隔離環境を使い、対応GPUと依存の固定版を確認してから学習する。モデル取得・学習を伴わない検査は`python -B -m unittest discover -s tools/lora -p 'test_*.py'`。本番トークナイザの検査だけは`LORA_TEST_MODEL`へ既存のHF資産ディレクトリを明示し、transformersが導入済みの隔離Pythonで実行する。環境・教材ハッシュ・学習条件・測定結果・採否は該当PR本文と出力manifestへ残す。
 
 ## Windows各版のビルドとアップロード

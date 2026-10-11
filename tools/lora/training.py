@@ -14,6 +14,7 @@ from pathlib import Path
 import random
 import sys
 import time
+import warnings
 
 # Windows共有違反の有限再試行は、既存の原子的配置へ集約する。
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
@@ -62,6 +63,68 @@ def save_epoch_checkpoint(model, output, manifest, epoch, step):
 def digest(path: Path):
     with path.open("rb") as stream:
         return hashlib.file_digest(stream, "sha256").hexdigest()
+
+
+def lora_config(rank):
+    from peft import LoraConfig
+    return LoraConfig(
+        r=rank, lora_alpha=2 * rank, lora_dropout=0.05,
+        target_modules=list(TARGET_MODULES), task_type="CAUSAL_LM", bias="none",
+    )
+
+
+def inspect_initial_adapter(args, base_sha256):
+    """保存済み重みの条件を検査する。optimizerや乱数の中断再開ではない。"""
+    paths = {
+        "manifest": args.initial_manifest.resolve(),
+        "config": args.initial_adapter.resolve() / "adapter_config.json",
+        "weights": args.initial_adapter.resolve() / "adapter_model.safetensors",
+    }
+    for path in paths.values():
+        if not path.is_file() or not path.stat().st_size:
+            raise ValueError(f"初期adapterの必要ファイルがありません: {path}")
+    previous = read_json(paths["manifest"])
+    saved = read_json(paths["config"])
+    if not isinstance(previous, dict) or not isinstance(saved, dict):
+        raise ValueError("初期adapterの設定と前run manifestはJSON objectが必要です")
+    if previous.get("base_model_sha256") != base_sha256:
+        raise ValueError("初期adapterと今回のbase_model_sha256が一致しません")
+    if previous.get("arguments", {}).get("rank") != args.rank:
+        raise ValueError("前run manifestのrankが今回の条件と一致しません")
+    # 別runのmanifestを添えることや、保存未完了の成果を成功扱いすることを防ぐ。
+    previous_root = paths["manifest"].parent
+    eligible = []
+    if previous.get("status") == "学習完了・品質未判定":
+        eligible.append((previous_root / "adapter").resolve())
+    for checkpoint in previous.get("checkpoints", []):
+        if checkpoint.get("status") == "保存完了・品質未判定":
+            eligible.append((previous_root / checkpoint["adapter"]).resolve())
+    if args.initial_adapter.resolve() not in eligible:
+        raise ValueError("初期adapterが前run manifestの保存完了した成果物に一致しません")
+    config = lora_config(args.rank)
+    expected = config.to_dict()
+    # 振る舞いの既定値もPEFTの正本と比較し、DoRAや層別rank等の取り違えを防ぐ。
+    metadata = {"base_model_name_or_path", "revision", "auto_mapping", "inference_mode", "peft_version"}
+    mismatched = []
+    for key in (set(expected) | set(saved)) - metadata:
+        actual, required = saved.get(key), expected.get(key)
+        if key == "target_modules":
+            actual = sorted(actual) if isinstance(actual, (list, set)) else actual
+            required = sorted(required) if isinstance(required, (list, set)) else required
+        if key not in saved or key not in expected or actual != required or (
+            isinstance(actual, bool) != isinstance(required, bool)
+        ):
+            mismatched.append(key)
+    if mismatched:
+        raise ValueError(f"初期adapterの学習条件が一致しません: {', '.join(sorted(mismatched))}")
+    roles = {"manifest": "前runの由来と保存完了の根拠", "config": "初期LoRAの構造と条件", "weights": "今回へ引き継ぐLoRA重み"}
+    provenance = {
+        "mode": "adapter重みを引き継ぐ新規run", "optimizer": "新規初期化",
+        "random_state": "今回のseedで初期化。前runの乱数状態は復元しない",
+        "files": {key: {"path": str(path), "sha256": digest(path), "role": roles[key]}
+                  for key, path in paths.items()},
+    }
+    return config, provenance
 
 
 def template_messages(messages):
@@ -115,6 +178,8 @@ def prepare_case(case, tokenizer, template: str, max_length: int):
 
 
 def validate_args(args):
+    if bool(args.initial_adapter) != bool(args.initial_manifest):
+        raise ValueError("initial-adapterとinitial-manifestは対で指定してください")
     for name, minimum in (
         ("limit", 0), ("rank", 1), ("max_length", 2), ("epochs", 1),
         ("accumulation", 1), ("warmup", 0), ("max_steps", 0),
@@ -158,6 +223,7 @@ def run(args):
         "completed_epochs": 0, "checkpoints": [],
         "arguments": {key: str(value) if isinstance(value, Path) else value for key, value in vars(args).items()},
         "kernel": "PyTorch標準CUDA演算を明示選択。Hubカーネル取得なし",
+        "initialization": {"mode": "新規LoRA", "optimizer": "新規初期化", "random_state": "今回のseedで初期化"},
     }
     torch = model = optimizer = scheduler = None
     inputs = labels = loss = grad = None
@@ -176,6 +242,12 @@ def run(args):
                 manifest["packages"][name] = None
         manifest.update(input_sha256=digest(args.input), template_sha256=digest(args.template),
                         base_model_sha256=digest(args.base / "model.safetensors"))
+        initial_config = None
+        if args.initial_adapter:
+            manifest["phase"] = "初期adapterの由来と条件の確認"
+            initial_config, manifest["initialization"] = inspect_initial_adapter(
+                args, manifest["base_model_sha256"]
+            )
         data = read_json(args.input)
         cases = [case for case in data["cases"] if case.get("split") == "train"]
         if args.limit:
@@ -213,7 +285,7 @@ def run(args):
         torch.cuda.reset_peak_memory_stats()
         manifest["phase"] = "ベースモデルとLoRAの読込"
         write_json(args.output / "manifest.json", manifest)
-        from peft import LoraConfig, get_peft_model
+        from peft import PeftModel, get_peft_model
 
         model = AutoModelForCausalLM.from_pretrained(
             args.base, dtype=torch.bfloat16, local_files_only=True,
@@ -225,10 +297,16 @@ def run(args):
         found = {name.rsplit(".", 1)[-1] for name, _ in model.named_modules()}
         if not set(TARGET_MODULES).issubset(found):
             raise RuntimeError(f"対象層が見つかりません: {sorted(set(TARGET_MODULES) - found)}")
-        model = get_peft_model(model, LoraConfig(
-            r=args.rank, lora_alpha=2 * args.rank, lora_dropout=0.05,
-            target_modules=list(TARGET_MODULES), task_type="CAUSAL_LM", bias="none",
-        ))
+        if initial_config is None:
+            model = get_peft_model(model, lora_config(args.rank))
+        else:
+            # PEFTは欠損tensorを警告に留めるため、初期化重みの混入を失敗として止める。
+            with warnings.catch_warnings():
+                warnings.filterwarnings("error", message=".*missing adapter keys.*", category=UserWarning)
+                model = PeftModel.from_pretrained(
+                    model, str(args.initial_adapter.resolve()), config=initial_config,
+                    is_trainable=True, local_files_only=True, torch_device="cuda",
+                )
         model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
         model.train()
         trainable = cuda_trainable_parameters(model)
@@ -328,6 +406,8 @@ def main():
     for name in ("input", "base", "template", "output"):
         parser.add_argument(f"--{name}", type=Path, required=True)
     parser.add_argument("--prepare-only", action="store_true")
+    parser.add_argument("--initial-adapter", type=Path)
+    parser.add_argument("--initial-manifest", type=Path)
     parser.add_argument("--limit", type=int, default=0)
     parser.add_argument("--max-length", type=int, default=4096)
     parser.add_argument("--rank", type=int, default=16)
