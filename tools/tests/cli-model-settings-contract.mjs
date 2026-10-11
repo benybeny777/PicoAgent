@@ -16,7 +16,7 @@ function harness(listModels, value = "codex") {
     cliModelSelect: { replaceChildren(...options) { this.options = options; } },
     statusEl: {},
     window: { picoagent: { settings: { listModels } } },
-    data: { active: { providerId: "agent_cli" }, numberSettings: {} },
+    data: { active: { providerId: "agent_cli" }, numberSettings: {}, values: {}, valueRevisions: {} },
     providerDefaultModel: () => "codex",
     el: (tag, props) => ({ tag, ...props }),
     updateDirtyState() {}, logApp() {}, errorDetail: String, errorMessage: String,
@@ -191,6 +191,8 @@ test("モデル一覧待ちの保存中に旧一覧が完了しても保存値�
   ctx.collect = () => ({ PICOAGENT_MODEL: ctx.modelInput.value });
   ctx.settingsChangeRequest = current => ({ patch: current, baseRevisions: {} });
   ctx.cloneSettings = value => structuredClone(value);
+  const accepted = settings.indexOf("function acceptSavedSettings(");
+  vm.runInContext(settings.slice(accepted, settings.indexOf("function updateDirtyStateNow(", accepted)), ctx);
   ctx.saveBtn = { addEventListener(type, handler) { saveHandler = handler; } };
   ctx.window.picoagent.settings.save = patch => {
     submitted = patch;

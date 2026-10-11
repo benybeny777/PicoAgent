@@ -105,7 +105,12 @@ window.__listeners = {};
 window.__settingsData = JSON.parse(sessionStorage.getItem("mockSettingsData") || ${JSON.stringify(JSON.stringify(settingsData))});
 window.__savedSettingsPatches = [];
 window.__userCharactersRecovered = false;
+window.__removedUserCharacters = new Set();
 if (location.search.includes("user-list-failure")) window.__settingsData.values.PICOAGENT_CHARACTER = "user-test";
+// 版は画面では解釈しない。mockでも値と同じ時点の版を返し、API応答は参照共有しない。
+const mockRevisions = values => Object.fromEntries(Object.entries(values).map(([key, value]) => [key, JSON.stringify(value)]));
+window.__settingsData.valueRevisions = mockRevisions(window.__settingsData.values);
+window.__settingsData.pendingRestart ??= null;
 window.__memoryItems = [
   { category: "好み", text: "私は結論から読むのが好き", updated_at: "2026-08-18T08:30:00Z", hits: 4 },
   { category: "継続指示", text: "今後はサイズをMBかGBで表示してほしい", updated_at: "2026-08-18T07:15:00Z", hits: 2 },
@@ -117,14 +122,16 @@ window.__TAURI__ = {
         sessionStorage.setItem("settings-load-retried", "1");
         throw new Error("設定読込の検証用エラー");
       }
-      return window.__settingsData;
+      return structuredClone(window.__settingsData);
     }
     if (name === "settings_save") {
       if (window.__rejectNumberSave) return { conflicts: [], invalid: [{ key: "PICOAGENT_STREAM_CHAT_FONT_PX", message: "検証用の保存拒否理由" }] };
       window.__savedSettingsPatches.push(args.patch);
       Object.assign(window.__settingsData.values, args.patch);
+      const valueRevisions = mockRevisions(args.patch);
+      Object.assign(window.__settingsData.valueRevisions, valueRevisions);
       sessionStorage.setItem("mockSettingsData", JSON.stringify(window.__settingsData));
-      return { up: true };
+      return { up: true, valueRevisions };
     }
     if (name === "settings_memory_list") return { items: window.__memoryItems };
     if (name === "settings_memory_delete") {
@@ -135,14 +142,27 @@ window.__TAURI__ = {
     }
     if (name === "pet_user_characters") {
       if (location.search.includes("user-list-failure") && !window.__userCharactersRecovered) throw new Error("追加キャラクター一覧の検証用エラー");
-      return { characters: [{ id: "user-test", name: "追加テスト", path: "http://127.0.0.1:${port}/assets/characters/mugi", user: true }], root: "" };
+      return { characters: [{ id: "user-test", name: "追加テスト", path: "http://127.0.0.1:${port}/assets/characters/mugi", user: true }]
+        .filter(character => !window.__removedUserCharacters.has(character.id)), root: "" };
     }
     if (name === "settings_character_discover_downloads") return { candidates: [
       { kind: "live2d", name: "ひより", path: "C:\\Users\\me\\Downloads\\ひより.zip" },
       { kind: "mmd", name: "モデル", path: "C:\\Users\\me\\Downloads\\モデル.pmx" },
     ] };
     if (name === "settings_character_rename") return { ok: true, id: args.id, name: args.name };
-    if (name === "settings_character_remove") return { ok: true, activeCharacter: "mugi" };
+    if (name === "settings_character_remove") {
+      if (args.id !== "user-test" || window.__removedUserCharacters.has(args.id)) throw new Error("削除対象の追加キャラクターがありません");
+      window.__removedUserCharacters.add(args.id);
+      const key = "PICOAGENT_CHARACTER";
+      if (window.__settingsData.values[key] === args.id) {
+        window.__settingsData.values[key] = "mugi";
+        window.__settingsData.valueRevisions[key] = mockRevisions({ [key]: "mugi" })[key];
+      }
+      sessionStorage.setItem("mockSettingsData", JSON.stringify(window.__settingsData));
+      return { ok: true, activeCharacter: "mugi", savedCharacter: window.__settingsData.values[key] || "mugi",
+        valueRevisions: { [key]: window.__settingsData.valueRevisions[key] || "missing" },
+        pendingRestart: structuredClone(window.__settingsData.pendingRestart) };
+    }
     if (name === "settings_export_diagnostics") return { path: "C:\\\\Users\\\\me\\\\AppData\\\\Roaming\\\\PicoAgent\\\\log\\\\diagnostics.2026-09-02.080000.txt" };
     if (name === "settings_components_status") return [
       { id: "aivis", label: "音声読み上げ", description: "AivisSpeechでキャラクターの声を作ります。", sizeLabel: "約0.8GB＋音声モデル", ready: true, available: true, removable: true, installMode: "managed", installedVersion: "1.1.0", targetVersion: "1.2.0", updateAvailable: true, newerThanTarget: false, versionUnknown: false, versionError: null, sources: [] },
@@ -619,7 +639,10 @@ try {
   await addedCharacter.getByRole("button", { name: "このキャラを選ぶ", exact: true }).click();
   await addedCharacter.getByRole("button", { name: "削除", exact: true }).click();
   await addedCharacter.getByRole("button", { name: "もう一度押して削除", exact: true }).click();
+  await page.waitForFunction(() => !document.getElementById("form").inert);
   if (await addedCharacter.count()) throw new Error("削除した追加キャラが一覧に残っています");
+  const remainingCharacters = await page.evaluate(() => window.__TAURI__.core.invoke("pet_user_characters"));
+  if (remainingCharacters.characters.some(character => character.id === "user-test")) throw new Error("削除済みキャラがAPI一覧に残っています");
   if (await page.locator('[data-setting-key="PICOAGENT_CHARACTER"] select').inputValue() !== "mugi") throw new Error("未保存選択の削除後に保存中キャラへ戻りません");
   if (!(await page.locator('textarea[placeholder="性格・口調・一人称など"]').inputValue()).includes("年下っぽく")) throw new Error("削除後の選択と人格表示が一致しません");
   const settled = await page.waitForFunction(() => document.getElementById("dirtySummary")?.textContent === "保存済み", null, { timeout: 5000 }).then(() => true, () => false);

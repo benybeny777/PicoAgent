@@ -219,7 +219,11 @@ impl Config {
     }
 
     pub fn invalid_int_settings(&self) -> Vec<Value> {
-        let values = self.get_all();
+        Self::invalid_int_settings_in(&self.get_all())
+    }
+
+    /// 応答用に取得済みの保存スナップショットから、不正な数量だけを検査する。
+    pub(crate) fn invalid_int_settings_in(values: &Map<String, Value>) -> Vec<Value> {
         ints::INT_SETTINGS
             .iter()
             .filter_map(|setting| {
@@ -340,34 +344,44 @@ impl Config {
             .write
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let (current, mut runtime) = {
+        let (original, mut runtime) = {
             let values = self.values.lock().unwrap();
-            (values.saved.clone(), values.deferred.get(key).cloned())
+            (
+                values.saved.get(key).cloned(),
+                values.deferred.get(key).cloned(),
+            )
         };
-        let mut next = current.clone();
-        let saved_changed = matches(current.get(key)) && current.get(key) != Some(replacement);
-        if saved_changed {
-            next.insert(key.to_string(), replacement.clone());
-        }
+        let saved_changed = matches(original.as_ref()) && original.as_ref() != Some(replacement);
         let runtime_value = match &runtime {
             Some(value) => value.as_ref(),
-            None => current.get(key),
+            None => original.as_ref(),
         };
         if matches(runtime_value) {
             runtime = Some(Some(replacement.clone()));
         }
-        let path = saved_changed.then(|| self.writable_path()).transpose()?;
-        let snapshot = Value::Object(next);
-        if let Some(path) = &path {
-            crate::store::write_json_atomic(path, &snapshot)?;
-        }
+        // 保存変更がある場合だけ全体を1回複製する。実行値だけの置換では複製もI/Oもしない。
+        let mut persisted = if saved_changed {
+            let path = self.writable_path()?;
+            let mut next = self.values.lock().unwrap().saved.clone();
+            next.insert(key.to_string(), replacement.clone());
+            let snapshot = Value::Object(next);
+            crate::store::write_json_atomic(&path, &snapshot)?;
+            Some((path, snapshot))
+        } else {
+            None
+        };
         let result = match operation() {
             Ok(result) => result,
             Err(error) => {
-                if let Some(path) = &path {
-                    if let Err(restore) =
-                        crate::store::write_json_atomic(path, &Value::Object(current))
-                    {
+                if let Some((path, snapshot)) = &mut persisted {
+                    let next = snapshot.as_object_mut().expect("設定はJSONオブジェクト");
+                    // 元の単一値だけ覚えておけば、別の全体複製を持たずに原本へ戻せる。
+                    if let Some(original) = original {
+                        next.insert(key.to_string(), original);
+                    } else {
+                        next.remove(key);
+                    }
+                    if let Err(restore) = crate::store::write_json_atomic(path, snapshot) {
                         return Err(anyhow::anyhow!(
                             "操作に失敗しました: {error:#}。設定の復元にも失敗しました: {restore:#}"
                         ));
@@ -376,18 +390,20 @@ impl Config {
                 return Err(error);
             }
         };
-        let Value::Object(next) = snapshot else {
-            unreachable!("設定スナップショットは必ずJSONオブジェクト")
-        };
         let mut values = self.values.lock().unwrap();
+        if let Some((_, snapshot)) = persisted {
+            let Value::Object(next) = snapshot else {
+                unreachable!("設定スナップショットは必ずJSONオブジェクト")
+            };
+            values.saved = next;
+        }
         if let Some(runtime) = runtime {
-            if runtime.as_ref() == next.get(key) {
+            if runtime.as_ref() == values.saved.get(key) {
                 values.deferred.remove(key);
             } else {
                 values.deferred.insert(key.to_string(), runtime);
             }
         }
-        values.saved = next;
         Ok(result)
     }
 
@@ -1040,6 +1056,32 @@ mod tests {
             assert_eq!(cfg.get("別項目", ""), "別実行中");
             assert!(asset.join("残っているファイル").exists());
         }
+    }
+
+    #[test]
+    fn 欠損値の置換操作に失敗したら追加キーを消して他の保存値を保つ() {
+        let initial = serde_json::json!({"別項目": {"配列": [1, 2, 3]}});
+        let (_directory, path, cfg) = saved_config(initial.clone());
+        let before = std::fs::read(&path).unwrap();
+        let result: anyhow::Result<()> = cfg.replace_value_for_operation(
+            "未設定の対象",
+            None,
+            &serde_json::json!("置換後"),
+            || {
+                let saved = Config::new();
+                saved.load(path.clone()).unwrap();
+                assert_eq!(saved.get("未設定の対象", ""), "置換後");
+                assert_eq!(cfg.get_runtime_value("未設定の対象"), None);
+                anyhow::bail!("操作を完了できない");
+            },
+        );
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("操作を完了できない"));
+        assert_eq!(std::fs::read(path).unwrap(), before);
+        assert_eq!(cfg.get_all(), *initial.as_object().unwrap());
+        assert_eq!(cfg.get_runtime_value("未設定の対象"), None);
     }
 
     #[test]

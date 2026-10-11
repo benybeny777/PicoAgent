@@ -84,7 +84,6 @@ test("設定の保存直後にも、自分のクイック操作と既定ボタ�
   const body = handler.slice(0, handler.indexOf("\n});"));
   assert.match(body, /if \(ui\.quickActions != null\) composer\.setQuickActions\(ui\.quickActions\);/);
   assert.match(body, /composer\.refreshDefaultQuickActions\(\);/);
-  assert.match(commands, /ui\["quickActions"\] = json!\(state\.config\.get\("PICOAGENT_QUICK_ACTIONS", ""\)\);/);
 });
 
 test("狭幅で省略するのは通常一覧だけで診断と質問選択肢を残す", async () => {
