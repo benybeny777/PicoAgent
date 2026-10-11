@@ -18,6 +18,10 @@ use std::time::Duration;
 use tokio::io::AsyncReadExt;
 use tokio::process::{Child, Command};
 
+mod ownership;
+use ownership::{OwnedAsyncChild, SpawnFailure};
+pub(crate) use ownership::{OwnedChild, ProcessSnapshot};
+
 /// タイムアウトの上限（どんな設定値でもこれを超えて待たない）。
 const MAX_TIMEOUT_SECS: u64 = 7200;
 const MAX_CAPTURE_BYTES: usize = 1024 * 1024;
@@ -441,56 +445,52 @@ async fn output_worker(
     mut abandon: tokio::sync::oneshot::Receiver<()>,
 ) -> Result<Output, RunFailure> {
     let timeout = timeout_secs.clamp(1, MAX_TIMEOUT_SECS);
-    let mut child = command
-        .spawn()
-        .map_err(|error| RunFailure::NotStarted(format!("{label}を起動できません: {error}")))?;
+    let mut child = OwnedAsyncChild::spawn(&mut command).map_err(|failure| match failure {
+        SpawnFailure::Spawn(error) => {
+            RunFailure::NotStarted(format!("{label}を起動できません: {error}"))
+        }
+        SpawnFailure::Ownership(error) => {
+            RunFailure::Interrupted(format!("{label}の所有を確立できません: {error}"))
+        }
+    })?;
     let captures = OutputCapture {
-        stdout: tokio::spawn(read_capture(child.stdout.take())),
-        stderr: tokio::spawn(read_capture(child.stderr.take())),
+        stdout: tokio::spawn(read_capture(child.take_stdout())),
+        stderr: tokio::spawn(read_capture(child.take_stderr())),
     };
-    let waited = tokio::select! {
-        biased;
-        _ = &mut abandon => {
-            let cleanup_error = terminate_process_tree(&mut child, label).await.err();
-            return Err(RunFailure::Interrupted(match cleanup_error {
-                Some(error) => format!("{label}の中断後に子プロセスを回収できません: {error}"),
-                None => format!("{label}を中断しました。"),
-            }));
+    let result: Result<Output, String> = async {
+        let waited = tokio::select! {
+            biased;
+            _ = &mut abandon => return Err(format!("{label}を中断しました。")),
+            waited = tokio::time::timeout(Duration::from_secs(timeout), child.wait()) => waited,
+        };
+        let status = waited
+            .map_err(|_| format!("{label}が {timeout} 秒でタイムアウトしました。"))?
+            .map_err(|error| format!("{label}の終了を待てません: {error}"))?;
+        // 根が先に終了した後も、読取失敗・期限切れ・呼出future破棄を所有者へ伝える。
+        let (stdout, stderr) = tokio::select! {
+            biased;
+            _ = &mut abandon => return Err(format!("{label}を中断しました。")),
+            captured = captures.collect(label) => captured?,
+        };
+        // 非0終了コードも従来どおりOutputとして返す。正常EOFなら意図した起動先を残す。
+        child.release().await?;
+        Ok(Output {
+            status,
+            stdout,
+            stderr,
+        })
+    }
+    .await;
+    match result {
+        Ok(output) => Ok(output),
+        Err(error) => {
+            let message = match child.terminate(label).await {
+                Ok(()) => error,
+                Err(cleanup) => format!("{error}\n子プロセスの回収にも失敗しました: {cleanup}"),
+            };
+            Err(RunFailure::Interrupted(message))
         }
-        waited = tokio::time::timeout(Duration::from_secs(timeout), child.wait()) => waited,
-    };
-    let status = match waited {
-        Ok(Ok(status)) => status,
-        Ok(Err(error)) => {
-            return Err(RunFailure::Interrupted(format!(
-                "{label}の終了を待てません: {error}"
-            )))
-        }
-        Err(_) => {
-            let cleanup_error = terminate_process_tree(&mut child, label).await.err();
-            // 出力の回収を待たずに打ち切る。`sh -c` / `powershell -Command` のように
-            // 子がさらにプロセスを産む形では、子を kill しても孫がパイプの書き込み端を
-            // 握ったままで終端（EOF）が来ない。ここで待つと孫が終わるまで戻れず、
-            // タイムアウトを設けた意味がなくなる（実際に1秒指定が30秒待ちになっていた）。
-            return Err(RunFailure::Interrupted(match cleanup_error {
-                Some(error) => format!(
-                    "{label}が {timeout} 秒でタイムアウトし、子プロセスの回収にも失敗しました: {error}"
-                ),
-                None => format!("{label}が {timeout} 秒でタイムアウトしました。"),
-            }));
-        }
-    };
-    // 子が正常終了しても、孫がパイプを握っていれば同じ理由で終端が来ない。
-    // 終了後の回収にも上限を置き、待ち続けずエラーとして返す。
-    let (stdout, stderr) = captures
-        .collect(label)
-        .await
-        .map_err(RunFailure::Interrupted)?;
-    Ok(Output {
-        status,
-        stdout,
-        stderr,
-    })
+    }
 }
 
 /// タイムアウトしたプロセスと、その配下で起動した孫プロセスを回収する。
@@ -544,17 +544,16 @@ pub async fn terminate_process_tree(child: &mut Child, label: &str) -> Result<()
 /// 終端が来ないのは孫プロセスがパイプを握っている場合だけなので、短くてよい。
 pub const CAPTURE_DRAIN_SECS: u64 = 5;
 
-/// 出力を読むタスクを上限付きで待ち、上限を超えたら中断して `None` を返す。
+/// 出力を読むタスクを指定期限まで待ち、上限を超えたら中断して `None` を返す。
 ///
 /// 子を停止しても、`sh -c` / `powershell -Command` が産んだ孫や、子がさらに起動した
 /// プロセスがパイプの書き込み端を握っていると終端（EOF）が来ない。ここで待ち切ると
 /// タイムアウトも中断も効かなくなるため、待ち方を共通化する。
 pub async fn join_capture<T>(
     task: &mut tokio::task::JoinHandle<T>,
+    deadline: tokio::time::Instant,
 ) -> Option<Result<T, tokio::task::JoinError>> {
-    let joined = tokio::time::timeout(Duration::from_secs(CAPTURE_DRAIN_SECS), &mut *task)
-        .await
-        .ok();
+    let joined = tokio::time::timeout_at(deadline, &mut *task).await.ok();
     if joined.is_none() {
         task.abort();
     }
@@ -575,10 +574,24 @@ impl Drop for OutputCapture {
 }
 
 impl OutputCapture {
-    async fn collect(mut self, label: &str) -> Result<(Vec<u8>, Vec<u8>), String> {
-        let stdout = collect(&mut self.stdout, label, "標準出力").await?;
-        let stderr = collect(&mut self.stderr, label, "標準エラー").await?;
-        Ok((stdout, stderr))
+    async fn collect(self, label: &str) -> Result<(Vec<u8>, Vec<u8>), String> {
+        self.collect_until(
+            label,
+            tokio::time::Instant::now() + Duration::from_secs(CAPTURE_DRAIN_SECS),
+        )
+        .await
+    }
+
+    async fn collect_until(
+        mut self,
+        label: &str,
+        deadline: tokio::time::Instant,
+    ) -> Result<(Vec<u8>, Vec<u8>), String> {
+        // 両系統を同時に待ち、片方の失敗も同じ終了後期限も相手の待機へ埋もれさせない。
+        tokio::try_join!(
+            collect(&mut self.stdout, label, "標準出力", deadline),
+            collect(&mut self.stderr, label, "標準エラー", deadline)
+        )
     }
 }
 
@@ -587,8 +600,9 @@ async fn collect(
     task: &mut tokio::task::JoinHandle<Result<Vec<u8>, String>>,
     label: &str,
     kind: &str,
+    deadline: tokio::time::Instant,
 ) -> Result<Vec<u8>, String> {
-    match join_capture(task).await {
+    match join_capture(task, deadline).await {
         Some(Ok(result)) => result,
         Some(Err(error)) => Err(format!("{label}の{kind}回収に失敗しました: {error}")),
         None => Err(format!(
@@ -620,52 +634,106 @@ async fn read_capture<R: tokio::io::AsyncRead + Unpin>(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     #[cfg(windows)]
     use super::process_open_error;
-    use super::{command, command_sync, output, output_or_install_hint, process_alive};
+    use super::{command, command_sync, output, output_or_install_hint, process_alive, OwnedChild};
     use std::process::Stdio;
 
     #[tokio::test]
     async fn 出力回収の失敗と中断で両方の読取タスクを残さない() {
-        for mode in ["読取失敗", "回収中断", "終了確認失敗"] {
-            let (released, released_rx) = tokio::sync::oneshot::channel::<()>();
-            let (ready, ready_rx) = tokio::sync::oneshot::channel();
-            let stderr = tokio::spawn(async move {
-                // 書込側が生き続けるパイプと同じく、回収されるまで終わらない。
-                let _released = released;
-                ready.send(()).unwrap();
-                std::future::pending::<Result<Vec<u8>, String>>().await
-            });
-            ready_rx.await.unwrap();
-            let stdout = tokio::spawn(async move {
-                if mode == "読取失敗" {
-                    Err("読取エラー".to_string())
-                } else {
+        for reversed in [false, true] {
+            for mode in ["読取失敗", "回収中断", "終了確認失敗"] {
+                let (released, released_rx) = tokio::sync::oneshot::channel::<()>();
+                let (ready, ready_rx) = tokio::sync::oneshot::channel();
+                let stderr = tokio::spawn(async move {
+                    // 書込側が生き続けるパイプと同じく、回収されるまで終わらない。
+                    let _released = released;
+                    ready.send(()).unwrap();
                     std::future::pending::<Result<Vec<u8>, String>>().await
+                });
+                ready_rx.await.unwrap();
+                let stdout = tokio::spawn(async move {
+                    if mode == "読取失敗" {
+                        Err("読取エラー".to_string())
+                    } else {
+                        std::future::pending::<Result<Vec<u8>, String>>().await
+                    }
+                });
+                let cleanup = [stdout.abort_handle(), stderr.abort_handle()];
+                let captures = if reversed {
+                    super::OutputCapture {
+                        stdout: stderr,
+                        stderr: stdout,
+                    }
+                } else {
+                    super::OutputCapture { stdout, stderr }
+                };
+                match mode {
+                    "読取失敗" => {
+                        let result = tokio::time::timeout(
+                            std::time::Duration::from_secs(1),
+                            captures.collect("検査"),
+                        )
+                        .await
+                        .expect("他方の待機で読取失敗が遅延しました");
+                        assert_eq!(result.unwrap_err(), "読取エラー")
+                    }
+                    "回収中断" => {
+                        let task = tokio::spawn(async move { captures.collect("検査").await });
+                        tokio::task::yield_now().await;
+                        task.abort();
+                        assert!(task.await.unwrap_err().is_cancelled());
+                    }
+                    _ => drop(captures),
                 }
-            });
-            let cleanup = [stdout.abort_handle(), stderr.abort_handle()];
-            let captures = super::OutputCapture { stdout, stderr };
-            match mode {
-                "読取失敗" => {
-                    assert_eq!(captures.collect("検査").await.unwrap_err(), "読取エラー")
-                }
-                "回収中断" => {
-                    let task = tokio::spawn(async move { captures.collect("検査").await });
-                    tokio::task::yield_now().await;
+                let reclaimed =
+                    tokio::time::timeout(std::time::Duration::from_secs(1), released_rx).await;
+                // 退行検査が失敗する場合でも、この検査自身の読取タスクは残さない。
+                for task in cleanup {
                     task.abort();
-                    assert!(task.await.unwrap_err().is_cancelled());
                 }
-                _ => drop(captures),
+                assert!(
+                    reclaimed.is_ok(),
+                    "{mode}・反転={reversed}で読取タスクが残りました"
+                );
             }
-            let reclaimed =
-                tokio::time::timeout(std::time::Duration::from_secs(1), released_rx).await;
-            // 退行検査が失敗する場合でも、この検査自身の読取タスクは残さない。
-            for task in cleanup {
-                task.abort();
-            }
-            assert!(reclaimed.is_ok(), "{mode}で標準エラーの読取が残りました");
+        }
+    }
+
+    #[tokio::test]
+    async fn 両出力の回収期限は片側の完了時に延長されない() {
+        for reversed in [false, true] {
+            let start = tokio::time::Instant::now();
+            let stdout = tokio::spawn(async move {
+                tokio::time::sleep_until(start + std::time::Duration::from_millis(150)).await;
+                Ok(b"early".to_vec())
+            });
+            let stderr = tokio::spawn(async move {
+                tokio::time::sleep_until(start + std::time::Duration::from_millis(450)).await;
+                Ok(b"late".to_vec())
+            });
+            let captures = if reversed {
+                super::OutputCapture {
+                    stdout: stderr,
+                    stderr: stdout,
+                }
+            } else {
+                super::OutputCapture { stdout, stderr }
+            };
+            let error = captures
+                .collect_until("期限検査", start + std::time::Duration::from_millis(350))
+                .await
+                .unwrap_err();
+            let delayed = if reversed {
+                "標準出力"
+            } else {
+                "標準エラー"
+            };
+            assert!(
+                error.contains(delayed) && error.contains("回収できません"),
+                "{error}"
+            );
         }
     }
 
@@ -898,8 +966,7 @@ mod tests {
     }
 
     /// 検査ファイルから親子PIDを読む。書き込み途中・共有違反は「まだ」として扱う。
-    #[cfg(windows)]
-    fn read_marker_ids(marker: &std::path::Path) -> Result<Vec<u32>, String> {
+    pub(crate) fn read_marker_ids(marker: &std::path::Path) -> Result<Vec<u32>, String> {
         let text = std::fs::read_to_string(marker).map_err(|error| error.to_string())?;
         let values = text
             .trim()
@@ -917,86 +984,290 @@ mod tests {
         Ok(values)
     }
 
+    pub(crate) fn fixture_command(marker: &std::path::Path, role: &str) -> std::process::Command {
+        let mut command = command_sync(std::env::current_exe().unwrap());
+        command.args([
+            "--exact",
+            "tools::process::tests::所有範囲の検査用プロセス",
+            "--nocapture",
+        ]);
+        command
+            .env("PICOAGENT_PROCESS_TEST_ROLE", role)
+            .env("PICOAGENT_PROCESS_TEST_MARKER", marker);
+        command
+    }
+
+    fn fixture_stop_path(marker: &std::path::Path) -> std::path::PathBuf {
+        marker.with_extension("stop")
+    }
+
+    /// 同じ検査実行ファイルで親先行終了とpipe継承を作り、シェル固有の起動仕様を避ける。
+    pub(crate) fn tree_test_command(
+        marker: &std::path::Path,
+        wait_for_child: bool,
+        inherit_output: bool,
+        exit_code: i32,
+    ) -> std::process::Command {
+        let mut command = fixture_command(marker, "root");
+        command
+            .env(
+                "PICOAGENT_PROCESS_TEST_WAIT",
+                if wait_for_child { "1" } else { "0" },
+            )
+            .env(
+                "PICOAGENT_PROCESS_TEST_PIPE",
+                if inherit_output { "1" } else { "0" },
+            )
+            .env("PICOAGENT_PROCESS_TEST_EXIT", exit_code.to_string());
+        command
+    }
+
+    #[test]
+    fn 所有範囲の検査用プロセス() {
+        let Ok(role) = std::env::var("PICOAGENT_PROCESS_TEST_ROLE") else {
+            return;
+        };
+        let marker =
+            std::path::PathBuf::from(std::env::var_os("PICOAGENT_PROCESS_TEST_MARKER").unwrap());
+        if role == "marker" {
+            std::fs::write(marker, "started").unwrap();
+            return;
+        }
+        if role == "leaf" {
+            let stop = fixture_stop_path(&marker);
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+            while !stop.exists() && std::time::Instant::now() < deadline {
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            return;
+        }
+        assert_eq!(role, "root");
+        let mut command = fixture_command(&marker, "leaf");
+        command.stdin(Stdio::null());
+        if std::env::var("PICOAGENT_PROCESS_TEST_PIPE").unwrap() == "0" {
+            // 子の標準出力をnullへ変えても、Windowsでは根のpipeハンドルが別途
+            // 継承され得る。専用fixture内だけで継承フラグを外してEOF条件を作る。
+            #[cfg(windows)]
+            {
+                use std::os::windows::io::AsRawHandle;
+                use windows_sys::Win32::Foundation::{SetHandleInformation, HANDLE_FLAG_INHERIT};
+                for handle in [
+                    std::io::stdout().as_raw_handle(),
+                    std::io::stderr().as_raw_handle(),
+                ] {
+                    assert_ne!(
+                        unsafe { SetHandleInformation(handle, HANDLE_FLAG_INHERIT, 0) },
+                        0
+                    );
+                }
+            }
+            command.stdout(Stdio::null()).stderr(Stdio::null());
+        }
+        let mut child = command.spawn().unwrap();
+        std::fs::write(&marker, format!("{},{}", std::process::id(), child.id())).unwrap();
+        if std::env::var("PICOAGENT_PROCESS_TEST_WAIT").unwrap() == "1" {
+            child.wait().unwrap();
+        }
+        std::process::exit(
+            std::env::var("PICOAGENT_PROCESS_TEST_EXIT")
+                .unwrap()
+                .parse()
+                .unwrap(),
+        );
+    }
+
+    pub(crate) fn wait_marker_ids(marker: &std::path::Path) -> Vec<u32> {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        loop {
+            if let Ok(ids) = read_marker_ids(marker) {
+                return ids;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "検査用の親子PIDがそろいません"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+    }
+
+    /// 起動時に渡した固有の終了要求ファイルだけでfixtureを回収する。
+    /// PIDは観測用であり、終了済みPIDが再利用されても停止操作には使わない。
+    pub(crate) struct TestProcessIds(pub(crate) Vec<u32>, std::path::PathBuf);
+
+    impl TestProcessIds {
+        pub(crate) fn capture(marker: &std::path::Path) -> Self {
+            // markerの待機が失敗しても、Dropで同じfixtureへ終了を要求する。
+            let mut ids = Self(Vec::new(), marker.to_owned());
+            ids.0 = wait_marker_ids(marker);
+            ids
+        }
+    }
+
+    pub(crate) fn test_process_running(pid: u32) -> bool {
+        #[cfg(target_os = "linux")]
+        {
+            let Ok(stat) = std::fs::read_to_string(format!("/proc/{pid}/stat")) else {
+                return false;
+            };
+            let state = stat
+                .rsplit_once(')')
+                .unwrap()
+                .1
+                .split_whitespace()
+                .next()
+                .unwrap();
+            state != "Z" && state != "X"
+        }
+        #[cfg(target_os = "macos")]
+        {
+            let mut info: libc::proc_bsdinfo = unsafe { std::mem::zeroed() };
+            let size = std::mem::size_of_val(&info) as i32;
+            let read = unsafe {
+                libc::proc_pidinfo(
+                    pid as i32,
+                    libc::PROC_PIDTBSDINFO,
+                    0,
+                    &mut info as *mut _ as _,
+                    size,
+                )
+            };
+            read == size && info.pbi_status != libc::SZOMB
+        }
+        #[cfg(windows)]
+        process_alive(pid).unwrap_or(true)
+    }
+
+    impl Drop for TestProcessIds {
+        fn drop(&mut self) {
+            if let Err(error) = std::fs::write(fixture_stop_path(&self.1), []) {
+                eprintln!("検査プロセスへ終了を要求できません: {error}");
+                return;
+            }
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+            loop {
+                if self.0.is_empty() {
+                    if let Ok(ids) = read_marker_ids(&self.1) {
+                        self.0 = ids;
+                    }
+                }
+                if !self.0.is_empty() && self.0.iter().all(|pid| !test_process_running(*pid)) {
+                    return;
+                }
+                if std::time::Instant::now() >= deadline {
+                    // 観測失敗やPID再利用の疑いがあっても、番号指定の停止へ切り替えない。
+                    eprintln!("検査プロセスの終了を期限内に確認できません: {:?}", self.1);
+                    return;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+        }
+    }
+
+    #[test]
+    fn 根が先に終了した孫を回収し正常出力時の起動先は残す() {
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        runtime.block_on(async {
+            // 同名の別ジョブは、各回収で巻き込まれないことを同じ検査の中で確かめる。
+            let independent_dir = tempfile::tempdir().unwrap();
+            let independent_marker = independent_dir.path().join("independent.txt");
+            let mut independent_cmd = tree_test_command(&independent_marker, true, false, 0);
+            independent_cmd.stdout(Stdio::null()).stderr(Stdio::null());
+            let mut independent = OwnedChild::spawn(&mut independent_cmd).unwrap();
+            let independent_ids = TestProcessIds::capture(&independent_marker);
+            for (inherit_pipe, cancel, exit_code) in [
+                (false, false, 0),
+                (false, false, 7),
+                (true, false, 0),
+                (true, true, 0),
+            ] {
+                let directory = tempfile::tempdir().unwrap();
+                let marker = directory.path().join("owned.txt");
+                let mut command = tokio::process::Command::from(tree_test_command(
+                    &marker,
+                    false,
+                    inherit_pipe,
+                    exit_code,
+                ));
+                command.stdout(Stdio::piped()).stderr(Stdio::piped());
+                let running = tokio::spawn(output(command, 10, "親先行終了検査"));
+                let ids = TestProcessIds::capture(&marker);
+                if cancel {
+                    // 根の終了後に出力回収中のfutureを破棄する。
+                    for _ in 0..200 {
+                        if !test_process_running(ids.0[0]) {
+                            break;
+                        }
+                        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                    }
+                    assert!(
+                        !test_process_running(ids.0[0]),
+                        "親退出後の取消検査で根が終了していません"
+                    );
+                    running.abort();
+                    let _ = running.await;
+                } else {
+                    let result = running.await.unwrap();
+                    if inherit_pipe {
+                        assert!(result.unwrap_err().contains("回収できません"));
+                    } else {
+                        assert_eq!(result.unwrap().status.code(), Some(exit_code));
+                        assert!(
+                            test_process_running(ids.0[1]),
+                            "正常EOFで起動先を停止しました"
+                        );
+                    }
+                }
+                if inherit_pipe {
+                    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(3);
+                    while test_process_running(ids.0[1]) && tokio::time::Instant::now() < deadline {
+                        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                    }
+                    assert!(
+                        !test_process_running(ids.0[1]),
+                        "親退出後の孫が残っています"
+                    );
+                }
+                assert!(
+                    process_alive(independent.id()).unwrap(),
+                    "別ジョブを停止しました"
+                );
+                assert!(
+                    process_alive(independent_ids.0[1]).unwrap(),
+                    "別ジョブの孫を停止しました"
+                );
+            }
+            independent.terminate("独立ジョブの検査後始末").unwrap();
+        });
+    }
+
     #[cfg(windows)]
     #[test]
     fn 呼び出しfutureを破棄しても孫プロセスまで回収する() {
         let runtime = tokio::runtime::Runtime::new().unwrap();
         runtime.block_on(async {
-            let marker = std::env::temp_dir().join(format!(
-                "picoagent-process-cancel-{}-{}.txt",
-                std::process::id(),
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap()
-                    .as_nanos()
-            ));
-            let escaped = marker.to_string_lossy().replace('\'', "''");
-            let script = format!(
-                "$child = Start-Process -FilePath 'ping.exe' -ArgumentList '-n','31','127.0.0.1' -PassThru -WindowStyle Hidden; \"$PID,$($child.Id)\" | Set-Content -Encoding ascii -LiteralPath '{escaped}'; Wait-Process -Id $child.Id"
-            );
-            let mut cmd = command("powershell.exe");
-            cmd.args(["-NoProfile", "-NonInteractive", "-Command", &script]);
-            let running = tokio::spawn(output(cmd, 30, "破棄検査"));
-
-            // 存在を待つだけでは足りない。書き手（PowerShell の Set-Content）は作った直後も
-            // ハンドルを持っていて、その一瞬は共有違反で読めず、読めても内容が途中のことがある。
-            // 「期待する形へ読み切れる」までを待機条件にする。
-            let mut last_error = "まだ作られていません".to_string();
-            let mut ids = Vec::new();
-            let marker_deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-            while std::time::Instant::now() < marker_deadline {
-                match read_marker_ids(&marker) {
-                    Ok(values) => {
-                        ids = values;
-                        break;
-                    }
-                    Err(reason) => last_error = reason,
-                }
-                tokio::time::sleep(std::time::Duration::from_millis(25)).await;
-            }
-            // 起動確認に失敗した経路でも、assertする前に呼び出しを破棄して回収する。
+            let directory = tempfile::tempdir().unwrap();
+            let marker = directory.path().join("owned.txt");
+            let mut command =
+                tokio::process::Command::from(tree_test_command(&marker, true, true, 0));
+            command.stdout(Stdio::piped()).stderr(Stdio::piped());
+            let running = tokio::spawn(output(command, 30, "破棄検査"));
+            let ids = TestProcessIds::capture(&marker);
             running.abort();
             let _ = running.await;
-            if ids.is_empty() {
-                // PIDを書き込む前に停止した場合も、自分の固有マーカーを起動引数に持つ
-                // PowerShellだけを探す。名前だけで他のPowerShellを停止しない。
-                let cleanup_script = format!(
-                    "$targets = Get-CimInstance Win32_Process -Filter \"Name='powershell.exe'\" | Where-Object {{ $_.ProcessId -ne $PID -and $_.CommandLine -and $_.CommandLine.Contains('{escaped}') }}; foreach ($target in $targets) {{ & taskkill.exe /PID $target.ProcessId /T /F | Out-Null }}"
-                );
-                let mut cleanup = command("powershell.exe");
-                cleanup.args(["-NoProfile", "-NonInteractive", "-Command", &cleanup_script]);
-                let cleanup_result = output(cleanup, 10, "検査プロセスの回収").await;
-                let _ = std::fs::remove_file(&marker);
-                assert!(
-                    cleanup_result.as_ref().is_ok_and(|result| result.status.success()),
-                    "検査プロセスの回収に失敗しました: {cleanup_result:?}"
-                );
-                panic!("親子PIDを書いた検査ファイルを10秒以内に読み切れませんでした: {last_error}");
+            let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(3);
+            while ids.0.iter().any(|pid| test_process_running(*pid))
+                && tokio::time::Instant::now() < deadline
+            {
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
             }
-            let mut alive = ids.clone();
-            let mut query_errors = Vec::new();
-            for _ in 0..120 {
-                alive.retain(|pid| match process_alive(*pid) {
-                    Ok(exists) => exists,
-                    Err(error) => { query_errors.push(error.to_string()); true }
-                });
-                if alive.is_empty() {
-                    break;
-                }
-                tokio::time::sleep(std::time::Duration::from_millis(25)).await;
-            }
-            if !alive.is_empty() {
-                // テスト失敗でも、自分が起動してPIDを記録したツリーだけを回収する。
-                let _ = std::process::Command::new("taskkill.exe")
-                    .args(["/PID", &ids[0].to_string(), "/T", "/F"])
-                    .output();
-            }
-            let _ = std::fs::remove_file(&marker);
-            assert!(alive.is_empty(), "中断後も残った検査プロセス: {alive:?}、確認失敗: {query_errors:?}");
+            assert!(
+                ids.0.iter().all(|pid| !test_process_running(*pid)),
+                "中断後も検査プロセスが残っています: {:?}",
+                ids.0
+            );
         });
     }
 }
-
 /// 設計ガード: スキルが外部プロセスの起動作法を自前で持ち込んでいないかを検査する。
 ///
 /// 以前は `#[cfg(windows)] fn hide_window` を各スキルへコピーする運用で、7ファイルに
@@ -1011,13 +1282,18 @@ mod guard {
 
     use crate::guard_scan;
 
+    fn is_process_layer(source: &guard_scan::Source) -> bool {
+        source.path == std::path::Path::new("src-tauri/src/tools/process.rs")
+            || source.path.starts_with("src-tauri/src/tools/process")
+    }
+
     /// 外部プロセスの起動は `tools::process::command()` 経由に統一すること。
     #[test]
     fn プロセス起動作法を自前実装しない() {
         let mut violations = Vec::new();
         for source in guard_scan::all_sources() {
             let name = &source.name;
-            if name == "process.rs" {
+            if is_process_layer(source) {
                 continue; // 共通層の実装そのもの
             }
             if RAW_COMMAND_ALLOWED.contains(&name.as_str()) {
@@ -1062,7 +1338,7 @@ mod guard {
     fn 子プロセスの完了待ちに上限を付ける() {
         let mut violations = Vec::new();
         for source in guard_scan::all_sources() {
-            if source.name == "process.rs" {
+            if is_process_layer(source) {
                 continue; // 上限を実装している共通層そのもの
             }
             for (number, line) in source.body().lines().enumerate() {
@@ -1093,13 +1369,13 @@ mod guard {
     /// `tokio::time::timeout(..., command.output())` も同じ理由で検出する。上限は付くが、
     /// 打ち切りで `output()` のfutureを捨てても `kill_on_drop` が届くのは**直下の子だけ**で、
     /// 起動直後に本体を立て直す実行ファイル（LibreOffice の `soffice` → `soffice.bin` など）は
-    /// 残り続ける。共通層は `terminate_process_tree()` でツリーごと回収する。
+    /// 残り続ける。共通層は `OwnedAsyncChild` が所有する範囲を回収する。
     /// 実際に `ms_office` / `image_tools` / `pdf_tools` の4箇所がこの形で残っていた。
     #[test]
     fn 一度きりの実行は共通層を通す() {
         let mut violations = Vec::new();
         for source in guard_scan::all_sources() {
-            if source.name == "process.rs" {
+            if is_process_layer(source) {
                 continue; // 共通層の実装そのもの
             }
             for (number, line) in source.body().lines().enumerate() {
