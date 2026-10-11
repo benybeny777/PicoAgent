@@ -39,17 +39,9 @@ fn name(path: &Path) -> Result<String> {
 fn ordinary(path: &Path) -> Result<bool> {
     match std::fs::symlink_metadata(path) {
         Ok(meta) => {
-            #[cfg(windows)]
-            {
-                use std::os::windows::fs::MetadataExt;
-                anyhow::ensure!(
-                    meta.file_attributes() & 0x400 == 0,
-                    "配置対象がリンクです: {}",
-                    path.display()
-                );
-            }
+            super::fs::validate_normal_metadata(path, &meta)?;
             anyhow::ensure!(
-                meta.is_dir() && !meta.file_type().is_symlink(),
+                meta.is_dir(),
                 "配置対象が通常のディレクトリではありません: {}",
                 path.display()
             );

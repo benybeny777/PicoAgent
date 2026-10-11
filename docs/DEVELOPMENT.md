@@ -494,6 +494,8 @@ scripts/setup-character-learning-runtime.pyは共有Python3.12から専用venv�
 本体の取得・展開・複製・ファイル探索・空き容量・配置復元の正本は`src-tauri/src/installer/`です。用途側は上限と保存先を渡し、共通部品の手順を複製しません。プロセスの生存確認は`tools::process`がOSのAPIで行い、外部コマンドへ無期限に待ちません。音声学習のPython導入・状態保存の原子的移動は、既存の配布共通モジュール`voice_training_common.py`へ集め、Windowsの一時的な共有拒否だけ同じ操作を有限回再試行します。中核crateの最小RustはSHA-256共通化に必要な1.85、本体・xtaskの最小Rustは従来どおり1.88です。Whisperの`WHISPER_RELEASE`は正本マニフェストの`binaryRelease`と一致する指定だけを受け付けます。Macは固定ソースからCMakeでビルドし、他OSのバイナリやSDKを代用取得しません。
 
 
+導入先のリンク・ジャンクション・特殊ファイル判定は`installer::fs::validate_normal_metadata`へ集約します。存在確認で取得済みのファイル情報をその場で検査し、同じ検査内で読み直しません。公開や復元など別工程では改めて取得し、古い検査結果を使い回しません。
+
 固定取得の終了時清掃では、取得先そのものを旧 `.part` 残物と判定しません。uv・ComfyUI・Whisperの専用展開先は `components::prepare_cached_extraction` で通常ディレクトリと管理直下を確認してから作り直し、展開後の工程が失敗しても再試行できます。書庫・隣接キャッシュ・公開済みランタイムはこの回収対象に含めません。
 
 ## キャラ描画の負荷確認
