@@ -125,10 +125,7 @@ pub fn approval_prompt(pending: &PendingCommandApproval) -> String {
 }
 
 pub fn trim_output(label: &str, bytes: &[u8]) -> String {
-    format!(
-        "{label}:\n{}",
-        crate::text::command_output_within(bytes, MAX_OUTPUT_BYTES)
-    )
+    crate::text::labeled_command_output_within(label, bytes, MAX_OUTPUT_BYTES)
 }
 
 #[async_trait]

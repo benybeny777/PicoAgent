@@ -57,6 +57,7 @@ pub fn truncate_bytes(text: &str, max_bytes: usize) -> &str {
 /// バイト上限を超えた場合だけ文字境界で切り詰め、切ったことを示す `notice` を末尾へ付ける。
 ///
 /// 黙って切ると、読み手（モデル）は途中までの出力を全文として扱ってしまう。
+/// 上限は本文だけに適用し、呼び出し側が渡した注記は上限に含めない。
 pub fn truncate_bytes_with_notice(text: &mut String, max_bytes: usize, notice: &str) {
     if text.len() <= max_bytes {
         return;
@@ -68,14 +69,30 @@ pub fn truncate_bytes_with_notice(text: &mut String, max_bytes: usize, notice: &
 
 /// バイト上限で切ったことを、上限を十進MBにして伝える末尾の注記。
 pub fn byte_limit_notice(max_bytes: usize) -> String {
-    format!("\n…（約{:.2}MBで打ち切り）", max_bytes as f64 / 1_000_000.0)
+    // 小さい正の上限を0MBへ丸めず、音声処理の既存の小数3桁も保持する。
+    let precision = if max_bytes > 0 && max_bytes < 1000 {
+        6
+    } else {
+        3
+    };
+    format!(
+        "\n…（約{:.precision$}MBで打ち切り）",
+        max_bytes as f64 / 1_000_000.0
+    )
 }
 
 /// 外部コマンドの出力をバイト上限まで文字列にし、切った場合は上限を添える。
 pub fn command_output_within(bytes: &[u8], max_bytes: usize) -> String {
     let mut text = String::from_utf8_lossy(bytes).into_owned();
-    truncate_bytes_with_notice(&mut text, max_bytes, &byte_limit_notice(max_bytes));
+    if text.len() > max_bytes {
+        truncate_bytes_with_notice(&mut text, max_bytes, &byte_limit_notice(max_bytes));
+    }
     text
+}
+
+/// ラベルと本文を分け、ラベル・注記を除いた本文の変換後サイズだけを制限する。
+pub fn labeled_command_output_within(label: &str, bytes: &[u8], max_bytes: usize) -> String {
+    format!("{label}:\n{}", command_output_within(bytes, max_bytes))
 }
 
 /// チャンク境界で分断されたUTF-8末尾を、次のチャンクまで保持する逐次デコーダ。
@@ -124,8 +141,8 @@ impl Utf8Stream {
 #[cfg(test)]
 mod tests {
     use super::{
-        command_output_within, preview, tail, truncate_bytes, truncate_bytes_with_notice,
-        Utf8Stream,
+        byte_limit_notice, command_output_within, labeled_command_output_within, preview, tail,
+        truncate_bytes, truncate_bytes_with_notice, Utf8Stream,
     };
 
     #[test]
@@ -149,12 +166,58 @@ mod tests {
         let mut cut = "あいう".to_string();
         truncate_bytes_with_notice(&mut cut, 7, "[切]");
         assert_eq!(cut, "あい[切]");
+        let mut empty = String::new();
+        truncate_bytes_with_notice(&mut empty, 0, "[切]");
+        assert_eq!(empty, "");
+        let mut zero = "あ".to_string();
+        truncate_bytes_with_notice(&mut zero, 0, "[切]");
+        assert_eq!(zero, "[切]");
         assert_eq!(command_output_within("abc".as_bytes(), 3), "abc");
         assert!(command_output_within("あいう".as_bytes(), 4).starts_with("あ\n…（約"));
         assert_eq!(
             command_output_within(&vec![b'x'; 40_000], 32 * 1024).len(),
-            32 * 1024 + "\n…（約0.03MBで打ち切り）".len()
+            32 * 1024 + "\n…（約0.033MBで打ち切り）".len()
         );
+    }
+
+    #[test]
+    fn 注記は小さい正の上限もゼロへ丸めず十進の容量を伝える() {
+        for (limit, expected) in [
+            (1, "0.000001"),
+            (0, "0.000"),
+            (999, "0.000999"),
+            (1000, "0.001"),
+            (16 * 1024, "0.016"),
+            (32 * 1024, "0.033"),
+        ] {
+            assert_eq!(
+                byte_limit_notice(limit),
+                format!("\n…（約{expected}MBで打ち切り）")
+            );
+        }
+    }
+
+    #[test]
+    fn 置換文字で増えた変換後本文も上限を守りラベルと注記を保持する() {
+        for (bytes, limit, expected) in [
+            (&[0xff][..], 2, ""),
+            (&[0xff, 0xff][..], 4, "�"),
+            ("あ😀い".as_bytes(), 6, "あ"),
+            (b"abcdef".as_slice(), 0, ""),
+        ] {
+            let notice = byte_limit_notice(limit);
+            let output = command_output_within(bytes, limit);
+            assert_eq!(output, format!("{expected}{notice}"));
+            assert!(output.strip_suffix(&notice).unwrap().len() <= limit);
+            for label in ["", "stdout", "標準エラー"] {
+                assert_eq!(
+                    labeled_command_output_within(label, bytes, limit),
+                    format!("{label}:\n{expected}{notice}")
+                );
+            }
+        }
+        assert_eq!(labeled_command_output_within("", b"", 0), ":\n");
+        assert_eq!(command_output_within(&[0xff], 3), "�");
     }
 
     #[test]

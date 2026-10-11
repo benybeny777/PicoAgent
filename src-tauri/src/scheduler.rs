@@ -435,13 +435,6 @@ pub fn validate_task(cfg: &Config, task: &ScheduledTask) -> Result<(), String> {
     Ok(())
 }
 
-fn trim_output(label: &str, bytes: &[u8]) -> String {
-    format!(
-        "{label}:\n{}",
-        crate::text::command_output_within(bytes, MAX_OUTPUT_BYTES)
-    )
-}
-
 async fn execute_task(app: &AppHandle, cfg: &Config, task: &ScheduledTask) -> String {
     if task.kind.trim().eq_ignore_ascii_case("tool") {
         if let Err(error) = validate_task(cfg, task) {
@@ -517,9 +510,17 @@ async fn execute_task(app: &AppHandle, cfg: &Config, task: &ScheduledTask) -> St
             .unwrap_or_else(|| "シグナル終了".to_string()),
         cwd.display()
     );
-    result.push_str(&trim_output("stdout", &output.stdout));
+    result.push_str(&crate::text::labeled_command_output_within(
+        "stdout",
+        &output.stdout,
+        MAX_OUTPUT_BYTES,
+    ));
     result.push('\n');
-    result.push_str(&trim_output("stderr", &output.stderr));
+    result.push_str(&crate::text::labeled_command_output_within(
+        "stderr",
+        &output.stderr,
+        MAX_OUTPUT_BYTES,
+    ));
     result
 }
 
