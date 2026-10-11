@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import copy
 import hashlib
+import http.client
 import json
 import math
 import os
@@ -13,10 +14,11 @@ import secrets
 import socket
 import subprocess
 import sys
+import threading
 import time
 from contextlib import contextmanager
 from datetime import datetime, timezone
-from urllib import error, request
+from urllib import error
 
 # 原子的配置のWindows共有違反対策は、配布スクリプトの共通実装を使う。
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
@@ -56,7 +58,7 @@ def result_key(result):
     return result.get("case_id"), result.get("seed")
 
 
-def read_journal(path, planned, *, require_complete):
+def read_journal(path, planned, *, require_complete, key_function=result_key):
     """欠損・重複・途中行を許さず、実行順に保存した結果だけを復元する。"""
     results = []
     seen = set()
@@ -67,7 +69,7 @@ def read_journal(path, planned, *, require_complete):
             result = json.loads(line)
             if not isinstance(result, dict) or result.get("status") not in {"completed", "failed", "interrupted"}:
                 raise ValueError(f"結果ジャーナルの{line_number}行目が不正です")
-            key = result_key(result)
+            key = key_function(result)
             if key in seen or len(results) >= len(planned) or key != planned[len(results)]:
                 raise ValueError(f"結果ジャーナルに欠損・重複・順序違いがあります: {line_number}行目")
             if require_complete and result["status"] != "completed":
@@ -85,30 +87,68 @@ def append_result(journal, result):
     journal.flush()
 
 
-class NoRedirect(request.HTTPRedirectHandler):
-    def redirect_request(self, req, fp, code, msg, headers, newurl):
-        raise ValueError("ローカル評価サーバからのリダイレクトは許可しません")
-
-
 class LocalClient:
     def __init__(self, port, api_key, process):
         self.base = f"http://127.0.0.1:{port}"
+        self.port = port
         self.api_key = api_key
         self.process = process
-        # 環境変数のHTTPプロキシや認証情報を参照しない。
-        self.opener = request.build_opener(request.ProxyHandler({}), NoRedirect())
 
-    def json(self, endpoint, body=None, timeout=120):
+    @contextmanager
+    def open(self, endpoint, body=None, timeout=120):
+        """JSONとSSEで同じ専用接続を使い、応答が少しずつ届いても総時間を制限する。"""
         if endpoint not in {"/props", "/v1/chat/completions", "/apply-template", "/tokenize"}:
             raise ValueError("許可していない評価APIです")
         if self.process.poll() is not None:
             raise RuntimeError(f"評価サーバが終了しました: {self.process.returncode}")
         data = None if body is None else json.dumps(body, ensure_ascii=False, allow_nan=False).encode("utf-8")
-        req = request.Request(self.base + endpoint, data=data, headers={
+        headers = {
             "Content-Type": "application/json",
             "Authorization": f"Bearer {self.api_key}",
-        })
-        with self.opener.open(req, timeout=timeout) as response:
+        }
+        started = time.monotonic()
+        # http.clientは環境変数のHTTPプロキシ・認証・リダイレクトを使わない。
+        connection = http.client.HTTPConnection("127.0.0.1", self.port, timeout=timeout)
+        expired = threading.Event()
+        timer = None
+        try:
+            connection.connect()
+            own_socket = connection.sock
+
+            def abort():
+                expired.set()
+                try:
+                    own_socket.shutdown(socket.SHUT_RDWR)
+                except OSError:
+                    pass
+
+            remaining = timeout - (time.monotonic() - started)
+            if remaining <= 0:
+                raise TimeoutError("評価APIの総時間が上限を超えました")
+            timer = threading.Timer(remaining, abort)
+            timer.daemon = True
+            timer.start()
+            connection.request("GET" if body is None else "POST", endpoint, body=data, headers=headers)
+            with connection.getresponse() as response:
+                if 300 <= response.status < 400:
+                    raise ValueError("ローカル評価サーバからのリダイレクトは許可しません")
+                if response.status >= 400:
+                    raise error.HTTPError(self.base + endpoint, response.status, response.reason, response.headers, None)
+                yield response
+                if expired.is_set():
+                    raise TimeoutError("評価APIの総時間が上限を超えました")
+        except (OSError, http.client.HTTPException) as exc:
+            if expired.is_set():
+                raise TimeoutError("評価APIの総時間が上限を超えました") from exc
+            raise
+        finally:
+            if timer is not None:
+                timer.cancel()
+                timer.join()
+            connection.close()
+
+    def json(self, endpoint, body=None, timeout=120):
+        with self.open(endpoint, body, timeout) as response:
             raw = response.read(32_000_001)
         if len(raw) > 32_000_000:
             raise ValueError("評価APIの応答が上限32MBを超えています")
@@ -379,27 +419,32 @@ def seeds_value(value):
     return values
 
 
+def add_server_arguments(command, *, adapter_required=False):
+    for field, help_text in (("server", "起動するllama-server実行ファイル"), ("model", "ベースGGUF"),
+                             ("template", "本番Jinjaテンプレート"), ("input", "Rustがbodyを追加したcases JSON"),
+                             ("output", "新規作成する結果JSON")):
+        command.add_argument("--" + field, type=Path, required=True, help=help_text)
+    command.add_argument("--adapter", type=Path, required=adapter_required,
+                         help="比較するLoRA GGUF" + ("。必須" if adapter_required else "。省略時はベースのみ"))
+    command.add_argument("--gpu-layers", type=int, choices=(0, 99), required=True, help="0はCPU、99はGPU")
+    command.add_argument("--device", help="明示する製品GPUデバイス名")
+    command.add_argument("--context", type=positive_integer, default=4096, help="文脈長。既定4096")
+    command.add_argument("--max-tokens", type=positive_integer, default=256, help="最大生成token数。既定256")
+    command.add_argument("--startup-timeout", type=positive_number, default=180, help="起動の上限秒数")
+    command.add_argument("--request-timeout", type=positive_number, default=120, help="API応答の総時間上限秒数")
+    command.add_argument("--snapshot-seconds", type=positive_number, default=30, help="全JSONの保存間隔。結果は各件JSONLへ追記")
+
+
 def parser():
     result = argparse.ArgumentParser(description=__doc__)
     commands = result.add_subparsers(dest="command", required=True)
     for name, description in (("evaluate", "本番入力で回答を生成し、未採点の結果を保存する"),
                               ("inspect", "本番テンプレートの入力文字列とtoken IDを保存する")):
         command = commands.add_parser(name, help=description, description=description)
-        for field, help_text in (("server", "起動するllama-server実行ファイル"), ("model", "ベースGGUF"),
-                                 ("template", "本番Jinjaテンプレート"), ("input", "Rustがbodyを追加したcases JSON"),
-                                 ("output", "新規作成する結果JSON")):
-            command.add_argument("--" + field, type=Path, required=True, help=help_text)
-        command.add_argument("--adapter", type=Path, help="比較するLoRA GGUF。省略時はベースのみ")
-        command.add_argument("--gpu-layers", type=int, choices=(0, 99), required=True, help="0はCPU、99はGPU")
-        command.add_argument("--device", help="明示する製品GPUデバイス名")
+        add_server_arguments(command)
         command.add_argument("--seeds", type=seeds_value, default=[1, 2, 3], help="推論seed。既定1,2,3")
         command.add_argument("--limit", type=positive_integer, help="対象ケースの先頭件数")
         command.add_argument("--split", help="対象splitの完全一致名")
-        command.add_argument("--context", type=positive_integer, default=4096, help="文脈長。既定4096")
-        command.add_argument("--max-tokens", type=positive_integer, default=256, help="最大生成token数。既定256")
-        command.add_argument("--startup-timeout", type=positive_number, default=180, help="起動の上限秒数")
-        command.add_argument("--request-timeout", type=positive_number, default=120, help="API応答の上限秒数")
-        command.add_argument("--snapshot-seconds", type=positive_number, default=30, help="全JSONの保存間隔。結果は各件JSONLへ追記")
     return result
 
 

@@ -22,6 +22,7 @@
 | `python tools/lora/training.py ...` | ローカルHF資産を使ってCUDA GPU上でLoRAだけを更新する。GPU要件を満たさない場合は停止する |
 | `python tools/lora/probe.py ...` | 少量学習したアダプタの有無をCPU・GPUで比較し、同じ入力の候補token確率が変わることを検査する。品質評価とは分ける |
 | `python tools/lora/runner.py evaluate ...` | 本番bodyで回答を生成し、seed別の生出力・ツール呼出・timings・経過時間を未採点のまま保存する |
+| `python tools/lora/benchmark.py ...` | 明示したdev入力で基底とアダプタを比較し、SSEの応答開始時間・全体時間・生成量をキャッシュ別に反復測定する |
 
 本番テンプレートの正本は`src-tauri/src/providers/templates/lfm25-jp-history.jinja`。教材の`body`をPython側で作り直さない。Rustの出力テストは`LORA_FIXTURE_INPUT`と`LORA_FIXTURE_OUTPUT`へ異なる新規入出力先を明示して実行する。
 
@@ -33,6 +34,8 @@ Remove-Item Env:LORA_FIXTURE_INPUT, Env:LORA_FIXTURE_OUTPUT
 ```
 
 `runner.py`は`--server <実行ファイル> --model <ベースGGUF> --template <本番Jinja> --input <本番body付きJSON> --output <新規結果JSON> --gpu-layers <0|99>`を必須とする。0はCPU、99はGPUで、必要なら`--device`へ製品で使うデバイスを指定する。`--adapter <LoRA GGUF>`の省略時はベースのみ。`evaluate`はtemperature 0.6、seed 1・2・3、キャッシュなし、最大生成256tokenを既定とし、`--seeds`・`--max-tokens`・`--split`・`--limit`で対象を明示できる。全入力を照合する`inspect`には`--split`・`--limit`を付けない。
+
+`benchmark.py`はrunnerと同じサーバ引数に加え、`--adapter <LoRA GGUF> --case-ids <devのIDをカンマ区切りで1〜8件>`を必須とする。基底・アダプタそれぞれでキャッシュ無／有を分け、各入力を準備1回と測定3回、同じseedで生成する。TTFTはSSEで最初の可視文字を受け取るまでの時間とし、全体時間・サーバtimings・実際のcache_n・生成token数・生回答とcase別median/p95を保存する。3回のp95は最大値になるため参考値として扱う。短答や誤答による高速化を自動合格にせず、意味と生成量を照合する。JSON/SSEとも総応答時間を制限し、未完のSSE・指標欠落を成功扱いにしない。
 
 `parity.py --input <本番body付きJSON> --inspection <inspect結果JSON> --base <HF資産ディレクトリ> --template <本番Jinja> --output <新規照合JSON>`で照合する。最終評価の入力も照合できるが、正解はローカルの学習範囲検査だけに使用し、モデルへ送信しない。一致判定は入力とテンプレートのSHA-256、全caseの対応、全文、全token IDのすべてを対象とする。llama.cppがテンプレートからBOSを除きtoken化時に戻す場合は、その単一BOSと全token一致を確認したうえで実効入力全文を比較する。raw本文の差と補正内容も保存し、他の本文差を正規化して隠さない。
 
