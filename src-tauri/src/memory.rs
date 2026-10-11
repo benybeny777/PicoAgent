@@ -1,7 +1,7 @@
 // memory.rs - 暗黙的な長期メモリ。
 //
 // 直近履歴とは別に、ユーザーの好み・自己情報・継続指示だけを保守的に
-// app_data_dir/memory.json へ保存し、system 文脈へ短く差し込む。
+// app_data_dir/memory.json へ保存し、利用者主体のターン資料へ短く差し込む。
 
 use std::path::PathBuf;
 
@@ -397,6 +397,16 @@ fn reported_or_uncertain(text: &str) -> bool {
             "感じる",
             "感じた",
             "感じて",
+            "頼む",
+            "頼み",
+            "頼ん",
+            "依頼する",
+            "依頼し",
+            "求める",
+            "求めた",
+            "求めて",
+            "要求する",
+            "要求し",
         ]
         .into_iter()
         .any(|verb| rest.starts_with(verb))
@@ -404,10 +414,13 @@ fn reported_or_uncertain(text: &str) -> bool {
     ["だと", "ですと", "ことを", "のを"]
         .into_iter()
         .any(|link| text.split(link).skip(1).any(reporting_verb))
-        // 「好きと聞いた」のような省略形は、直前が好み等の述語の場合だけ扱う。
+        // 好みや依頼の引用を報告と判定し、「人と話す」の並列・相手の助詞と区別する。
         || text.match_indices('と').any(|(index, link)| {
             let (before, after) = text.split_at(index);
-            ["好き", "嫌い", "得意", "苦手"]
+            [
+                "好き", "嫌い", "得意", "苦手", "ほしい", "ください", "しないで",
+                "読まないで", "読み上げないで", "参照して", "優先して", "覚えて",
+            ]
                 .into_iter()
                 .any(|predicate| before.ends_with(predicate))
                 && reporting_verb(&after[link.len()..])
@@ -426,9 +439,44 @@ fn reported_or_uncertain(text: &str) -> bool {
         )
 }
 
+// 属性値だけの引用を判定用の名詞へ置く。原文は保存・表示のため変更しない。
+// 発言の引用は「と言った」等へ続くため許可せず、自己申告の値と混同しない。
+fn memory_subject_text(text: &str) -> Option<String> {
+    let mut quotes = crate::text::QuoteState::default();
+    let mut output = String::with_capacity(text.len());
+    for (index, character) in text.char_indices() {
+        let depth = quotes.depth();
+        let quoted = quotes.enter(character);
+        if quotes.in_code() {
+            return None;
+        }
+        if depth == 0 && quotes.depth() == 1 {
+            output.push_str("引用値");
+        } else if depth == 1 && quotes.depth() == 0 {
+            let rest = &text[index + character.len_utf8()..];
+            let value_end = rest.is_empty()
+                || ["です", "だ", "が好き", "が嫌い", "が苦手", "が得意"]
+                    .iter()
+                    .any(|ending| rest.starts_with(ending));
+            if !value_end {
+                return None;
+            }
+        } else if !quoted {
+            output.push(character);
+        } else if depth == 0 {
+            // 対応する開始がない閉じ引用符は、属性値として補完しない。
+            return None;
+        }
+    }
+    (quotes.depth() == 0).then_some(output)
+}
+
 // 保存時と旧記録の参照時で同じ主体判定を使い、発話者と事実の主体を混同しない。
 fn memory_subject(text: &str) -> MemorySubject {
-    let text = text.trim();
+    let Some(subject_text) = memory_subject_text(text.trim()) else {
+        return MemorySubject::Unresolved;
+    };
+    let text = subject_text.as_str();
     if reported_or_uncertain(text) {
         return MemorySubject::Unresolved;
     }
@@ -616,7 +664,8 @@ fn extract_candidates(text: &str) -> Vec<(String, String)> {
     chunks
         .into_iter()
         .filter(|chunk| memory_subject(chunk) != MemorySubject::Unresolved)
-        .flat_map(|chunk| split_sentences(&chunk))
+        // 引用内の句点を再分割せず、既に確定した文境界を使う。
+        .filter_map(|chunk| memory_sentence(&chunk, true))
         .filter_map(|sentence| classify_sentence(&sentence).map(|category| (category, sentence)))
         .collect()
 }
@@ -625,17 +674,21 @@ fn extract_candidates(text: &str) -> Vec<(String, String)> {
 /// （別に実装すると、片方だけが箇条書きや改行の扱いを取りこぼす）。
 pub(crate) fn split_sentences(text: &str) -> Vec<String> {
     let normalized = text.replace('\r', "\n");
-    let mut out = Vec::new();
-    for chunk in normalized.split(SENTENCE_SEPARATORS) {
-        let sentence = chunk
-            .trim()
-            .trim_matches(|c: char| c.is_whitespace() || "、，,.：:「」『』（）()[]".contains(c));
-        let count = sentence.chars().count();
-        if (4..=MAX_ITEM_CHARS).contains(&count) {
-            out.push(sentence.to_string());
-        }
-    }
-    out
+    normalized
+        .split(SENTENCE_SEPARATORS)
+        .filter_map(|chunk| memory_sentence(chunk, false))
+        .collect()
+}
+
+fn memory_sentence(chunk: &str, quoted_values: bool) -> Option<String> {
+    let sentence = chunk.trim().trim_matches(|c: char| {
+        c.is_whitespace()
+            || "、，,.：:（）()[]".contains(c)
+            || (!quoted_values && "「」『』".contains(c))
+    });
+    (4..=MAX_ITEM_CHARS)
+        .contains(&sentence.chars().count())
+        .then(|| sentence.to_string())
 }
 
 fn classify_sentence(sentence: &str) -> Option<String> {
@@ -752,6 +805,66 @@ mod tests {
         assert_eq!(items.len(), 2);
         assert!(items.iter().any(|(_, text)| text == "私はRustをよく使う"));
         assert!(items.iter().any(|(category, _)| category == "継続指示"));
+    }
+
+    #[test]
+    fn 第三者の依頼や伝聞を継続指示へ移さず本人の直接指示だけを保存する() {
+        for (text, accepted) in [
+            ("太郎は今後結論から話してほしいと言った", false),
+            ("太郎は今後結論から話してほしいと頼んだ", false),
+            ("太郎は今後結論から話してほしいと依頼した", false),
+            ("太郎は今後結論から話してほしいと求めた", false),
+            ("太郎は結論を優先してと要求した", false),
+            ("太郎は今後結論から話してくださいと言った", false),
+            ("太郎は「今後結論から話してほしい」と言った", false),
+            ("私は結論を優先してと頼みました", false),
+            ("今後は結論から話してほしい", true),
+            ("私は今後結論から話してほしい", true),
+            ("結論を優先して", true),
+        ] {
+            let expected = if accepted {
+                vec![("継続指示".to_string(), text.to_string())]
+            } else {
+                Vec::new()
+            };
+            assert_eq!(extract_candidates(text), expected, "{text}");
+            assert_eq!(
+                super::memory_subject(text) == super::MemorySubject::Instruction,
+                accepted,
+                "旧記録も同じ主体で扱う: {text}"
+            );
+        }
+    }
+
+    #[test]
+    fn 本人の属性値の引用を保ち発話の引用とは区別する() {
+        for (text, category) in [
+            ("私の名前は「太郎」です", Some("ユーザー情報")),
+            ("私の名前は「太郎」", Some("ユーザー情報")),
+            ("私は「緑茶」が好きです", Some("好み")),
+            ("私は『吾輩は猫である。』が好きです", Some("好み")),
+            ("私は\"緑茶\"が好きです", Some("好み")),
+            ("私は「太郎は緑茶好き」と言った", None),
+            ("友人が「私は緑茶が好き」と話した", None),
+            ("「私は緑茶が好き」です", None),
+            ("私は「緑茶が好きです", None),
+            ("私は`緑茶`が好きです", None),
+        ] {
+            let expected = category
+                .map(|category| vec![(category.to_string(), text.to_string())])
+                .unwrap_or_default();
+            assert_eq!(extract_candidates(text), expected, "{text}");
+            let store = MemoryStore {
+                items: vec![MemoryItem {
+                    category: category.unwrap_or("好み").to_string(),
+                    text: text.to_string(),
+                    updated_at: "2026-10-11T00:00:00Z".to_string(),
+                    hits: 1,
+                }],
+            };
+            let context = context_from_store(&store);
+            assert_eq!(context.contains(text), category.is_some(), "{text}");
+        }
     }
 
     #[test]

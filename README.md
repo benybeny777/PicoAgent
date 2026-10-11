@@ -139,7 +139,7 @@ AIモデルなど数GBの取得は `setup` を明示したときだけ行いま�
 
 既定は **`local`（同梱エンジン）** で、何も設定しなくても動きます。
 
-- **ローカルモデル** — 初回は連続ツール利用を検証済みの LFM2.5 2.6B QAD Q4（約1.59GB）を選びます。設定画面「AIモデル」には実PCのRAMと、正確に取れた場合だけ専用VRAMを表示し、日本語対応の LFM2.5・Gemma 4・Qwen3.5・gpt-oss・Phi-4 mini を候補として案内します。利用者が選んだモデルは自動で変えません
+- **ローカルモデル** — 初回はツール履歴補正付きの LFM2.5 1.2B JP-202606 Q4_K_M（約0.731GB）を選びます。設定画面「AIモデル」には実PCのRAMと、正確に取れた場合だけ専用VRAMを表示し、日本語対応の LFM2.5・Gemma 4・Qwen3.5・gpt-oss・Phi-4 mini を候補として案内します。利用者が選んだモデルは自動で変えません
 - **GPU** — Windows は NVIDIA で `CUDA → Vulkan → CPU`、AMD で `ROCm → Vulkan → CPU`、Intel で `SYCL → Vulkan → CPU` の順に起動確認します。Ubuntu は Vulkan、macOS は Metal を使います
 - **ディスク整理** — 「AIモデル」の「ダウンロード済みモデル」から一覧・サイズ確認・削除（使用中は削除不可。同じボタンを2回押したときだけ削除）
 - **クラウド AI**（費用が発生します） — 右クリック →「設定を開く…」→「AIモデル」でプロバイダ・API キー・モデルを設定。OpenAI / Claude / Gemini / DeepSeek / xAI Grok / Mistral に対応
@@ -580,7 +580,8 @@ flowchart LR
 
 | プリセット | モデル | 推奨 VRAM | 推奨 RAM | ダウンロード目安 |
 |---|---|---|---|---|
-| `lfm25_2_6b`（既定） | LFM2.5 2.6B QAD Q4 | 4 GB | 8 GB | 約 1.59 GB |
+| `lfm25_1_2b_jp`（既定） | LFM2.5 1.2B JP-202606 Q4_K_M | 不要（CPUでも可） | 8 GB | 約 0.731 GB |
+| `lfm25_2_6b` | LFM2.5 2.6B QAD Q4 | 4 GB | 8 GB | 約 1.59 GB |
 | `small` | Gemma 4 E2B Q4 | 不要（CPU 中心でも可） | 8 GB | 約 3.1 GB |
 | `balanced` | Gemma 4 E4B Q4 | 4 GB | 16 GB | 約 5.0 GB |
 | `large` | Gemma 4 12B Q4 | 8 GB | 24 GB | 約 7.1 GB |
@@ -625,7 +626,7 @@ APU は独立したVRAMではなくシステムRAMをGPUと共有するため、
 
 | 環境 | 最低目安 | 推奨 | モデルの目安 |
 |---|---|---|---|
-| Windows 10/11 x64＋Vulkan対応Radeon内蔵AMD APU | RAM 16 GB | RAM 32 GB以上（可能ならデュアルチャネル） | 既定の `lfm25_2_6b`、または `small` / `balanced`（`large` は標準推奨外） |
+| Windows 10/11 x64＋Vulkan対応Radeon内蔵AMD APU | RAM 16 GB | RAM 32 GB以上（可能ならデュアルチャネル） | 既定の `lfm25_1_2b_jp`、または `small` / `balanced`（`large` は標準推奨外） |
 
 - RAM 16 GB では OS・GPU・モデルが同じメモリを使うため、他アプリとの併用時に余裕が少なくなります。遅い・メモリ不足のときは `small` か `PICOAGENT_LOCAL_NGL=0`（CPU固定）にしてください
 - BIOS/UEFI の UMA Frame Buffer 設定は機種ごとに異なるため必須値にはしません

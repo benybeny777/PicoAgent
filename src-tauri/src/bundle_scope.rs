@@ -12,7 +12,12 @@
 // 追加すること。
 
 /// `bundle.resources` に書いてよいもの。追加するときは、なぜ製品へ同梱するのかを書き添える。
-const ALLOWED_RESOURCES: [(&str, &str, &str); 11] = [
+const ALLOWED_RESOURCES: [(&str, &str, &str); 12] = [
+    (
+        "resources/licenses/LFM-Open-License.txt",
+        "resources/licenses/LFM-Open-License.txt",
+        "本体に組み込むLiquid AI公式由来のJP履歴テンプレートのライセンス全文",
+    ),
     (
         "resources/bundled/**/*",
         "resources/bundled/",
@@ -76,7 +81,11 @@ const ALLOWED_RESOURCES: [(&str, &str, &str); 11] = [
 /// LibreOffice・AivisSpeech・Whisper のような取得物がそのまま販売物へ入る。
 /// 通常ビルド側（`ALLOWED_RESOURCES`）は `resources/bundled/**/*` を許しているため、
 /// 販売用の上書き設定を見ていないと、この違いが誰にも検出されないまま消える。
-const ALLOWED_DISTRIBUTION_RESOURCES: [(&str, &str); 8] = [
+const ALLOWED_DISTRIBUTION_RESOURCES: [(&str, &str); 9] = [
+    (
+        "resources/licenses/LFM-Open-License.txt",
+        "販売版にも組み込むLiquid AI公式由来のJP履歴テンプレートのライセンス全文",
+    ),
     (
         "resources/bundled/engine/**/*",
         "販売版に入れるのはローカルAIエンジンだけ（自前配布が許される同梱物）",

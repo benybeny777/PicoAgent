@@ -215,6 +215,7 @@ pub async fn chat_structured(
     send_chat(cfg, &structured_body(model, messages, schema)?).await
 }
 
+#[derive(Clone)]
 pub struct LocalModelPreset {
     pub id: &'static str,
     pub family: &'static str,
@@ -238,32 +239,32 @@ pub fn context_length(cfg: &Config) -> Result<usize, String> {
         .map(|value| value as usize)
 }
 
-pub const DEFAULT_LOCAL_MODEL_PRESET: &str = "lfm25_2_6b";
-const DEFAULT_LOCAL_MODEL_URL: &str = "https://huggingface.co/LiquidAI/LFM2.5-2.6B-GGUF/resolve/84022ce711b28455e8c4fc364ce68c00cf995875/LFM2.5-2.6B-QAD-Q4_0.gguf";
+pub const DEFAULT_LOCAL_MODEL_PRESET: &str = "lfm25_1_2b_jp";
+const DEFAULT_LOCAL_MODEL_URL: &str = "https://huggingface.co/LiquidAI/LFM2.5-1.2B-JP-202606-GGUF/resolve/8c74801fdfe71394c59d3f519b86de305ff49f00/LFM2.5-1.2B-JP-202606-Q4_K_M.gguf";
 
 pub const LOCAL_MODEL_PRESETS: &[LocalModelPreset] = &[
     LocalModelPreset {
-        id: "lfm25_1_2b_jp",
+        id: DEFAULT_LOCAL_MODEL_PRESET,
         family: "Liquid AI",
         size: "LFM2.5 1.2B 日本語",
-        label: "互換: LFM2.5 1.2B 日本語 Q4（会話向け）",
-        url: "https://huggingface.co/LiquidAI/LFM2.5-1.2B-JP-202606-GGUF/resolve/8c74801fdfe71394c59d3f519b86de305ff49f00/LFM2.5-1.2B-JP-202606-Q4_K_M.gguf",
+        label: "軽量: LFM2.5 1.2B 日本語 Q4_K_M（既定）",
+        url: DEFAULT_LOCAL_MODEL_URL,
         file_name: "LFM2.5-1.2B-JP-202606-Q4_K_M-8c74801f.gguf",
         size_bytes: 730_894_624,
         sha256: "23d4d4060cb06463563f6e8644bbbc7d1cb0bfe4cf21d5edf3ccc6f515fd44bb",
         ctx: "32768",
         recommended_vram_gb: 0,
         recommended_ram_gb: 8,
-        download_size: "約0.73GB",
+        download_size: "約0.731GB",
         japanese_note: "日本語特化",
-        note: "軽い日本語会話向け。連続ツール利用に失敗するため、一般候補には表示しない。",
+        note: "軽い日本語会話向け。連続ツール利用を確認済み。人物や引用を取り違える場合がある。",
     },
     LocalModelPreset {
-        id: DEFAULT_LOCAL_MODEL_PRESET,
+        id: "lfm25_2_6b",
         family: "Liquid AI",
         size: "LFM2.5 2.6B Agentic",
-        label: "軽量: LFM2.5 2.6B QAD Q4（既定）",
-        url: DEFAULT_LOCAL_MODEL_URL,
+        label: "軽量: LFM2.5 2.6B QAD Q4",
+        url: "https://huggingface.co/LiquidAI/LFM2.5-2.6B-GGUF/resolve/84022ce711b28455e8c4fc364ce68c00cf995875/LFM2.5-2.6B-QAD-Q4_0.gguf",
         file_name: "LFM2.5-2.6B-QAD-Q4_0-84022ce7.gguf",
         size_bytes: 1_593_894_944,
         sha256: "a247afd6414918eac8e520a9e6137dc271235461ecbe1180462221d5b8d40b03",
@@ -451,12 +452,12 @@ pub fn preset(id: &str) -> Option<&'static LocalModelPreset> {
 }
 
 /// 設定画面で一般利用者へ候補として案内してよいプリセットだけを返す。
-/// LFM2.5 1.2BとLLM-jp-4 Thinkingは既存設定との互換用に残すが、連続ツール利用を
+/// LLM-jp-4 Thinkingは既存設定との互換用に残すが、連続ツール利用を
 /// 実エンジンで確認できないため新規候補へ出さない。
 pub fn settings_candidate_presets() -> impl Iterator<Item = &'static LocalModelPreset> {
     LOCAL_MODEL_PRESETS
         .iter()
-        .filter(|preset| !matches!(preset.id, "lfm25_1_2b_jp" | "llmjp4_8b"))
+        .filter(|preset| preset.id != "llmjp4_8b")
 }
 
 pub fn preset_url(id: &str) -> Option<&'static str> {
@@ -491,6 +492,14 @@ pub fn model_url(cfg: &Config) -> String {
         return url.to_string();
     }
     cfg.get("PICOAGENT_MODEL_URL", DEFAULT_LOCAL_MODEL_URL)
+}
+
+/// 管理プリセットだけに適用する履歴テンプレートの対象。custom の公式URL指定も除外する。
+pub(crate) fn history_template_preset(cfg: &Config) -> Option<&'static LocalModelPreset> {
+    if cfg.get("PICOAGENT_LOCAL_MODEL_PRESET", DEFAULT_LOCAL_MODEL_PRESET) == "custom" {
+        return None;
+    }
+    preset_by_url(&model_url(cfg)).filter(|preset| preset.id == "lfm25_1_2b_jp")
 }
 
 // Gemma などのチャットテンプレートは user/assistant の厳密な交互（かつ user 始まり）を要求し、
@@ -739,6 +748,31 @@ inventory::submit! { ProviderReg { make: || Box::new(Local) } }
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn 日本語履歴テンプレートは実効プリセットだけを対象にしカスタムを除外する() {
+        for (selection, model, expected) in [
+            ("auto", "", true),
+            ("lfm25_2_6b", "", false),
+            ("lfm25_1_2b_jp", "lfm25_1_2b_jp", true),
+            ("lfm25_1_2b_jp", "lfm25_2_6b", false),
+            ("lfm25_2_6b", "lfm25_1_2b_jp", true),
+            ("custom", "lfm25_1_2b_jp", false),
+            ("lfm25_2_6b", "lfm25_2_6b", false),
+        ] {
+            let cfg = crate::config::Config::new();
+            cfg.set("PICOAGENT_LOCAL_MODEL_PRESET", selection);
+            cfg.set("PICOAGENT_MODEL", model);
+            cfg.set(
+                "PICOAGENT_MODEL_URL",
+                super::preset("lfm25_1_2b_jp").unwrap().url,
+            );
+            assert_eq!(
+                super::history_template_preset(&cfg).is_some(),
+                expected,
+                "{selection}/{model}"
+            );
+        }
+    }
     use super::{
         canonical_preset_id, normalize_for_local, obsolete_model_file_names, preset,
         settings_candidate_presets, DEFAULT_LOCAL_MODEL_PRESET, LOCAL_MODEL_PRESETS,
@@ -1163,12 +1197,17 @@ mod tests {
                 "llmjp4_8b",
             ]
         );
-        assert_eq!(DEFAULT_LOCAL_MODEL_PRESET, "lfm25_2_6b");
+        assert_eq!(DEFAULT_LOCAL_MODEL_PRESET, "lfm25_1_2b_jp");
+        assert_eq!(
+            preset(DEFAULT_LOCAL_MODEL_PRESET).unwrap().url,
+            super::DEFAULT_LOCAL_MODEL_URL
+        );
         assert_eq!(
             settings_candidate_presets()
                 .map(|preset| preset.id)
                 .collect::<Vec<_>>(),
             [
+                "lfm25_1_2b_jp",
                 "lfm25_2_6b",
                 "small",
                 "balanced",
