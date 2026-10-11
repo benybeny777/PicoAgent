@@ -18,6 +18,14 @@ pub(crate) struct QuoteState {
 }
 
 impl QuoteState {
+    pub(crate) fn depth(&self) -> usize {
+        self.stack.len()
+    }
+
+    pub(crate) fn in_code(&self) -> bool {
+        self.code_delimiter > 0 || self.pending_ticks > 0
+    }
+
     /// 引用の開始・終了文字自身もtrue。エスケープしたASCII引用符は境界にしない。
     pub(crate) fn enter(&mut self, character: char) -> bool {
         // 連続するバッククォートの幅は次の文字で確定する。短い内部tickは閉じない。

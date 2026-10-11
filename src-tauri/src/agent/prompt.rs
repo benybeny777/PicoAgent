@@ -65,11 +65,12 @@ fn finish(mut prompt: String) -> String {
     prompt
 }
 
-pub fn base(config: &Config) -> String {
-    finish(base_content(config))
-}
-
-pub fn compose(config: &Config, character_profile: &str, character_id: &str) -> String {
+/// 固定人格の本文を唯一の順序で組み立て、公開検査の共有状態は変更しない。
+pub(crate) fn compose_content(
+    config: &Config,
+    character_profile: &str,
+    character_id: &str,
+) -> String {
     let mut prompt = base_content(config);
     if !character_profile.is_empty() {
         prompt.push_str("\n\n選択中キャラクターの人格設定:\n");
@@ -79,7 +80,11 @@ pub fn compose(config: &Config, character_profile: &str, character_id: &str) -> 
             character_id,
         ));
     }
-    let prompt = finish(prompt);
+    finish(prompt)
+}
+
+pub fn compose(config: &Config, character_profile: &str, character_id: &str) -> String {
+    let prompt = compose_content(config, character_profile, character_id);
     // 人格を組み立てたこの場所が、公開検査の照合元を更新する唯一の入り口。
     // 呼び出し側（会話の作り直し・キャラ切替・設定変更）へ登録を任せると、
     // 増えた経路のどれか1つが忘れた時点で人格設定が画面へ出る。
@@ -124,7 +129,8 @@ mod tests {
         assert!(!prompt.contains("長期メモリ"));
         assert!(!prompt.contains("関係性メモリ"));
         assert!(prompt.ends_with(super::super::context::REFERENCE_RULES));
-        assert!(super::base(&config).ends_with(super::super::context::REFERENCE_RULES));
+        assert!(super::compose_content(&config, "", "")
+            .ends_with(super::super::context::REFERENCE_RULES));
         assert!(
             prompt.find("名前: むぎ").unwrap()
                 < prompt.find(super::super::context::REFERENCE_RULES).unwrap()
@@ -136,7 +142,7 @@ mod tests {
             1
         );
         assert_eq!(
-            super::base(&config)
+            super::compose_content(&config, "", "")
                 .matches(super::super::context::REFERENCE_RULES)
                 .count(),
             1
@@ -144,5 +150,66 @@ mod tests {
         // 組み立てた人格がそのまま公開検査の照合元になる（登録漏れの経路を作らない）。
         assert!(super::super::guard_public_answer("名前: むぎ".to_string(), "").is_err());
         super::super::remember_private_context("");
+    }
+
+    #[test]
+    fn 純粋な人格組立は空と非空と関係設定を同順序にし明示設定と公開検査を変更しない() {
+        let _lock = crate::agent::PRIVATE_CONTEXT_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let config = Config::new();
+        let custom = "明示した独自プロンプト\n末尾も保持。";
+        config.set("PICOAGENT_SYSTEM_PROMPT", custom);
+        config.set("PICOAGENT_RELATIONSHIP", "sister_younger");
+        let remembered = super::super::remembered_private_context();
+        let empty = super::compose_content(&config, "", "mugi");
+        assert!(empty.starts_with(custom));
+        assert!(!empty.contains("選択中キャラクターの人格設定:"));
+        assert!(!empty.contains("ユーザーの妹として接する"));
+        let full = super::compose_content(&config, "名前: むぎ", "mugi");
+        assert!(full.starts_with(custom));
+        assert!(full.contains("ユーザーの妹として接する"));
+        assert!(full.ends_with(super::super::context::REFERENCE_RULES));
+        assert_eq!(
+            full.matches(super::super::context::REFERENCE_RULES).count(),
+            1
+        );
+        assert_eq!(config.get("PICOAGENT_SYSTEM_PROMPT", ""), custom);
+        assert_eq!(super::super::remembered_private_context(), remembered);
+        assert_eq!(compose(&config, "名前: むぎ", "mugi"), full);
+        super::super::remember_private_context("");
+    }
+
+    // 関数名を変えた複製も、人格見出し・プロフィール追記・関係suffixの組立責務で拾う。
+    fn duplicates_persona_assembly(body: &str) -> bool {
+        body.contains("選択中キャラクターの人格設定:")
+            && body.contains("profile_suffix")
+            && (body.contains("push_str") || body.contains("format!"))
+    }
+
+    #[test]
+    fn 人格本文の再組立を正本以外へ複製しない() {
+        let duplicates: Vec<_> = crate::guard_scan::all_sources()
+            .into_iter()
+            .filter(|source| !source.path.ends_with("agent/prompt.rs"))
+            .filter(|source| duplicates_persona_assembly(source.body()))
+            .map(|source| source.path.display().to_string())
+            .collect();
+        assert!(
+            duplicates.is_empty(),
+            "人格組立が複製されています: {duplicates:?}"
+        );
+        let old_commands = r#"
+    let mut persona = agent::prompt::base(&state.config);
+    if !character_profile.is_empty() {
+        persona.push_str("\n\n選択中キャラクターの人格設定:\n");
+        persona.push_str(&character_profile);
+        persona.push_str(&crate::relationship_preset::profile_suffix(&state.config, &character_id));
+    }
+"#;
+        assert!(duplicates_persona_assembly(old_commands));
+        assert!(!duplicates_persona_assembly(
+            "agent::prompt::compose_content(&config, &profile, &id)"
+        ));
     }
 }

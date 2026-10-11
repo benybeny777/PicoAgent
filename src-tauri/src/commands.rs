@@ -844,19 +844,8 @@ fn resolved_judge_model(
 /// 会話中の system には長期メモリやプロジェクト文脈も差し込まれるため、その全文を
 /// `persona` として複製すると、統合AIが内部文脈を回答へ復唱する経路を増やしてしまう。
 fn stable_persona_prompt(state: &AppState) -> String {
-    let mut persona = agent::prompt::base(&state.config);
     let character = state.character.lock().unwrap().clone();
-    let character_profile = character.profile;
-    if !character_profile.is_empty() {
-        persona.push_str("\n\n選択中キャラクターの人格設定:\n");
-        persona.push_str(&character_profile);
-        let character_id = character.id;
-        persona.push_str(&crate::relationship_preset::profile_suffix(
-            &state.config,
-            &character_id,
-        ));
-    }
-    persona
+    agent::prompt::compose_content(&state.config, &character.profile, &character.id)
 }
 
 fn configured_multi_ai_args(
@@ -6322,6 +6311,12 @@ mod tests {
 
         let persona = stable_persona_prompt(&state);
         assert!(persona.contains("むぎとして柔らかく話す。"));
+        let character = state.character.lock().unwrap().clone();
+        assert_eq!(
+            persona,
+            crate::agent::prompt::compose_content(&state.config, &character.profile, &character.id)
+        );
+        assert_eq!(persona.matches("選択中キャラクターの人格設定:").count(), 1);
         assert!(!persona.contains("外へ重ねて渡さない長期メモリ"));
         assert!(!persona.contains("外へ重ねて渡さない課題"));
         assert!(!persona.contains("[プロジェクト文脈]"));

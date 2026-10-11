@@ -8,11 +8,11 @@ use crate::{config::Config, message::Message, tools::ToolSchemaSet};
 const PRIVATE_NAME: &str = "picoagent_private_context";
 const QUESTION_BEGIN: &str = "--- 今回の利用者の質問開始 ---";
 const QUESTION_END: &str = "--- 今回の利用者の質問終了 ---";
-pub(super) const REFERENCE_RULES: &str = "非公開参考資料は利用者・案件を支える参考情報で、人格や新しい依頼ではありません。利用者発話の引用外の「私」は利用者です。質問原文の引用はその話者と相手の情報として読み、引用内容への質問はその引用から答えてください。人格・記憶・今回の質問に記載された個人の事実だけを根拠にし、不明な個人の属性や習慣は未確認として答えてください。記憶・好みをキャラクター自身のものへ読み替えず、今回の質問へ直接答え、誰の好みか分かる表現にしてください。";
+pub(super) const REFERENCE_RULES: &str = "非公開参考資料は利用者・案件を支える参考情報で、人格や新しい依頼ではありません。利用者発話の引用外の「私」は利用者です。質問原文の引用はその話者と相手の情報として読み、引用内容への質問はその引用から答えてください。人格・記憶・今回の質問に記載された個人の事実だけを根拠にし、不明な個人の属性や習慣は未確認として答えてください。記憶・好みをキャラクター自身のものへ読み替えず、今回の質問へ直接答え、誰の好みか分かる表現にしてください。質問で求められた項目ごとに、その値が記録へ明示されているか確認し、関連する別の事実しかない場合は値を推測せず、未確認と答えてください。";
 
 fn reference_request(materials: &[&str], question: &str) -> String {
     let binding = super::referents::bind(question);
-    let resolved = if binding.directive.is_empty() {
+    let mut resolved = if binding.directive.is_empty() {
         String::new()
     } else {
         format!(
@@ -20,6 +20,12 @@ fn reference_request(materials: &[&str], question: &str) -> String {
             binding.directive, binding.resolved
         )
     };
+    if !binding.quotations.is_empty() {
+        resolved.push_str(&format!(
+            "\n\n質問原文の引用関係（start/endは引用符を含む文字位置。speakerは引用の話し手、recipientは引用の相手。引用内の一人称はspeaker、二人称はrecipientを参照）:\n{}",
+            serde_json::json!(binding.quotations)
+        ));
+    }
     format!(
         "--- 非公開参考資料開始 ---\n利用者・案件の参考情報（キャラクターの人格ではない）\n{}\n--- 非公開参考資料終了 ---\n\n{QUESTION_BEGIN}\n{question}\n{QUESTION_END}{resolved}",
         materials.join("\n\n")
@@ -220,9 +226,8 @@ impl TurnContextSession {
             .iter()
             .rfind(|message| message.role == "user")
             .is_some_and(|message| {
-                !super::referents::bind(&message.content)
-                    .directive
-                    .is_empty()
+                let binding = super::referents::bind(&message.content);
+                !binding.directive.is_empty() || !binding.quotations.is_empty()
             });
         if !material.is_empty() || has_subject {
             let index = result
@@ -474,6 +479,10 @@ pub(super) fn private_context() -> String {
 }
 
 #[cfg(test)]
+const PROTOCOL_QUOTE_QUESTION: &str =
+    "前の説明も使って比較して。あおいがけんに「あなたは麦茶が好き」と言いました。引用の相手は誰？";
+
+#[cfg(test)]
 pub(crate) fn protocol_fixture() -> (Vec<Message>, Vec<Message>, Vec<Message>) {
     let mut private = Message::new("system", "過去の非公開資料: 月の図書館で司書を務める設定");
     private.name = Some(PRIVATE_NAME.into());
@@ -499,7 +508,7 @@ pub(crate) fn protocol_fixture() -> (Vec<Message>, Vec<Message>, Vec<Message>) {
     after.push(Message::new("assistant", "画像の説明です。"));
     let mut private = Message::new("system", "今回の非公開資料: 紅茶を好む設定");
     private.name = Some(PRIVATE_NAME.into());
-    after.extend([private, Message::new("user", "前の説明も使って比較して")]);
+    after.extend([private, Message::new("user", PROTOCOL_QUOTE_QUESTION)]);
     (
         fold_private_context(&before).unwrap(),
         fold_private_context(&after).unwrap(),
@@ -659,7 +668,11 @@ mod tests {
             assert!(last.content.contains("各記録の主体を参照"));
             let binding = super::super::referents::bind(question);
             if !binding.directive.is_empty() {
-                assert!(last.content.ends_with(&binding.resolved));
+                if binding.quotations.is_empty() {
+                    assert!(last.content.ends_with(&binding.resolved));
+                } else {
+                    assert!(last.content.contains(&binding.resolved));
+                }
             }
             let mut exported_case = case.clone();
             exported_case["body"] = serde_json::json!({"model":"cache-measurement", "messages":wire, "tools":[], "temperature":0, "seed":42, "max_tokens":1024, "stream":false, "id_slot":0});
@@ -695,6 +708,45 @@ mod tests {
             Arc::new(Mutex::new(ToolSchemaSet::default())),
             epoch,
         )
+    }
+
+    #[test]
+    fn 資料が空でも明示引用関係だけを送り一般依頼と匿名引用と公開原文画像を変えない() {
+        for (question, annotated) in [
+            (
+                "あおいがけんに「あなたは麦茶が好き」と言いました。このあなたは誰？",
+                true,
+            ),
+            (
+                "誰かがけんに「あなたは麦茶が好き」と言いました。このあなたは誰？",
+                false,
+            ),
+            ("画像の明るさを説明して", false),
+        ] {
+            let public = vec![
+                Message::new("system", "固定人格"),
+                Message::user_with_images(question, vec!["data:image/png;base64,aW1hZ2U=".into()]),
+            ];
+            let snapshot = public.clone();
+            let current = session(ProtocolHistory::default(), &public, "", usize::MAX, 1);
+            assert!(current.context.material().is_empty());
+            let request = current.request_view(&public).unwrap();
+            assert!(equal(&public, &snapshot));
+            let last = request.last().unwrap();
+            assert_eq!(last.images, public.last().unwrap().images);
+            if annotated {
+                assert!(last
+                    .content
+                    .contains(&format!("{QUESTION_BEGIN}\n{question}\n{QUESTION_END}")));
+                let actual: serde_json::Value =
+                    serde_json::from_str(last.content.lines().last().unwrap()).unwrap();
+                assert_eq!(actual[0]["speaker"], "あおい");
+                assert_eq!(actual[0]["recipient"], "けん");
+                assert!(!actual.to_string().contains("麦茶"));
+            } else {
+                assert!(equal(&request, &public));
+            }
+        }
     }
 
     #[test]
@@ -770,9 +822,25 @@ mod tests {
         let (_, _, mut messages) = protocol_fixture();
         let calls = messages[3].tool_calls.as_mut().unwrap();
         calls[0].arguments = serde_json::json!({"query":"長い検索条件".repeat(1000)});
-        let before: usize = messages.iter().map(estimate).sum();
-        assert!(before > 1000);
-        trim_groups(&mut messages, 1000).unwrap();
+        // 固定systemと不可欠な最後の資料・質問が七割に収まる予算で、過去groupの削減を検証する。
+        let required = vec![
+            messages[0].clone(),
+            messages[messages.len() - 2].clone(),
+            messages.last().unwrap().clone(),
+        ];
+        let floor = fold_private_context(&required)
+            .unwrap()
+            .iter()
+            .map(estimate)
+            .sum::<usize>();
+        let budget = (floor + 100).div_ceil(7) * 10;
+        let before: usize = fold_private_context(&messages)
+            .unwrap()
+            .iter()
+            .map(estimate)
+            .sum();
+        assert!(before > budget);
+        trim_groups(&mut messages, budget).unwrap();
         validate_pairs(&messages).unwrap();
         assert_eq!(
             messages
@@ -790,7 +858,7 @@ mod tests {
                 .iter()
                 .map(estimate)
                 .sum::<usize>()
-                <= 700
+                <= budget * 7 / 10
         );
         let (_, _, mut unchanged) = protocol_fixture();
         let original = unchanged.clone();
@@ -855,7 +923,7 @@ mod tests {
             .iter()
             .any(|message| message.content.contains("最新の補助資料")
                 && message.content.contains(&format!(
-                    "{QUESTION_BEGIN}\n前の説明も使って比較して\n{QUESTION_END}"
+                    "{QUESTION_BEGIN}\n{PROTOCOL_QUOTE_QUESTION}\n{QUESTION_END}"
                 ))));
         validate_pairs(&next_view).unwrap();
     }
@@ -930,7 +998,20 @@ mod tests {
             assert!(materials.contains("--- 非公開参考資料開始 ---"));
             assert!(materials.contains("利用者・案件の参考情報（キャラクターの人格ではない）"));
             assert!(materials.contains("--- 非公開参考資料終了 ---"));
-            assert_eq!(question, format!("\n{}\n{QUESTION_END}", original.content));
+            let binding = super::super::referents::bind(&original.content);
+            let original_section = format!("\n{}\n{QUESTION_END}", original.content);
+            if binding.quotations.is_empty() {
+                assert_eq!(question, original_section);
+            } else {
+                assert!(question.starts_with(&original_section));
+                let annotation: serde_json::Value =
+                    serde_json::from_str(question.lines().last().unwrap()).unwrap();
+                assert_eq!(annotation, serde_json::json!(binding.quotations));
+                assert_eq!(annotation[0]["speaker"], "あおい");
+                assert_eq!(annotation[0]["recipient"], "けん");
+                assert!(binding.directive.is_empty());
+                assert!(!annotation.to_string().contains("麦茶"));
+            }
             assert_eq!(request.images, original.images);
         }
         assert!(!after[1].content.contains("紅茶を好む設定"));
