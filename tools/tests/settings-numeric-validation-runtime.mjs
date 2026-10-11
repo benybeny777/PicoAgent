@@ -58,6 +58,8 @@ function saveFixture(response) {
     logApp: () => {}, errorDetail: String, errorMessage: String,
     saveBtn: { addEventListener: (_name, handler) => { callback = handler; } },
   });
+  const accepted = settings.indexOf("function acceptSavedSettings(");
+  vm.runInContext(settings.slice(accepted, settings.indexOf("function updateDirtyStateNow(", accepted)), context);
   const start = settings.indexOf('saveBtn.addEventListener("click"');
   vm.runInContext(settings.slice(start, settings.indexOf('resetChangesBtn?.addEventListener', start)), context);
   return { context, marks, click: () => callback() };

@@ -1,6 +1,6 @@
 [package]
 name = "picoagent"
-version = "1.3.17"
+version = "1.3.22"
 description = "PicoAgent - コネクタ駆動のデスクトップペット"
 authors = ["PicoAgent"]
 edition = "2021"
@@ -33,9 +33,10 @@ serde = { version = "1", features = ["derive"] }
 # preserve_order: JSONを読み書きするときにキーの並びを保つ（`character.json` の名前変更など、
 # 利用者が作ったファイルを再保存しても並べ替えで差分を出さないため）。
 serde_json = { version = "1", features = ["preserve_order"] }
+regex = "1"
 toml = "1.1.4"
 reqwest = { version = "0.13", default-features = false, features = ["json", "multipart", "query", "form", "rustls", "stream"] }
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "process", "time", "net", "io-util"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "process", "time", "net", "io-util", "signal"] }
 # ブラウザ操作（browser_control）の CDP は WebSocket。接続先は 127.0.0.1 の ws:// 固定なので TLS 機能は入れない。
 tokio-tungstenite = { version = "0.30", default-features = false, features = ["connect", "handshake"] }
 futures = "0.3"
@@ -92,6 +93,8 @@ windows-sys = { version = "0.61", features = [
     # 学習処理の孫もアプリ終了・異常終了で回収する。
     "Win32_System_JobObjects",
     "Win32_System_Threading",
+    # 停止状態で起動した根をJobへ登録した後に、所有スレッドだけを再開する。
+    "Win32_System_Diagnostics_ToolHelp",
     "Win32_Security",
     # ウィンドウ一覧・前面化（desktop_control）。
     "Win32_UI_WindowsAndMessaging",

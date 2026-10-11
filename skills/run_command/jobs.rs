@@ -9,8 +9,10 @@
 
 use std::io::Read;
 use std::path::Path;
-use std::process::{Child, Stdio};
+use std::process::Stdio;
 use std::sync::{Arc, Mutex, OnceLock};
+
+use crate::tools::process::{OwnedChild as Child, ProcessSnapshot};
 
 /// 同時に走らせられるジョブ数。
 const MAX_RUNNING: usize = 4;
@@ -142,26 +144,38 @@ fn pump<R: Read + Send + 'static>(mut reader: R, buffer: Arc<Mutex<Buffer>>) {
 
 /// 終了済みジョブの状態を取り込み、古い履歴を捨てる。
 fn refresh(jobs: &mut Vec<Job>) {
-    for job in jobs.iter_mut() {
+    let mut exited = Vec::new();
+    // 一覧取得より先に、対象となる根すべての終了を観測する。取得後に初めて
+    // 終了した根へ古い一覧を使うと、直前に起動した孫を取りこぼす。
+    for (index, job) in jobs.iter_mut().enumerate() {
         if job.status != Status::Running {
             continue;
         }
         let Some(child) = job.child.as_mut() else {
             continue;
         };
-        match child.try_wait() {
+        match child.try_root_exit() {
+            Ok(Some(_)) => exited.push(index),
+            Ok(None) => {}
+            Err(error) => append_refresh_error(job, &error),
+        }
+    }
+    let mut snapshot = ProcessSnapshot::default();
+    for index in exited {
+        let job = &mut jobs[index];
+        let Some(child) = job.child.as_mut() else {
+            continue;
+        };
+        match child.try_complete(&mut snapshot) {
             Ok(Some(exit)) => {
                 job.status = Status::Exited(exit.code());
-                // 終了を確認できた時点でハンドルを解放する（ゾンビを残さない）。
+                // 根の終了と所有する子孫の終了がそろった時点だけ、履歴へ移す。
                 job.child = None;
             }
             Ok(None) => {}
             Err(error) => {
-                job.status = Status::Exited(None);
-                job.child = None;
-                if let Ok(mut buffer) = job.output.lock() {
-                    buffer.append(&format!("\n[状態を取得できませんでした: {error}]"));
-                }
+                // 状態不明を終了扱いにせず、停止・再確認に必要な所有ハンドルを残す。
+                append_refresh_error(job, &error);
             }
         }
     }
@@ -172,9 +186,16 @@ fn refresh(jobs: &mut Vec<Job>) {
         .map(|(index, _)| index)
         .collect();
     if finished.len() > MAX_RETAINED {
-        for index in finished.into_iter().take(jobs.len() - MAX_RETAINED).rev() {
+        let excess = finished.len() - MAX_RETAINED;
+        for index in finished.into_iter().take(excess).rev() {
             jobs.remove(index);
         }
+    }
+}
+
+fn append_refresh_error(job: &Job, error: &str) {
+    if let Ok(mut buffer) = job.output.lock() {
+        buffer.append(&format!("\n[状態を取得できませんでした: {error}]"));
     }
 }
 
@@ -193,7 +214,7 @@ pub fn spawn(program: &str, args: &[String], cwd: &Path) -> Result<String, Strin
             "同時に実行できるバックグラウンドジョブは {MAX_RUNNING} 件までです。command_job の stop で止めてください。"
         ));
     }
-    // future の終了後も動かし続けるため、同期版のコマンドを使う（窓抑止だけ共通化される）。
+    // futureの終了後も動かし続ける。根が先に終わっても所有範囲を保持する。
     let mut command = crate::tools::process::command_sync(program);
     command
         .args(args)
@@ -201,15 +222,14 @@ pub fn spawn(program: &str, args: &[String], cwd: &Path) -> Result<String, Strin
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    let mut child = command
-        .spawn()
+    let mut child = Child::spawn(&mut command)
         .map_err(|error| format!("起動できませんでした（{error}）: {program}"))?;
 
     let output = Arc::new(Mutex::new(Buffer::default()));
-    if let Some(stdout) = child.stdout.take() {
+    if let Some(stdout) = child.take_stdout() {
         pump(stdout, Arc::clone(&output));
     }
-    if let Some(stderr) = child.stderr.take() {
+    if let Some(stderr) = child.take_stderr() {
         pump(stderr, Arc::clone(&output));
     }
     let id = next_id(&jobs);
@@ -289,22 +309,25 @@ pub fn stop(id: &str) -> String {
     let Some(job) = jobs.iter_mut().find(|job| job.id == id) else {
         return format!("エラー: そのジョブはありません: {id}\n{}", summary(&jobs));
     };
-    match job.child.take() {
-        Some(mut child) => {
-            let killed = child.kill();
-            // kill したら wait でハンドルまで回収する（ゾンビを残さない）。
-            let waited = child.wait();
-            job.status = Status::Stopped;
-            match (killed, waited) {
-                (_, Err(error)) => {
-                    format!("エラー: {id} の終了ハンドルを回収できませんでした: {error}")
-                }
-                (Ok(()), Ok(_)) => format!("OK: {id} を停止しました。"),
-                (Err(error), Ok(_)) => format!("{id} は既に終了していました（{error}）。"),
-            }
-        }
-        None => format!("{id} は既に{}です。", job.status.label()),
+    match stop_job(job, Child::terminate) {
+        Ok(true) => format!("OK: {id} を停止しました。"),
+        Ok(false) => format!("{id} は既に{}です。", job.status.label()),
+        Err(error) => format!("エラー: {id} を停止できませんでした: {error}"),
     }
+}
+
+fn stop_job(
+    job: &mut Job,
+    terminate: impl FnOnce(&mut Child, &str) -> Result<(), String>,
+) -> Result<bool, String> {
+    let Some(child) = job.child.as_mut() else {
+        return Ok(false);
+    };
+    terminate(child, "バックグラウンドジョブ")?;
+    // ツリー停止と終了ハンドルの回収に成功してから、状態と所有権を同時に確定する。
+    job.child = None;
+    job.status = Status::Stopped;
+    Ok(true)
 }
 
 fn summary(jobs: &[Job]) -> String {
@@ -326,29 +349,270 @@ pub fn stop_all() {
     let mut jobs = registry()
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
-    for job in jobs.iter_mut() {
-        if let Some(mut child) = job.child.take() {
-            if let Err(error) = child.kill() {
-                if error.kind() != std::io::ErrorKind::InvalidInput {
-                    crate::log_paths::log_detached(&format!(
-                        "バックグラウンドジョブを停止できません: {error}"
-                    ));
-                }
-            }
-            if let Err(error) = child.wait() {
-                crate::log_paths::log_detached(&format!(
-                    "バックグラウンドジョブの終了ハンドルを回収できません: {error}"
-                ));
-            }
-            job.status = Status::Stopped;
-        }
+    for error in stop_jobs(&mut jobs, Child::terminate) {
+        crate::log_paths::log_detached(&error);
     }
-    jobs.clear();
+}
+
+fn stop_jobs(
+    jobs: &mut Vec<Job>,
+    mut terminate: impl FnMut(&mut Child, &str) -> Result<(), String>,
+) -> Vec<String> {
+    let mut errors = Vec::new();
+    jobs.retain_mut(|job| match stop_job(job, &mut terminate) {
+        Ok(_) => false,
+        Err(error) => {
+            errors.push(format!(
+                "バックグラウンドジョブ {} の停止失敗: {error}",
+                job.id
+            ));
+            true
+        }
+    });
+    errors
 }
 
 #[cfg(test)]
 mod tests {
     use super::{list, output, spawn, stop, Buffer, MAX_BUFFER_BYTES};
+
+    // 回帰を注入した検査が途中で失敗しても、自分が起動したプロセスを回収する。
+    struct TestJobs(Vec<super::Job>);
+
+    impl TestJobs {
+        fn new(job: super::Job) -> Self {
+            let mut jobs = Self(Vec::new());
+            jobs.push(job);
+            jobs
+        }
+
+        fn push(&mut self, job: super::Job) {
+            self.0.push(job);
+        }
+    }
+
+    impl Drop for TestJobs {
+        fn drop(&mut self) {
+            for job in &mut self.0 {
+                if let Some(child) = job.child.as_mut() {
+                    if let Err(error) = child.terminate("ジョブ検査の後始末") {
+                        eprintln!("ジョブ検査の後始末に失敗しました: {error}");
+                    }
+                }
+            }
+        }
+    }
+
+    fn test_job(id: &str, command: Option<std::process::Command>) -> super::Job {
+        let child = command.map(|mut command| {
+            command
+                .stdin(super::Stdio::null())
+                .stdout(super::Stdio::null())
+                .stderr(super::Stdio::null());
+            super::Child::spawn(&mut command).unwrap()
+        });
+        super::Job {
+            id: id.to_owned(),
+            command: "停止検査".into(),
+            cwd: String::new(),
+            child,
+            output: std::sync::Arc::new(std::sync::Mutex::new(Buffer::default())),
+            status: super::Status::Running,
+        }
+    }
+
+    fn waiting_command() -> std::process::Command {
+        #[cfg(windows)]
+        {
+            let mut command = crate::tools::process::command_sync("ping.exe");
+            command.args(["-n", "31", "127.0.0.1"]);
+            command
+        }
+        #[cfg(not(windows))]
+        {
+            let mut command = crate::tools::process::command_sync("sleep");
+            command.arg("30");
+            command
+        }
+    }
+
+    #[test]
+    fn 停止失敗は状態と所有ハンドルを保持し一括停止も他のジョブを回収する() {
+        for all in [false, true] {
+            let mut jobs = TestJobs::new(test_job("失敗対象", Some(waiting_command())));
+            let pid = jobs.0[0].child.as_ref().unwrap().id();
+            if all {
+                jobs.push(test_job("成功対象", Some(waiting_command())));
+                let errors = super::stop_jobs(&mut jobs.0, |child, label| {
+                    if child.id() == pid {
+                        Err("停止できません".into())
+                    } else {
+                        child.terminate(label)
+                    }
+                });
+                assert_eq!(errors.len(), 1);
+                assert_eq!(jobs.0.len(), 1);
+            } else {
+                assert_eq!(
+                    super::stop_job(&mut jobs.0[0], |_, _| Err("停止できません".into()))
+                        .unwrap_err(),
+                    "停止できません"
+                );
+            }
+            assert!(matches!(jobs.0[0].status, super::Status::Running));
+            assert_eq!(jobs.0[0].child.as_ref().map(super::Child::id), Some(pid));
+            assert!(crate::tools::process::process_alive(pid).unwrap());
+            assert!(super::stop_job(&mut jobs.0[0], super::Child::terminate).unwrap());
+            assert!(jobs.0[0].child.is_none());
+            assert!(matches!(jobs.0[0].status, super::Status::Stopped));
+            assert!(!super::stop_job(&mut jobs.0[0], |_, _| panic!(
+                "停止済みのプロセスへ再停止しました"
+            ))
+            .unwrap());
+            assert!(super::stop_jobs(&mut jobs.0, |_, _| panic!(
+                "回収済みのプロセスへ再停止しました"
+            ))
+            .is_empty());
+            assert!(jobs.0.is_empty());
+        }
+    }
+
+    #[test]
+    fn 実行中のジョブが混在しても完了履歴は上限件数まで保持する() {
+        let mut jobs = Vec::new();
+        for index in 0..(super::MAX_RETAINED + 3) {
+            let mut finished = test_job(&format!("完了{index}"), None);
+            finished.status = super::Status::Exited(Some(0));
+            jobs.push(finished);
+            if index < super::MAX_RUNNING {
+                jobs.push(test_job(&format!("実行中{index}"), None));
+            }
+        }
+        super::refresh(&mut jobs);
+        assert_eq!(jobs.len(), super::MAX_RETAINED + super::MAX_RUNNING);
+        let completed: Vec<_> = jobs
+            .iter()
+            .filter(|job| job.status != super::Status::Running)
+            .map(|job| job.id.as_str())
+            .collect();
+        assert_eq!(completed.len(), super::MAX_RETAINED);
+        assert_eq!(completed[0], "完了3");
+        for index in 0..super::MAX_RUNNING {
+            assert!(jobs.iter().any(|job| job.id == format!("実行中{index}")));
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn 個別停止と一括停止はwindowsで孫プロセスまで回収する() {
+        use crate::tools::process::{
+            process_alive,
+            tests::{tree_test_command, TestProcessIds},
+        };
+        for all in [false, true] {
+            let directory = tempfile::tempdir().unwrap();
+            let marker = directory.path().join("owned-processes.txt");
+            let command = tree_test_command(&marker, true, false, 0);
+            let mut jobs = TestJobs::new(test_job("ツリー停止対象", Some(command)));
+            let ids = TestProcessIds::capture(&marker);
+            assert_eq!(ids.0[0], jobs.0[0].child.as_ref().unwrap().id());
+            for pid in &ids.0 {
+                assert!(
+                    process_alive(*pid).unwrap(),
+                    "停止前に検査PID {pid} が終了しました"
+                );
+            }
+            if all {
+                assert!(super::stop_jobs(&mut jobs.0, super::Child::terminate).is_empty());
+            } else {
+                assert!(super::stop_job(&mut jobs.0[0], super::Child::terminate).unwrap());
+            }
+            for pid in &ids.0 {
+                assert!(
+                    !process_alive(*pid).unwrap(),
+                    "停止後も検査PID {pid} が残りました"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn 親が先に終了しても一覧更新と履歴圧縮後に孫を停止できる() {
+        use crate::tools::process::tests::{
+            test_process_running, tree_test_command, TestProcessIds,
+        };
+        let independent_dir = tempfile::tempdir().unwrap();
+        let independent_marker = independent_dir.path().join("independent.txt");
+        let mut independent_command = tree_test_command(&independent_marker, true, false, 0);
+        independent_command
+            .stdout(super::Stdio::null())
+            .stderr(super::Stdio::null());
+        let mut independent = super::Child::spawn(&mut independent_command).unwrap();
+        let independent_ids = TestProcessIds::capture(&independent_marker);
+        for mode in 0..4 {
+            let directory = tempfile::tempdir().unwrap();
+            let marker = directory.path().join("owned.txt");
+            let command = tree_test_command(&marker, false, false, 0);
+            let mut jobs = TestJobs::new(test_job("親先行終了", Some(command)));
+            let ids = TestProcessIds::capture(&marker);
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+            while jobs.0[0]
+                .child
+                .as_mut()
+                .unwrap()
+                .try_root_exit()
+                .unwrap()
+                .is_none()
+            {
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "検査の根が終了しません"
+                );
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            if mode != 0 {
+                // list/outputが共有する更新を通し、20件の履歴圧縮にも巻き込ませない。
+                for index in 0..(super::MAX_RETAINED + 2) {
+                    let mut finished = test_job(&format!("履歴{index}"), None);
+                    finished.status = super::Status::Exited(Some(0));
+                    jobs.push(finished);
+                }
+                super::refresh(&mut jobs.0);
+                assert!(matches!(jobs.0[0].status, super::Status::Running));
+                assert!(jobs.0[0].child.is_some());
+                assert_eq!(jobs.0.len(), super::MAX_RETAINED + 1);
+                assert!(
+                    test_process_running(ids.0[1]),
+                    "一覧更新だけで孫を停止しました"
+                );
+            }
+            if mode == 3 {
+                assert!(
+                    super::stop_job(&mut jobs.0[0], |_, _| Err("検査用の停止失敗".into())).is_err()
+                );
+                assert!(jobs.0[0].child.is_some());
+                assert!(test_process_running(ids.0[1]));
+            }
+            if mode == 2 {
+                assert!(super::stop_jobs(&mut jobs.0, super::Child::terminate).is_empty());
+            } else {
+                assert!(super::stop_job(&mut jobs.0[0], super::Child::terminate).unwrap());
+            }
+            assert!(
+                !test_process_running(ids.0[1]),
+                "停止成功後も孫が実行中です"
+            );
+            assert!(
+                test_process_running(independent.id()),
+                "独立した根を停止しました"
+            );
+            assert!(
+                test_process_running(independent_ids.0[1]),
+                "独立した孫を停止しました"
+            );
+        }
+        independent.terminate("独立ジョブの検査後始末").unwrap();
+    }
 
     /// 起動 → 途中出力の取得 → 停止までを実プロセスで通す。
     #[test]

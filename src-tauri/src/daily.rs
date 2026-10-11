@@ -56,10 +56,16 @@ pub fn now_local_minute() -> String {
     Local::now().format("%Y-%m-%dT%H:%M").to_string()
 }
 
-pub fn after_minutes(minutes: i64) -> String {
-    (Local::now() + Duration::minutes(minutes.max(1)))
-        .format("%Y-%m-%dT%H:%M")
-        .to_string()
+pub fn after_minutes(minutes: i64) -> Result<String, String> {
+    if minutes < 1 {
+        return Err("通知までの時間は1分以上で指定してください".into());
+    }
+    let duration =
+        Duration::try_minutes(minutes).ok_or("通知までの時間が扱える範囲を超えています")?;
+    let due_at = Local::now()
+        .checked_add_signed(duration)
+        .ok_or("通知日時が扱える範囲を超えています")?;
+    Ok(due_at.format("%Y-%m-%dT%H:%M").to_string())
 }
 
 pub fn parse_local_minute(input: &str) -> Option<NaiveDateTime> {
@@ -210,7 +216,7 @@ mod tests {
         let future = DailyEvent {
             id: "d1".to_string(),
             kind: "reminder".to_string(),
-            due_at: after_minutes(60),
+            due_at: after_minutes(60).unwrap(),
             text: "お茶を飲む".to_string(),
             label: String::new(),
             enabled: true,
@@ -235,7 +241,7 @@ mod tests {
         let past = DailyEvent {
             id: "d1".to_string(),
             kind: "reminder".to_string(),
-            // after_minutes は最短1分先へ丸めるため、過去時刻は直接組み立てる。
+            // after_minutes は1分未満を拒否するため、過去時刻は直接組み立てる。
             due_at: (Local::now() - Duration::minutes(60))
                 .format("%Y-%m-%dT%H:%M")
                 .to_string(),

@@ -1,5 +1,5 @@
 // character_learning.rs - 素材の取り込み・学習候補・人格草稿を既存キャラから分離して管理する。
-use crate::{commands::AppState, message::Message};
+use crate::{commands::AppState, message::Message, tools::process::OwnedChild};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
@@ -16,7 +16,7 @@ use tauri::{AppHandle, Manager, State};
 pub struct LearningState {
     execution: tokio::sync::Mutex<()>,
     active: Mutex<Option<(String, Arc<AtomicBool>)>>,
-    child: Arc<Mutex<Option<std::process::Child>>>,
+    child: Arc<Mutex<Option<OwnedChild>>>,
 }
 impl LearningState {
     pub fn new() -> Self {
@@ -35,13 +35,13 @@ impl LearningState {
         {
             flag.store(true, Ordering::SeqCst);
         }
-        if let Some(mut child) = self
+        let mut owned = self
             .child
             .lock()
-            .map_err(|_| "学習プロセスの状態が壊れました")?
-            .take()
-        {
-            crate::tools::process::terminate_tree_sync(&mut child, "キャラクター学習の終了")?;
+            .map_err(|_| "学習プロセスの状態が壊れました")?;
+        if let Some(child) = owned.as_mut() {
+            child.terminate("キャラクター学習の終了")?;
+            owned.take();
         }
         Ok(())
     }
@@ -315,51 +315,6 @@ fn apply_runtime_env(command: &mut std::process::Command, path: &Path) -> Result
     }
     Ok(())
 }
-#[cfg(windows)]
-struct ProcessJob(windows_sys::Win32::Foundation::HANDLE);
-#[cfg(windows)]
-impl ProcessJob {
-    fn attach(child: &std::process::Child) -> Result<Self, String> {
-        use std::os::windows::io::AsRawHandle;
-        use windows_sys::Win32::System::JobObjects::*;
-        // 自分が起動した子だけを専用Jobへ所属させ、親の異常終了でも孫まで停止する。
-        unsafe {
-            let handle = CreateJobObjectW(std::ptr::null(), std::ptr::null());
-            if handle.is_null() {
-                return Err(format!(
-                    "学習プロセスの回収領域を作れません: {}",
-                    std::io::Error::last_os_error()
-                ));
-            }
-            let job = Self(handle);
-            let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
-            info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
-            if SetInformationJobObject(
-                handle,
-                JobObjectExtendedLimitInformation,
-                &info as *const _ as _,
-                std::mem::size_of_val(&info) as u32,
-            ) == 0
-                || AssignProcessToJobObject(handle, child.as_raw_handle() as _) == 0
-            {
-                return Err(format!(
-                    "学習プロセスの自動回収を設定できません: {}",
-                    std::io::Error::last_os_error()
-                ));
-            }
-            Ok(job)
-        }
-    }
-}
-#[cfg(windows)]
-impl Drop for ProcessJob {
-    fn drop(&mut self) {
-        unsafe {
-            windows_sys::Win32::Foundation::CloseHandle(self.0);
-        }
-    }
-}
-
 async fn cancellable<F, T, E>(future: F, flag: &AtomicBool) -> Result<T, String>
 where
     F: std::future::Future<Output = Result<T, E>>,
@@ -379,7 +334,7 @@ async fn run_process(
     dir: PathBuf,
     flag: Arc<AtomicBool>,
     label: &str,
-    owner: Arc<Mutex<Option<std::process::Child>>>,
+    owner: Arc<Mutex<Option<OwnedChild>>>,
 ) -> Result<(), String> {
     let label = label.to_string();
     tauri::async_runtime::spawn_blocking(move || {
@@ -389,23 +344,21 @@ async fn run_process(
         {
             let mut owned=owner.lock().map_err(|_|"学習プロセスの状態が壊れました")?;
             if flag.load(Ordering::SeqCst){return Err("学習を停止しました".into());}
-            *owned=Some(command.spawn().map_err(|e|format!("{label}を開始できません: {e}"))?);
+            *owned=Some(OwnedChild::spawn(&mut command).map_err(|e|format!("{label}を開始できません: {e}"))?);
         }
-        #[cfg(windows)]
-        let _process_job={let mut owned=owner.lock().map_err(|_|"学習プロセスの状態が壊れました")?;let child=owned.as_mut().ok_or("学習が停止されました")?;match ProcessJob::attach(child){Ok(job)=>job,Err(error)=>{crate::tools::process::terminate_tree_sync(child,&label)?;owned.take();return Err(error);}}};
         let started=Instant::now();
         loop {
             let mut owned=owner.lock().map_err(|_|"学習プロセスの状態が壊れました")?;
             let Some(child)=owned.as_mut() else{return Err("学習を停止しました".into());};
             if flag.load(Ordering::SeqCst)||started.elapsed()>Duration::from_secs(24*3600) {
-                crate::tools::process::terminate_tree_sync(child,&label)?;
+                child.terminate(&label)?;
                 owned.take();
                 return Err(if flag.load(Ordering::SeqCst){"学習を停止しました".into()}else{format!("{label}が24時間で完了しませんでした")});
             }
-            match child.try_wait(){
-                Ok(Some(status))=>{owned.take();return if status.success(){Ok(())}else{let detail=read_json(&dir.join("status.json")).ok().and_then(|v|v.get("error").or_else(||v.get("message")).and_then(Value::as_str).map(str::to_string));Err(detail.unwrap_or_else(||format!("{label}に失敗しました。学習結果の実行ログを確認してください（{status}）")))};},
+            match child.try_root_exit(){
+                Ok(Some(status))=>{child.terminate(&label)?;owned.take();return if status.success(){Ok(())}else{let detail=read_json(&dir.join("status.json")).ok().and_then(|v|v.get("error").or_else(||v.get("message")).and_then(Value::as_str).map(str::to_string));Err(detail.unwrap_or_else(||format!("{label}に失敗しました。学習結果の実行ログを確認してください（{status}）")))};},
                 Ok(None)=>{drop(owned);std::thread::sleep(Duration::from_millis(200));},
-                Err(error)=>{crate::tools::process::terminate_tree_sync(child,&label)?;owned.take();return Err(format!("{label}の状態を取得できません: {error}"));}
+                Err(error)=>{child.terminate(&label)?;owned.take();return Err(format!("{label}の状態を取得できません: {error}"));}
             }
         }
     }).await.map_err(|e|e.to_string())?
@@ -1053,25 +1006,9 @@ mod tests {
     fn 回収領域を閉じると自分の学習子プロセスが終了する() {
         let mut command = crate::tools::process::command_sync("powershell.exe");
         command.args(["-NoProfile", "-Command", "Start-Sleep -Seconds 60"]);
-        let mut child = command.spawn().unwrap();
-        let job = match ProcessJob::attach(&child) {
-            Ok(job) => job,
-            Err(error) => {
-                crate::tools::process::terminate_tree_sync(&mut child, "学習回収テスト").unwrap();
-                panic!("{error}");
-            }
-        };
-        drop(job);
-        let start = Instant::now();
-        loop {
-            if child.try_wait().unwrap().is_some() {
-                break;
-            }
-            if start.elapsed() > Duration::from_secs(5) {
-                crate::tools::process::terminate_tree_sync(&mut child, "学習回収テスト").unwrap();
-                panic!("Jobを閉じても学習プロセスが残っています");
-            }
-            std::thread::sleep(Duration::from_millis(20));
-        }
+        let child = OwnedChild::spawn(&mut command).unwrap();
+        let pid = child.id();
+        drop(child);
+        assert!(!crate::tools::process::process_alive(pid).unwrap());
     }
 }

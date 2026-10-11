@@ -143,9 +143,8 @@ export class Live2dRenderer {
         internal.eyeBlink.updateParameters(internal.coreModel, delta);
       });
     }
-    this.motionEnabled = !this.reducedMotion || this.config.alwaysAnimate === true;
-    if (!this.motionEnabled) internal.motionManager.groups.idle = "";
-    else if (this.config.motions?.idle) internal.motionManager.groups.idle = this.config.motions.idle;
+    this.idleMotionGroup = this.config.motions?.idle || internal.motionManager.groups.idle;
+    this.syncMotionPreference();
     // 同梱ランタイムの自動更新はTicker.sharedを使うため、appの予算内だけで進める。
     this.lastModelUpdateAt = performance.now();
     this.updateModel = () => {
@@ -259,11 +258,21 @@ export class Live2dRenderer {
   }
 
   setReducedMotion(reduced) {
-    this.reducedMotion = Boolean(reduced);
+    reduced = Boolean(reduced);
+    if (this.disposed || reduced === this.reducedMotion) return;
+    this.reducedMotion = reduced;
+    this.syncMotionPreference();
+    if (this.motionEnabled) this.setMotion("idle");
+  }
+
+  syncMotionPreference() {
     const always = this.config?.alwaysAnimate === true;
     this.motionEnabled = !this.reducedMotion || always;
-    if (!this.motionEnabled) this.model?.internalModel?.motionManager?.stopAllMotions?.();
-    else this.setMotion("idle");
+    const manager = this.model?.internalModel?.motionManager;
+    if (!manager) return;
+    // stopAllMotionsだけでは次の更新で自動待機が再開するため、要求元のグループも切り替える。
+    manager.groups.idle = this.motionEnabled ? this.idleMotionGroup : "";
+    if (!this.motionEnabled) manager.stopAllMotions();
   }
 
   dispose() {

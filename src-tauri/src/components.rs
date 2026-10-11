@@ -926,7 +926,7 @@ async fn acquire_uv(app: &AppHandle, cache: &Path, id: &str) -> Result<PathBuf> 
         },
     )
     .await?;
-    let unpack = cache.join("uv");
+    let unpack = prepare_cached_extraction(cache, "uv")?;
     let extract = unpack.clone();
     tokio::task::spawn_blocking(move || match asset.archive {
         UvArchive::Zip => extract_zip(&archive, &extract),
@@ -1234,6 +1234,32 @@ fn extract_options() -> crate::installer::archive::ExtractOptions {
     }
 }
 
+/// 導入専用キャッシュの展開先だけを空へ戻し、後段失敗後も新規展開を再試行できるようにする。
+fn prepare_cached_extraction(cache: &Path, name: &str) -> Result<PathBuf> {
+    let mut parts = Path::new(name).components();
+    anyhow::ensure!(
+        matches!(parts.next(), Some(std::path::Component::Normal(_))) && parts.next().is_none(),
+        "導入キャッシュの展開名が不正です"
+    );
+    let cache = crate::installer::fs::checked_directory(cache)?;
+    let destination = cache.join(name);
+    match std::fs::symlink_metadata(&destination) {
+        Ok(_) => {
+            // 祖先と対象のリンク・特殊ファイルを拒否してから、この直下の一領域だけを回収する。
+            let existing = crate::installer::fs::checked_directory(&destination)?;
+            anyhow::ensure!(
+                existing.parent() == Some(cache.as_path()),
+                "展開先が導入キャッシュの直下ではありません"
+            );
+            std::fs::remove_dir_all(existing)
+                .context("前回の導入キャッシュ展開先を回収できません")?;
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error.into()),
+    }
+    Ok(destination)
+}
+
 fn extract_tar_gz(archive: &Path, destination: &Path) -> Result<()> {
     crate::installer::archive::extract_tar_gz(
         archive,
@@ -1367,8 +1393,7 @@ async fn install_character_maker(app: &AppHandle) -> Result<()> {
         )
         .await?;
 
-        let comfy_unpack = cache.join("comfy");
-        cleanup_dir(app, "ComfyUI展開途中フォルダ", &comfy_unpack).await;
+        let comfy_unpack = prepare_cached_extraction(&cache, "comfy")?;
         let archive = comfy_zip.clone();
         let unpack = comfy_unpack.clone();
         tokio::task::spawn_blocking(move || extract_zip(&archive, &unpack)).await??;
@@ -1995,7 +2020,7 @@ async fn build_whisper_source(
         },
     )
     .await?;
-    let unpacked = cache.join("source");
+    let unpacked = prepare_cached_extraction(cache, "source")?;
     extract_tar_gz(&archive, &unpacked)?;
     let source = unpacked.join(format!("whisper.cpp-{}", pin.source_commit));
     anyhow::ensure!(
@@ -2035,7 +2060,7 @@ async fn install_whisper(app: &AppHandle) -> Result<()> {
             let archive = cache.join(source_name);
             download_to(app, DownloadSpec { id: "whisper", url: &asset_url, destination: &archive, expected_size: asset_size,
                 max_size: MAX_DOWNLOAD_BYTES, sha256: Some(&asset_sha256), message: "固定版Whisperの公式配布を取得中…" }).await?;
-            let unpacked = cache.join("binary");
+            let unpacked = prepare_cached_extraction(&cache, "binary")?;
             if source_name.ends_with(".tar.gz") { extract_tar_gz(&archive, &unpacked)?; } else { extract_zip(&archive, &unpacked)?; }
             let executable = find_named_file(&unpacked, whisper_exe_name(), 0)?.context("公式Whisper配布にCLIがありません")?;
             copy_dir_all(executable.parent().context("Whisper CLIの親フォルダがありません")?, &stage)?;
@@ -2371,6 +2396,99 @@ mod tests {
         if destination.exists() {
             std::fs::remove_dir_all(destination).unwrap();
         }
+    }
+
+    #[test]
+    fn 導入の後段失敗後も専用展開先だけを作り直して再試行できる() {
+        for (name, format) in [
+            ("uv", UvArchive::Zip),
+            ("uv", UvArchive::TarGz),
+            ("comfy", UvArchive::Zip),
+            ("binary", UvArchive::Zip),
+            ("binary", UvArchive::TarGz),
+            ("source", UvArchive::TarGz),
+        ] {
+            let directory = crate::installer::fs::test_directory();
+            let cache = directory.path();
+            let archive = cache.join("archive");
+            let file = std::fs::File::create(&archive).unwrap();
+            match format {
+                UvArchive::Zip => {
+                    let mut writer = zip::ZipWriter::new(file);
+                    writer
+                        .start_file("runtime", zip::write::SimpleFileOptions::default())
+                        .unwrap();
+                    writer.write_all(b"verified").unwrap();
+                    writer.finish().unwrap();
+                }
+                UvArchive::TarGz => {
+                    let encoder = flate2::write::GzEncoder::new(file, flate2::Compression::fast());
+                    let mut writer = tar::Builder::new(encoder);
+                    let mut header = tar::Header::new_gnu();
+                    header.set_mode(0o644);
+                    header.set_size(8);
+                    header.set_cksum();
+                    writer
+                        .append_data(&mut header, "runtime", &b"verified"[..])
+                        .unwrap();
+                    writer.into_inner().unwrap().finish().unwrap();
+                }
+            }
+            let original_archive = std::fs::read(&archive).unwrap();
+            let sibling = cache.join("保持する取得キャッシュ");
+            std::fs::write(&sibling, b"retain").unwrap();
+            let attempt = |fail_after_extract: bool| -> Result<()> {
+                let unpack = prepare_cached_extraction(cache, name)?;
+                match format {
+                    UvArchive::Zip => extract_zip(&archive, &unpack)?,
+                    UvArchive::TarGz => extract_tar_gz(&archive, &unpack)?,
+                }
+                anyhow::ensure!(!fail_after_extract, "展開後のモデル取得に失敗しました");
+                Ok(())
+            };
+            assert!(attempt(true).unwrap_err().to_string().contains("展開後"));
+            let unpack = cache.join(name);
+            std::fs::write(unpack.join("前回の残物"), b"stale").unwrap();
+            attempt(false).unwrap();
+            assert_eq!(std::fs::read(unpack.join("runtime")).unwrap(), b"verified");
+            assert!(!unpack.join("前回の残物").exists());
+            assert_eq!(std::fs::read(&archive).unwrap(), original_archive);
+            assert_eq!(std::fs::read(sibling).unwrap(), b"retain");
+        }
+    }
+
+    #[test]
+    fn 展開先回収は管理直下以外と通常ファイルを拒否する() {
+        let directory = crate::installer::fs::test_directory();
+        let cache = directory.path().join("cache");
+        std::fs::create_dir(&cache).unwrap();
+        let existing = cache.join("uv");
+        std::fs::write(&existing, b"retain").unwrap();
+        for name in ["", ".", "..", "../outside", "nested/uv", "uv"] {
+            assert!(prepare_cached_extraction(&cache, name).is_err(), "{name}");
+        }
+        assert_eq!(std::fs::read(&existing).unwrap(), b"retain");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn 展開先回収は対象と祖先のリンクを辿らない() {
+        let directory = crate::installer::fs::test_directory();
+        let cache = directory.path().join("cache");
+        let outside = directory.path().join("outside");
+        std::fs::create_dir(&cache).unwrap();
+        std::fs::create_dir(&outside).unwrap();
+        std::fs::write(outside.join("retain"), b"retain").unwrap();
+        std::os::unix::fs::symlink(&outside, cache.join("uv")).unwrap();
+        assert!(prepare_cached_extraction(&cache, "uv").is_err());
+        let ancestor = directory.path().join("linked-cache");
+        std::os::unix::fs::symlink(&outside, &ancestor).unwrap();
+        assert!(prepare_cached_extraction(&ancestor, "uv").is_err());
+        assert_eq!(std::fs::read(outside.join("retain")).unwrap(), b"retain");
+        assert!(std::fs::symlink_metadata(cache.join("uv"))
+            .unwrap()
+            .file_type()
+            .is_symlink());
     }
 
     #[test]

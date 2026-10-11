@@ -9,6 +9,12 @@ use super::Limits;
 
 pub(super) fn normal_metadata(path: &Path) -> Result<std::fs::Metadata> {
     let metadata = std::fs::symlink_metadata(path)?;
+    validate_normal_metadata(path, &metadata)?;
+    Ok(metadata)
+}
+
+/// 呼出元が取得した情報を使い、リンク・特殊ファイルの判定を一箇所に保つ。
+pub(super) fn validate_normal_metadata(path: &Path, metadata: &std::fs::Metadata) -> Result<()> {
     #[cfg(windows)]
     {
         use std::os::windows::fs::MetadataExt;
@@ -28,7 +34,7 @@ pub(super) fn normal_metadata(path: &Path) -> Result<std::fs::Metadata> {
         "通常のファイル・フォルダではありません: {}",
         path.display()
     );
-    Ok(metadata)
+    Ok(())
 }
 
 /// 既存の祖先も検査し、途中のリンクを経由した書込みを拒否する。
@@ -60,11 +66,14 @@ fn directory_location(path: &Path, create: bool) -> Result<PathBuf> {
             continue;
         }
         match std::fs::symlink_metadata(&current) {
-            Ok(_) => anyhow::ensure!(
-                normal_metadata(&current)?.is_dir(),
-                "保存先がフォルダではありません: {}",
-                current.display()
-            ),
+            Ok(metadata) => {
+                validate_normal_metadata(&current, &metadata)?;
+                anyhow::ensure!(
+                    metadata.is_dir(),
+                    "保存先がフォルダではありません: {}",
+                    current.display()
+                );
+            }
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                 if create {
                     std::fs::create_dir(&current)?;
@@ -105,8 +114,8 @@ pub(super) fn destination(root: &Path, relative: &Path) -> Result<PathBuf> {
 
 fn check_existing_target(path: &Path) -> Result<()> {
     match std::fs::symlink_metadata(path) {
-        Ok(_) => {
-            normal_metadata(path)?;
+        Ok(metadata) => {
+            validate_normal_metadata(path, &metadata)?;
         }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
         Err(error) => return Err(error.into()),

@@ -231,6 +231,17 @@ function settingsChangeRequest(current, saved, revisions) {
   return { patch, baseRevisions };
 }
 
+/** 保存が確定したキーだけ原本と版へ反映し、他操作の最新値や未保存の草稿を混ぜない。 */
+function acceptSavedSettings(patch, revisions) {
+  if (savedSnapshot) Object.assign(savedSnapshot, cloneSettings(patch));
+  Object.assign(data.values, cloneSettings(patch));
+  // 応答に全キーの版があっても、未編集の原本とその読込時の版は一緒に保持する。
+  for (const key of Object.keys(patch)) {
+    const revision = revisions?.[key];
+    if (typeof revision === "string") data.valueRevisions[key] = revision;
+  }
+}
+
 function updateDirtyStateNow() {
   if (renderingSettings || !savedSnapshot || !resetChangesBtn) return;
   let current;
@@ -254,33 +265,17 @@ function updateDirtyStateNow() {
     data.valueRevisions,
   ).patch));
   const dirty = changedKeys.size > 0;
-  for (const [key, wrapper] of inputWrappers) {
-    const currentValue = current[key];
-    const savedValue = savedSnapshot[key];
-    wrapper.classList.toggle("changed", stableStringify(comparisonValue(currentValue)) !== stableStringify(comparisonValue(savedValue)));
+  const compositeWrappers = [
+    ["PICOAGENT_CHARACTER_OVERRIDES", characterPersona?.closest(".field")],
+    ["PICOAGENT_TTS_CHARACTER_OVERRIDES", characterSpeaker?.closest(".field")],
+    ["PICOAGENT_LIVE2D_SDK_OVERRIDES", characterLive2dSdkField],
+    ["PICOAGENT_RENDERER_OVERRIDES", characterRendererField],
+    ["PICOAGENT_ALARMS", form.querySelector(".alarm-editor")?.closest(".card-config")],
+    ["PICOAGENT_SCHEDULED_TASKS", form.querySelector(".schedule-editor")?.closest(".card-config")],
+  ];
+  for (const [key, wrapper] of [...inputWrappers, ...compositeWrappers]) {
+    wrapper?.classList.toggle("changed", changedKeys.has(key));
   }
-  characterPersona?.closest(".field")?.classList.toggle(
-    "changed",
-    stableStringify(current.PICOAGENT_CHARACTER_OVERRIDES) !== stableStringify(savedSnapshot.PICOAGENT_CHARACTER_OVERRIDES)
-  );
-  characterSpeaker?.closest(".field")?.classList.toggle(
-    "changed",
-    stableStringify(current.PICOAGENT_TTS_CHARACTER_OVERRIDES) !== stableStringify(savedSnapshot.PICOAGENT_TTS_CHARACTER_OVERRIDES)
-  );
-  characterLive2dSdkField?.classList.toggle(
-    "changed",
-    stableStringify(current.PICOAGENT_LIVE2D_SDK_OVERRIDES) !== stableStringify(savedSnapshot.PICOAGENT_LIVE2D_SDK_OVERRIDES)
-  );
-  characterRendererField?.classList.toggle("changed",
-    stableStringify(current.PICOAGENT_RENDERER_OVERRIDES) !== stableStringify(savedSnapshot.PICOAGENT_RENDERER_OVERRIDES));
-  form.querySelector(".alarm-editor")?.closest(".card-config")?.classList.toggle(
-    "changed",
-    stableStringify(current.PICOAGENT_ALARMS) !== stableStringify(savedSnapshot.PICOAGENT_ALARMS)
-  );
-  form.querySelector(".schedule-editor")?.closest(".card-config")?.classList.toggle(
-    "changed",
-    stableStringify(current.PICOAGENT_SCHEDULED_TASKS) !== stableStringify(savedSnapshot.PICOAGENT_SCHEDULED_TASKS)
-  );
   // 折りたたんだ「詳細設定」の中を変更しても、閉じている間は .changed の色が見えない。
   // どこを触ったか分からないまま保存することになるので、見出し側にも印を出す。
   for (const group of form.querySelectorAll(".advanced-group")) {
@@ -289,9 +284,9 @@ function updateDirtyStateNow() {
   resetChangesBtn.disabled = settingsMutationBusy || !dirty;
   saveBtn.disabled = settingsMutationBusy;
   saveBtn.classList.toggle("dirty", dirty);
-  saveBtn.textContent = dirty ? `変更を保存（${changedKeys.size}件）` : "変更を保存";
+  saveBtn.textContent = dirty ? `変更を保存（${changedKeys.size}件）` : data.pendingRestart ? "保存済みの設定を反映" : "変更を保存";
   if (dirtySummary) {
-    dirtySummary.textContent = dirty ? `未保存 ${changedKeys.size}件` : "保存済み";
+    dirtySummary.textContent = dirty ? `未保存 ${changedKeys.size}件` : data.pendingRestart ? "保存済み・反映待ち" : "保存済み";
     dirtySummary.classList.toggle("dirty", dirty);
   }
 }
@@ -3827,16 +3822,22 @@ async function render() {
         removeButton.textContent = "ゴミ箱へ移動中…";
         try {
           const result = await window.picoagent.settings.removeCharacter(character.id);
+          const savedCharacter = result.savedCharacter;
+          const revision = result.valueRevisions?.PICOAGENT_CHARACTER;
+          if (typeof savedCharacter !== "string" || !savedCharacter || typeof revision !== "string") {
+            throw new Error("削除後のキャラクター選択を確認できません。設定画面を読み直してください。");
+          }
           const wasSelected = characterSelect.value === character.id;
           characterCatalog.characters = characterCatalog.characters.filter(item => item.id !== character.id);
           [...characterSelect.options].find(option => option.value === character.id)?.remove();
           card.remove();
+          // 原本は削除後の保存値へ揃える。別キャラの未保存選択は選択欄に保持し、
+          // 次の保存で正しい版との比較に使う。実行中キャラは保留中の保存値と区別する。
+          acceptSavedSettings({ PICOAGENT_CHARACTER: savedCharacter }, result.valueRevisions);
+          data.pendingRestart = result.pendingRestart || null;
           if (wasSelected) {
-            const fallbackCharacter = result?.activeCharacter || characterCatalog.default;
-            characterSelect.value = fallbackCharacter;
-            if (savedSnapshot) savedSnapshot.PICOAGENT_CHARACTER = fallbackCharacter;
-            data.values.PICOAGENT_CHARACTER = fallbackCharacter;
-            await queueCharacterSwitch(fallbackCharacter);
+            characterSelect.value = savedCharacter;
+            await queueCharacterSwitch(savedCharacter);
           }
           // 選択中キャラの既定値と現在値を照合し終えてから破棄する。先に消すと既定人格が
           // ユーザー上書きとして残り、削除直後に「未保存」と誤表示される。
@@ -3844,7 +3845,7 @@ async function render() {
           delete characterDefaultPersonas[character.id];
           delete characterDefaultVoices[character.id];
           applyCharacterFilters();
-          statusEl.textContent = `${character.name}をOSのゴミ箱へ移動しました。`;
+          statusEl.textContent = `${character.name}をOSのゴミ箱へ移動しました。${data.pendingRestart ? "選択の反映は「保存済みの設定を反映」から実行できます。" : ""}`;
         } catch (error) {
           removeButton.disabled = false;
           removeButton.textContent = "削除";
@@ -4466,6 +4467,26 @@ function confirmRestart() {
   });
 }
 
+// 保存は完了済み。延期・開始失敗のあとは、同じ値を再保存せず再初期化だけ試す。
+async function applyPendingSettingsRestart() {
+  const pending = data.pendingRestart;
+  if (!pending) return;
+  if (!await confirmRestart()) {
+    statusEl.textContent = "保存しました（次回の起動時に反映されます）";
+    return;
+  }
+  statusEl.textContent = "保存済みの設定を反映するため再初期化しています…";
+  try {
+    await window.picoagent.restartApp(pending.restartEngine, pending.restartAivis);
+    data.pendingRestart = null;
+    statusEl.textContent = "反映しました（起動画面で再読み込み中）";
+  } catch (error) {
+    logApp("error", "保存済み設定の再初期化に失敗しました", errorDetail(error));
+    statusEl.textContent = `設定は保存済みです。再初期化に失敗: ${errorMessage(error)}。「保存済みの設定を反映」から再試行できます`;
+  }
+  updateDirtyState();
+}
+
 function clearNumberErrors() {
   for (const [key, input] of inputs) {
     input.removeAttribute("aria-invalid");
@@ -4516,7 +4537,8 @@ saveBtn.addEventListener("click", async () => {
     const current = collect();
     const request = settingsChangeRequest(current, savedSnapshot, data.valueRevisions);
     if (!Object.keys(request.patch).length) {
-      statusEl.textContent = "変更はありません";
+      if (data.pendingRestart) await applyPendingSettingsRestart();
+      else statusEl.textContent = "変更はありません";
       return;
     }
     const res = await window.picoagent.settings.save(request.patch, request.baseRevisions);
@@ -4538,20 +4560,13 @@ saveBtn.addEventListener("click", async () => {
       return;
     }
     clearNumberErrors();
-    savedSnapshot = cloneSettings(current);
-    data.values = cloneSettings(current);
-    data.valueRevisions = cloneSettings(res.valueRevisions || data.valueRevisions);
-    updateDirtyState();
+    acceptSavedSettings(request.patch, res.valueRevisions);
     if (res.requiresRestart) {
-      const restartNow = await confirmRestart();
-      if (restartNow) {
-        statusEl.textContent = "反映のため再起動しています…";
-        // 変わった部分だけ立ち上げ直す（キャラ変更だけなら LLM は再起動しない）。
-        await window.picoagent.restartApp(res.restartEngine, res.restartAivis);
-        statusEl.textContent = "反映しました（起動画面で再読み込み中）";
-      } else {
-        statusEl.textContent = "保存しました（次回の起動時に反映されます）";
-      }
+      data.pendingRestart = { restartEngine: res.restartEngine, restartAivis: res.restartAivis };
+    }
+    updateDirtyState();
+    if (data.pendingRestart) {
+      await applyPendingSettingsRestart();
     } else {
       statusEl.textContent = res.up === null ? `保存しました（接続状態不明: ${res.providerError || "接続状態を確認できません"}）` : res.up ? "保存しました（接続OK）" : "保存しました（AIに未接続）";
     }
@@ -4622,7 +4637,7 @@ document.addEventListener("keydown", event => {
   if (modalOpen) return; // 確認ダイアログ表示中は裏の保存・検索を動かさない
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
     event.preventDefault();
-    if (!saveBtn.disabled && !resetChangesBtn.disabled) saveBtn.click();
+    if (!saveBtn.disabled && (!resetChangesBtn.disabled || data?.pendingRestart)) saveBtn.click();
   }
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "f") {
     event.preventDefault();

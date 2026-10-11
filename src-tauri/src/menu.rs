@@ -508,7 +508,7 @@ pub fn handle_event(app: &tauri::AppHandle, id: &str) {
                 "PICOAGENT_TTS_ENABLED".to_string(),
                 serde_json::Value::Bool(next),
             );
-            if let Err(error) = state.config.set_all(patch) {
+            if let Err(error) = state.config.set_all_and_activate(patch) {
                 crate::log_paths::append_app_log(
                     app,
                     &format!("読み上げ設定の保存に失敗しました: {error}"),

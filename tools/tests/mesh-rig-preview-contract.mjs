@@ -34,9 +34,11 @@ test("Windowsの確認入口は2.5D・MMD・登録済みLive2Dを選べる", () 
   assert.match(previewLauncher, /PSObject\.Properties\['live2d'\]/);
   assert.match(previewLauncher, /PICO_PREVIEW_CHARACTER/);
   assert.match(previewLauncher, /& cargo xtask dev/);
-  const override = config.indexOf('std::env::var("PICO_PREVIEW_CHARACTER")');
-  const persisted = config.indexOf("self.values.lock().unwrap().get(key)", override);
-  assert.ok(override >= 0 && persisted > override, "確認対象は保存値より先に、その起動中だけ解決する");
+  const getter = config.slice(config.indexOf("    pub fn get(&self,"), config.indexOf("    pub(crate) fn resolve_string("));
+  const override = getter.indexOf('std::env::var("PICO_PREVIEW_CHARACTER")');
+  const runtime = getter.indexOf("self.get_runtime_value(key)");
+  assert.match(getter, /cfg!\(debug_assertions\) && key == "PICOAGENT_CHARACTER"/);
+  assert.ok(override >= 0 && runtime > override, "確認対象は実行値より先に、その起動中だけ解決する");
 });
 
 test("関係者版ビルドのダブルクリック入口は結果を読むまで閉じない", () => {

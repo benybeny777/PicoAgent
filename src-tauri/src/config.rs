@@ -2,8 +2,9 @@
 //
 // 値の優先順位: 永続ファイル（PicoAgent/config.json）> 環境変数 > ハードコード既定値。
 // 開発ビルドの PICO_PREVIEW_CHARACTER だけは保存値を書き換えず実描画を選ぶため最優先にする。
-// コネクタは get() で都度読むため、設定画面での保存はアプリ再起動なしに反映される。
+// 通常の保存はすぐ反映し、再初期化が必要な値だけは承諾されるまで実行中の値を保つ。
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Mutex;
 
@@ -16,12 +17,26 @@ pub use ints::{number_settings_schema, validate_int_patch, IntSetting};
 
 const MISSING_REVISION: &str = "missing";
 
+#[derive(Default)]
+struct ConfigValues {
+    saved: Map<String, Value>,
+    /// 再初期化を待つ項目の実行値。未保存だった項目も None として固定する。
+    deferred: HashMap<String, Option<Value>>,
+}
+
+enum RuntimeUpdate<'a> {
+    Preserve,
+    Defer(&'a [&'a str]),
+    Activate,
+}
+
 pub struct Config {
     path: Mutex<Option<PathBuf>>,
     /// 原本を読めず・退避できず、保存先を持てないまま起動した理由。
     /// 保存要求が来たときに「なぜ保存できないのか」を利用者へそのまま返すため覚えておく。
     read_only_reason: Mutex<Option<String>>,
-    values: Mutex<Map<String, Value>>,
+    /// 保存値と実行値を同じロックで公開し、保存直後の先行反映を防ぐ。
+    values: Mutex<ConfigValues>,
     /// 「スナップショットを取る → ファイルへ書く」を直列化するためのロック。
     /// これが無いと、2つの保存が同時に走ったとき **あとから取ったスナップショットが
     /// 先に書かれ、古い方が後から上書きする**ことがあり、メモリ上には残っているのに
@@ -34,7 +49,7 @@ impl Config {
         Config {
             path: Mutex::new(None),
             read_only_reason: Mutex::new(None),
-            values: Mutex::new(Map::new()),
+            values: Mutex::new(ConfigValues::default()),
             write: Mutex::new(()),
         }
     }
@@ -47,7 +62,7 @@ impl Config {
         let mut warning = None;
         match std::fs::read_to_string(&file) {
             Ok(text) => match serde_json::from_str::<Value>(&text) {
-                Ok(Value::Object(map)) => *self.values.lock().unwrap() = map,
+                Ok(Value::Object(map)) => self.values.lock().unwrap().saved = map,
                 Ok(_) | Err(_) => {
                     // フォールバック許可: 破損時は空設定で起動（初回起動を成立させるため）。（根拠: PR #463 採用案。退避・通知と原本保護）
                     // ただし「設定が全部消えた」ように見える事象の原因調査ができるよう必ず記録する。
@@ -104,6 +119,16 @@ impl Config {
             .ok_or_else(|| "PicoAgentの設定ディレクトリを特定できません。".to_string())
     }
 
+    /// 実行中の生の値。画面表示・保存検証には永続値を返す get_all() を使う。
+    pub fn get_runtime_value(&self, key: &str) -> Option<Value> {
+        let values = self.values.lock().unwrap();
+        values
+            .deferred
+            .get(key)
+            .cloned()
+            .unwrap_or_else(|| values.saved.get(key).cloned())
+    }
+
     /// 文字列設定を取得。空文字は未設定とみなし env → 既定値へフォールバック。
     pub fn get(&self, key: &str, fallback: &str) -> String {
         if cfg!(debug_assertions) && key == "PICOAGENT_CHARACTER" {
@@ -113,7 +138,13 @@ impl Config {
                 }
             }
         }
-        if let Some(v) = self.values.lock().unwrap().get(key) {
+        Self::resolve_string(key, self.get_runtime_value(key).as_ref(), fallback)
+    }
+
+    /// 同じ保存スナップショットの値を、通常取得と同じ優先順位で文字列へ解決する。
+    /// 開発中の描画上書きは保存値ではないため、get() だけで先に適用する。
+    pub(crate) fn resolve_string(key: &str, raw: Option<&Value>, fallback: &str) -> String {
+        if let Some(v) = raw {
             if let Some(s) = v.as_str() {
                 if !s.is_empty() {
                     // シークレットはOSの資格情報保護へ預けてあるため、読み取り時に復号する（非保護値は素通り）。
@@ -143,7 +174,7 @@ impl Config {
 
     /// 数量設定は保存時と同じ宣言で読む。ファイル中の不正値も黙って続行させない。
     pub fn int_or_auto(&self, setting: &IntSetting) -> Result<Option<i64>, String> {
-        let stored = self.values.lock().unwrap().get(setting.key).cloned();
+        let stored = self.get_runtime_value(setting.key);
         setting.parse(&effective_int_text(stored.as_ref(), setting)?)
     }
 
@@ -161,7 +192,7 @@ impl Config {
         let stored = patch
             .get(setting.key)
             .cloned()
-            .or_else(|| self.values.lock().unwrap().get(setting.key).cloned());
+            .or_else(|| self.values.lock().unwrap().saved.get(setting.key).cloned());
         setting.parse(&effective_int_text(stored.as_ref(), setting)?)
     }
 
@@ -188,7 +219,11 @@ impl Config {
     }
 
     pub fn invalid_int_settings(&self) -> Vec<Value> {
-        let values = self.get_all();
+        Self::invalid_int_settings_in(&self.get_all())
+    }
+
+    /// 応答用に取得済みの保存スナップショットから、不正な数量だけを検査する。
+    pub(crate) fn invalid_int_settings_in(values: &Map<String, Value>) -> Vec<Value> {
         ints::INT_SETTINGS
             .iter()
             .filter_map(|setting| {
@@ -202,7 +237,7 @@ impl Config {
 
     /// 真偽値設定を取得。
     pub fn get_bool(&self, key: &str, fallback: bool) -> bool {
-        if let Some(v) = self.values.lock().unwrap().get(key) {
+        if let Some(v) = self.get_runtime_value(key) {
             if let Some(b) = v.as_bool() {
                 return b;
             }
@@ -216,9 +251,9 @@ impl Config {
         fallback
     }
 
-    /// 永続設定または環境変数に空でない値があるか。
+    /// 実行中の設定または環境変数に空でない値があるか。
     pub fn has_value(&self, key: &str) -> bool {
-        if let Some(v) = self.values.lock().unwrap().get(key) {
+        if let Some(v) = self.get_runtime_value(key) {
             if let Some(s) = v.as_str() {
                 return !s.is_empty();
             }
@@ -231,15 +266,18 @@ impl Config {
 
     /// 永続化されている生の値一式（設定画面の初期表示用）。
     pub fn get_all(&self) -> Map<String, Value> {
-        self.values.lock().unwrap().clone()
+        self.values.lock().unwrap().saved.clone()
     }
 
     /// 設定画面の楽観的排他に使う、値ごとの不可逆な版。
     /// シークレットの値そのものを画面へ返さず、読込後の変更だけを検出する。
     pub fn value_revisions(&self) -> Map<String, Value> {
-        self.values
-            .lock()
-            .unwrap()
+        Self::revisions_for(&self.values.lock().unwrap().saved)
+    }
+
+    /// 読み込んだ値または保存が確定した差分と、必ず同じ時点の版を返す。
+    pub fn revisions_for(values: &Map<String, Value>) -> Map<String, Value> {
+        values
             .iter()
             .map(|(key, value)| (key.clone(), Value::String(value_revision(Some(value)))))
             .collect()
@@ -254,28 +292,167 @@ impl Config {
         self.set_all_with_writer(patch, crate::store::write_json_atomic)
     }
 
+    /// 明示された操作の対象だけを、保存が成功した時点で実行側へ反映する。
+    /// 保存済みと同じ値を選び直した場合も、対象の保留だけを解除する。
+    pub fn set_all_and_activate(&self, patch: Map<String, Value>) -> anyhow::Result<()> {
+        self.save_patch(
+            patch,
+            &Map::new(),
+            RuntimeUpdate::Activate,
+            |_, _| Ok(()),
+            crate::store::write_json_atomic,
+        )
+        .map(|_| ())
+    }
+
+    /// 削除などの明示操作が参照できなくする値だけを、保存側と実行側で置き換える。
+    /// 操作に失敗した場合は設定を戻す。operation 内では設定の保存・保留解除を行わない。
+    pub fn replace_value_for_operation<T>(
+        &self,
+        key: &str,
+        removed: Option<&Value>,
+        replacement: &Value,
+        operation: impl FnOnce() -> anyhow::Result<T>,
+    ) -> anyhow::Result<T> {
+        self.replace_for_operation(key, replacement, |raw| raw == removed, operation)
+    }
+
+    /// 環境変数から選ばれた値も含め、対象文字列へ解決される選択だけを置き換える。
+    pub fn replace_string_for_operation<T>(
+        &self,
+        key: &str,
+        removed: &str,
+        replacement: &str,
+        operation: impl FnOnce() -> anyhow::Result<T>,
+    ) -> anyhow::Result<T> {
+        self.replace_for_operation(
+            key,
+            &Value::String(replacement.to_string()),
+            |raw| Self::resolve_string(key, raw, "") == removed,
+            operation,
+        )
+    }
+
+    fn replace_for_operation<T>(
+        &self,
+        key: &str,
+        replacement: &Value,
+        matches: impl Fn(Option<&Value>) -> bool,
+        operation: impl FnOnce() -> anyhow::Result<T>,
+    ) -> anyhow::Result<T> {
+        let _write = self
+            .write
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let (original, mut runtime) = {
+            let values = self.values.lock().unwrap();
+            (
+                values.saved.get(key).cloned(),
+                values.deferred.get(key).cloned(),
+            )
+        };
+        let saved_changed = matches(original.as_ref()) && original.as_ref() != Some(replacement);
+        let runtime_value = match &runtime {
+            Some(value) => value.as_ref(),
+            None => original.as_ref(),
+        };
+        if matches(runtime_value) {
+            runtime = Some(Some(replacement.clone()));
+        }
+        // 保存変更がある場合だけ全体を1回複製する。実行値だけの置換では複製もI/Oもしない。
+        let mut persisted = if saved_changed {
+            let path = self.writable_path()?;
+            let mut next = self.values.lock().unwrap().saved.clone();
+            next.insert(key.to_string(), replacement.clone());
+            let snapshot = Value::Object(next);
+            crate::store::write_json_atomic(&path, &snapshot)?;
+            Some((path, snapshot))
+        } else {
+            None
+        };
+        let result = match operation() {
+            Ok(result) => result,
+            Err(error) => {
+                if let Some((path, snapshot)) = &mut persisted {
+                    let next = snapshot.as_object_mut().expect("設定はJSONオブジェクト");
+                    // 元の単一値だけ覚えておけば、別の全体複製を持たずに原本へ戻せる。
+                    if let Some(original) = original {
+                        next.insert(key.to_string(), original);
+                    } else {
+                        next.remove(key);
+                    }
+                    if let Err(restore) = crate::store::write_json_atomic(path, snapshot) {
+                        return Err(anyhow::anyhow!(
+                            "操作に失敗しました: {error:#}。設定の復元にも失敗しました: {restore:#}"
+                        ));
+                    }
+                }
+                return Err(error);
+            }
+        };
+        let mut values = self.values.lock().unwrap();
+        if let Some((_, snapshot)) = persisted {
+            let Value::Object(next) = snapshot else {
+                unreachable!("設定スナップショットは必ずJSONオブジェクト")
+            };
+            values.saved = next;
+        }
+        if let Some(runtime) = runtime {
+            if runtime.as_ref() == values.saved.get(key) {
+                values.deferred.remove(key);
+            } else {
+                values.deferred.insert(key.to_string(), runtime);
+            }
+        }
+        Ok(result)
+    }
+
     /// 読込時の版が変わっていない場合だけ、差分を原子的に保存する。
     /// 比較から書込みまで `write` ロック内で行い、検査直後の更新割込みを許さない。
     /// 競合検査に成功した場合だけ、同じ保存ロック内で差分の検証・保護変換を行う。
     /// シークレットを資格情報ストアへ書く処理が競合却下より先に走ることを防ぐ。
     pub fn set_all_checked_with(
         &self,
-        mut patch: Map<String, Value>,
+        patch: Map<String, Value>,
         expected_revisions: &Map<String, Value>,
         prepare: impl FnOnce(&Map<String, Value>, &mut Map<String, Value>) -> anyhow::Result<()>,
     ) -> anyhow::Result<(Vec<String>, Map<String, Value>)> {
+        self.set_all_checked_deferred(patch, expected_revisions, &[], prepare)
+    }
+
+    /// 再初期化を待つキーは保存だけを先に済ませ、現在の実行値を維持する。
+    /// 連続保存しても最初の実行値を保ち、保存失敗・競合時は保留を作らない。
+    pub fn set_all_checked_deferred(
+        &self,
+        patch: Map<String, Value>,
+        expected_revisions: &Map<String, Value>,
+        deferred_keys: &[&str],
+        prepare: impl FnOnce(&Map<String, Value>, &mut Map<String, Value>) -> anyhow::Result<()>,
+    ) -> anyhow::Result<(Vec<String>, Map<String, Value>)> {
+        self.save_patch(
+            patch,
+            expected_revisions,
+            RuntimeUpdate::Defer(deferred_keys),
+            prepare,
+            crate::store::write_json_atomic,
+        )
+    }
+
+    fn save_patch(
+        &self,
+        mut patch: Map<String, Value>,
+        expected_revisions: &Map<String, Value>,
+        runtime_update: RuntimeUpdate<'_>,
+        prepare: impl FnOnce(&Map<String, Value>, &mut Map<String, Value>) -> anyhow::Result<()>,
+        write_snapshot: impl FnOnce(&std::path::Path, &Value) -> anyhow::Result<()>,
+    ) -> anyhow::Result<(Vec<String>, Map<String, Value>)> {
+        // スナップショットの採取から公開まで、全保存経路を同じ順序で直列化する。
         let _write = self
             .write
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let path = self.path.lock().unwrap().clone();
-        let Some(path) = path else {
-            let reason = self.read_only_reason.lock().unwrap().clone();
-            return Err(anyhow::anyhow!(
-                reason.unwrap_or_else(|| "config.load() が未実行です".to_string())
-            ));
-        };
-        let current = self.values.lock().unwrap().clone();
+        let path = self.writable_path()?;
+        let current = self.values.lock().unwrap().saved.clone();
         let mut conflicts = expected_revisions
             .iter()
             .filter_map(|(key, expected)| {
@@ -290,18 +467,58 @@ impl Config {
         prepare(&current, &mut patch)?;
         let mut next = current;
         let mut changed = false;
+        let mut deferred = Vec::new();
         for (key, value) in &patch {
             if next.get(key) != Some(value) {
+                if let RuntimeUpdate::Defer(keys) = &runtime_update {
+                    if keys.contains(&key.as_str()) {
+                        deferred.push((key.clone(), next.get(key).cloned()));
+                    }
+                }
                 next.insert(key.clone(), value.clone());
                 changed = true;
             }
         }
-        if !changed {
-            return Ok((Vec::new(), patch));
+        let snapshot = Value::Object(next);
+        // ディスクI/O中は values ロックを外し、実行側の読取を止めない。
+        if changed {
+            write_snapshot(&path, &snapshot)?;
         }
-        crate::store::write_json_atomic(&path, &Value::Object(next.clone()))?;
-        *self.values.lock().unwrap() = next;
+        let Value::Object(next) = snapshot else {
+            unreachable!("設定スナップショットは必ずJSONオブジェクト")
+        };
+        let mut values = self.values.lock().unwrap();
+        for (key, previous) in deferred {
+            values.deferred.entry(key).or_insert(previous);
+        }
+        if matches!(runtime_update, RuntimeUpdate::Activate) {
+            for key in patch.keys() {
+                values.deferred.remove(key);
+            }
+        }
+        values.saved = next;
         Ok((Vec::new(), patch))
+    }
+
+    fn writable_path(&self) -> anyhow::Result<PathBuf> {
+        self.path.lock().unwrap().clone().ok_or_else(|| {
+            anyhow::anyhow!(self
+                .read_only_reason
+                .lock()
+                .unwrap()
+                .clone()
+                .unwrap_or_else(|| "config.load() が未実行です".to_string()))
+        })
+    }
+
+    /// 利用者が再初期化を承諾した時点で、保存済みの値を実行側へ公開する。
+    pub fn activate_saved_values(&self) {
+        // 保存と同じ write → values 順に取り、保存途中の解除・保留復活を防ぐ。
+        let _write = self
+            .write
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        self.values.lock().unwrap().deferred.clear();
     }
 
     fn set_all_with_writer(
@@ -309,44 +526,14 @@ impl Config {
         patch: Map<String, Value>,
         write_snapshot: impl FnOnce(&std::path::Path, &Value) -> anyhow::Result<()>,
     ) -> anyhow::Result<()> {
-        // スナップショットの採取から書き込みまでを直列化する（並び替わりを防ぐ）。
-        // 毒された場合も保存自体は続ける（中身は () で不変）。
-        let _write = self
-            .write
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let path = self.path.lock().unwrap().clone();
-        let Some(path) = path else {
-            // 読み取り専用で起動した場合は、その理由（対象ファイルを含む）をそのまま返す。
-            let reason = self.read_only_reason.lock().unwrap().clone();
-            return Err(anyhow::anyhow!(
-                reason.unwrap_or_else(|| "config.load() が未実行です".to_string())
-            ));
-        };
-        let next = {
-            let values = self.values.lock().unwrap();
-            let mut next = values.clone();
-            let mut changed = false;
-            for (k, v) in patch {
-                if next.get(&k) != Some(&v) {
-                    next.insert(k, v);
-                    changed = true;
-                }
-            }
-            if !changed {
-                return Ok(());
-            }
-            next
-        };
-        let snapshot = Value::Object(next);
-        // 書き込み中に落ちても設定が全損しないよう、共通層の原子的な書き込みを使う。
-        // ディスクI/O中は values ロックを外し、プロバイダ等の get() を止めない。
-        write_snapshot(&path, &snapshot)?;
-        let Value::Object(next) = snapshot else {
-            unreachable!("設定スナップショットは必ずJSONオブジェクト")
-        };
-        *self.values.lock().unwrap() = next;
-        Ok(())
+        self.save_patch(
+            patch,
+            &Map::new(),
+            RuntimeUpdate::Preserve,
+            |_, _| Ok(()),
+            write_snapshot,
+        )
+        .map(|_| ())
     }
 
     /// 単一の設定を永続化する。
@@ -362,6 +549,7 @@ impl Config {
             .values
             .lock()
             .unwrap()
+            .saved
             .get("PICOAGENT_CHARACTER")
             .and_then(Value::as_str)
             .map(str::to_owned);
@@ -379,13 +567,18 @@ impl Config {
         self.values
             .lock()
             .unwrap()
+            .saved
             .insert(key.to_string(), Value::String(value.to_string()));
     }
 
     /// テスト専用: JSONオブジェクトや配列をインメモリへ設定する。
     #[cfg(test)]
     pub fn set_value(&self, key: &str, value: Value) {
-        self.values.lock().unwrap().insert(key.to_string(), value);
+        self.values
+            .lock()
+            .unwrap()
+            .saved
+            .insert(key.to_string(), value);
     }
 }
 
@@ -502,10 +695,7 @@ mod tests {
         std::env::set_var(setting.key, "９");
         cfg.set(setting.key, "");
         assert_eq!(cfg.int(&setting).unwrap(), 9);
-        cfg.values
-            .lock()
-            .unwrap()
-            .insert(setting.key.to_string(), serde_json::Value::Null);
+        cfg.set_value(setting.key, serde_json::Value::Null);
         assert_eq!(cfg.int(&setting).unwrap(), 9);
         cfg.set(setting.key, "2");
         assert_eq!(cfg.int(&setting).unwrap(), 2);
@@ -683,6 +873,501 @@ mod tests {
             .is_empty());
         assert_eq!(cfg.get("B", ""), "追加");
         std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn 保存した差分の版は後続更新や未編集の最新値を混ぜない() {
+        let directory = tempfile::tempdir().unwrap();
+        let cfg = Config::new();
+        cfg.load(directory.path().join("config.json")).unwrap();
+        cfg.set_all(serde_json::Map::from_iter([
+            ("A".into(), serde_json::json!("読込時")),
+            ("B".into(), serde_json::json!("変更前")),
+        ]))
+        .unwrap();
+        let snapshot = cfg.get_all();
+        let loaded_revisions = Config::revisions_for(&snapshot);
+        cfg.set_string("A", "別操作の更新".into()).unwrap();
+        let (_, saved) = cfg
+            .set_all_checked_with(
+                serde_json::Map::from_iter([("B".into(), serde_json::json!("変更後"))]),
+                &serde_json::Map::from_iter([("B".into(), loaded_revisions["B"].clone())]),
+                |_, _| Ok(()),
+            )
+            .unwrap();
+        // 応答までの別更新を読み直さず、今回保存した値に対応する版を使う。
+        cfg.set_string("B", "保存後の別更新".into()).unwrap();
+        let saved_revisions = Config::revisions_for(&saved);
+        assert_eq!(saved_revisions.len(), 1);
+        assert_eq!(
+            saved_revisions["B"],
+            super::value_revision(Some(&serde_json::json!("変更後")))
+        );
+        assert_ne!(saved_revisions["B"], cfg.value_revisions()["B"]);
+        assert_eq!(
+            loaded_revisions["A"],
+            super::value_revision(snapshot.get("A"))
+        );
+        assert_ne!(loaded_revisions["A"], cfg.value_revisions()["A"]);
+    }
+
+    fn saved_config(initial: serde_json::Value) -> (tempfile::TempDir, std::path::PathBuf, Config) {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("config.json");
+        crate::store::write_json_atomic(&path, &initial).unwrap();
+        let cfg = Config::new();
+        cfg.load(path.clone()).unwrap();
+        (directory, path, cfg)
+    }
+
+    fn deferred_config(
+        active: &str,
+        saved: &str,
+    ) -> (tempfile::TempDir, std::path::PathBuf, Config) {
+        let (directory, path, cfg) = saved_config(serde_json::json!({
+            "対象": active,
+            "別項目": "別実行中"
+        }));
+        cfg.set_all_checked_deferred(
+            serde_json::json!({"対象": saved, "別項目": "別保存後"})
+                .as_object()
+                .unwrap()
+                .clone(),
+            &cfg.value_revisions(),
+            &["対象", "別項目"],
+            |_, _| Ok(()),
+        )
+        .unwrap();
+        (directory, path, cfg)
+    }
+
+    #[test]
+    fn 明示反映は保存済みと同じ値でも対象だけ保留解除する() {
+        for selected in ["保存後", "新しい選択"] {
+            let (_directory, path, cfg) = deferred_config("実行中", "保存後");
+            let before = std::fs::read(&path).unwrap();
+            let modified = std::fs::metadata(&path).unwrap().modified().unwrap();
+            cfg.set_all_and_activate(
+                serde_json::json!({"対象": selected})
+                    .as_object()
+                    .unwrap()
+                    .clone(),
+            )
+            .unwrap();
+            assert_eq!(cfg.get("対象", ""), selected);
+            assert_eq!(cfg.get("別項目", ""), "別実行中");
+            assert_eq!(cfg.get_all()["別項目"], "別保存後");
+            let reloaded = Config::new();
+            reloaded.load(path.clone()).unwrap();
+            assert_eq!(reloaded.get("対象", ""), selected);
+            if selected == "保存後" {
+                assert_eq!(std::fs::read(&path).unwrap(), before);
+                assert_eq!(
+                    std::fs::metadata(&path).unwrap().modified().unwrap(),
+                    modified
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn 明示反映の実保存に失敗したら対象と別項目の保留を保つ() {
+        let (_directory, path, cfg) = deferred_config("実行中", "保存後");
+        let before = cfg.get_all();
+        std::fs::remove_file(&path).unwrap();
+        std::fs::create_dir(&path).unwrap();
+        assert!(cfg
+            .set_all_and_activate(
+                serde_json::json!({"対象": "新しい選択"})
+                    .as_object()
+                    .unwrap()
+                    .clone(),
+            )
+            .is_err());
+        assert_eq!(cfg.get_all(), before);
+        assert_eq!(cfg.get("対象", ""), "実行中");
+        assert_eq!(cfg.get("別項目", ""), "別実行中");
+        std::fs::remove_dir(&path).unwrap();
+        cfg.set_string("対象", "後続の通常保存".into()).unwrap();
+        assert_eq!(cfg.get("対象", ""), "実行中");
+    }
+
+    #[test]
+    fn 削除操作は保存側と実行側の対象値だけを置き換える() {
+        for (active, saved, removed, next_active, next_saved) in [
+            ("A", "B", "B", "A", "既定"),
+            ("A", "B", "A", "既定", "B"),
+            ("A", "B", "C", "A", "B"),
+            ("A", "A", "A", "既定", "既定"),
+        ] {
+            let (directory, path, cfg) = deferred_config(active, saved);
+            let asset = directory.path().join("character.json");
+            std::fs::write(&asset, removed).unwrap();
+            let result = cfg
+                .replace_value_for_operation(
+                    "対象",
+                    Some(&serde_json::json!(removed)),
+                    &serde_json::json!("既定"),
+                    || {
+                        let persisted = Config::new();
+                        persisted.load(path.clone()).unwrap();
+                        assert_eq!(persisted.get("対象", ""), next_saved);
+                        assert_eq!(cfg.get("対象", ""), active);
+                        assert_eq!(cfg.get_all()["対象"], saved);
+                        std::fs::remove_file(&asset)?;
+                        Ok("削除完了")
+                    },
+                )
+                .unwrap();
+            assert_eq!(result, "削除完了");
+            assert!(!asset.exists());
+            assert_eq!(cfg.get("対象", ""), next_active);
+            assert_eq!(cfg.get_all()["対象"], next_saved);
+            assert_eq!(cfg.get("別項目", ""), "別実行中");
+            assert_eq!(cfg.get_all()["別項目"], "別保存後");
+            cfg.activate_saved_values();
+            assert_eq!(cfg.get("対象", ""), next_saved);
+        }
+    }
+
+    #[test]
+    fn 削除失敗は設定ファイルを戻して保存値と実行値を維持する() {
+        for removed in ["A", "B"] {
+            let (directory, path, cfg) = deferred_config("A", "B");
+            let before = std::fs::read(&path).unwrap();
+            let values = cfg.get_all();
+            let asset = directory.path().join("削除できないディレクトリ");
+            std::fs::create_dir(&asset).unwrap();
+            std::fs::write(asset.join("残っているファイル"), "保持").unwrap();
+            assert!(cfg
+                .replace_value_for_operation(
+                    "対象",
+                    Some(&serde_json::json!(removed)),
+                    &serde_json::json!("既定"),
+                    || {
+                        std::fs::remove_dir(&asset)?;
+                        Ok(())
+                    },
+                )
+                .is_err());
+            assert_eq!(std::fs::read(path).unwrap(), before);
+            assert_eq!(cfg.get_all(), values);
+            assert_eq!(cfg.get("対象", ""), "A");
+            assert_eq!(cfg.get("別項目", ""), "別実行中");
+            assert!(asset.join("残っているファイル").exists());
+        }
+    }
+
+    #[test]
+    fn 欠損値の置換操作に失敗したら追加キーを消して他の保存値を保つ() {
+        let initial = serde_json::json!({"別項目": {"配列": [1, 2, 3]}});
+        let (_directory, path, cfg) = saved_config(initial.clone());
+        let before = std::fs::read(&path).unwrap();
+        let result: anyhow::Result<()> = cfg.replace_value_for_operation(
+            "未設定の対象",
+            None,
+            &serde_json::json!("置換後"),
+            || {
+                let saved = Config::new();
+                saved.load(path.clone()).unwrap();
+                assert_eq!(saved.get("未設定の対象", ""), "置換後");
+                assert_eq!(cfg.get_runtime_value("未設定の対象"), None);
+                anyhow::bail!("操作を完了できない");
+            },
+        );
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("操作を完了できない"));
+        assert_eq!(std::fs::read(path).unwrap(), before);
+        assert_eq!(cfg.get_all(), *initial.as_object().unwrap());
+        assert_eq!(cfg.get_runtime_value("未設定の対象"), None);
+    }
+
+    #[test]
+    fn 削除前の設定保存に失敗したら削除操作を実行しない() {
+        let (_directory, path, cfg) = deferred_config("A", "B");
+        let values = cfg.get_all();
+        std::fs::remove_file(&path).unwrap();
+        std::fs::create_dir(&path).unwrap();
+        let executed = std::cell::Cell::new(false);
+        assert!(cfg
+            .replace_value_for_operation(
+                "対象",
+                Some(&serde_json::json!("B")),
+                &serde_json::json!("既定"),
+                || {
+                    executed.set(true);
+                    Ok(())
+                },
+            )
+            .is_err());
+        assert!(!executed.get());
+        assert_eq!(cfg.get_all(), values);
+        assert_eq!(cfg.get("対象", ""), "A");
+        assert_eq!(cfg.get("別項目", ""), "別実行中");
+    }
+
+    #[test]
+    fn 欠損実行値の置換は別の保存値を保ち既存値を欠損と誤認しない() {
+        for saved in [None, Some("次回の値")] {
+            let (_directory, path, cfg) = saved_config(serde_json::json!({}));
+            if let Some(saved) = saved {
+                cfg.set_all_checked_deferred(
+                    serde_json::json!({"対象": saved})
+                        .as_object()
+                        .unwrap()
+                        .clone(),
+                    &cfg.value_revisions(),
+                    &["対象"],
+                    |_, _| Ok(()),
+                )
+                .unwrap();
+            }
+            assert_eq!(cfg.get_runtime_value("対象"), None);
+            cfg.replace_value_for_operation("対象", None, &serde_json::json!("既定"), || Ok(()))
+                .unwrap();
+            assert_eq!(cfg.get("対象", ""), "既定");
+            assert_eq!(cfg.get_all()["対象"], saved.unwrap_or("既定"));
+            let reloaded = Config::new();
+            reloaded.load(path).unwrap();
+            assert_eq!(reloaded.get("対象", ""), saved.unwrap_or("既定"));
+        }
+        let (_directory, _path, cfg) = deferred_config("既存", "既存");
+        cfg.replace_value_for_operation("対象", None, &serde_json::json!("既定"), || Ok(()))
+            .unwrap();
+        assert_eq!(cfg.get("対象", ""), "既存");
+        assert_eq!(cfg.get_all()["対象"], "既存");
+    }
+
+    #[test]
+    fn 環境値を使う文字列置換は保存側と実行側を個別に解決する() {
+        let key = "TEST_CONFIG_RUNTIME_9005";
+        let _restore = RestoreEnvironment::new(key);
+        std::env::set_var(key, "A");
+        let empty = Some(serde_json::json!(""));
+        let null = Some(serde_json::Value::Null);
+        let other = Some(serde_json::json!("B"));
+        for (initial, saved, expected_runtime, expected_saved) in [
+            (None, None, "既定", "既定"),
+            (empty.clone(), empty.clone(), "既定", "既定"),
+            (null.clone(), null.clone(), "既定", "既定"),
+            (None, other.clone(), "既定", "B"),
+            (empty.clone(), other.clone(), "既定", "B"),
+            (null.clone(), other.clone(), "既定", "B"),
+            (other.clone(), empty, "B", "既定"),
+            (other, null, "B", "既定"),
+        ] {
+            let initial_values = initial
+                .clone()
+                .map(|value| (key.to_string(), value))
+                .into_iter()
+                .collect();
+            let (_directory, path, cfg) = saved_config(serde_json::Value::Object(initial_values));
+            if initial != saved {
+                cfg.set_all_checked_deferred(
+                    serde_json::Map::from_iter([(
+                        key.to_string(),
+                        saved.clone().expect("このケースの保存先には値がある"),
+                    )]),
+                    &cfg.value_revisions(),
+                    &[key],
+                    |_, _| Ok(()),
+                )
+                .unwrap();
+            }
+            let before = cfg.get_all();
+            assert_eq!(
+                cfg.get(key, "未設定"),
+                Config::resolve_string(key, initial.as_ref(), "未設定")
+            );
+            assert_eq!(
+                Config::resolve_string(key, before.get(key), "未設定"),
+                Config::resolve_string(key, saved.as_ref(), "未設定")
+            );
+            cfg.replace_string_for_operation(key, "A", "既定", || Ok(()))
+                .unwrap();
+            assert_eq!(cfg.get(key, "未設定"), expected_runtime);
+            let after = cfg.get_all();
+            assert_eq!(
+                Config::resolve_string(key, after.get(key), "未設定"),
+                expected_saved
+            );
+            let reloaded = Config::new();
+            reloaded.load(path).unwrap();
+            assert_eq!(reloaded.get(key, "未設定"), expected_saved);
+        }
+    }
+
+    #[test]
+    fn 再初期化待ちの設定は全取得形式で実行値を保ち保存値を別に返す() {
+        let setting = super::IntSetting {
+            key: "TEST_CONFIG_RUNTIME_9003",
+            label: "保留する数量",
+            default: Some(5),
+            min: 0,
+            max: 60,
+            unit: "件",
+        };
+        let missing = "TEST_CONFIG_RUNTIME_9004";
+        let _restore = RestoreEnvironment::new(missing);
+        std::env::remove_var(missing);
+        let initial = serde_json::json!({
+            "文字列": "実行中",
+            "真偽値": true,
+            setting.key: "10",
+            "空文字": "",
+            "空値": null,
+            "即時反映": "保存前"
+        });
+        let (_directory, path, cfg) = saved_config(initial);
+        let before = cfg.value_revisions();
+        let patch = serde_json::json!({
+            "文字列": "保存後",
+            "真偽値": false,
+            setting.key: "20",
+            missing: "新規値",
+            "空文字": "入力済み",
+            "空値": "入力済み",
+            "即時反映": "保存後"
+        })
+        .as_object()
+        .unwrap()
+        .clone();
+        let (conflicts, saved) = cfg
+            .set_all_checked_deferred(
+                patch.clone(),
+                &before,
+                &["文字列", "真偽値", setting.key, missing, "空文字", "空値"],
+                |_, _| Ok(()),
+            )
+            .unwrap();
+        assert!(conflicts.is_empty());
+        assert_eq!(saved, patch);
+        assert_eq!(cfg.get("文字列", ""), "実行中");
+        assert!(cfg.get_bool("真偽値", false));
+        assert_eq!(cfg.int(&setting).unwrap(), 10);
+        assert_eq!(
+            cfg.int_in_patch(&setting, &serde_json::Map::new()).unwrap(),
+            20
+        );
+        assert_eq!(cfg.get_runtime_value(missing), None);
+        assert_eq!(cfg.get(missing, "未設定"), "未設定");
+        assert!(!cfg.has_value(missing));
+        assert_eq!(cfg.get_runtime_value("空文字"), Some(serde_json::json!("")));
+        assert_eq!(cfg.get_runtime_value("空値"), Some(serde_json::Value::Null));
+        assert!(!cfg.has_value("空文字"));
+        assert!(!cfg.has_value("空値"));
+        assert_eq!(cfg.get("即時反映", ""), "保存後");
+        assert_eq!(cfg.get_all(), patch);
+        assert_ne!(cfg.value_revisions()["文字列"], before["文字列"]);
+
+        let reloaded = Config::new();
+        reloaded.load(path.clone()).unwrap();
+        assert_eq!(reloaded.get_all(), cfg.get_all());
+        assert_eq!(reloaded.value_revisions(), cfg.value_revisions());
+        assert_eq!(reloaded.get("文字列", ""), "保存後");
+        assert!(!reloaded.get_bool("真偽値", true));
+        assert_eq!(reloaded.int(&setting).unwrap(), 20);
+        assert!(reloaded.has_value(missing));
+        let persisted = std::fs::read(&path).unwrap();
+        cfg.activate_saved_values();
+        for key in patch.keys() {
+            assert_eq!(cfg.get_runtime_value(key), reloaded.get_runtime_value(key));
+        }
+        assert_eq!(std::fs::read(path).unwrap(), persisted);
+    }
+
+    #[test]
+    fn 保留中の連続保存は最初の実行値を保ち承諾時だけ最新版を反映する() {
+        let (_directory, _path, cfg) = saved_config(serde_json::json!({
+            "対象": "起動時",
+            "変更なし": "起動時"
+        }));
+        for value in ["保存一回目", "保存二回目"] {
+            let expected = cfg.value_revisions();
+            assert!(cfg
+                .set_all_checked_deferred(
+                    serde_json::json!({"対象": value, "変更なし": "起動時"})
+                        .as_object()
+                        .unwrap()
+                        .clone(),
+                    &expected,
+                    &["対象", "変更なし"],
+                    |_, _| Ok(()),
+                )
+                .unwrap()
+                .0
+                .is_empty());
+            assert_eq!(cfg.get("対象", ""), "起動時");
+            assert_eq!(cfg.get_all()["対象"], value);
+        }
+        // 通常経路の追記でも保留を破らず、変更のない項目には保留を作らない。
+        cfg.set_string("対象", "別経路の保存".into()).unwrap();
+        cfg.set_string("変更なし", "即時反映".into()).unwrap();
+        assert_eq!(cfg.get("対象", ""), "起動時");
+        assert_eq!(cfg.get("変更なし", ""), "即時反映");
+        cfg.activate_saved_values();
+        assert_eq!(cfg.get("対象", ""), "別経路の保存");
+        cfg.set_all_checked_deferred(
+            serde_json::json!({"対象": "次の保存"})
+                .as_object()
+                .unwrap()
+                .clone(),
+            &cfg.value_revisions(),
+            &["対象"],
+            |_, _| Ok(()),
+        )
+        .unwrap();
+        assert_eq!(cfg.get("対象", ""), "別経路の保存");
+        cfg.activate_saved_values();
+        assert_eq!(cfg.get("対象", ""), "次の保存");
+    }
+
+    #[test]
+    fn 競合と検証失敗と実保存失敗では実行値の保留を追加しない() {
+        for failure in ["競合", "検証失敗", "実保存失敗"] {
+            let initial = serde_json::json!({"対象": "保存前"});
+            let (_directory, path, cfg) = saved_config(initial.clone());
+            let mut expected = cfg.value_revisions();
+            if failure == "競合" {
+                expected.insert("対象".into(), serde_json::json!("古い版"));
+            }
+            if failure == "実保存失敗" {
+                std::fs::remove_file(&path).unwrap();
+                std::fs::create_dir(&path).unwrap();
+            }
+            let result = cfg.set_all_checked_deferred(
+                serde_json::json!({"対象": "保存後"})
+                    .as_object()
+                    .unwrap()
+                    .clone(),
+                &expected,
+                &["対象"],
+                |_, _| {
+                    if failure == "検証失敗" {
+                        anyhow::bail!("保存候補を拒否");
+                    }
+                    Ok(())
+                },
+            );
+            if failure == "競合" {
+                assert_eq!(result.unwrap().0, ["対象"]);
+            } else {
+                assert!(result.is_err(), "{failure}を検知していない");
+            }
+            assert_eq!(cfg.get_all(), *initial.as_object().unwrap());
+            assert_eq!(cfg.get("対象", ""), "保存前");
+            if failure == "実保存失敗" {
+                std::fs::remove_dir(&path).unwrap();
+            }
+            // 失敗した保存が保留を残すと、この通常保存が実行側へ反映されない。
+            cfg.set_string("対象", "正常な保存".into()).unwrap();
+            assert_eq!(cfg.get("対象", ""), "正常な保存", "{failure}");
+            let reloaded = Config::new();
+            reloaded.load(path).unwrap();
+            assert_eq!(reloaded.get("対象", ""), "正常な保存");
+        }
     }
 
     #[test]

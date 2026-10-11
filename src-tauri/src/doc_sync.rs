@@ -7,7 +7,27 @@
 
 /// 設定キーとして扱わない文字列（マーカー・テスト用ダミー・ドキュメント中の例）。
 /// 追加するときは、なぜ設定キーでないのかを理由として書き添えること。
-const NOT_CONFIG_KEYS: [(&str, &str); 15] = [
+const NOT_CONFIG_KEYS: [(&str, &str); 20] = [
+    (
+        "PICOAGENT_PROCESS_TEST_ROLE",
+        "共通プロセス回収の検査用実行ファイルへ渡す役割",
+    ),
+    (
+        "PICOAGENT_PROCESS_TEST_MARKER",
+        "検査用親子プロセスだけの識別と協調終了に使う固有ファイル",
+    ),
+    (
+        "PICOAGENT_PROCESS_TEST_WAIT",
+        "検査用の根が子の終了を待つかを指定する内部条件",
+    ),
+    (
+        "PICOAGENT_PROCESS_TEST_PIPE",
+        "検査用の子が出力パイプを保持するかを指定する内部条件",
+    ),
+    (
+        "PICOAGENT_PROCESS_TEST_EXIT",
+        "検査用の根だけの終了コードを指定する内部条件",
+    ),
     (
         "PICOAGENT_TEST_KEY_9001",
         "整数設定の環境優先検査専用のダミー",

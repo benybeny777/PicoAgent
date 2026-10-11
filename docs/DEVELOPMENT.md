@@ -340,9 +340,15 @@ NSIS アンインストーラは、インストール先またはPicoAgent管理
 
 追加キャラ一覧の取得と正規化は両画面で共通化する。取得失敗を空一覧へ降格せず、元の選択ID・未保存草稿を保持する。関連編集だけを停止し、他設定の保存へキャラの既定値を書き戻さない。理由と再取得操作は復旧まで保持する。Live2DのSDKモデル候補の選択と、描画方式をまたぐ切替を混同しない。
 
+設定画面の変更印は保存要求と同じ差分集合を使う。`settings.js`の`acceptSavedSettings`は保存が確定したキーだけ値・原本・版を更新し、未編集項目の版や草稿を動かさない。起動と保存後の共通画面設定は`commands.rs`の`ui_settings`、キャラ登録でも使う配信外観は`stream_ui_settings`で組み立てる。保存値のスナップショットを数量診断にも使い、実行中の設定値と混同しない。秘密設定のキー名一覧だけは固定レジストリから一度作る。秘密値はキャッシュしない。単一設定の置換は書込みロックの中で保存変更時だけ全体を一度複製し、操作失敗時は元の値または欠損へ戻す。
+
 外部HTTP取得の安全経路は `src-tauri/src/tools/http.rs` の `fetch_guarded` に集約する。全ホップの用途別URL方針・公開IP確認、検査済みDNS解決先固定、秘密ヘッダ除去、時間・本文・転送上限を一緒に保つ。DNS固定のため `no_proxy()` で直接接続し、プロキシ必須環境ではこの経路を使えない。`web_fetch` の先頭取得＋打切り表示と、API・RSSの上限超過エラーを区別する。通常のAPIは `service(method, url, timeout)` と要求ごとの認証・UAを使い、全体期限のみの接続プールを共有する。既存標準profileの接続10秒・無通信120秒と更新確認の5秒・10秒は用途を分けて保持し、全profileは起動時に一回確定する。API応答は `service_reply` / `service_body` で短い理由とHTTP状態コードを返す。既知の設定秘密値を切詰め前に伏せ、本文取得失敗を空へ降格しない。
 
 外部CLIは `tools::resolve_cli_path` で明示指定、未設定時だけ管理下の同梱物を解決する。コマンド名だけの明示指定時に限り共通探索を使う（macOSではPATHの後に既存Homebrew配置 `/opt/homebrew/bin`・`/usr/local/bin` も確認）。指定先や優先する管理配置の欠損は修復エラーにする。Whisperの2スキルは `tools::whisper` で解決し、固定モデル名は取得側と共通の `crates/picoagent-core/src/paths.rs` を正本とする。別名の導入モデルは `PICOAGENT_TRANSCRIBE_MODEL` へ明示し、`.bin` の名前順探索はしない。
+
+`tools::process::OutputCapture`が出力の両系統と共通の回収期限を所有する。待機は並行にし、失敗・中断では所有者の破棄で両読取タスクを止める。通常の出力回収、`run_command::jobs`、`character_learning`の子プロセスは`tools/process/ownership.rs`の共通所有者を使う。個別停止・一括停止・学習取消で停止に失敗したら、再試行に必要な所有者を残す。通常出力の正常完了では子孫を継続させるが、学習工程は根が終了した時点で残る子孫も回収する。
+
+Windowsは実行前に停止した状態で生成し、Job Objectへ登録してから実行を再開する。Unixは専用process groupを作り、根を`WNOWAIT`で未回収のまま保持して番号の再利用を防ぐ。停止は稼働する子孫の終了を確認してから所有を解放し、根を回収する。OS別の実装は`ownership_windows.rs`と`ownership_unix.rs`に分け、生のChildを呼出元へ公開しない。Unixのプロセス一覧の走査は原子的ではなく、走査中のfork・終了や明示的な`setsid`／`setpgid`での離脱までWindowsのJob Objectと同じ強さで封じ込めるものではない。アプリ起動・更新・専用ブラウザーなど、既に別の所有者を持つ起動経路はこの終了契約へ混ぜない。
 
 コマンド許可の所有者は `tools::process::command_policy` とする。チャットと予約実行は同じ `check` を呼び、引数制限と物理削除禁止を承認前後でも適用する。スキル側へ許可リストや検査の写しを作らない。ripgrepの欠損・実行失敗時の内蔵検索は撤去し、`doc_search` の正常な0一致時のファイル名検索だけを維持する。
 
@@ -491,6 +497,10 @@ scripts/setup-character-learning-runtime.pyは共有Python3.12から専用venv�
 
 本体の取得・展開・複製・ファイル探索・空き容量・配置復元の正本は`src-tauri/src/installer/`です。用途側は上限と保存先を渡し、共通部品の手順を複製しません。プロセスの生存確認は`tools::process`がOSのAPIで行い、外部コマンドへ無期限に待ちません。音声学習のPython導入・状態保存の原子的移動は、既存の配布共通モジュール`voice_training_common.py`へ集め、Windowsの一時的な共有拒否だけ同じ操作を有限回再試行します。中核crateの最小RustはSHA-256共通化に必要な1.85、本体・xtaskの最小Rustは従来どおり1.88です。Whisperの`WHISPER_RELEASE`は正本マニフェストの`binaryRelease`と一致する指定だけを受け付けます。Macは固定ソースからCMakeでビルドし、他OSのバイナリやSDKを代用取得しません。
 
+
+導入先のリンク・ジャンクション・特殊ファイル判定は`installer::fs::validate_normal_metadata`へ集約します。存在確認で取得済みのファイル情報をその場で検査し、同じ検査内で読み直しません。公開や復元など別工程では改めて取得し、古い検査結果を使い回しません。
+
+固定取得の終了時清掃では、取得先そのものを旧 `.part` 残物と判定しません。uv・ComfyUI・Whisperの専用展開先は `components::prepare_cached_extraction` で通常ディレクトリと管理直下を確認してから作り直し、展開後の工程が失敗しても再試行できます。書庫・隣接キャッシュ・公開済みランタイムはこの回収対象に含めません。
 
 ## キャラ描画の負荷確認
 

@@ -6,7 +6,7 @@
 import { ensurePixi } from "./runtime.js";
 import { packUrl } from "./manifest.js";
 import { backingResolution, defaultFramingFor, framingRectsFor } from "./framing.js";
-import { el, errorDetail, fetchJson, logApp, sleep } from "../app/util.js";
+import { el, errorDetail, fetchJson, logApp } from "../app/util.js";
 
 const BLINK_TIMINGS = Object.freeze({
   normal: Object.freeze({ closing: 180, closed: 220, opening: 250 }),
@@ -27,7 +27,8 @@ export class MeshRenderer {
     this.frameBudget = 0;
     this.framing = "bust";
     this.speaking = false;
-    this.timers = new Set();
+    this.blinkTimer = 0;
+    this.blinkGeneration = 0;
   }
 
   async load(pack) {
@@ -112,6 +113,7 @@ export class MeshRenderer {
     this.active = next;
     this.controller?.setActive(next);
     if (next && this.frameBudget) this.scheduleBlink();
+    else this.stopBlink();
   }
 
   setFrameBudget(fps) {
@@ -119,11 +121,20 @@ export class MeshRenderer {
     this.frameBudget = fps;
     this.controller?.setFrameBudget(fps);
     if (this.active && fps) this.scheduleBlink();
+    else this.stopBlink();
   }
 
   setReducedMotion(reduced) {
     this.reducedMotion = Boolean(reduced);
     this.controller?.setReducedMotion(this.reducedMotion);
+  }
+
+  stopBlink() {
+    ++this.blinkGeneration;
+    clearTimeout(this.blinkTimer);
+    this.blinkTimer = 0;
+    // canvasは停止時のまま保ち、復帰初回だけ開眼で描く。
+    this.controller?.setEyeOpen(1, 1);
   }
 
   /** まばたき: 全閉まで連続補間し、閉眼保持後に開く（確認ツールと同じ動き）。 */
@@ -133,32 +144,31 @@ export class MeshRenderer {
     const sleepy = hour >= 23 || hour < 5;
     const timings = sleepy ? BLINK_TIMINGS.sleepy : BLINK_TIMINGS.normal;
     const interval = sleepy ? 900 + Math.random() * 1600 : 1400 + Math.random() * 2800;
-    const id = setTimeout(async () => {
-      this.timers.delete(id);
+    const generation = this.blinkGeneration;
+    const phases = [
+      [() => this.controller.setBlink(0, timings.closing), timings.closing],
+      [() => this.controller.setEyeOpen(0, 0), timings.closed],
+      [() => this.controller.setBlink(1, timings.opening), timings.opening],
+    ];
+    const advance = index => {
+      if (this.disposed || !this.active || !this.frameBudget || generation !== this.blinkGeneration) return;
       this.blinkTimer = 0;
-      if (this.disposed || !this.active || !this.frameBudget) return;
+      if (index === phases.length) { this.scheduleBlink(); return; }
       try {
-        this.controller.setBlink(0, timings.closing);
-        await sleep(timings.closing);
-        if (this.disposed || !this.active || !this.frameBudget) return;
-        this.controller.setEyeOpen(0, 0);
-        await sleep(timings.closed);
-        if (this.disposed || !this.active || !this.frameBudget) return;
-        this.controller.setBlink(1, timings.opening);
-        await sleep(timings.opening);
+        phases[index][0]();
+        this.blinkTimer = setTimeout(() => advance(index + 1), phases[index][1]);
       } catch (error) {
+        this.stopBlink();
         logApp("warn", "まばたきを更新できませんでした", errorDetail(error));
+        this.scheduleBlink();
       }
-      this.scheduleBlink();
-    }, interval);
-    this.blinkTimer = id;
-    this.timers.add(id);
+    };
+    this.blinkTimer = setTimeout(() => advance(0), interval);
   }
 
   dispose() {
     this.disposed = true;
-    for (const id of this.timers) clearTimeout(id);
-    this.timers.clear();
+    this.stopBlink();
     this.controller?.destroy();
     this.controller = null;
     this.canvas.remove();

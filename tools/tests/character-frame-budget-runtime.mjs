@@ -27,16 +27,17 @@ test("境界の浮動誤差でも144と240Hzで描画上限を超えず停止後
   }
 });
 
-function fixture() {
+function fixture({ reducedMotion = false, loadRenderer = async () => {} } = {}) {
   const listeners = new Map();
-  const media = { matches: false, addEventListener(_name, callback) { this.change = callback; } };
+  const media = { matches: reducedMotion, addEventListener(_name, callback) { this.change = callback; } };
   const document = { hidden: false, addEventListener(name, callback) { listeners.set(name, callback); } };
   class Renderer {
     static kind = "2d";
     static supports() { return true; }
-    constructor() { this.element = { style: {}, setAttribute() {}, removeAttribute() {} }; this.history = []; }
-    async load() {}
-    setLayoutId() {} setFraming() {} setMotion() {} setSpeaking() {} setReducedMotion() {}
+    constructor(options) { this.element = { style: {}, setAttribute() {}, removeAttribute() {} }; this.history = []; this.reducedMotion = options.reducedMotion; }
+    async load(pack) { await loadRenderer(pack); }
+    setLayoutId() {} setFraming() {} setMotion() {} setSpeaking() {}
+    setReducedMotion(value) { this.reducedMotion = value; }
     setActive(value) { this.active = value; }
     setFrameBudget(fps) { this.fps = fps; this.history.push(fps); }
     dispose() { this.disposed = true; }
@@ -79,6 +80,24 @@ test("重なる通常ドラッグの完了と失敗は最後に待機へ戻り�
   assert.equal(host.renderer.fps, 60);
   host.setDragging(true); release(); await first; assert.equal(host.renderer.fps, 60);
   host.setDragging(false); assert.equal(host.renderer.fps, 30);
+});
+
+for (const initial of [false, true]) test(`読込中に動きを減らす設定を${initial ? "解除" : "有効化"}しても新描画器へ最新状態を渡す`, async () => {
+  let release, started;
+  const loading = new Promise(resolve => { started = resolve; });
+  const pending = new Promise(resolve => { release = resolve; });
+  const { host, media } = fixture({ reducedMotion: initial, loadRenderer: pack => {
+    if (pack.id === "next") { started(); return pending; }
+  } });
+  await host.load("first");
+  host.setMotion("thinking");
+  const next = host.load("next");
+  await loading;
+  media.change({ matches: !initial });
+  assert.equal(host.renderer.reducedMotion, !initial, "表示中の旧描画器も更新する");
+  release(); await next;
+  assert.equal(host.renderer.reducedMotion, !initial, "読込開始時の設定を持ち越さない");
+  assert.equal(host.renderer.fps, initial ? 60 : 30);
 });
 
 test("全描画器は共通予算を受け取り上限表を複写しない", () => {

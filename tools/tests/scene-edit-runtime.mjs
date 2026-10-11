@@ -74,6 +74,7 @@ test("キャラ非表示中に描画器を読み替えても停止状態を保�
     setFraming() {}
     setMotion() {}
     setSpeaking() {}
+    setReducedMotion() {}
     setActive(value) { this.active = value; }
     setFrameBudget(value) { this.fps = value; }
     dispose() {}
