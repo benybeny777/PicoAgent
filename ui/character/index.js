@@ -104,6 +104,7 @@ export function createCharacterHost({ container }) {
 
   function applyState(target = renderer) {
     if (!target) return;
+    target.setReducedMotion(reducedMotion);
     target.setLayoutId?.(layoutId);
     target.setFraming(framing);
     target.setMotion(motion);

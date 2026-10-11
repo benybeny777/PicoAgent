@@ -41,6 +41,10 @@ fn recover_download_parts(
     for entry in std::fs::read_dir(parent)? {
         let entry = entry?;
         let name = entry.file_name();
+        // 呼出元が.partを正式な保存名に使う場合も、公開済み取得先は回収しない。
+        if Some(name.as_os_str()) == destination.file_name() {
+            continue;
+        }
         let Some(name) = name.to_str() else {
             anyhow::bail!("取得先に識別できないファイル名があり、残物を保全しました");
         };
@@ -375,7 +379,7 @@ mod tests {
             ),
         ] {
             let directory = tempfile::tempdir().unwrap();
-            let destination = directory.path().join("model.gguf");
+            let destination = directory.path().join("uv.zip.part");
             std::fs::write(&destination, b"old").unwrap();
             let abandoned = directory.path().join(format!(
                 "{}2147483647-1-crash",
@@ -525,6 +529,27 @@ mod tests {
             recover_download_parts(&directory.path().join("欠損/model.gguf"), |_| Ok(false))
                 .is_err()
         );
+    }
+
+    #[test]
+    fn 取得先がpart名でも公開済み本体を残して終了済み残物だけ回収する() {
+        for filename in ["model.gguf", "model.part", "uv.zip.part", "uv.tar.gz.part"] {
+            let directory = tempfile::tempdir().unwrap();
+            let destination = directory.path().join(filename);
+            std::fs::write(&destination, b"verified").unwrap();
+            let abandoned = directory.path().join(format!(
+                "{}123-1-crash",
+                temporary_prefix(&destination).unwrap()
+            ));
+            std::fs::write(&abandoned, b"incomplete").unwrap();
+            assert_eq!(
+                recover_download_parts(&destination, |_| Ok(false)).unwrap(),
+                1,
+                "{filename}"
+            );
+            assert_eq!(std::fs::read(&destination).unwrap(), b"verified");
+            assert!(!abandoned.exists());
+        }
     }
 
     #[test]

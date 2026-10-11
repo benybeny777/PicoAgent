@@ -14,12 +14,21 @@ function fixture() {
   let nextTimer = 0, resolveModel;
   const modelPending = new Promise(resolve => { resolveModel = resolve; });
   const callbacks = new Map(), blinkDeltas = [], modelDeltas = [];
+  const motionStarts = [];
+  const motionManager = {
+    groups: { idle: "DefaultIdle" }, playing: null,
+    stopAllMotions() { this.playing = null; },
+    // 同梱CubismのMotionManagerは停止後の更新でもidleグループを自動要求する。
+    update() { if (!this.playing && this.groups.idle) model.motion(this.groups.idle); },
+  };
   const model = {
-    update(delta) { modelDeltas.push(delta); },
-    anchor: point(), scale: point(), position: point(), motion() {}, destroy() { this.destroyed = true; },
+    update(delta) { modelDeltas.push(delta); motionManager.update(); },
+    anchor: point(), scale: point(), position: point(),
+    motion(group) { motionManager.playing = group; motionStarts.push(group); },
+    destroy() { this.destroyed = true; },
     internalModel: {
       originalWidth: 100, originalHeight: 200, settings: {},
-      coreModel: { setParameterValueById() {} }, motionManager: { groups: {}, stopAllMotions() {} },
+      coreModel: { setParameterValueById() {} }, motionManager,
       eyeBlink: { updateParameters(core, delta) { blinkDeltas.push(delta); } },
       on(name, callback) { callbacks.set(name, callback); },
     },
@@ -63,7 +72,7 @@ function fixture() {
     packUrl: (pack, path) => `${pack.root}/${path}`, backingResolution: () => 1,
     defaultFramingFor: () => "full", fitTransform: () => ({ scale: 1, offsetX: 0, offsetY: 0 }),
     framingRectsFor: content => ({ full: content, bust: content }), fetchJson: async () => ({ canvas: [100, 200] }),
-    sleep: async () => {}, loadScriptOnce: async () => {}, PIXI: window.PIXI,
+    sleep: ms => new Promise(resolve => context.setTimeout(resolve, ms)), loadScriptOnce: async () => {}, PIXI: window.PIXI,
     fetch: async () => ({ ok: true, json: async () => ({ version: 2, mode: "anime25d-v1", canvas: [100, 200], layers: [] }) }),
   };
   const api = runInNewContext(`${read("ui/frame-scheduler.js")}
@@ -72,9 +81,14 @@ function fixture() {
     ${moduleSource("ui/character/mesh.js")}
     ${read("ui/mesh-rig.js").replace("Object.freeze({ create })", "Object.freeze({ create, MeshRigController })")}
     ({ Live2dRenderer, MeshRenderer, MeshRigController: window.PicoMeshRig.MeshRigController })`, context);
-  return { ...api, apps, window, canvas, model, blinkDeltas, modelDeltas, callbacks, timers,
+  return { ...api, apps, window, canvas, model, blinkDeltas, modelDeltas, callbacks, timers, motionStarts, motionManager,
     resolveModel: () => resolveModel(model),
     setNow(value) { now = value; },
+    async fireTimer() {
+      const [id, callback] = timers.entries().next().value;
+      timers.delete(id); callback();
+      await Promise.resolve(); await Promise.resolve();
+    },
     advance(app, hz, seconds = 1) {
       const start = now;
       for (let index = 1; index <= hz * seconds; index++) { now = start + index * 1000 / hz; if (model.autoUpdate) model.update(1000 / hz); app.ticker.update(now); }
@@ -90,9 +104,9 @@ function fixture() {
   };
 }
 
-async function live(state) {
-  const renderer = new state.Live2dRenderer();
-  const loading = renderer.load({ root: "test", live2dSdk: "4", live2d: { model: "model.json" } });
+async function live(state, { reducedMotion = false, config = {} } = {}) {
+  const renderer = new state.Live2dRenderer({ reducedMotion });
+  const loading = renderer.load({ root: "test", live2dSdk: "4", live2d: { model: "model.json", ...config } });
   await Promise.resolve(); await Promise.resolve();
   const app = state.apps[0];
   assert.equal(app.options.autoStart, false);
@@ -160,6 +174,66 @@ test("MeshRendererは中央予算をcontrollerへ渡し停止中のまばたき�
   renderer.setActive(false); renderer.setReducedMotion(true); renderer.setFrameBudget(60);
   const before = app.draws; state.advance(app, 240); assert.equal(app.draws, before);
   renderer.dispose(); assert.equal(state.timers.size, 0);
+});
+
+for (const pause of ["active", "budget"]) for (const phase of [0, 1, 2, 3]) {
+  test(`メッシュのまばたき段階${phase}を${pause}で停止すると開眼へ戻り古い段階を再開しない`, async () => {
+    const state = fixture(), { renderer: controller, app } = state.mesh();
+    state.window.PicoMeshRig = { create: async () => controller };
+    const renderer = new state.MeshRenderer();
+    await renderer.load({ root: "test", meshRig: { rig: "rig.json" } });
+    renderer.setActive(true); renderer.setFrameBudget(30);
+    for (let index = 0; index < phase; index++) await state.fireTimer();
+    const stale = [...state.timers.values()][0];
+    if (pause === "active") renderer.setActive(false); else renderer.setFrameBudget(0);
+    const draws = app.draws;
+    assert.equal(state.timers.size, 0, "停止時に段階待機も回収する");
+    assert.equal(controller.eyeOpen, 1, "閉眼と補間を復帰へ持ち越さない");
+    assert.equal(controller.blinkTween, null);
+    state.advance(app, 240, 10); assert.equal(app.draws, draws);
+    if (pause === "active") renderer.setActive(true); else renderer.setFrameBudget(30);
+    const fresh = [...state.timers.keys()];
+    stale(); await Promise.resolve(); await Promise.resolve();
+    assert.equal(controller.eyeOpen, 1);
+    assert.equal(controller.blinkTween, null, "停止前の閉眼処理が新しい待機へ干渉しない");
+    assert.deepEqual([...state.timers.keys()], fresh);
+    const beforeDispose = [...state.timers.values()][0];
+    renderer.dispose(); beforeDispose();
+    assert.equal(state.timers.size, 0, "破棄後は古い段階から予約を復活させない");
+  });
+}
+
+for (const configured of [false, true]) for (const reducedMotion of [false, true]) {
+  test(`Live2Dの待機グループ${configured ? "指定あり" : "既定"}は動きを減らす初期値${reducedMotion}から切替と復帰を守る`, async () => {
+    const state = fixture();
+    const idle = configured ? "ConfiguredIdle" : "DefaultIdle";
+    const config = configured ? { motions: { idle } } : {};
+    const { renderer, app } = await live(state, { reducedMotion, config });
+    renderer.setActive(true); renderer.setFrameBudget(30);
+    const check = reduced => {
+      renderer.setReducedMotion(reduced);
+      const count = state.motionStarts.length;
+      state.motionManager.playing = null;
+      state.advance(app, 240);
+      assert.equal(state.motionManager.groups.idle, reduced ? "" : idle);
+      assert.equal(state.motionStarts.length, count + Number(!reduced), "更新時の自動待機再生も設定に従う");
+      if (!reduced) assert.equal(state.motionStarts.at(-1), idle);
+    };
+    check(reducedMotion); check(!reducedMotion); check(reducedMotion);
+    renderer.dispose();
+  });
+}
+
+test("常時アニメーションを指定したLive2DはOS設定変更で待機を失わない", async () => {
+  const state = fixture(), { renderer, app } = await live(state, { reducedMotion: true, config: { alwaysAnimate: true } });
+  renderer.setActive(true); renderer.setFrameBudget(30);
+  for (const reduced of [false, true]) {
+    renderer.setReducedMotion(reduced); state.motionManager.playing = null;
+    state.advance(app, 240);
+    assert.equal(state.motionManager.groups.idle, "DefaultIdle");
+    assert.equal(state.motionManager.playing, "DefaultIdle");
+  }
+  renderer.dispose();
 });
 
 test("Live2Dの古い読込が破棄後に完了しても描画を再開しない", async () => {

@@ -1,7 +1,9 @@
 // focus_timer/mod.rs - 集中タイマーと作業見守り通知を設定するスキル。
 
 use async_trait::async_trait;
+use regex::Regex;
 use serde_json::{json, Value};
+use std::sync::LazyLock;
 
 use super::{Tool, ToolReg};
 use crate::config::Config;
@@ -9,6 +11,16 @@ use crate::daily::{self, DailyEvent};
 use crate::tools::datetime_words::number_before;
 
 pub struct FocusTimerTool;
+
+// 発話全体が開始依頼のときだけ先回りする。停止・質問・引用は通常の解釈へ渡す。
+static START_REQUEST: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"^(?:[0-9]+分(?:の)?(?:集中)?(?:タイマー|ポモドーロ)(?:を)?(?:始めて|はじめて|開始して|セットして|設定して)?|(?:集中タイマー|タイマー|ポモドーロ)(?:を)?(?:始めて|はじめて|開始して|セットして|設定して))(?:ください|下さい)?[。！!]*$")
+        .expect("タイマー開始依頼の正規表現")
+});
+static WATCH_REQUEST: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"^(?:[0-9]+(?:分|時間)(?:おきに|おき|ごとに|ごと))?(?:作業を)?(?:見守って|みまもって|見て)(?:ください|下さい)?[。！!]*$")
+        .expect("見守り開始依頼の正規表現")
+});
 
 fn str_arg(args: &Value, key: &str) -> String {
     args.get(key)
@@ -54,7 +66,8 @@ impl Tool for FocusTimerTool {
             "集中",
             "ポモドーロ",
             "タイマー",
-            "見守り",
+            "見守",
+            "みまも",
             "作業を見て",
             "focus",
             "pomodoro",
@@ -69,11 +82,27 @@ impl Tool for FocusTimerTool {
         if !self.matches_intent(text) {
             return None;
         }
-        let parsed = match number_before(text, "分") {
+        let text = text.trim();
+        let watch = WATCH_REQUEST.is_match(text);
+        if !watch && !START_REQUEST.is_match(text) {
+            return None;
+        }
+        let parsed = match number_before(text, "分").and_then(|minutes| {
+            if minutes.is_some() {
+                return Ok(minutes);
+            }
+            number_before(text, "時間")?
+                .map(|hours| {
+                    hours
+                        .checked_mul(60)
+                        .ok_or_else(|| "時間を分へ換算できません".to_string())
+                })
+                .transpose()
+        }) {
             Ok(parsed) => parsed,
             Err(reason) => return Some(crate::tools::IntentInvocation::invalid(reason)),
         };
-        let (action, minutes) = if text.contains("見守") {
+        let (action, minutes) = if watch {
             ("watch", parsed.unwrap_or(60).clamp(5, 240))
         } else {
             ("start", parsed.unwrap_or(25).clamp(1, 240))
@@ -123,51 +152,42 @@ impl Tool for FocusTimerTool {
                     Err(error) => format!("エラー: タイマーの保存に失敗しました: {error}"),
                 }
             }
-            "start" => {
-                let minutes = minutes_arg(&args, "minutes", 25, 1, 240);
-                let label = str_arg(&args, "label");
-                let text = if label.is_empty() {
-                    format!("{minutes}分の集中タイマーが終わったよ。少し休もう。")
+            "start" | "watch" => {
+                let watch = action == "watch";
+                let (default, minimum, prefix, kind) = if watch {
+                    (60, 5, "wt", "watch")
                 } else {
-                    format!("「{label}」の{minutes}分集中が終わったよ。少し休もう。")
+                    (25, 1, "fc", "focus")
                 };
-                let event = DailyEvent {
-                    id: daily::new_id("fc"),
-                    kind: "focus".to_string(),
-                    due_at: daily::after_minutes(minutes),
+                let minutes = minutes_arg(&args, "minutes", default, minimum, 240);
+                let due_at = match daily::after_minutes(minutes) {
+                    Ok(due_at) => due_at,
+                    Err(reason) => return format!("エラー: {reason}"),
+                };
+                let label = str_arg(&args, "label");
+                let text = match (watch, label.is_empty()) {
+                    (true, true) => "作業の様子を見にきたよ。無理してない？".to_string(),
+                    (true, false) => format!("「{label}」の様子を見にきたよ。無理してない？"),
+                    (false, true) => format!("{minutes}分の集中タイマーが終わったよ。少し休もう。"),
+                    (false, false) => format!("「{label}」の{minutes}分集中が終わったよ。少し休もう。"),
+                };
+                let summary = if watch {
+                    format!("{minutes}分おきの作業見守りを始めたよ。")
+                } else {
+                    format!("集中タイマーを始めたよ: {due_at} に終了")
+                };
+                events.push(DailyEvent {
+                    id: daily::new_id(prefix),
+                    kind: kind.to_string(),
+                    due_at,
                     text,
                     label,
                     enabled: true,
-                    repeat_minutes: None,
-                };
-                let summary = format!("{} に終了", event.due_at);
-                events.push(event);
+                    repeat_minutes: watch.then_some(minutes as u32),
+                });
                 match daily::save_events(cfg, &events) {
-                    Ok(()) => format!("集中タイマーを始めたよ: {summary}"),
+                    Ok(()) => summary,
                     Err(error) => format!("エラー: タイマーの保存に失敗しました: {error}"),
-                }
-            }
-            "watch" => {
-                let minutes = minutes_arg(&args, "minutes", 60, 5, 240);
-                let label = str_arg(&args, "label");
-                let text = if label.is_empty() {
-                    "作業の様子を見にきたよ。無理してない？".to_string()
-                } else {
-                    format!("「{label}」の様子を見にきたよ。無理してない？")
-                };
-                let event = DailyEvent {
-                    id: daily::new_id("wt"),
-                    kind: "watch".to_string(),
-                    due_at: daily::after_minutes(minutes),
-                    text,
-                    label,
-                    enabled: true,
-                    repeat_minutes: Some(minutes as u32),
-                };
-                events.push(event);
-                match daily::save_events(cfg, &events) {
-                    Ok(()) => format!("{minutes}分おきの作業見守りを始めたよ。"),
-                    Err(error) => format!("エラー: 見守りの保存に失敗しました: {error}"),
                 }
             }
             "stop" => {
@@ -193,3 +213,66 @@ impl Tool for FocusTimerTool {
 }
 
 inventory::submit! { ToolReg { make: || Box::new(FocusTimerTool) } }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn 集中終了と繰り返す見守りを区別して保存する() {
+        let directory = tempfile::tempdir().unwrap();
+        let cfg = Config::new();
+        cfg.load(directory.path().join("config.json")).unwrap();
+        for (action, minutes, kind, repeat) in [
+            ("start", 15, "focus", None),
+            ("watch", 30, "watch", Some(30)),
+        ] {
+            let reply = FocusTimerTool
+                .run(
+                    &cfg,
+                    json!({"action": action, "minutes": minutes, "label": "資料"}),
+                )
+                .await;
+            assert!(!reply.starts_with("エラー:"), "{reply}");
+            let events = daily::load_events(&cfg).unwrap();
+            let event = events.last().unwrap();
+            assert_eq!(event.kind, kind);
+            assert_eq!(event.repeat_minutes, repeat);
+            assert!(daily::parse_local_minute(&event.due_at).is_some());
+            assert_eq!(event.label, "資料");
+        }
+        assert_eq!(daily::load_events(&cfg).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn タイマーの停止や相談を新規開始へ読み替えない() {
+        for text in [
+            "タイマーを止めて",
+            "25分タイマーを削除して",
+            "見守りをやめて",
+            "集中できない",
+            "タイマー一覧を見せて",
+            "ポモドーロとは何ですか",
+            "25分集中タイマーを始めないで",
+            "「25分集中タイマー」と言った",
+        ] {
+            assert!(FocusTimerTool.intent_invocation(text).is_none(), "{text}");
+        }
+    }
+
+    #[test]
+    fn 明示した開始依頼だけ時間を保って先回りする() {
+        for (text, action, minutes) in [
+            ("25分集中タイマー", "start", 25),
+            ("10分のタイマーを始めてください", "start", 10),
+            ("タイマーをはじめて", "start", 25),
+            ("30分おきに見守って", "watch", 30),
+            ("1時間おきに見守って", "watch", 60),
+            ("作業をみまもってください。", "watch", 60),
+        ] {
+            let invocation = FocusTimerTool.intent_invocation(text).expect(text);
+            assert_eq!(invocation.args["action"], action, "{text}");
+            assert_eq!(invocation.args["minutes"], minutes, "{text}");
+        }
+    }
+}

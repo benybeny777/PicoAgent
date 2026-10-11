@@ -324,9 +324,8 @@ mod tests {
     // PSD を生成 → PNG へ変換 → 情報取得まで一連の流れを確認する。
     #[test]
     fn psdをpngへ変換して情報取得できる() {
-        let dir =
-            std::env::temp_dir().join(format!("picoagent-image-tools-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
+        let directory = tempfile::tempdir().unwrap();
+        let dir = directory.path();
         let cfg = crate::config::Config::new();
         cfg.set("PICOAGENT_ALLOWED_ROOT", &dir.to_string_lossy());
         let Some(program) = resolve_imagemagick(&cfg) else {
@@ -355,7 +354,6 @@ mod tests {
         let result = runtime.block_on(super::run_info(&cfg, &args, 120));
         assert!(result.contains("画像情報"), "情報結果: {result}");
         assert!(result.to_lowercase().contains("psd"), "情報結果: {result}");
-        let _ = std::fs::remove_dir_all(&dir);
     }
 }
 

@@ -102,7 +102,7 @@ test("読込途中の描画器は寸法と状態を確定するまで可視に�
     constructor() { this.element = { style: {} }; instances.push(this); }
     load() { return work.promise; }
     setFraming() { assert.equal(this.element.style.visibility, "hidden"); }
-    setMotion() {} setSpeaking() {} setActive(value) { this.active = value; }
+    setMotion() {} setSpeaking() {} setReducedMotion() {} setActive(value) { this.active = value; }
     setFrameBudget(value) { this.fps = value; }
     dispose() { this.disposed = true; }
   }
