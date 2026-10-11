@@ -125,20 +125,7 @@ pub fn approval_prompt(pending: &PendingCommandApproval) -> String {
 }
 
 pub fn trim_output(label: &str, bytes: &[u8]) -> String {
-    let text = String::from_utf8_lossy(bytes);
-    if text.len() <= MAX_OUTPUT_BYTES {
-        return format!("{}:\n{}", label, text);
-    }
-    let mut end = MAX_OUTPUT_BYTES;
-    while !text.is_char_boundary(end) {
-        end -= 1;
-    }
-    format!(
-        "{}:\n{}\n…（{} バイトで打ち切り）",
-        label,
-        &text[..end],
-        MAX_OUTPUT_BYTES
-    )
+    crate::text::labeled_command_output_within(label, bytes, MAX_OUTPUT_BYTES)
 }
 
 #[async_trait]

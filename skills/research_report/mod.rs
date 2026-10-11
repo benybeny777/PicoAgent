@@ -103,15 +103,11 @@ fn extract_results(
 }
 
 fn trim_to_bytes(text: &mut String, max_bytes: usize) {
-    if text.len() <= max_bytes {
-        return;
-    }
-    let mut end = max_bytes;
-    while !text.is_char_boundary(end) {
-        end -= 1;
-    }
-    text.truncate(end);
-    text.push_str("\n\n…（レポートサイズ上限で打ち切り）\n");
+    crate::text::truncate_bytes_with_notice(
+        text,
+        max_bytes,
+        "\n\n…（レポートサイズ上限で打ち切り）\n",
+    );
 }
 
 fn question_list(topic: &str, args: &Value) -> Vec<String> {

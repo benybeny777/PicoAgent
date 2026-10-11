@@ -5,6 +5,7 @@
 import * as bridge from "../app/bridge.js";
 import { toast } from "../app/toast.js";
 import { copyText, el, errorDetail, logApp } from "../app/util.js";
+import { parseWeatherBlock } from "./weather-card.js";
 
 /** ローカルサーバー（ComfyUI 等）の http:// 画像 URL は安全と判定する。外部 http:// は除く。 */
 function isSafeImageUrl(url) {
@@ -136,6 +137,14 @@ export function renderMarkdown(container, source, { onApproval } = {}) {
     || /^```/.test(line) || /^>\s?/.test(line) || /^(---+|\*\*\*+|___+)$/.test(line.trim()) || /^\s*\|.+\|\s*$/.test(line);
   while (index < lines.length) {
     const line = lines[index];
+    const weather = parseWeatherBlock(lines, index);
+    if (weather) {
+      // 直前の空行の改行は落とす（カード自身の余白と重なって間が空きすぎる）。
+      if (wrap.lastChild?.tagName === "BR") wrap.lastChild.remove();
+      wrap.append(weather.node);
+      index = weather.next;
+      continue;
+    }
     const fence = line.match(/^```(\w*)/);
     if (fence) {
       index += 1;

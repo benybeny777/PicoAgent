@@ -367,7 +367,7 @@ NSIS アンインストーラは、インストール先またはPicoAgent管理
 | `src-tauri/src/api_server.rs` | Ollama 風ローカル HTTP API（既定無効・127.0.0.1 のみ・`PICOAGENT_API_KEY` で Bearer 認証。`/api/chat` `/api/generate` `/v1/chat/completions` `/mcp` ほか） |
 | `src-tauri/src/mcp/{mod,client,server}.rs` | MCP 層（agent / skills / mcp の3層構成の相互運用部）。client: `PICOAGENT_MCP_SERVERS` の stdio サーバを起動し `mcp__<サーバ>__<ツール>` として動的登録（tools::dispatch / schemas_for_conversation から候補として参照）。server: `/mcp` でスキルを MCP ツールとして公開 |
 | `src-tauri/src/permissions.rs` | **全スキル共通のファイル許可の正本**。`resolve()` が許可判定を通した `SafePath` を返し（生成経路は resolve / join / sibling のみ）、`permissions::fs` が `SafePath` 専用のファイル操作を提供する。`permissions::guard` のテストがスキルの自前実装・`resolve` 漏れを検出 |
-| `src-tauri/src/text.rs` | **文字列を安全に扱う共通層**。`preview()`（文字数＋`…`）、`truncate_bytes()`（バイト上限だが文字の途中で切らない）、`Utf8Stream`（ストリーミング受信の逐次 UTF-8 デコード）。`text::guard` のテストが固定長バイト添字での切り出しと、ストリーミングでの直接 lossy 変換を検出 |
+| `src-tauri/src/text.rs` | **文字列を安全に扱う共通層**。コアの`preview()`、`truncate_bytes()`、`truncate_bytes_with_notice()`、`command_output_within()`／`labeled_command_output_within()`、`Utf8Stream`を再公開する。切り詰め上限は本文だけに適用し、用途固有の注記・ラベルは別に保持する。`text::guard`が固定長バイト添字、ストリーミングの直接lossy変換、文字境界へ後退する切り詰めの再実装と共通関数の複写を、コア・スキル・本体・xtaskで検出する |
 | `src-tauri/src/doc_sync.rs` | **ドキュメントと実装のズレを検出する設計ガード**（テスト専用）。実装が参照する `PICOAGENT_*` がすべて `docs/SETTINGS.md` に載っているか、逆に一覧だけに残った削除漏れが無いかを双方向で照合する。`skills/` と SPEC の**スキル分類表**（役割と副作用の一覧）も同じく双方向で照合し、載せ忘れ・消し忘れを検出する |
 | `src-tauri/src/character_pack.rs` | **キャラクターパック検証規則の正本**。アプリ（設定画面からの導入）と `cargo xtask character-pack` の両方が使う。CLI 側は `#[path]` でこのファイルを取り込むため、`std` / `serde_json` / `anyhow` 以外に依存しないこと（`crate::` のアプリ内部モジュールを参照しない）。Live2D は `model3.json` の参照ファイルの実在まで確かめる。**キャラクターIDの判定 `is_valid_id()` もここが唯一の定義元**（IDはフォルダ名と設定キーの一部になるため、判定を写さない） |
 | `src-tauri/src/components.rs` | **初回追加機能の公式取得元・検証・導入境界**。Aivis／Whisperは各公式配布元からPicoAgent管理領域へ直接取得し、LibreOffice／文書ツールは公式ページと手動設定を案内する。第三者ソフトをPicoAgentのReleaseへ再配布しない |
@@ -406,7 +406,7 @@ NSIS アンインストーラは、インストール先またはPicoAgent管理
 | `scripts/manage-character-sources.py` | 制作正本 PNG を内容ハッシュの blob へ格納・展開する（同じ絵を何度も持たないための共有化） |
 | `scripts/finish-2d-character-assets.ps1` | PNG 系キャラの高精細化工程（Photoshop 連携）を通しで実行する Windows 専用スクリプト |
 | `scripts/CharacterAssetImageProcessor.cs` | 上の工程が呼ぶ画像処理（アルファ再適用・境界検査）の C# 実装 |
-| `.claude/hooks/session-start.sh` | **Claude Code on the web のセッション開始フック**（`.claude/settings.json` の `hooks.SessionStart` で登録）。Linux コンテナで `cargo` が通る状態を作る（システムライブラリの apt 導入 → `sync-characters` → `build-ui` で `ui-dist/` 生成 → 依存取得とテストバイナリの事前ビルド）。`sync-characters` は git-lfs 未導入で必ず失敗するため、理由を出して続行し `ui-dist/` の生成を止めない。冪等・非対話で、`CLAUDE_CODE_REMOTE!=true` のローカル環境では即 exit する |
+| `tools/session-start.sh` | Linuxリモートの共通セッション準備。`.claude/hooks/session-start.sh`／`.codex/hooks/session-start.sh` はそれぞれの登録用入口。apt導入 → `sync-characters` → `setup pixi` → `build-ui` → 依存取得 → テスト事前ビルドの順。固定SHAのPIXIが導入済みなら通信せず、取得が必要なら`cdn.jsdelivr.net`の許可が必要。素材同期の失敗は現行仕様どおり理由を出して続行するが、他工程の失敗は非0で終了し準備完了にしない。`SKIP_PREBUILD=1`で事前ビルドだけ明示省略。`CLAUDE_CODE_REMOTE!=true`では何もしない |
 | `.agents/skills/<名前>/SKILL.md` | Codex・Claude Codeなど複数エージェントで共有する作業スキルの正本。Claude Codeの自動認識入口は`.claude/skills/`に置くが、実手順はここだけを更新する |
 | `docs/TASKS.md` | **未完了・条件待ちだけを置く一覧**。完了結果はPRへ残し、一覧から削除する |
 | `tools/screenshots/shoot.mjs` | README 掲載画像（`docs/images/`）の撮影。実物の `ui/` を配信して `window.__TAURI__` だけモックし、ヘッドレス Chromium で描画する。合成ではなく実際の描画結果。使い方は `tools/screenshots/README.md` |

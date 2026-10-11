@@ -6,7 +6,10 @@
 // ここの関数を使うこと（直接のバイト添字による切り出しは `text::guard` が検出する）。
 
 // UTF-8処理は非公開の内部共通crateであるpicoagent-coreへ置き、既存のアプリ内パスを保つ。
-pub use picoagent_core::text::{command_output, preview, truncate_bytes, Utf8Stream};
+pub use picoagent_core::text::{
+    byte_limit_notice, command_output, command_output_within, labeled_command_output_within,
+    preview, truncate_bytes, truncate_bytes_with_notice, Utf8Stream,
+};
 
 /// 引用内と引用境界を判定する。引用内の句点や一人称を別の文として扱わない。
 #[derive(Default)]
@@ -285,6 +288,17 @@ mod guard {
     #[test]
     fn 小道具の定義は責務の持ち主以外へ複写しない() {
         let owners = [
+            ("truncate_bytes", "crates/picoagent-core/src/text.rs"),
+            (
+                "truncate_bytes_with_notice",
+                "crates/picoagent-core/src/text.rs",
+            ),
+            ("byte_limit_notice", "crates/picoagent-core/src/text.rs"),
+            ("command_output_within", "crates/picoagent-core/src/text.rs"),
+            (
+                "labeled_command_output_within",
+                "crates/picoagent-core/src/text.rs",
+            ),
             ("slug", "src-tauri/src/text.rs"),
             ("html_escape", "src-tauri/src/text.rs"),
             ("xml_escape", "src-tauri/src/text.rs"),
@@ -471,6 +485,79 @@ mod guard {
         ] {
             assert!(!fixed_byte_slice(source), "誤検出しました: {source}");
         }
+    }
+
+    /// 改行や行コメントを挟む同型も、境界の添字と同じ変数の後退として検出する。
+    fn reimplements_byte_retreat(section: &str) -> bool {
+        let compact: String = section
+            .lines()
+            .flat_map(|line| line.split("//").next().unwrap_or("").chars())
+            .filter(|character| !character.is_whitespace())
+            .collect();
+        compact.split(".is_char_boundary(").skip(1).any(|tail| {
+            let Some((argument, _)) = tail.split_once(')') else {
+                return false;
+            };
+            let variable = argument.trim_end_matches(',');
+            !variable.is_empty()
+                && variable
+                    .chars()
+                    .all(|character| character.is_alphanumeric() || character == '_')
+                && [
+                    format!("{variable}-=1;"),
+                    format!("{variable}={variable}-1;"),
+                    format!("{variable}={variable}.saturating_sub(1)"),
+                    format!("{variable}={variable}.checked_sub(1)"),
+                ]
+                .iter()
+                .any(|pattern| compact.contains(pattern))
+        })
+    }
+
+    #[test]
+    fn 切り詰めの再実装検出は行配置に依存せず前進処理を許す() {
+        for section in [
+            "fn cut() { while !s.is_char_boundary(end) { end -= 1; } }",
+            "fn cut() { while !s.is_char_boundary(\nend\n) {\n// 境界へ戻す\nend -= 1;\n} }",
+            "fn cut() { while !s.is_char_boundary(end) { end = end - 1; } }",
+            "fn cut() { while !s.is_char_boundary(end) { end = end.saturating_sub(1); } }",
+            "fn cut() { while !s.is_char_boundary(end) { end = end.checked_sub(1).unwrap(); } }",
+        ] {
+            assert!(reimplements_byte_retreat(section), "{section}");
+        }
+        for section in [
+            "fn ring() { while !s.is_char_boundary(start) { start += 1; } }",
+            "fn check() { if s.is_char_boundary(end) { unrelated -= 1; } }",
+            "fn common() { crate::text::truncate_bytes(s, max) }",
+        ] {
+            assert!(!reimplements_byte_retreat(section), "{section}");
+        }
+    }
+
+    /// 上限まで戻す手順の正本だけを例外にし、同名ファイルを免除しない。
+    #[test]
+    fn バイト上限の切り詰めを各所で再実装しない() {
+        let mut offenders = Vec::new();
+        for source in guard_scan::all_sources()
+            .into_iter()
+            .chain(guard_scan::xtask_sources())
+        {
+            if source.path == std::path::Path::new("crates/picoagent-core/src/text.rs") {
+                continue;
+            }
+            let body = source.body();
+            let functions = function_headers(body);
+            for (index, (start, name)) in functions.iter().enumerate() {
+                let end = functions.get(index + 1).map_or(body.len(), |next| next.0);
+                if reimplements_byte_retreat(&body[*start..end]) {
+                    offenders.push(format!("{}: {name}", source.path.display()));
+                }
+            }
+        }
+        assert!(
+            offenders.is_empty(),
+            "バイト上限の切り詰めは text::truncate_bytes_with_notice などを使ってください: {offenders:?}"
+        );
     }
 
     /// ストリーミング受信は `text::Utf8Stream` を通す。`from_utf8_lossy` を直接使うと、
