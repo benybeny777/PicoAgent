@@ -591,105 +591,12 @@ pub(crate) fn cache_measurement_fixture(
 }
 
 #[cfg(test)]
+#[path = "context_fixtures.rs"]
+mod fixtures;
+
+#[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn 帰属対照十六ケースは原文と履歴を保持して本番送信変換を通る() {
-        let _lock = super::super::PRIVATE_CONTEXT_TEST_LOCK
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let fixture: serde_json::Value =
-            serde_json::from_str(include_str!("fixtures/ownership-cases.json")).unwrap();
-        let cfg = Config::new();
-        let store = crate::memory::MemoryStore {
-            items: [
-                "私は緑茶が好きです",
-                "私はカレーが好きです",
-                "私の趣味は写真撮影です",
-                "私の名前はゆうです",
-            ]
-            .into_iter()
-            .map(|text| crate::memory::MemoryItem {
-                category: "好み".into(),
-                text: text.into(),
-                updated_at: "2026-10-11T00:00:00Z".into(),
-                hits: 1,
-            })
-            .collect(),
-        };
-        let mut exported = Vec::new();
-        for case in fixture["cases"].as_array().unwrap() {
-            let switched = case["carry"]["mode"] == "character-switch";
-            let (name, drink) = if switched {
-                ("はな", "ミルク")
-            } else {
-                ("むぎ", "コーヒー")
-            };
-            let profile = format!("名前: {name}。穏やかに短く相談へ答える。\nキャラクター「{name}」の好きな飲み物は{drink}です。好きな食べ物はプリン、趣味は読書です。");
-            let mut public = vec![Message::new(
-                "system",
-                super::super::prompt::compose(&cfg, &profile, name),
-            )];
-            if !switched {
-                for turn in case["carry"]["turns"].as_array().unwrap() {
-                    public.push(Message::new("user", turn["user"].as_str().unwrap()));
-                    public.push(Message::new(
-                        "assistant",
-                        turn["assistant"].as_str().unwrap(),
-                    ));
-                }
-            }
-            let question = case["question"].as_str().unwrap();
-            public.push(Message::new("user", question));
-            let original = public.clone();
-            let mut context = TurnContext::default();
-            context.push_owned(
-                ContextSubject::UserMemory,
-                "記憶",
-                crate::memory::context_from_store(&store),
-            );
-            let session = TurnContextSession::new(
-                ProtocolHistory::default(),
-                &public,
-                context,
-                32768,
-                Arc::new(Mutex::new(ToolSchemaSet::default())),
-                1,
-            );
-            let raw = session.protocol_view(&public).unwrap();
-            let sent = crate::providers::local::normalize_for_local(&raw).unwrap();
-            let wire = crate::providers::openai::to_wire(&sent);
-            assert!(equal(&public, &original));
-            let last = sent.last().unwrap();
-            assert!(last
-                .content
-                .contains(&format!("{QUESTION_BEGIN}\n{question}\n{QUESTION_END}")));
-            assert!(last.content.contains("各記録の主体を参照"));
-            let binding = super::super::referents::bind(question);
-            if !binding.directive.is_empty() {
-                if binding.quotations.is_empty() {
-                    assert!(last.content.ends_with(&binding.resolved));
-                } else {
-                    assert!(last.content.contains(&binding.resolved));
-                }
-            }
-            let mut exported_case = case.clone();
-            exported_case["body"] = serde_json::json!({"model":"cache-measurement", "messages":wire, "tools":[], "temperature":0, "seed":42, "max_tokens":1024, "stream":false, "id_slot":0});
-            exported.push(exported_case);
-        }
-        assert_eq!(exported.len(), 16);
-        if let Ok(path) = std::env::var("OWNERSHIP_FIXTURE_OUTPUT") {
-            std::fs::write(
-                path,
-                serde_json::to_vec_pretty(
-                    &serde_json::json!({"metadata":fixture["metadata"], "cases":exported}),
-                )
-                .unwrap(),
-            )
-            .unwrap();
-        }
-    }
 
     fn session(
         previous: ProtocolHistory,

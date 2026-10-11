@@ -1,0 +1,35 @@
+{
+  "description": "PR #498の隔離学習・比較で照合する資産。製品の既定設定や自動取得を変更しない。",
+  "python": "3.12.13",
+  "hf": {
+    "repository": "LiquidAI/LFM2.5-1.2B-JP-202606",
+    "revision": "52b8b4475311a63bf839c6494f78f8ad59d13515",
+    "weights": "model.safetensors",
+    "sha256": "abf38960d3f37c2be7c946a9b6b06d23ed04a1afb8ac192aa3b491e3dcdcf325",
+    "size_bytes": 2340697936,
+    "license": "LFM Open License v1.0"
+  },
+  "gguf": {
+    "repository": "LiquidAI/LFM2.5-1.2B-JP-202606-GGUF",
+    "revision": "8c74801fdfe71394c59d3f519b86de305ff49f00",
+    "file": "LFM2.5-1.2B-JP-202606-Q4_K_M.gguf",
+    "sha256": "23d4d4060cb06463563f6e8644bbbc7d1cb0bfe4cf21d5edf3ccc6f515fd44bb"
+  },
+  "llama_cpp": {
+    "repository": "https://github.com/ggml-org/llama.cpp",
+    "tag": "b11429",
+    "commit": "d81235049384534c167caea52b85a694f6103d14",
+    "windows_archive": "llama-b11429-bin-win-vulkan-x64.zip",
+    "archive_sha256": "1bfe78ad9168b79fa02bf67f6af9f5e17a966d824d77238517f7bef12ac73b36",
+    "archive_size_bytes": 33337769,
+    "converter": "convert_lora_to_gguf.py"
+  },
+  "template": "src-tauri/src/providers/templates/lfm25-jp-history.jinja",
+  "training": {
+    "torch": "2.14.1+cu130",
+    "transformers": "5.19.0",
+    "peft": "0.21.2",
+    "kernel": "PyTorch標準CUDA演算。Hubカーネル取得とCPUへの切替は行わない。",
+    "reason": "causal-conv1d 1.7.0の公式配布にWindows wheelがないため。所要時間は同じGPUで実測する。"
+  }
+}

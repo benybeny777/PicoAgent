@@ -120,15 +120,30 @@ pub fn browser_profile_dir() -> Result<PathBuf, String> {
     // 単体テストではTauriを起動しない。アプリのデータを触らない専用領域で実ブラウザを検査する。
     #[cfg(test)]
     {
-        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .ok_or_else(|| "検査用保存先のルートを取得できません".to_string())?
-            .join("temp")
-            .join(format!("browser-control-tests-{}", std::process::id()));
+        let root = test_workspace_dir(TestWorkspace::BrowserControl)?;
         Ok(path_at(&root, DataPath::BrowserProfile))
     }
     #[cfg(not(test))]
     Err("エラー: ブラウザ用プロファイルのアプリ情報を取得できません".to_string())
+}
+
+/// Tauriを起動しない検査で使う一時領域。任意の利用者パスは受け付けない。
+#[cfg(test)]
+pub(crate) enum TestWorkspace {
+    BrowserControl,
+    LoraFixtures,
+}
+
+#[cfg(test)]
+pub(crate) fn test_workspace_dir(workspace: TestWorkspace) -> Result<PathBuf, String> {
+    let name = match workspace {
+        TestWorkspace::BrowserControl => format!("browser-control-tests-{}", std::process::id()),
+        TestWorkspace::LoraFixtures => "lora-fixtures".to_string(),
+    };
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .map(|root| root.join("temp").join(name))
+        .ok_or_else(|| "検査用保存先のルートを取得できません".to_string())
 }
 
 #[cfg(test)]
