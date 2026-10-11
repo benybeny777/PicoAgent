@@ -4540,7 +4540,12 @@ saveBtn.addEventListener("click", async () => {
     clearNumberErrors();
     savedSnapshot = cloneSettings(current);
     data.values = cloneSettings(current);
-    data.valueRevisions = cloneSettings(res.valueRevisions || data.valueRevisions);
+    // 未編集の値は読込時のままなので、その版も保持する。別操作の最新の版だけを
+    // 取り込むと、次回は古い画面の値で新しい原本を競合なしに上書きしてしまう。
+    for (const key of Object.keys(request.patch)) {
+      const revision = res.valueRevisions?.[key];
+      if (typeof revision === "string") data.valueRevisions[key] = revision;
+    }
     updateDirtyState();
     if (res.requiresRestart) {
       const restartNow = await confirmRestart();

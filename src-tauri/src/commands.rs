@@ -84,6 +84,38 @@ struct RequestReceipt {
     approval: Option<Arc<crate::tools::run_command::PendingCommandApproval>>,
 }
 
+/// 「あとで」を選んでも、未反映の再初期化要求を次の保存へ引き継ぐ。
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct SettingsRestart {
+    engine: bool,
+    aivis: bool,
+    character: bool,
+}
+
+impl SettingsRestart {
+    fn include(&mut self, next: Self) -> Self {
+        self.engine |= next.engine;
+        self.aivis |= next.aivis;
+        self.character |= next.character;
+        *self
+    }
+
+    fn required(self) -> bool {
+        self.engine || self.aivis || self.character
+    }
+
+    /// 再初期化の開始が失敗したら、再試行に必要な要求をそのまま残す。
+    fn apply<T, E>(
+        &mut self,
+        requested: Self,
+        apply: impl FnOnce(Self) -> Result<T, E>,
+    ) -> Result<T, E> {
+        let result = apply(self.include(requested))?;
+        *self = Self::default();
+        Ok(result)
+    }
+}
+
 pub struct AppState {
     pub config: Config,
     pub provider_id: Mutex<String>,
@@ -115,6 +147,8 @@ pub struct AppState {
     /// 会話状態の世代番号。リセット・キャラ切替・再初期化後に古い非同期処理が
     /// 履歴や文脈を書き戻さないよう、送信開始時の値と完了時の値を照合する。
     pub conversation_epoch: AtomicU64,
+    /// 設定の保存確定と再初期化開始を直列化し、未反映の要求を取りこぼさない。
+    settings_restart: Mutex<SettingsRestart>,
 }
 
 fn take_received<T>(pending: &Mutex<Option<Arc<T>>>, received: Option<&Arc<T>>) -> Option<Arc<T>> {
@@ -149,6 +183,7 @@ impl AppState {
             conversation_commit: Mutex::new(()),
             agent_cli_session: Mutex::new(None),
             conversation_epoch: AtomicU64::new(0),
+            settings_restart: Mutex::new(SettingsRestart::default()),
         }
     }
 
@@ -3249,8 +3284,8 @@ pub async fn settings_load(
 ) -> Result<Value, String> {
     let provider_id = state.provider_id.lock().unwrap().clone();
     let model = state.model.lock().unwrap().clone();
-    let value_revisions = state.config.value_revisions();
     let mut values = state.config.get_all();
+    let value_revisions = Config::revisions_for(&values);
     // 発火済み時刻などはschedulerだけが所有し、設定画面の編集対象へ出さない。
     values.remove(crate::scheduler::STATE_KEY);
     // 暗号化済みのシークレットは設定画面で編集できるよう復号して返す（非暗号の値は不変）。
@@ -3568,7 +3603,8 @@ pub async fn settings_save(
     // シークレット保護と候補全体の検証は、競合検査に成功した後、設定の原子的保存
     // ロック内で行う。競合却下なのにキーチェーンだけ変える経路を作らない。
     let schema_keys = secret_keys();
-    let prepared_patch = {
+    let (prepared_patch, restart) = {
+        let mut restart = state.settings_restart.lock().unwrap();
         let _layout_sizes_guard = if layout_changed {
             Some(crate::store::lock_state(crate::layout::SIZES_KEY))
         } else {
@@ -3642,8 +3678,14 @@ pub async fn settings_save(
                 "valueRevisions": state.config.value_revisions(),
             }));
         }
-        prepared
+        let restart = restart.include(SettingsRestart {
+            engine: provider_changed || local_engine_changed,
+            aivis: tts_runtime_changed,
+            character: character_changed || live2d_sdk_changed,
+        });
+        (prepared, restart)
     };
+    let saved_revisions = Config::revisions_for(&prepared_patch);
     for setting in crate::config::ints::INT_SETTINGS {
         if prepared_patch.contains_key(setting.key) && state.config.int_or_auto(setting).is_ok() {
             crate::notice::emit(
@@ -3676,10 +3718,9 @@ pub async fn settings_save(
     // 再起動して起動シーケンス（ローディング画面）でまとめて反映する（フキダシに
     // 「準備中…」を出さないため）。何が変わったかを再起動側へ伝え、必要な部分だけ
     // 立ち上げ直す（例: キャラ変更だけなら LLM エンジンは再起動しない）。
-    let restart_engine = provider_changed || local_engine_changed;
-    let restart_aivis = tts_runtime_changed;
-    let requires_restart =
-        restart_engine || restart_aivis || character_changed || live2d_sdk_changed;
+    let restart_engine = restart.engine;
+    let restart_aivis = restart.aivis;
+    let requires_restart = restart.required();
 
     // 人格プロンプト・メモリは軽いので常に即反映する（再起動対象外）。
     if memory_setting_changed {
@@ -3804,7 +3845,7 @@ pub async fn settings_save(
         "restartEngine": restart_engine,
         "restartAivis": restart_aivis,
         "hotkeyWarning": hotkey_warning,
-        "valueRevisions": state.config.value_revisions(),
+        "valueRevisions": saved_revisions,
         "up": up,
         "providerError": provider_error
     }))
@@ -4006,107 +4047,116 @@ pub fn restart_app(
     restart_engine: bool,
     restart_aivis: bool,
 ) -> Result<Value, String> {
-    crate::log_paths::append_app_log(&app, "設定反映のため再初期化します。");
-    crate::remember_window_position(&app)?;
+    let mut pending_restart = state.settings_restart.lock().unwrap();
+    // 古い保存応答から届く再初期化でも、その後に保存した要求を落とさない。
+    pending_restart.apply(
+        SettingsRestart {
+            engine: restart_engine,
+            aivis: restart_aivis,
+            character: false,
+        },
+        |restart| {
+            crate::log_paths::append_app_log(&app, "設定反映のため再初期化します。");
+            crate::remember_window_position(&app)?;
 
-    let pid = state.config.get("PICOAGENT_PROVIDER", "local");
-    {
-        let mut character = state.character.lock().unwrap();
-        let _commit = state.conversation_commit.lock().unwrap();
-        state.conversation_epoch.fetch_add(1, Ordering::Relaxed);
-        let character_id = state.config.get("PICOAGENT_CHARACTER", "mugi");
-        let relationship_mode = state.config.get("PICOAGENT_COMPANION_MODE", "both");
-        let relationship = crate::relationship::load(&app, &character_id, &relationship_mode)?;
-        let recent =
-            crate::history::load_recent(&app, &character_id).map_err(|error| error.to_string())?;
-        let model = state.config.get("PICOAGENT_MODEL", "");
-        let model = if model.is_empty() {
-            providers::get(&pid)
-                .map(|provider| provider.default_model(&state.config))
-                .unwrap_or_default()
-        } else {
-            model
-        };
-        *state.provider_id.lock().unwrap() = pid.clone();
-        *state.model.lock().unwrap() = model;
-        *state.memory_context.lock().unwrap() = crate::memory::context(&app, &state.config);
-        *state.relationship_context.lock().unwrap() =
-            relationship_prompt_context(&state.config, &relationship);
-        state.pending_command.lock().unwrap().take();
-        state.pending_question.lock().unwrap().take();
-        *character = LoadedCharacter {
-            id: character_id,
-            ..LoadedCharacter::default()
-        };
-        state.rebuild_from_character(&character, true);
-        state.messages.lock().unwrap().extend(recent);
-    }
-
-    // 同梱エンジンは、プロバイダ/モデル関連が変わったときだけ立ち上げ直す。
-    // キャラ変更だけのときは LLM を再ロードせず動かしたままにする。
-    if restart_engine {
-        crate::engine::stop(&app);
-        if pid == "local" {
-            // stop() が立てた stopping フラグを下ろさないと、ensure_and_start が冒頭で
-            // 即 return してエンジンが再起動されない（再初期化後に AI へ接続できなくなる）。
-            crate::engine::clear_stopping(&app);
-            let handle = app.clone();
-            tauri::async_runtime::spawn(crate::engine::ensure_and_start(handle));
-        }
-    }
-    // Aivis は TTS 設定（ON/OFF・デバイス・ポート）が変わったときだけ立ち上げ直す。
-    if restart_aivis {
-        aivis::stop(&app);
-        if state.config.get_bool("PICOAGENT_TTS_ENABLED", false) {
-            aivis::clear_stopping(&app);
-            let handle = app.clone();
-            if let Err(error) = aivis::start_background(&handle) {
-                crate::log_paths::append_app_log(
-                    &handle,
-                    &format!("再初期化後の同梱 Aivis 起動に失敗しました: {error}"),
-                );
+            let pid = state.config.get("PICOAGENT_PROVIDER", "local");
+            {
+                let mut character = state.character.lock().unwrap();
+                let _commit = state.conversation_commit.lock().unwrap();
+                state.conversation_epoch.fetch_add(1, Ordering::Relaxed);
+                let character_id = state.config.get("PICOAGENT_CHARACTER", "mugi");
+                let relationship_mode = state.config.get("PICOAGENT_COMPANION_MODE", "both");
+                let relationship =
+                    crate::relationship::load(&app, &character_id, &relationship_mode)?;
+                let recent = crate::history::load_recent(&app, &character_id)
+                    .map_err(|error| error.to_string())?;
+                let model = state.config.get("PICOAGENT_MODEL", "");
+                let model = if model.is_empty() {
+                    providers::get(&pid)
+                        .map(|provider| provider.default_model(&state.config))
+                        .unwrap_or_default()
+                } else {
+                    model
+                };
+                *state.provider_id.lock().unwrap() = pid.clone();
+                *state.model.lock().unwrap() = model;
+                *state.memory_context.lock().unwrap() = crate::memory::context(&app, &state.config);
+                *state.relationship_context.lock().unwrap() =
+                    relationship_prompt_context(&state.config, &relationship);
+                state.pending_command.lock().unwrap().take();
+                state.pending_question.lock().unwrap().take();
+                *character = LoadedCharacter {
+                    id: character_id,
+                    ..LoadedCharacter::default()
+                };
+                state.rebuild_from_character(&character, true);
+                state.messages.lock().unwrap().extend(recent);
             }
-            tauri::async_runtime::spawn(async move {
-                if let Err(error) = aivis::ensure_started(&handle).await {
+
+            // 同梱エンジンは、プロバイダ/モデル関連が変わったときだけ立ち上げ直す。
+            // キャラ変更だけのときは LLM を再ロードせず動かしたままにする。
+            if restart.engine {
+                crate::engine::stop(&app);
+                if pid == "local" {
+                    // stop() が立てた stopping フラグを下ろさないと、ensure_and_start が冒頭で
+                    // 即 return してエンジンが再起動されない（再初期化後に AI へ接続できなくなる）。
+                    crate::engine::clear_stopping(&app);
+                    let handle = app.clone();
+                    tauri::async_runtime::spawn(crate::engine::ensure_and_start(handle));
+                }
+            }
+            // Aivis は TTS 設定（ON/OFF・デバイス・ポート）が変わったときだけ立ち上げ直す。
+            if restart.aivis {
+                aivis::stop(&app);
+                if state.config.get_bool("PICOAGENT_TTS_ENABLED", false) {
+                    aivis::clear_stopping(&app);
+                    let handle = app.clone();
+                    aivis::start_background(&handle).map_err(|error| {
+                        log_command_error(
+                            &handle,
+                            "再初期化後の同梱 Aivis 起動に失敗しました",
+                            error,
+                        )
+                    })?;
+                    tauri::async_runtime::spawn(async move {
+                        if let Err(error) = aivis::ensure_started(&handle).await {
+                            crate::log_paths::append_app_log(
+                                &handle,
+                                &format!("再初期化後の同梱 Aivis 起動確認に失敗しました: {error}"),
+                            );
+                        }
+                    });
+                }
+            }
+
+            // メインウィンドウへ再読込（起動シーケンス再実行）を指示する。
+            {
+                let win = app
+                    .get_webview_window("main")
+                    .ok_or_else(|| "再初期化するメイン画面が見つかりません。".to_string())?;
+                // 前回の完了状態を残したまま再読込すると、JavaScriptの開始通知が届くまで
+                // `surface_main_window` が完成済みと誤認し、中身の無い窓を表示できてしまう。
+                // イベント送信より先に未開始へ戻し、読込開始そのものの停止監視も張り直す。
+                crate::boot_screen::mark_reloading(&app);
+                crate::layout::restart_boot(&app).map_err(|error| {
+                    log_command_error(&app, "再読込前に起動画面へ戻せませんでした", error)
+                })?;
+                win.emit("pet:reload", ()).map_err(|error| {
+                    log_command_error(&app, "再初期化後にメイン画面を再読み込みできません", error)
+                })?;
+            }
+            // 再初期化の開始に失敗したときは、理由と再試行操作を残すため設定を閉じない。
+            if let Some(settings) = app.get_webview_window("settings") {
+                if let Err(error) = settings.close() {
                     crate::log_paths::append_app_log(
-                        &handle,
-                        &format!("再初期化後の同梱 Aivis 起動確認に失敗しました: {error}"),
+                        &app,
+                        &format!("再初期化時に設定画面を閉じられませんでした: {error}"),
                     );
                 }
-            });
-        }
-    }
-
-    // 設定画面から再初期化した場合は、古い設定ウィンドウを残さない。
-    if let Some(settings) = app.get_webview_window("settings") {
-        if let Err(error) = settings.close() {
-            crate::log_paths::append_app_log(
-                &app,
-                &format!("再初期化時に設定画面を閉じられませんでした: {error}"),
-            );
-        }
-    }
-
-    // メインウィンドウへ再読込（起動シーケンス再実行）を指示する。
-    if let Some(win) = app.get_webview_window("main") {
-        // 前回の完了状態を残したまま再読込すると、JavaScriptの開始通知が届くまで
-        // `surface_main_window` が完成済みと誤認し、中身の無い窓を表示できてしまう。
-        // イベント送信より先に未開始へ戻し、読込開始そのものの停止監視も張り直す。
-        crate::boot_screen::mark_reloading(&app);
-        if let Err(error) = crate::layout::restart_boot(&app) {
-            crate::log_paths::append_app_log(
-                &app,
-                &format!("再読込前に起動画面へ戻せませんでした: {error}"),
-            );
-        }
-        if let Err(error) = win.emit("pet:reload", ()) {
-            crate::log_paths::append_app_log(
-                &app,
-                &format!("再初期化後にメイン画面を再読み込みできません: {error}"),
-            );
-        }
-    }
-    Ok(json!({ "ok": true }))
+            }
+            Ok(json!({ "ok": true }))
+        },
+    )
 }
 
 /// 同梱エンジンの現在状態（download/starting/ready/error）を返す。
@@ -5636,6 +5686,54 @@ fn settings_tab(tab: Option<&str>) -> Option<&str> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn 再起動延期後の保存は全要求を保持し開始失敗でも再試行できる() {
+        for first in [
+            super::SettingsRestart {
+                engine: true,
+                ..Default::default()
+            },
+            super::SettingsRestart {
+                aivis: true,
+                ..Default::default()
+            },
+            super::SettingsRestart {
+                character: true,
+                ..Default::default()
+            },
+        ] {
+            let mut pending = super::SettingsRestart::default();
+            pending.include(first);
+            assert_eq!(
+                pending.include(Default::default()),
+                first,
+                "無関係な保存で要求を消さない"
+            );
+            assert!(pending.required());
+            let next = super::SettingsRestart {
+                character: true,
+                ..Default::default()
+            };
+            let expected = super::SettingsRestart {
+                character: true,
+                ..first
+            };
+            assert_eq!(pending.include(next), expected);
+            let failed: Result<(), &str> = pending.apply(Default::default(), |plan| {
+                assert_eq!(plan, expected, "直近の保存以外の要求も反映する");
+                Err("画面再読込の開始に失敗")
+            });
+            assert!(failed.is_err());
+            assert_eq!(pending, expected);
+            let started: Result<(), &str> = pending.apply(Default::default(), |plan| {
+                assert_eq!(plan, expected);
+                Ok(())
+            });
+            assert!(started.is_ok());
+            assert!(!pending.required());
+        }
+    }
+
     #[test]
     fn 数値保存は待機中の別保存後も間隔の逆転と副作用を拒否する() {
         use serde_json::{json, Map};

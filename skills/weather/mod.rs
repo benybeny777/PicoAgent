@@ -1,8 +1,9 @@
 // skills/weather/mod.rs - Open-Meteo による天気取得スキル。
 
-use std::time::Duration;
+use std::{sync::LazyLock, time::Duration};
 
 use async_trait::async_trait;
+use regex::Regex;
 use serde_json::{json, Value};
 
 use super::{Tool, ToolReg};
@@ -16,14 +17,26 @@ const FORECAST_URL: &str = "https://api.open-meteo.com/v1/forecast";
 
 pub struct WeatherTool;
 
-const DIRECT_WEATHER_WORDS: [&str; 7] = ["天気", "気温", "降水", "予報", "天候", "気象", "weather"];
+static WEATHER_WORD: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)天気予報|降水確率|天気|気温|降水|予報|天候|気象|weather")
+        .expect("天気を表す語の正規表現")
+});
+static REQUEST_END: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?:(?:を)?(?:教えて|おしえて|見せて)(?:ください|下さい)?|(?:が)?知りたい|(?:を)?お願い(?:します)?|ですか)$")
+        .expect("天気の依頼末尾の正規表現")
+});
+const TIME_WORDS: &str = "明後日|明日|あした|今日|きょう|現在|いま|今|この";
+static TIME_PREFIX: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(&format!(r"^(?:(?:{TIME_WORDS})(?:の|[、,，\s]+))+"))
+        .expect("天気の日時の接頭辞の正規表現")
+});
+static TIME_SUFFIX: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(&format!(r"(?:^|の)(?:{TIME_WORDS})$")).expect("天気の日時の接尾辞の正規表現")
+});
 
 fn is_direct_query(text: &str) -> bool {
     let lower = text.to_lowercase();
-    DIRECT_WEATHER_WORDS
-        .iter()
-        .any(|word| lower.contains(&word.to_lowercase()))
-        && !is_weather_source_search(&lower)
+    WEATHER_WORD.is_match(&lower) && !is_weather_source_search(&lower)
 }
 
 /// 天気そのものではなく、天気を掲載するWebページを探している要求。
@@ -112,53 +125,31 @@ fn configured_location(value: &str) -> Option<&str> {
 }
 
 fn extract_location(text: &str) -> Option<String> {
-    let mut query = text.to_string();
-    for word in [
-        "天気",
-        "天候",
-        "気象",
-        "気温",
-        "降水確率",
-        "降水",
-        "予報",
-        "weather",
-        "明後日",
-        "明日",
-        "あした",
-        "今日",
-        "きょう",
-        "現在",
-        "いまの",
-        "今の",
-        "この",
-        "教えて",
-        "おしえて",
-        "ですか",
-        "を",
-        "は",
-        "の",
-        "が",
-        "って",
-        "?",
-        "？",
-        "。",
-        "、",
-        "!",
-        "！",
-        " ",
-        "　",
-    ] {
-        query = query.replace(word, "");
+    fn trim_edges(value: &str) -> &str {
+        value.trim_matches(|ch: char| {
+            ch.is_whitespace() || matches!(ch, '?' | '？' | '。' | '、' | ',' | '，' | '!' | '！')
+        })
     }
-    // 「今」は地名の一部にもなる（今治市・今別町など）。落として2文字以上残るときだけ
-    // 時刻の言い回しとして外す。無条件に外すと「今治の天気」が地名なしの依頼になり、
-    // 保存済みの地点や現在地の天気を、聞かれた街の天気として黙って返してしまう。
-    let without_now = query.replace('今', "");
-    if without_now.trim().chars().count() >= 2 {
-        query = without_now;
+    let text = REQUEST_END.replace(trim_edges(text), "");
+    let weather = WEATHER_WORD.find(&text)?;
+    // 地名の内側には触れない。「今治市」「明日香村」や、助詞を含む「ののいち」も
+    // 原文のまま検索する。日時は「今日の」「今、」など区切りがある場合だけ外す。
+    let before = trim_edges(&text[..weather.start()]);
+    let before = before.strip_suffix('の').unwrap_or(before).trim();
+    let before = TIME_PREFIX.replace(before, "");
+    let before = TIME_SUFFIX.replace(&before, "");
+    let before = trim_edges(&before);
+    if !before.is_empty() {
+        return Some(before.to_string());
     }
-    let query = query.trim();
-    (query.chars().count() >= 2).then(|| query.to_string())
+    // 「天気は横浜」のように地点が後ろにある場合も、天気語に接する助詞だけを外す。
+    let after = trim_edges(&text[weather.end()..]);
+    let after = ["って", "の", "は", "が", "を"]
+        .into_iter()
+        .find_map(|particle| after.strip_prefix(particle))
+        .unwrap_or(after);
+    let after = trim_edges(after);
+    (!after.is_empty()).then(|| after.to_string())
 }
 
 #[async_trait]
@@ -406,15 +397,28 @@ async fn geocode(
     request_timeout: std::time::Duration,
     location: &str,
 ) -> Result<(f64, f64, String), String> {
+    geocode_with_fetch(location, |name| async move {
+        fetch_candidates(cfg, request_timeout, &name).await
+    })
+    .await
+}
+
+/// 地点を選ぶ前に必要な検索をすべて完了し、取得失敗を候補なしと混同しない。
+async fn geocode_with_fetch<F, Fut>(
+    location: &str,
+    mut fetch: F,
+) -> Result<(f64, f64, String), String>
+where
+    F: FnMut(String) -> Fut,
+    Fut: std::future::Future<Output = Result<Vec<Value>, String>>,
+{
     // 都道府県名は候補が返らないので県庁所在地へ読み替える。
     let location = resolvable_location(location);
-    let mut candidates = fetch_candidates(cfg, request_timeout, location).await?;
+    let mut candidates = fetch(location.to_string()).await?;
     // 「横浜」のように自治体の種別を省いた言い方では、小さな同名の町が先に来る。
     // 「市」を補った候補も集めてから人口で選ぶ。
     if !location.ends_with(['市', '区', '町', '村']) {
-        if let Ok(extra) = fetch_candidates(cfg, request_timeout, &format!("{location}市")).await {
-            candidates.extend(extra);
-        }
+        candidates.extend(fetch(format!("{location}市")).await?);
     }
     pick_location(location, &candidates)
         .ok_or_else(|| format!("地点が見つかりません: {location}。市区町村まで指定してください。"))
@@ -656,6 +660,53 @@ mod tests {
         assert!(super::pick_location("横浜", &[]).is_none());
     }
 
+    #[tokio::test]
+    async fn 地名検索は必要な候補の取得が全て成功したときだけ地点を確定する() {
+        let town = serde_json::json!({"name":"横浜","latitude":41.08,"longitude":141.25,"population":4412,"admin1":"青森県"});
+        let city = serde_json::json!({"name":"横浜市","latitude":35.43,"longitude":139.65,"population":3777491,"admin1":"神奈川県"});
+        for (location, failed_call, expected_calls, expected_label) in [
+            ("横浜", Some(1), vec!["横浜"], None),
+            ("横浜", Some(2), vec!["横浜", "横浜市"], None),
+            (
+                "横浜",
+                None,
+                vec!["横浜", "横浜市"],
+                Some("横浜市（神奈川県）"),
+            ),
+            ("神奈川県", None, vec!["横浜市"], Some("横浜市（神奈川県）")),
+        ] {
+            let mut calls = Vec::new();
+            let result = super::geocode_with_fetch(location, |name| {
+                calls.push(name.clone());
+                let reply = if failed_call == Some(calls.len()) {
+                    Err("地名検索APIの取得失敗".to_string())
+                } else {
+                    Ok(vec![if name == "横浜市" {
+                        city.clone()
+                    } else {
+                        town.clone()
+                    }])
+                };
+                std::future::ready(reply)
+            })
+            .await;
+            assert_eq!(calls, expected_calls, "{location}: {failed_call:?}");
+            match expected_label {
+                Some(label) => assert_eq!(result.unwrap().2, label),
+                None => assert_eq!(result.unwrap_err(), "地名検索APIの取得失敗"),
+            }
+        }
+        let result = super::geocode_with_fetch("横浜", |name| {
+            std::future::ready(Ok(if name == "横浜" {
+                vec![town.clone()]
+            } else {
+                Vec::new()
+            }))
+        })
+        .await;
+        assert_eq!(result.unwrap().2, "横浜（青森県）");
+    }
+
     use super::{
         configured_location, extract_location, is_direct_query, is_weather_source_search,
         parse_ip_location,
@@ -663,14 +714,28 @@ mod tests {
 
     #[test]
     fn 地名に含まれる今を時刻の言い回しとして消さない() {
-        // 「今」を無条件に外すと今治が1文字になり、別の地点の天気を黙って返していた。
-        assert_eq!(extract_location("今治の天気は？").as_deref(), Some("今治"));
-        assert_eq!(
-            extract_location("今、東京の天気を教えて").as_deref(),
-            Some("東京")
-        );
-        assert_eq!(extract_location("今日の天気"), None);
-        assert_eq!(extract_location("今の天気"), None);
+        for (text, location) in [
+            ("今治の天気は？", "今治"),
+            ("今治市の天気は？", "今治市"),
+            ("今別町の天気を教えて", "今別町"),
+            ("今金町の天気予報", "今金町"),
+            ("明日香村の天気", "明日香村"),
+            ("みはらの天気", "みはら"),
+            ("ののいちの天気", "ののいち"),
+            ("はままつの天気を教えてください", "はままつ"),
+            ("今日のNew Yorkの天気", "New York"),
+            ("今、東京の天気を教えて", "東京"),
+            ("東京の明日の気温を教えて", "東京"),
+            ("天気は横浜", "横浜"),
+            ("天気ははままつ", "はままつ"),
+            ("津の天気", "津"),
+        ] {
+            assert_eq!(extract_location(text).as_deref(), Some(location), "{text}");
+        }
+        for text in ["今日の天気", "今の天気", "明日の天気は？", "天気を教えて"]
+        {
+            assert_eq!(extract_location(text), None, "{text}");
+        }
     }
 
     #[test]

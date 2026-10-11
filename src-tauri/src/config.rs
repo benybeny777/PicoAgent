@@ -237,9 +237,12 @@ impl Config {
     /// 設定画面の楽観的排他に使う、値ごとの不可逆な版。
     /// シークレットの値そのものを画面へ返さず、読込後の変更だけを検出する。
     pub fn value_revisions(&self) -> Map<String, Value> {
-        self.values
-            .lock()
-            .unwrap()
+        Self::revisions_for(&self.values.lock().unwrap())
+    }
+
+    /// 読み込んだ値または保存が確定した差分と、必ず同じ時点の版を返す。
+    pub fn revisions_for(values: &Map<String, Value>) -> Map<String, Value> {
+        values
             .iter()
             .map(|(key, value)| (key.clone(), Value::String(value_revision(Some(value)))))
             .collect()
@@ -683,6 +686,42 @@ mod tests {
             .is_empty());
         assert_eq!(cfg.get("B", ""), "追加");
         std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn 保存した差分の版は後続更新や未編集の最新値を混ぜない() {
+        let directory = tempfile::tempdir().unwrap();
+        let cfg = Config::new();
+        cfg.load(directory.path().join("config.json")).unwrap();
+        cfg.set_all(serde_json::Map::from_iter([
+            ("A".into(), serde_json::json!("読込時")),
+            ("B".into(), serde_json::json!("変更前")),
+        ]))
+        .unwrap();
+        let snapshot = cfg.get_all();
+        let loaded_revisions = Config::revisions_for(&snapshot);
+        cfg.set_string("A", "別操作の更新".into()).unwrap();
+        let (_, saved) = cfg
+            .set_all_checked_with(
+                serde_json::Map::from_iter([("B".into(), serde_json::json!("変更後"))]),
+                &serde_json::Map::from_iter([("B".into(), loaded_revisions["B"].clone())]),
+                |_, _| Ok(()),
+            )
+            .unwrap();
+        // 応答までの別更新を読み直さず、今回保存した値に対応する版を使う。
+        cfg.set_string("B", "保存後の別更新".into()).unwrap();
+        let saved_revisions = Config::revisions_for(&saved);
+        assert_eq!(saved_revisions.len(), 1);
+        assert_eq!(
+            saved_revisions["B"],
+            super::value_revision(Some(&serde_json::json!("変更後")))
+        );
+        assert_ne!(saved_revisions["B"], cfg.value_revisions()["B"]);
+        assert_eq!(
+            loaded_revisions["A"],
+            super::value_revision(snapshot.get("A"))
+        );
+        assert_ne!(loaded_revisions["A"], cfg.value_revisions()["A"]);
     }
 
     #[test]
