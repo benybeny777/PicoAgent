@@ -282,12 +282,14 @@ PicoAgentで実際に起きた退行・再発を、レビュー観点ごとに�
 | JSの `slice()` がUTF-16単位で絵文字を割った | #74 |
 | ストリーミングのチャンク境界で日本語が文字化けした／バイト添字の切り詰めでpanicした | `text::guard` 導入時 |
 | 利用者向けラベルが英語・複数の呼び名で混在した | `a5ace5c` 2巡目、#74 |
+| 日本語入りPS1をBOMなしUTF-8で保存し、Windows PowerShell 5.1で文字化けと構文エラーが発生した | `tools/tests/powershell-encoding-contract.mjs` |
 
 見る:
 - キー処理が `isImeComposing()` を通るか。文字列の切り詰めが `text::preview()` / `PicoUI.preview()` か。
 - 利用者向け文言が日本語で、同じ物を同じ名前で呼ぶか。
+- 日本語入りPS1がUTF-8 BOM付きか。5.1で実行する入口と配布用コピーを5.1自身で検査したか。PowerShell 7の構文確認だけで閉じない。
 
-固定済み: `text::guard`。
+固定済み: `text::guard`、`tools/tests/powershell-encoding-contract.mjs`。
 
 ## D16 外部入力の上限・境界
 

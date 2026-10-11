@@ -1,4 +1,4 @@
-#Requires -Version 7
+﻿#Requires -Version 7
 # Windows各版の正規ビルド入口を直列実行し、新規Releaseだけへ保存する。
 [CmdletBinding()]
 param(

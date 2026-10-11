@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
   選別済みデータセット1件をStyle-Bert-VITS2 JP-Extraで前処理・学習し、ONNXとAIVMXへ書き出す。
 

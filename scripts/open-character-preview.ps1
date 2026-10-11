@@ -1,4 +1,4 @@
-#Requires -Version 7
+﻿#Requires -Version 7
 [CmdletBinding()]
 param(
     [ValidateSet('menu', '2d', 'live2d', 'miko-mmd', 'korone-mmd')]

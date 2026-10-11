@@ -1,4 +1,4 @@
-#Requires -Version 7
+﻿#Requires -Version 7
 $ErrorActionPreference = 'Stop'
 . "$PSScriptRoot/publish-windows.ps1"
 function Assert-True([bool]$Value, [string]$Label) { if (-not $Value) { throw $Label }; Write-Host "合格: $Label" }
