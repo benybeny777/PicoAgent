@@ -472,22 +472,6 @@ fn append_diarize_args(cfg: &Config, args_list: &mut Vec<String>, enabled: bool)
     );
 }
 
-fn trim_output(bytes: &[u8]) -> String {
-    let text = String::from_utf8_lossy(bytes);
-    if text.len() <= MAX_COMMAND_OUTPUT_BYTES {
-        return text.to_string();
-    }
-    let mut end = MAX_COMMAND_OUTPUT_BYTES;
-    while !text.is_char_boundary(end) {
-        end -= 1;
-    }
-    format!(
-        "{}\n…（{}バイトで打ち切り）",
-        &text[..end],
-        MAX_COMMAND_OUTPUT_BYTES
-    )
-}
-
 /// 共通層でタイムアウト付き実行する。起動失敗・タイムアウト・出力回収の
 /// 打ち切りはすべて共通層の判断に任せ、ここでは案内文の先頭だけ揃える。
 async fn run_transcribe_command(
@@ -555,8 +539,8 @@ async fn transcribe(cfg: &Config, args: &Value) -> String {
     if !output.status.success() {
         return format!(
             "エラー: ローカル文字起こしが失敗しました。\nstdout:\n{}\nstderr:\n{}",
-            trim_output(&output.stdout),
-            trim_output(&output.stderr)
+            crate::text::command_output_within(&output.stdout, MAX_COMMAND_OUTPUT_BYTES),
+            crate::text::command_output_within(&output.stderr, MAX_COMMAND_OUTPUT_BYTES)
         );
     }
     let transcript =
@@ -570,7 +554,7 @@ async fn transcribe(cfg: &Config, args: &Value) -> String {
             Err(error) => return format!("エラー: 文字起こし結果を読めません: {error}"),
         }
     } else {
-        trim_output(&output.stdout)
+        crate::text::command_output_within(&output.stdout, MAX_COMMAND_OUTPUT_BYTES)
     };
     let target = match transcript_path(cfg, &audio) {
         Ok(path) => path,
