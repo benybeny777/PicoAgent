@@ -26,6 +26,8 @@
 
 本番テンプレートの正本は`src-tauri/src/providers/templates/lfm25-jp-history.jinja`。教材の`body`をPython側で作り直さない。Rustの出力テストは`LORA_FIXTURE_INPUT`と`LORA_FIXTURE_OUTPUT`へ異なる新規入出力先を明示して実行する。
 
+`tools/lora/fixtures/casual-challenge.json`は20種類の日常場面を集めた、学習と候補選定に使わない追加評価。生成器の最終100件を置き換えず、候補を固定してから別集計する。参照回答の文面一致ではなく、各問の根拠と期待行動で採点する。同じRustの出力テストで本番bodyを作り、使用前に入力照合を通す。
+
 ```powershell
 $env:LORA_FIXTURE_INPUT = '<教材JSONの絶対パス>'
 $env:LORA_FIXTURE_OUTPUT = '<本番body付きJSONの新規絶対パス>'
