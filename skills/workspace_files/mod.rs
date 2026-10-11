@@ -122,17 +122,6 @@ fn undo_last(cfg: &Config, confirm: bool) -> String {
 
 pub struct WorkspaceFilesTool;
 
-fn trim_to_bytes(content: &str, max_bytes: usize) -> String {
-    if content.len() <= max_bytes {
-        return content.to_string();
-    }
-    let mut end = max_bytes;
-    while !content.is_char_boundary(end) {
-        end -= 1;
-    }
-    format!("{}\n…（{} バイトで打ち切り）", &content[..end], max_bytes)
-}
-
 fn list_dir(path: &SafePath) -> String {
     let entries = match permissions::fs::read_dir(path) {
         Ok(entries) => entries,
@@ -272,7 +261,14 @@ impl Tool for WorkspaceFilesTool {
         match action {
             "list" => list_dir(&target),
             "read" => match permissions::fs::read_to_string(&target) {
-                Ok(content) => trim_to_bytes(&content, MAX_READ_BYTES),
+                Ok(mut content) => {
+                    crate::text::truncate_bytes_with_notice(
+                        &mut content,
+                        MAX_READ_BYTES,
+                        &crate::text::byte_limit_notice(MAX_READ_BYTES),
+                    );
+                    content
+                }
                 Err(error) => format!("エラー: 読み取りに失敗しました（{}）: {}", error, target.display()),
             },
             "write" | "append" => {
