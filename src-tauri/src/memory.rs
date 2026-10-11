@@ -283,9 +283,155 @@ enum MemorySubject {
 
 const SENTENCE_SEPARATORS: [char; 7] = ['\n', '。', '！', '？', '!', '?', '\r'];
 
+// 「私の」は所有者だけを示す。「私の兄」の述語を利用者自身の事実へ移さない。
+fn user_owned_attribute(body: &str) -> bool {
+    let Some((attribute, value)) = body.split_once('は') else {
+        return false;
+    };
+    let direct = [
+        "名前",
+        "年齢",
+        "職業",
+        "出身",
+        "住所",
+        "誕生日",
+        "好み",
+        "趣味",
+    ]
+    .contains(&attribute);
+    let qualified = [
+        "好きな",
+        "嫌いな",
+        "苦手な",
+        "得意な",
+        "普段使う",
+        "よく使う",
+    ]
+    .into_iter()
+    .find_map(|prefix| attribute.strip_prefix(prefix));
+    // 好みの参照先が人か物か不明な場合は、名詞＋ですだけで名前と属性を推定しない。
+    // 飲み物等の直接の好み、または参照先の「名前」という明示同定だけを扱う。
+    let explicit_reference = qualified.is_some_and(|reference| {
+        [
+            "飲み物",
+            "食べ物",
+            "料理",
+            "色",
+            "音楽",
+            "本",
+            "作品",
+            "場所",
+            "ゲーム",
+            "言語",
+            "ツール",
+            "ソフト",
+            "アプリ",
+            "道具",
+        ]
+        .contains(&reference)
+            || reference
+                .strip_suffix("の名前")
+                .is_some_and(|referent| !referent.is_empty() && !referent.contains('の'))
+    });
+    (direct || explicit_reference) && !value.trim().is_empty()
+        // 属性の値が更に別人の好み等を述べるなら、確定した利用者の属性とは扱わない。
+        && !contains_any(value, &["好き", "嫌い", "苦手", "得意", "住んで", "勤めて", "働いて"])
+}
+
+// 報告する人の一人称だけでは、報告内の事実の主体を確定できない。
+fn reported_or_uncertain(text: &str) -> bool {
+    // 並列助詞の「と」や名詞の一文字を、報告の文形・動詞として扱わない。
+    let reporting_verb = |rest: &str| {
+        [
+            "聞く",
+            "聞き",
+            "聞い",
+            "聞け",
+            "聞か",
+            "知る",
+            "知り",
+            "知っ",
+            "知れ",
+            "知ら",
+            "思う",
+            "思い",
+            "思っ",
+            "思え",
+            "思わ",
+            "考える",
+            "考えた",
+            "考えて",
+            "考えます",
+            "言う",
+            "言い",
+            "言っ",
+            "言え",
+            "言わ",
+            "話す",
+            "話し",
+            "話せ",
+            "話さ",
+            "見る",
+            "見た",
+            "見て",
+            "見ます",
+            "読む",
+            "読み",
+            "読ん",
+            "読め",
+            "読ま",
+            "理解する",
+            "理解し",
+            "認識する",
+            "認識し",
+            "記憶する",
+            "記憶し",
+            "覚える",
+            "覚えた",
+            "覚えて",
+            "覚えます",
+            "教わる",
+            "教わり",
+            "教わっ",
+            "教えられ",
+            "感じる",
+            "感じた",
+            "感じて",
+        ]
+        .into_iter()
+        .any(|verb| rest.starts_with(verb))
+    };
+    ["だと", "ですと", "ことを", "のを"]
+        .into_iter()
+        .any(|link| text.split(link).skip(1).any(reporting_verb))
+        // 「好きと聞いた」のような省略形は、直前が好み等の述語の場合だけ扱う。
+        || text.match_indices('と').any(|(index, link)| {
+            let (before, after) = text.split_at(index);
+            ["好き", "嫌い", "得意", "苦手"]
+                .into_iter()
+                .any(|predicate| before.ends_with(predicate))
+                && reporting_verb(&after[link.len()..])
+        })
+        || contains_any(
+            text,
+            &[
+                "とのこと",
+                "という",
+                "らしい",
+                "そうです",
+                "そうだ",
+                "ようです",
+                "ようだ",
+            ],
+        )
+}
+
 // 保存時と旧記録の参照時で同じ主体判定を使い、発話者と事実の主体を混同しない。
 fn memory_subject(text: &str) -> MemorySubject {
     let text = text.trim();
+    if reported_or_uncertain(text) {
+        return MemorySubject::Unresolved;
+    }
     if text.contains([
         '「', '」', '『', '』', '"', '“', '”', '‘', '’', '\'', '`', '?', '？',
     ]) || contains_any(
@@ -342,7 +488,13 @@ fn memory_subject(text: &str) -> MemorySubject {
         "ユーザーの",
     ]
     .into_iter()
-    .find_map(|prefix| text.strip_prefix(prefix));
+    .find_map(|prefix| text.strip_prefix(prefix).map(|body| (prefix, body)));
+    if let Some((prefix, body)) = subject {
+        if prefix.ends_with('の') && !user_owned_attribute(body) {
+            return MemorySubject::Unresolved;
+        }
+    }
+    let subject = subject.map(|(_, body)| body);
     if let Some(body) = subject {
         // 複数の節を丸ごと一人の事実へ認定しない。本文は変更せず保存候補から外す。
         if body.contains(['、', ',', ';', '；'])
@@ -628,6 +780,107 @@ mod tests {
             ("好み".to_string(), "私は緑茶が好きです".to_string())
         );
         assert_eq!(items[1].0, "継続指示");
+    }
+
+    #[test]
+    fn 私の所有物と第三者の述語を区別し明示した自分の属性だけを覚える() {
+        for text in [
+            "私の兄はコーヒーが好き",
+            "私の母が緑茶好き",
+            "僕の同級生は緑茶好き",
+            "私の好きな作家は太郎です",
+            "私の好きな作家は東京出身です",
+            "私の好きな歌手は花子です",
+            "私の好きな先生の兄の名前は太郎です",
+            "私の好きな作家はコーヒーが好き",
+            "私の好きな作家はコーヒー好き",
+            "私の好きな作家の妹は緑茶好き",
+            "私の趣味の先生は緑茶が好き",
+            "利用者の父はコーヒーが好き",
+        ] {
+            assert!(
+                extract_candidates(text).is_empty(),
+                "所有名詞の第三者を利用者とした: {text}"
+            );
+            assert!(
+                super::memory_subject(text) == super::MemorySubject::Unresolved,
+                "旧記録でも同じ主体を拒否する: {text}"
+            );
+        }
+        for text in [
+            "私の好きな飲み物は緑茶です",
+            "僕の名前は太郎です",
+            "私の好きな作家の名前は太郎です",
+            "私の好きな歌手の名前は花子です",
+            "私の趣味は読書です",
+        ] {
+            assert_eq!(
+                extract_candidates(text).len(),
+                1,
+                "明示属性を失った: {text}"
+            );
+        }
+    }
+
+    #[test]
+    fn コード引用内の自己紹介を保存せず引用外の独立した自己情報だけを保存する() {
+        for text in [
+            "`私は緑茶が好き。私はコーヒーが苦手`",
+            "``私は緑茶が好き。`私は紅茶が好き``",
+            "```text\n私は緑茶が好き。私はコーヒーが苦手\n```",
+        ] {
+            assert!(
+                extract_candidates(text).is_empty(),
+                "コード資料を本人の情報とした: {text}"
+            );
+        }
+        let items = extract_candidates("```text\n私は緑茶が好き\n```。私はRustが好きです。");
+        assert_eq!(
+            items,
+            vec![("好み".to_string(), "私はRustが好きです".to_string())]
+        );
+    }
+
+    #[test]
+    fn 自己主語の報告や伝聞を本人の好みへ移さず直接の自己申告を保持する() {
+        for text in [
+            "私は兄がコーヒー好きだと聞いた",
+            "私は兄がコーヒー好きと聞きました",
+            "私は兄が緑茶好きだと記憶しています",
+            "私は兄が緑茶好きなのを覚えている",
+            "私はあおいが料理得意とのことを記憶した",
+            "私はあおいが緑茶嫌いと知りました",
+            "私はあおいが料理得意と聞きました",
+            "私はあおいが運動苦手と聞いています",
+            "私はあおいが緑茶好きだと知っています",
+            "僕はあおいが緑茶を好きだと聞きました",
+            "私はあおいがコーヒーが好きだと知りました",
+            "私はあおいが緑茶好きらしいと思います",
+            "私はあおいが緑茶好きとのことを聞いています",
+            "私はあおいが緑茶好きなことを知っている",
+            "私はあおいが緑茶好きという話を覚えてほしい",
+        ] {
+            assert!(
+                extract_candidates(text).is_empty(),
+                "報告の主体と事実の主体を混同した: {text}"
+            );
+            assert!(
+                super::memory_subject(text) == super::MemorySubject::Unresolved,
+                "旧記録でも伝聞を確定しない: {text}"
+            );
+        }
+        for text in [
+            "私は緑茶が好きです",
+            "私は散歩と思索が好きです",
+            "私は人と話すのが好きです",
+            "私は人の名前を覚えるのが得意です",
+        ] {
+            assert_eq!(
+                extract_candidates(text),
+                vec![("好み".to_string(), text.to_string())],
+                "直接の自己申告を伝聞へ読み替えない: {text}"
+            );
+        }
     }
 
     #[test]

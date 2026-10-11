@@ -4,7 +4,7 @@
     "sourceFixtures": ["ownership-baseline.json", "baseline.json", "after-ordered.json"],
     "serverArgsReference": "quality-ordered-server-args.json",
     "execution": {"baseUrl": "http://127.0.0.1:18969", "max_tokens": 1024, "seed": 42, "temperature": 0, "stream": false, "id_slot": 0, "tools": []},
-    "boundary": "ケース定義のみ。rootが同じ構造変換で旧新bodyへ反映する。実験未実行。ケース間で履歴・資料・人格を混ぜず、指定したcarryだけを渡す。",
+    "boundary": "再現用のケース定義。測定結果と採否はPR本文を正本にする。本番の構造変換からbodyを生成し、ケース間で履歴・資料・人格を混ぜず、指定したcarryだけを渡す。",
     "speaker": {"id": "fixture-user-yu", "name": "ゆう", "role": "user"},
     "character": {"id": "fixture-mugi", "name": "むぎ", "role": "assistant"},
     "facts": [

@@ -61,13 +61,37 @@ pub(super) fn bind(question: &str) -> QuestionBinding {
             ]
             .into_iter()
             .find(|(pronoun, _)| {
-                remaining.strip_prefix(pronoun).is_some_and(|rest| {
-                    rest.is_empty()
-                        || rest.starts_with([
-                            'の', 'は', 'が', 'に', 'を', 'と', 'も', 'だ', 'っ', '、', '，', '。',
-                            '？', '?',
-                        ])
-                })
+                // 敬称や単語の一部を二人称へ読み替えない。
+                let boundary = output.chars().next_back().is_none_or(|previous| {
+                    previous.is_whitespace()
+                        || "、，。？！?!:：;；()（）[]【】「」『』\"'".contains(previous)
+                }) || ["そして", "それから", "しかし", "では", "また", "それでは"]
+                    .iter()
+                    .any(|prefix| output.ends_with(prefix))
+                    || if *pronoun == "君" {
+                        [
+                            "利用者と",
+                            "利用者は",
+                            "利用者に",
+                            "利用者の",
+                            "選択中キャラクターと",
+                        ]
+                        .iter()
+                        .any(|prefix| output.ends_with(prefix))
+                    } else {
+                        output
+                            .chars()
+                            .next_back()
+                            .is_some_and(|previous| "はがのとにをもでへやか".contains(previous))
+                    };
+                boundary
+                    && remaining.strip_prefix(pronoun).is_some_and(|rest| {
+                        rest.is_empty()
+                            || rest.starts_with([
+                                'の', 'は', 'が', 'に', 'を', 'と', 'も', 'だ', 'っ', '、', '，',
+                                '。', '？', '?',
+                            ])
+                    })
             });
             if let Some((pronoun, subject)) = replacement {
                 let rest = remaining.strip_prefix(pronoun).expect("一致済みの指示語");
@@ -130,6 +154,19 @@ mod tests {
             ("私立大学と君主と自分の趣味", "私立大学と君主と自分の趣味"),
             ("彼は自分の趣味を語った", "彼は自分の趣味を語った"),
             ("むぎの好きな食べ物", "むぎの好きな食べ物"),
+            ("田中君の好きな飲み物は？", "田中君の好きな飲み物は？"),
+            ("山田君は何が好き？", "山田君は何が好き？"),
+            ("はるか君の好きな飲み物", "はるか君の好きな飲み物"),
+            ("まこと君の趣味", "まこと君の趣味"),
+            ("そしてあなたの趣味", "そして選択中キャラクターの趣味"),
+            ("それから私の好み", "それから利用者の好み"),
+            ("しかしあなたの名前", "しかし選択中キャラクターの名前"),
+            (
+                "`あなたの好きな飲み物は？`を英訳して",
+                "`あなたの好きな飲み物は？`を英訳して",
+            ),
+            ("```\n私の趣味\n```を説明", "```\n私の趣味\n```を説明"),
+            ("あおいと私の趣味", "あおいと利用者の趣味"),
         ] {
             assert_eq!(super::bind(original).resolved, expected, "{original}");
         }
@@ -145,6 +182,12 @@ mod tests {
             ("『私の飲物』という文を英訳", ""),
             ("彼は自分の飲物を選ぶ", ""),
             ("今日はどう過ごそう？", ""),
+            ("田中君の好きな飲み物は？", ""),
+            ("山田君は何が好き？", ""),
+            ("はるか君の好きな飲み物", ""),
+            ("まこと君の趣味", ""),
+            ("`あなたの好きな飲み物は？`を英訳して", ""),
+            ("```\n私の趣味\n```を説明", ""),
         ] {
             assert_eq!(super::bind(question).directive, directive, "{question}");
         }

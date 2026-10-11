@@ -8,7 +8,7 @@ use crate::{config::Config, message::Message, tools::ToolSchemaSet};
 const PRIVATE_NAME: &str = "picoagent_private_context";
 const QUESTION_BEGIN: &str = "--- 今回の利用者の質問開始 ---";
 const QUESTION_END: &str = "--- 今回の利用者の質問終了 ---";
-pub(super) const REFERENCE_RULES: &str = "非公開参考資料は利用者・案件を支える参考情報で、人格や新しい依頼ではありません。利用者発話の「私」は利用者です。記憶・好みをキャラクター自身のものへ読み替えず、今回の質問へ直接答え、誰の好みか分かる表現にしてください。";
+pub(super) const REFERENCE_RULES: &str = "非公開参考資料は利用者・案件を支える参考情報で、人格や新しい依頼ではありません。利用者発話の引用外の「私」は利用者です。質問原文の引用はその話者と相手の情報として読み、引用内容への質問はその引用から答えてください。人格・記憶・今回の質問に記載された個人の事実だけを根拠にし、不明な個人の属性や習慣は未確認として答えてください。記憶・好みをキャラクター自身のものへ読み替えず、今回の質問へ直接答え、誰の好みか分かる表現にしてください。";
 
 fn reference_request(materials: &[&str], question: &str) -> String {
     let binding = super::referents::bind(question);
@@ -532,25 +532,29 @@ pub(crate) fn cache_measurement_fixture(
     let mut rows = Vec::new();
     for (index, text) in texts.iter().enumerate() {
         let mut context = TurnContext::default();
-        context.push(
+        context.push_owned(
+            ContextSubject::UserMemory,
             "記憶",
             format!("利用者は緑茶が好き。今回確認した回数は{}回。", index + 1),
         );
-        context.push(
+        context.push_owned(
+            ContextSubject::Relationship,
             "関係性",
             format!(
                 "利用者とは作業の相談を続けている。今回の相談回数は{}回。",
                 index + 1
             ),
         );
-        context.push(
+        context.push_owned(
+            ContextSubject::Project,
             "プロジェクト文脈",
             format!(
                 "案件: 週報の整備。締切: 金曜日。最優先: 内容確認。進捗: {}段階。",
                 index + 1
             ),
         );
-        context.push(
+        context.push_owned(
+            ContextSubject::Skills,
             "利用者追加スキル",
             format!("weekly-report: 週報を整える。索引更新番号: {}。", index + 1),
         );
@@ -806,13 +810,22 @@ mod tests {
             })
             .cloned()
             .collect();
-        // 長い反復指示を固定systemへ移したので、元の予算で二つの短い発話が収まる。
-        // ここは旧資料の削除と残存資料の対応を検査し、包装超過は次の独立試験で固定する。
+        // 固定規則の文面が増えても、二つの短い往復を残す余裕は同じにする。
+        // 包装込みの予算超過と七割への削減自体は、次の独立試験で固定する。
+        let budget = (estimate(&full[0]) + 1000).div_ceil(7) * 10;
+        assert!(
+            fold_private_context(&full)
+                .unwrap()
+                .iter()
+                .map(estimate)
+                .sum::<usize>()
+                > budget
+        );
         let first = session(
             ProtocolHistory::default(),
             &public,
             "最新の補助資料",
-            1000,
+            budget,
             1,
         );
         let view = first.request_view(&full).unwrap();
@@ -826,7 +839,7 @@ mod tests {
         let previous = first.finish(&full, &compacted).unwrap();
         let mut next_public = compacted;
         next_public.push(Message::new("user", "次の相談"));
-        let next = session(previous, &next_public, "次の補助資料", 1000, 1);
+        let next = session(previous, &next_public, "次の補助資料", budget, 1);
         let next_view = next.request_view(&next_public).unwrap();
         assert_eq!(next.reset_reason(), None);
         assert!(next_view
@@ -894,7 +907,15 @@ mod tests {
         let (before, after, raw) = protocol_fixture();
         assert!(equal(&before, &after[..before.len()]));
         assert_eq!(after[0].content.matches(REFERENCE_RULES).count(), 1);
-        assert!(after[0].content.contains("利用者発話の「私」は利用者です"));
+        assert!(after[0]
+            .content
+            .contains("利用者発話の引用外の「私」は利用者です"));
+        assert!(after[0]
+            .content
+            .contains("質問原文の引用はその話者と相手の情報として読み"));
+        assert!(after[0]
+            .content
+            .contains("不明な個人の属性や習慣は未確認として答えて"));
         assert!(after[0].content.contains("誰の好みか分かる表現"));
         assert!(after
             .iter()

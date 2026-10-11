@@ -13,15 +13,36 @@ pub use picoagent_core::text::{command_output, preview, truncate_bytes, Utf8Stre
 pub(crate) struct QuoteState {
     stack: Vec<char>,
     escaped: bool,
+    code_delimiter: usize,
+    pending_ticks: usize,
 }
 
 impl QuoteState {
     /// 引用の開始・終了文字自身もtrue。エスケープしたASCII引用符は境界にしない。
     pub(crate) fn enter(&mut self, character: char) -> bool {
-        let inside = !self.stack.is_empty();
+        // 連続するバッククォートの幅は次の文字で確定する。短い内部tickは閉じない。
+        if character != '`' && self.pending_ticks > 0 {
+            let width = std::mem::take(&mut self.pending_ticks);
+            if self.code_delimiter == 0 {
+                self.code_delimiter = width;
+            } else if width == self.code_delimiter
+                || (self.code_delimiter >= 3 && width >= self.code_delimiter)
+            {
+                self.code_delimiter = 0;
+            }
+        }
+        let inside = !self.stack.is_empty() || self.code_delimiter > 0;
         if self.escaped {
             self.escaped = false;
             return inside;
+        }
+        if character == '`' && self.stack.is_empty() {
+            self.pending_ticks += 1;
+            return true;
+        }
+        // コード引用内では他の引用符やbackslashを文字のまま扱う。
+        if self.code_delimiter > 0 {
+            return true;
         }
         if character == '\\' {
             self.escaped = true;
@@ -494,6 +515,12 @@ mod tests {
             ("a」b", "010"),
             ("a'b'c", "01110"),
             (r#"a"don't"b"#, "011111110"),
+            ("a`b`c", "01110"),
+            ("a``b`c``d", "011111110"),
+            ("a```b`c```d", "01111111110"),
+            ("a```b\nc```d", "01111111110"),
+            ("a`b", "011"),
+            ("a`\"b`c", "011110"),
         ] {
             let mut quote = super::QuoteState::default();
             let actual: String = text
