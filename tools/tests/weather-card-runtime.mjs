@@ -80,3 +80,64 @@ test("天気スキルの出力形式とカードの読み取りが同じ形を�
   assert.ok(card.includes('"| 日付 | 天気 | 最高 / 最低 | 降水確率 |"'));
   assert.ok(skill.includes('"いまは {temp}°C"') && skill.includes('"今日は 最高 {}°C / 最低 {}°C、降水確率 {}%\\n"'));
 });
+
+
+test("不正な現在値と予報値と欠けた表は本文を欠落させず通常表示する", () => {
+  for (const text of [
+    WEATHER.replace("湿度 60%", "湿度 101%"),
+    WEATHER.replace("いまは 21°C", "いまは 21°Cに見えます"),
+    WEATHER.replace("いまは 21°C", "いまは予報を読んでね"),
+    WEATHER.replace("いまは 21°C", `いまは ${"9".repeat(400)}°C`),
+    WEATHER.replace("80% |", "800% |"),
+    WEATHER.replace("20° / 15°", "10° / 15°"),
+    WEATHER.replace("| --- | --- | --- | --- |", "| --- | --- |"),
+    WEATHER.replace("今日は 最高 23°C / 最低 14°C、降水確率 10%", "今日は傘も忘れないでね"),
+    WEATHER.slice(0, WEATHER.lastIndexOf("|")),
+  ]) {
+    const view = render(text);
+    assert.equal(view.querySelector(".wx-card"), null, text);
+    assert.ok(view.textContent.includes("いまは"));
+  }
+});
+
+test("今日の行だけがある場合も最高最低と降水確率を失わない", () => {
+  const view = render(WEATHER.split("\n").slice(0, 3).join("\n"));
+  assert.match(view.textContent, /最高 23°.*最低 14°/);
+  assert.match(view.textContent, /降水確率10%/);
+});
+
+test("欠測は未知のまま保持し日付を勝手に今日へ読み替えない", () => {
+  const text = WEATHER.replace("今日は 最高 23°C / 最低 14°C、降水確率 10%\n", "")
+    .replace("23° / 14°", "-° / -°").replace("10% |", "-% |");
+  const card = render(text).querySelector(".wx-card");
+  assert.ok(card);
+  assert.match(card.querySelector(".wx-day-date").textContent, /10\/10/);
+  assert.match(card.querySelector(".wx-day").getAttribute("aria-label"), /未確認/);
+});
+
+test("地点や説明へHTMLを含めても実行せず文字として描く", () => {
+  const attack = '<img src=x onerror=alert(1)>';
+  const view = render(WEATHER.replace("横浜市（神奈川県）", attack));
+  assert.equal(view.querySelectorAll("img").length, 0);
+  assert.ok(view.textContent.includes(attack));
+});
+
+
+test("天気カードは狭幅で降水列を消さず複数段表示し明るい空模様でも本文のコントラストを保つ", () => {
+  const css = readFileSync(new URL("../../ui/components/chat.css", import.meta.url), "utf8");
+  const block = css.slice(css.indexOf("/* ── 天気カード"), css.indexOf(".copy-code"));
+  assert.doesNotMatch(block, /\.wx-day-pop[^}]*display:\s*none/);
+  assert.match(block, /\.wx-day-high[^}]*grid-row:\s*3/);
+  assert.match(block, /\.wx-place[^}]*white-space:\s*normal/);
+  assert.match(block, /prefers-reduced-motion: reduce/);
+  const alpha = Number(block.match(/linear-gradient\(rgba\(0, 0, 0, ([\d.]+)\)/)?.[1]);
+  assert.ok(Number.isFinite(alpha));
+  const linear = channel => channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
+  for (const match of block.matchAll(/--wx-(?:from|to): #([\da-f]{6})/g)) {
+    const channels = [0, 2, 4].map(offset => parseInt(match[1].slice(offset, offset + 2), 16));
+    // 白い光沢が最大の角でも、前面の暗幕と白文字の比を確認する。
+    const [r, g, b] = channels.map(channel => linear(((channel * 0.72 + 255 * 0.28) * (1 - alpha)) / 255));
+    const luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    assert.ok(1.05 / (luminance + 0.05) >= 4.5, `背景#${match[1]}の本文コントラスト`);
+  }
+});
