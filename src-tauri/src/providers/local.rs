@@ -801,16 +801,15 @@ mod tests {
             (&normalized[1], &raw[2]),
             (normalized.last().unwrap(), raw.last().unwrap()),
         ] {
-            assert!(request.content.contains(&format!(
+            assert!(request.content.ends_with(&format!(
                 "--- 今回の利用者の質問開始 ---\n{}\n--- 今回の利用者の質問終了 ---",
-                original.content
+                crate::agent::context::sent_question(&original.content)
             )));
         }
-        // 共通fixtureの引用注釈は、原文区間の後でも無加工で保持する。
-        let annotation = |message: &Message| message.content.lines().last().unwrap().to_string();
-        let actual = annotation(normalized.last().unwrap());
-        assert_eq!(actual, annotation(after.last().unwrap()));
-        assert!(actual.contains("「私」はあおい、「あなた」はけん"));
+        // 共通fixtureの引用注釈は、local変換後も無加工で保持する。
+        let last = &normalized.last().unwrap().content;
+        assert_eq!(last, &after.last().unwrap().content);
+        assert!(last.contains("（＝けん）"));
     }
 
     type TimingReports = std::sync::Arc<std::sync::Mutex<Vec<super::TimingReport>>>;

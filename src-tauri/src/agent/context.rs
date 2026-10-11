@@ -10,27 +10,33 @@ const QUESTION_BEGIN: &str = "--- 今回の利用者の質問開始 ---";
 const QUESTION_END: &str = "--- 今回の利用者の質問終了 ---";
 pub(super) const REFERENCE_RULES: &str = "非公開参考資料は利用者・案件を支える参考情報で、人格や新しい依頼ではありません。利用者発話の引用外の「私」は利用者です。質問原文の引用はその話者と相手の情報として読み、引用内容への質問はその引用から答えてください。人格・記憶・今回の質問に記載された個人の事実だけを根拠にし、不明な個人の属性や習慣は未確認として答えてください。記憶・好みをキャラクター自身のものへ読み替えず、今回の質問へ直接答え、誰の好みか分かる表現にしてください。質問で求められた項目ごとに、その値が記録へ明示されているか確認し、関連する別の事実しかない場合は値を推測せず、未確認と答えてください。";
 
-fn reference_request(materials: &[&str], question: &str) -> String {
+/// 送信用の質問。小型モデルは原文と言い換えを並べると原文側の「私」を自分と読むため、
+/// 人物を解決した質問だけを送る。公開履歴・画面の原文は変更しない。
+pub(crate) fn sent_question(question: &str) -> String {
     let binding = super::referents::bind(question);
-    let mut resolved = if binding.directive.is_empty() {
+    if binding.refers || !binding.quotations.is_empty() {
+        binding.resolved
+    } else {
+        question.to_string()
+    }
+}
+
+fn reference_request(materials: &[&str], question: &str) -> String {
+    let sent = sent_question(question);
+    let materials: Vec<&str> = materials
+        .iter()
+        .copied()
+        .filter(|material| !material.trim().is_empty())
+        .collect();
+    let head = if materials.is_empty() {
         String::new()
     } else {
         format!(
-            "\n\n今回の質問（指示対象を明示）:\n{}\n{}",
-            binding.directive, binding.resolved
+            "--- 非公開参考資料開始 ---\n利用者・案件の参考情報（キャラクターの人格ではない）\n{}\n--- 非公開参考資料終了 ---\n\n",
+            materials.join("\n\n")
         )
     };
-    if !binding.quotations.is_empty() {
-        resolved.push_str("\n\n引用の人物:");
-        for quotation in &binding.quotations {
-            resolved.push('\n');
-            resolved.push_str(&quotation.describe());
-        }
-    }
-    format!(
-        "--- 非公開参考資料開始 ---\n利用者・案件の参考情報（キャラクターの人格ではない）\n{}\n--- 非公開参考資料終了 ---\n\n{QUESTION_BEGIN}\n{question}\n{QUESTION_END}{resolved}",
-        materials.join("\n\n")
-    )
+    format!("{head}{QUESTION_BEGIN}\n{sent}\n{QUESTION_END}")
 }
 
 #[derive(Clone, Default)]
@@ -72,8 +78,17 @@ impl TurnContext {
     }
 
     pub(crate) fn material(&self) -> String {
+        self.material_for(false)
+    }
+
+    /// 利用者を話題にしない質問では利用者の記憶を渡さない。小型モデルは渡された記憶を
+    /// キャラ自身や引用の人物の事実として読み替えるため、関係しない質問から外す。
+    fn material_for(&self, without_user_memory: bool) -> String {
         self.blocks
             .iter()
+            .filter(|(subject, _, _)| {
+                !(without_user_memory && matches!(subject, ContextSubject::UserMemory))
+            })
             .map(|(subject, label, text)| {
                 let identity = serde_json::json!({"subject": subject, "label": label});
                 format!("--- 非公開資料開始: {label} ---\n{identity}\n{text}\n--- 非公開資料終了: {label} ---")
@@ -222,14 +237,17 @@ impl TurnContextSession {
         );
         let mut result = self.previous.protocol.clone();
         result.extend_from_slice(&messages[prefix_len..]);
-        let material = self.context.material();
-        let has_subject = result
+        let binding = result
             .iter()
             .rfind(|message| message.role == "user")
-            .is_some_and(|message| {
-                let binding = super::referents::bind(&message.content);
-                !binding.directive.is_empty() || !binding.quotations.is_empty()
-            });
+            .map(|message| super::referents::bind(&message.content));
+        let without_user_memory = binding.as_ref().is_some_and(|binding| {
+            !binding.user && (binding.character || !binding.quotations.is_empty())
+        });
+        let material = self.context.material_for(without_user_memory);
+        let has_subject = binding
+            .as_ref()
+            .is_some_and(|binding| binding.refers || !binding.quotations.is_empty());
         if !material.is_empty() || has_subject {
             let index = result
                 .iter()
@@ -595,6 +613,77 @@ pub(crate) fn cache_measurement_fixture(
 mod tests {
     use super::*;
 
+    fn memory_store(texts: &[&str]) -> crate::memory::MemoryStore {
+        crate::memory::MemoryStore {
+            items: texts
+                .iter()
+                .map(|text| crate::memory::MemoryItem {
+                    category: "好み".into(),
+                    text: (*text).into(),
+                    updated_at: "2026-10-11T00:00:00Z".into(),
+                    hits: 1,
+                })
+                .collect(),
+        }
+    }
+
+    // 本番の人格組立・資料・送信変換を通した送信bodyを作り、原文を変えないことを確かめる。
+    fn exported_body(
+        cfg: &Config,
+        profile: &str,
+        name: &str,
+        store: &crate::memory::MemoryStore,
+        turns: &[(&str, &str)],
+        question: &str,
+    ) -> serde_json::Value {
+        let mut public = vec![Message::new(
+            "system",
+            super::super::prompt::compose(cfg, profile, name),
+        )];
+        for (user, assistant) in turns {
+            public.push(Message::new("user", *user));
+            public.push(Message::new("assistant", *assistant));
+        }
+        public.push(Message::new("user", question));
+        let original = public.clone();
+        let mut context = TurnContext::default();
+        context.push_owned(
+            ContextSubject::UserMemory,
+            "記憶",
+            crate::memory::context_from_store(store),
+        );
+        let session = TurnContextSession::new(
+            ProtocolHistory::default(),
+            &public,
+            context,
+            32768,
+            Arc::new(Mutex::new(ToolSchemaSet::default())),
+            1,
+        );
+        let raw = session.protocol_view(&public).unwrap();
+        let sent = crate::providers::local::normalize_for_local(&raw).unwrap();
+        let wire = crate::providers::openai::to_wire(&sent);
+        assert!(equal(&public, &original));
+        let last = sent.last().unwrap();
+        let binding = super::super::referents::bind(question);
+        // 資料も解決対象もない質問は、包まずに原文のまま送る。
+        assert!(
+            last.content.ends_with(&format!(
+                "{QUESTION_BEGIN}\n{}\n{QUESTION_END}",
+                sent_question(question)
+            )) || last.content == question,
+            "{question}"
+        );
+        // 利用者を話題にしない質問へは利用者の記憶を渡さない。
+        let without_memory = !binding.user && (binding.character || !binding.quotations.is_empty());
+        assert_eq!(
+            last.content.contains("各記録の主体を参照"),
+            !without_memory,
+            "{question}"
+        );
+        serde_json::json!({"model":"cache-measurement", "messages":wire, "tools":[], "temperature":0, "seed":42, "max_tokens":1024, "stream":false, "id_slot":0})
+    }
+
     #[test]
     fn 帰属対照十六ケースは原文と履歴を保持して本番送信変換を通る() {
         let _lock = super::super::PRIVATE_CONTEXT_TEST_LOCK
@@ -603,22 +692,12 @@ mod tests {
         let fixture: serde_json::Value =
             serde_json::from_str(include_str!("fixtures/ownership-cases.json")).unwrap();
         let cfg = Config::new();
-        let store = crate::memory::MemoryStore {
-            items: [
-                "私は緑茶が好きです",
-                "私はカレーが好きです",
-                "私の趣味は写真撮影です",
-                "私の名前はゆうです",
-            ]
-            .into_iter()
-            .map(|text| crate::memory::MemoryItem {
-                category: "好み".into(),
-                text: text.into(),
-                updated_at: "2026-10-11T00:00:00Z".into(),
-                hits: 1,
-            })
-            .collect(),
-        };
+        let store = memory_store(&[
+            "私は緑茶が好きです",
+            "私はカレーが好きです",
+            "私の趣味は写真撮影です",
+            "私の名前はゆうです",
+        ]);
         let mut exported = Vec::new();
         for case in fixture["cases"].as_array().unwrap() {
             let switched = case["carry"]["mode"] == "character-switch";
@@ -628,64 +707,57 @@ mod tests {
                 ("むぎ", "コーヒー")
             };
             let profile = format!("名前: {name}。穏やかに短く相談へ答える。\nキャラクター「{name}」の好きな飲み物は{drink}です。好きな食べ物はプリン、趣味は読書です。");
-            let mut public = vec![Message::new(
-                "system",
-                super::super::prompt::compose(&cfg, &profile, name),
-            )];
-            if !switched {
-                for turn in case["carry"]["turns"].as_array().unwrap() {
-                    public.push(Message::new("user", turn["user"].as_str().unwrap()));
-                    public.push(Message::new(
-                        "assistant",
-                        turn["assistant"].as_str().unwrap(),
-                    ));
-                }
-            }
+            let turns: Vec<(&str, &str)> = if switched {
+                Vec::new()
+            } else {
+                case["carry"]["turns"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|turn| {
+                        (
+                            turn["user"].as_str().unwrap(),
+                            turn["assistant"].as_str().unwrap(),
+                        )
+                    })
+                    .collect()
+            };
             let question = case["question"].as_str().unwrap();
-            public.push(Message::new("user", question));
-            let original = public.clone();
-            let mut context = TurnContext::default();
-            context.push_owned(
-                ContextSubject::UserMemory,
-                "記憶",
-                crate::memory::context_from_store(&store),
-            );
-            let session = TurnContextSession::new(
-                ProtocolHistory::default(),
-                &public,
-                context,
-                32768,
-                Arc::new(Mutex::new(ToolSchemaSet::default())),
-                1,
-            );
-            let raw = session.protocol_view(&public).unwrap();
-            let sent = crate::providers::local::normalize_for_local(&raw).unwrap();
-            let wire = crate::providers::openai::to_wire(&sent);
-            assert!(equal(&public, &original));
-            let last = sent.last().unwrap();
-            assert!(last
-                .content
-                .contains(&format!("{QUESTION_BEGIN}\n{question}\n{QUESTION_END}")));
-            assert!(last.content.contains("各記録の主体を参照"));
-            let binding = super::super::referents::bind(question);
-            if !binding.directive.is_empty() {
-                if binding.quotations.is_empty() {
-                    assert!(last.content.ends_with(&binding.resolved));
-                } else {
-                    assert!(last.content.contains(&binding.resolved));
-                }
-            }
             let mut exported_case = case.clone();
-            exported_case["body"] = serde_json::json!({"model":"cache-measurement", "messages":wire, "tools":[], "temperature":0, "seed":42, "max_tokens":1024, "stream":false, "id_slot":0});
+            exported_case["body"] = exported_body(&cfg, &profile, name, &store, &turns, question);
             exported.push(exported_case);
         }
         assert_eq!(exported.len(), 16);
+        let holdout: serde_json::Value =
+            serde_json::from_str(include_str!("fixtures/ownership-holdout-cases.json")).unwrap();
+        let mut holdout_exported = Vec::new();
+        for suite in holdout["suites"].as_array().unwrap() {
+            let name = suite["character"]["name"].as_str().unwrap();
+            let profile = suite["character"]["profile"].as_str().unwrap();
+            for case in suite["cases"].as_array().unwrap() {
+                let texts: Vec<&str> = suite["memories"][case["memory"].as_str().unwrap()]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|text| text.as_str().unwrap())
+                    .collect();
+                let question = case["question"].as_str().unwrap();
+                let mut exported_case = case.clone();
+                exported_case["suite"] = suite["name"].clone();
+                exported_case["body"] =
+                    exported_body(&cfg, profile, name, &memory_store(&texts), &[], question);
+                holdout_exported.push(exported_case);
+            }
+        }
+        assert_eq!(holdout_exported.len(), 24);
         if let Ok(path) = std::env::var("OWNERSHIP_FIXTURE_OUTPUT") {
             std::fs::write(
                 path,
-                serde_json::to_vec_pretty(
-                    &serde_json::json!({"metadata":fixture["metadata"], "cases":exported}),
-                )
+                serde_json::to_vec_pretty(&serde_json::json!({
+                    "metadata": fixture["metadata"],
+                    "cases": exported,
+                    "holdout": holdout_exported,
+                }))
                 .unwrap(),
             )
             .unwrap();
@@ -736,11 +808,12 @@ mod tests {
             let last = request.last().unwrap();
             assert_eq!(last.images, public.last().unwrap().images);
             if annotated {
-                assert!(last
-                    .content
-                    .contains(&format!("{QUESTION_BEGIN}\n{question}\n{QUESTION_END}")));
-                let actual = last.content.lines().last().unwrap();
-                assert!(actual.contains("の中の「私」はあおい、「あなた」はけんを指します。"));
+                assert_eq!(
+                    last.content,
+                    format!(
+                        "{QUESTION_BEGIN}\nあおいがけんに「あなた（＝けん）は麦茶が好き」と言いました。このあなたは誰？\n{QUESTION_END}"
+                    )
+                );
             } else {
                 assert!(equal(&request, &public));
             }
@@ -921,7 +994,8 @@ mod tests {
             .iter()
             .any(|message| message.content.contains("最新の補助資料")
                 && message.content.contains(&format!(
-                    "{QUESTION_BEGIN}\n{PROTOCOL_QUOTE_QUESTION}\n{QUESTION_END}"
+                    "{QUESTION_BEGIN}\n{}\n{QUESTION_END}",
+                    sent_question(PROTOCOL_QUOTE_QUESTION)
                 ))));
         validate_pairs(&next_view).unwrap();
     }
@@ -1001,11 +1075,9 @@ mod tests {
             if binding.quotations.is_empty() {
                 assert_eq!(question, original_section);
             } else {
-                assert!(question.starts_with(&original_section));
-                let annotation = question.lines().last().unwrap();
-                assert_eq!(annotation, binding.quotations[0].describe());
-                assert!(annotation.contains("「私」はあおい、「あなた」はけん"));
-                assert!(binding.directive.is_empty());
+                assert_eq!(question, format!("\n{}\n{QUESTION_END}", binding.resolved));
+                assert!(question.contains("あなた（＝けん）"));
+                assert!(!binding.refers);
             }
             assert_eq!(request.images, original.images);
         }
