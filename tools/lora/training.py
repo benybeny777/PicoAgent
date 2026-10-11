@@ -19,6 +19,7 @@ import warnings
 # Windows共有違反の有限再試行は、既存の原子的配置へ集約する。
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from scripts.voice_training_common import atomic_move
+from tools.lora.dataset import validate_exported_evidence
 
 
 TARGET_MODULES = ("q_proj", "k_proj", "v_proj", "out_proj", "w1", "w2", "w3")
@@ -240,7 +241,14 @@ def run(args):
                 manifest["packages"][name] = importlib.metadata.version(name)
             except importlib.metadata.PackageNotFoundError:
                 manifest["packages"][name] = None
-        manifest.update(input_sha256=digest(args.input), template_sha256=digest(args.template),
+        manifest["phase"] = "本番入力の正解根拠の確認"
+        manifest["input_sha256"] = digest(args.input)
+        data = read_json(args.input)
+        # token一致だけでは、正解に必要な記憶が本番bodyに残ったかを確認できない。
+        validate_exported_evidence(data)
+        manifest["evidence_validation"] = {"status": "検査済み", "cases": len(data["cases"])}
+        manifest["phase"] = "学習資産の確認"
+        manifest.update(template_sha256=digest(args.template),
                         base_model_sha256=digest(args.base / "model.safetensors"))
         initial_config = None
         if args.initial_adapter:
@@ -248,7 +256,6 @@ def run(args):
             initial_config, manifest["initialization"] = inspect_initial_adapter(
                 args, manifest["base_model_sha256"]
             )
-        data = read_json(args.input)
         cases = [case for case in data["cases"] if case.get("split") == "train"]
         if args.limit:
             cases = cases[:args.limit]

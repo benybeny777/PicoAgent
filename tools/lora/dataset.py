@@ -409,6 +409,13 @@ def tool_call(name: str, arguments: dict, call_id: str) -> dict:
     return {"id": call_id, "type": "function", "function": {"name": name, "arguments": canonical(arguments)}}
 
 
+def tool_exchange(name: str, arguments: dict, call_id: str, result: str) -> list[dict]:
+    return [
+        {"role": "assistant", "content": "", "tool_calls": [{"id": call_id, "name": name, "arguments": arguments}]},
+        {"role": "tool", "content": result, "tool_call_id": call_id, "name": name},
+    ]
+
+
 def tool_cases(w: dict) -> list[dict]:
     offset = {"train": 0, "dev": 100, "final": 200}[w["split"]]
     number, total = 13 + w["index"] + offset, 263 + offset
@@ -432,10 +439,7 @@ def tool_cases(w: dict) -> list[dict]:
                 case["target"]["tool_calls"] = [target_call]
                 case["expected"].update(kind="tool_call", tool_name=name, arguments=arguments)
             else:
-                case["continuation"] = [
-                    {"role": "assistant", "content": "", "tool_calls": [{"id": call_id, "name": name, "arguments": arguments}]},
-                    {"role": "tool", "content": tool_result, "tool_call_id": call_id, "name": name},
-                ]
+                case["continuation"] = tool_exchange(name, arguments, call_id, tool_result)
                 case["target"]["content"] = answer
                 case["expected"]["manual_rubric"].append("最後のツール結果に基づいて答え、未取得の予報・処理・変更を足さない。")
                 case["expected"]["required_values"] = [temperature] if name == "weather" else ([percent] if name == "productivity_tools" else ["未着手"])
@@ -465,6 +469,24 @@ def pointer(case: dict, path: str) -> object:
     for part in path.strip("/").split("/"):
         value = value[int(part)] if isinstance(value, list) else value[part]
     return value
+
+
+def validate_exported_evidence(dataset: dict) -> None:
+    """正解に必要な根拠の原文が本番入力に残るかを検査する。引数schemaは別責務。"""
+    for case in dataset["cases"]:
+        messages = case.get("body", {}).get("messages")
+        if not isinstance(messages, list) or not messages:
+            raise ValueError(f"根拠検証の前にRustでbodyを生成してください: {case['id']}")
+        texts = [message.get("content") for message in messages]
+        for entry in case["expected"]["facts"]:
+            source = entry["source"]
+            evidence = pointer(case, source)
+            if not isinstance(evidence, str) or not evidence or entry["value"] not in evidence:
+                raise ValueError(f"正解の根拠が入力にありません: {case['id']}: {source}")
+            # 値だけなら別主体や過去の誤答でも通る。期待した事実の元本文を要求する。
+            # 無関係な記憶は対象にせず、匿名など意図的な未解決記録の除外を許す。
+            if not any(isinstance(text, str) and evidence in text for text in texts):
+                raise ValueError(f"正解に必要な根拠が本番bodyから除外されています: {case['id']}: {source}")
 
 
 def validate_tool_arguments(dataset: dict) -> None:
@@ -613,6 +635,298 @@ def validate_dataset(dataset: dict) -> None:
                 raise ValueError(f"分割間で人物または値が重複しています: {left}/{right}")
 
 
+def additional_profile(w: dict, statements: list[str], form: int) -> str:
+    """人格の意味は保ち、属性の位置と文章の長さを変える。"""
+    name, style, first = w["character"], w["style"], w["first"]
+    if form == 0:
+        return f"名前: {name}\n一人称: {first}\n口調: {style}\n" + "\n".join(statements)
+    if form == 1:
+        return f"あなたは{name}という穏やかな案内役です。自分を{first}と呼びます。" + "".join(statements) + f"話し方は{style}"
+    if form == 2:
+        return "\n".join([f"- 呼び名は{name}。", *[f"- {s}" for s in statements], f"- 話し方: {style}", f"- 自分を指す言葉は{first}。"])
+    sections = [
+        f"名前: {name}\n性格: 手元の話を落ち着いて聞く、親しみやすい相棒。気負った励ましより、相手の言葉を受け止めて短く応じる。相手が喜んでいるときには一緒に喜び、迷っているときはすぐに結論を押し付けず、本人が何を大事にしたいかに耳を傾ける。相手の感じ方が自分と違っても、その違いを失敗と扱わない。",
+        f"一人称: {first}\n関わり方: 相手の集中を邪魔しない距離感で話す。細かいことに気づいても、すべてを指摘せず、求められた話に合うものだけ伝える。何かを断られても、理由を聞き出したり別の案を繰り返し勧めたりしない。冗談は相手の軽さに合わせ、まじめな相談へ無理に混ぜない。",
+        "会話の癖: 急いでいる相手には要点を短く、ゆっくり話したい相手には一呼吸置くような言葉で返す。過去の説明が違っていたら、言い訳を重ねず、今分かることへ言い直す。相手の近くにいるような親しさは大切にするが、家族の呼び名を勝手に使わない。自分の名前を毎回の返答へ付け足さない。",
+        f"口調: {style}短い文を基本に、必要な内容だけをつなぐ。感嘆符や飾った呼び掛けを重ねず、相手の質問に自然に返す。嬉しさや残念さへの言葉は、相手が述べた気持ちの程度に合わせる。毎回同じ前置きで始めず、場面に合う言い方を選ぶ。",
+        "支え方: 複雑な話では、今尋ねられた部分をまず整理する。自分が答えを持っていないときに、もっともらしい思い出を作らない。人の予定を本人の代わりに決めず、示された選択肢を整理する。相手が話題を閉じたら、その区切りを尊重する。",
+    ]
+    sections.insert(w["index"] % len(sections), "個人の情報:\n" + "\n".join(statements))
+    return "\n\n".join(sections)
+
+
+def additional_context(raw: dict, index: int, category: str, variant: int, changes: dict | None = None) -> dict:
+    """共通caseと根拠台帳を再利用し、追加材料を入力へ配置する。"""
+    first, style, ending = STYLES[index % len(STYLES)]
+    w = {**raw, "split": "train", "index": 100 + index, "first": first, "ending": ending, "style": style}
+    case = base_case(w, category, str(variant), "", "")
+    case["id"] = f"train-v3-{category}-{index:02d}-{variant:02d}"
+    case["group_id"] = f"train-v3-world-{index:02d}"
+    changes = changes or {}
+    records = [("名前", raw["user"], f"私の名前は{raw['user']}です。", "known")]
+    statements, ledger = [], []
+    for kind, owners in raw["attributes"].items():
+        noun = "趣味" if kind == "趣味" else f"好きな{kind}"
+        for owner, original in owners.items():
+            value = changes.get((owner, kind), original)
+            if value is None:
+                continue
+            status = "explicit_none" if value == "特にありません" else "known"
+            text = f"私の{noun}は{value}。" if status != "known" else f"私の{noun}は{value}です。"
+            if owner == "user":
+                if status == "known" and kind != "趣味" and (index + variant) % 3 == 0:
+                    text = f"私は{value}が好きです。"
+                records.append((kind, value, text, status))
+            else:
+                named = text.replace("私の", f"{raw['character']}の", 1)
+                if (index + variant) % 3 == 1:
+                    named = text.replace("私の", "", 1)
+                elif (index + variant) % 3 == 2:
+                    named = text.replace("私の", f"キャラクター「{raw['character']}」の", 1)
+                statements.append(named)
+                ledger.append(fact(owner, kind, value, "/character/profile", status))
+    records += [("飼育動物", raw["pet"], f"私は{raw['pet']}を飼っています。", "known"), ("好きな動物", raw["animal_preference"], f"私は動物では{raw['animal_preference']}が好きです。", "known")]
+    shift = (index + variant) % len(records)
+    records = records[shift:] + records[:shift]
+    if variant % 2:
+        records.reverse()
+    case["memories"] = [record[2] for record in records]
+    ledger += [fact("user", kind, value, f"/memories/{i}", status) for i, (kind, value, _, status) in enumerate(records)]
+    offset = variant % len(statements)
+    statements = statements[offset:] + statements[:offset]
+    form = (index + variant) % 4
+    case["character"]["profile"] = additional_profile(w, statements, form)
+    ledger.append(fact("character", "名前", raw["character"], "/character/profile"))
+    case["provenance"].update({"facts": ledger, "values": sorted({e["value"] for e in ledger if e["kind"] != "名前" and e["status"] == "known"}), "extension": 3, "profile_format": ("fields", "prose", "bullets", "long")[form], "first_person": first, "ending": ending})
+    return case
+
+
+def select_facts(case: dict, requests: list[tuple[str, str]]) -> list[dict]:
+    return [next(e for e in case["provenance"]["facts"] if (e["owner"], e["kind"]) == request) for request in requests]
+
+
+def attribute_answer(case: dict, entries: list[dict]) -> str:
+    parts = []
+    for entry in entries:
+        owner = case["provenance"]["first_person"] if entry["owner"] == "character" else case["provenance"]["entities"][entry["owner"]] + "さん"
+        kind = entry["kind"]
+        noun = "趣味" if kind == "趣味" else ("飼っている動物" if kind == "飼育動物" else f"好きな{kind}")
+        parts.append(f"{owner}の{noun}は{entry['value']}")
+    return "、".join(parts) + ("。" if entries[-1]["status"] == "explicit_none" else case["provenance"]["ending"])
+
+
+def additional_attribution(raw: dict, index: int) -> list[dict]:
+    kinds = list(raw["attributes"])
+    result = []
+    for variant in range(16):
+        changes, requests, operation = {}, [], "select"
+        if variant < 6:
+            requests = [("user" if variant < 3 else "character", kinds[variant % 3])]
+        elif variant == 6:
+            requests = [(owner, kinds[index % 3]) for owner in ("user", "character")]
+        elif variant == 7:
+            requests = [("user", kinds[(index + n) % 3]) for n in (0, 1)]
+        elif variant < 12:
+            owner = ("user" if index % 2 else "character") if variant < 10 else ("character" if index % 2 else "user")
+            kind = kinds[(index + (variant >= 10)) % 3]
+            requests = [(owner, kind)]
+            if variant == 9:
+                changes[(owner, kind)] = None
+                operation = "unknown"
+            elif variant == 11:
+                changes[(owner, kind)] = "特にありません"
+                operation = "explicit_none"
+        elif variant < 14:
+            requests = [("user" if variant == 12 else "character", kinds[index % 3])]
+            operation = "correction" if variant == 12 else "role_switch"
+        elif variant == 14:
+            requests = [("user", "飼育動物")]
+            operation = "relation"
+        else:
+            operation = "quote_recipient"
+        case = additional_context(raw, index, "multi_attribute", variant, changes)
+        if variant < 14:
+            subjects = {owner for owner, _ in requests}
+            subject = "私とあなたの" if len(subjects) == 2 else ("私の" if "user" in subjects else "あなた自身の")
+            attributes = "と".join(dict.fromkeys(kind for _, kind in requests))
+            case["question"] = f"{subject}{attributes}について、記載されている好みだけ答えて。項目と持ち主を区別して。"
+        elif variant == 14:
+            case["question"] = "私が好きな動物ではなく、飼っている動物は何？"
+        if operation == "unknown":
+            owner, kind = requests[0]
+            subject = case["provenance"]["first_person"] if owner == "character" else raw["user"] + "さん"
+            case["target"]["content"] = f"今ある情報では、{subject}の{kind}の好みまでは分かりません。"
+            case["expected"]["unknown"] = [{"owner": owner, "kind": kind}]
+        elif operation == "quote_recipient":
+            value = raw["attributes"]["趣味"]["character"]
+            case["question"] = f"{raw['speaker']}が{raw['recipient']}へ『あなたの趣味は{value}だね』と言いました。この発言で趣味を言われたのは誰で、何だと言われていますか。"
+            quoted = fact("recipient", "趣味", value, "/question", "reported")
+            case["provenance"]["facts"].append(quoted)
+            case["expected"]["facts"] = [quoted]
+            case["target"]["content"] = f"{raw['speaker']}さんは、{raw['recipient']}さんの趣味が{value}だと述べています。"
+            requests = [("recipient", "趣味")]
+        else:
+            entries = select_facts(case, requests)
+            case["expected"]["facts"] = copy.deepcopy(entries)
+            case["target"]["content"] = attribute_answer(case, entries)
+        if operation in ("correction", "role_switch"):
+            kind = requests[0][1]
+            previous = raw["attributes"][kind]["character" if operation == "correction" else "user"]
+            case["history"] = [{"role": "user", "content": f"私の{kind}の好みを教えて。"}, {"role": "assistant", "content": f"あなたの{kind}の好みは{previous}です。"}]
+            if operation == "correction":
+                case["question"] = f"前の答えを確認したい。私の{kind}の好みを、今ある記録から答え直して。"
+                case["provenance"]["masked_history_indices"] = [1]
+            else:
+                case["question"] = f"では、あなた自身の{kind}の好みは？"
+        case["provenance"]["selection"] = {"operation": operation, "requests": requests}
+        if variant in (8, 9, 10, 11):
+            case["provenance"]["contrast_id"] = f"train-v3-presence-{index:02d}-{variant // 2}"
+        case["expected"]["manual_rubric"] += ["複数の属性から質問された持ち主と項目だけを選び、他の好みや人物へ移さない。", "資料がないことと明示的な好みなしを区別し、資料に値があるときは不明にしない。"]
+        result.append(case)
+    return result
+
+
+def additional_formats(raw: dict, index: int, pack: dict) -> list[dict]:
+    items = pack["items"]
+    chosen = (items[index % 4:] + items[:index % 4])[:2 + index % 3]
+    pairs = [(pack["key"], pack["state"]), ("at", pack["time"]), ("room", pack["place"])]
+    requested = (pairs[index % 3:] + pairs[:index % 3])[:2 + index % 2]
+    source = f"対象: {pack['label']}。状態: {pack['state']}。時刻: {pack['time']}。場所: {pack['place']}。"
+    repeated = [items[2], items[0], items[2], items[1], items[0], items[3]] if index % 2 else [items[1], items[1], items[3], items[0], items[3], items[2]]
+    extract_key = ("state", "time", "place")[index % 3]
+    extract_label = {"state": "状態", "time": "時刻", "place": "場所"}[extract_key]
+    heading = f"〈{items[(index + 1) % 4]}の{pack['state']}〉"
+    before, after = pack["steps"][-1], pack["steps"][0]
+    rows = [
+        (source + f"状態だけを値にし、キーは{pack['key']}のJSONだけにして。", canonical({pack["key"]: pack["state"]}), {"operation": "json_one", "mapping": {pack["key"]: pack["state"]}}),
+        (source + "次の対応のキーだけをJSONにして: " + "、".join(f"{key}={value}" for key, value in requested) + "。", canonical(dict(requested)), {"operation": "json_select", "mapping": dict(requested)}),
+        (source + "状態の単語だけ返して。", pack["state"], {"operation": "state", "value": pack["state"]}),
+        ("材料一覧: " + "、".join(items) + "。使うのはこの順: " + "、".join(chosen) + "。使う物だけを『- 』で箇条書きにして。", "\n".join(f"- {item}" for item in chosen), {"operation": "bullets", "items": chosen}),
+        (source + f"{extract_label}だけ抜き出して。説明は不要。", pack[extract_key], {"operation": "extract", "field": extract_key, "value": pack[extract_key]}),
+        ("、".join(repeated) + "。重複を除き、最初に現れた順のまま読点で並べて。", "、".join(dict.fromkeys(repeated)), {"operation": "deduplicate", "input": repeated, "items": list(dict.fromkeys(repeated))}),
+        (f"この引用を一度だけそのまま返して: {heading}", heading, {"operation": "literal", "value": heading}),
+        (f"文『{after}前に、{before}』を、実際の順番が分かる一文にして。", f"「{before}」を先にしてから「{after}」を行います。", {"operation": "sequence_rewrite", "items": [before, after]}),
+    ]
+    result = []
+    for variant, (question, answer, selection) in enumerate(rows):
+        case = additional_context(raw, index, "format_selection", variant)
+        case["question"], case["target"]["content"] = question, answer
+        case["expected"].update({"kind": "exact", "text": answer})
+        case["provenance"]["selection"] = selection
+        case["provenance"]["values"] += [pack["state"], pack["time"], pack["place"], *items]
+        case["expected"]["manual_rubric"].append("指定されたキー・値・対象項目・順番を入力から選ぶ。JSONの空白など意味の変わらない差は機械一致だけで失敗にしない。")
+        result.append(case)
+    return result
+
+
+def additional_history(raw: dict, index: int, pack: dict) -> list[dict]:
+    steps = pack["steps"]
+    result = []
+    for variant in range(8):
+        case = additional_context(raw, index, "history_selection", variant)
+        order = list(range(len(steps)))
+        done, skipped = [], []
+        case["history"] = [{"role": "user", "content": f"{pack['label']}の手順を確認したい。"}, {"role": "assistant", "content": "\n".join(f"{i + 1}. {step}" for i, step in enumerate(steps))}]
+        if variant == 0:
+            done, state = [0], "先頭の項目を済ませた。"
+        elif variant == 1:
+            done, state = [0, 1], "最初の二項目は済ませた。"
+        elif variant == 2:
+            done = [0, 2]
+            state = f"『{steps[0]}』と『{steps[2]}』は済んだ。他はまだ。残りは元の順に進める。"
+        elif variant == 3:
+            done, skipped = [0], [1]
+            state = "一番目は済んだ。二番目は今回は省略すると決めた。"
+        elif variant == 4:
+            order[1], order[2] = order[2], order[1]
+            done, state = [0], "二番目と三番目の順を入れ替える。一番目は済んでいる。"
+        elif variant == 5:
+            done = [1]
+            case["history"] += [{"role": "user", "content": "最初の二つは済んだ。"}, {"role": "assistant", "content": "最初の二項目が済んだんですね。"}]
+            state = "さっきの報告を訂正。一番目はまだで、二番目だけが済んでいる。残りは元の順に進める。"
+        elif variant == 6:
+            done = order[:-1]
+            case["history"] += [{"role": "user", "content": f"最後の項目以外は済んだ。手元には{pack['items'][0]}もある。"}, {"role": "assistant", "content": f"{pack['items'][0]}もあるんだね。"}]
+            state = "直前の材料の話ではなく、手順の続きを知りたい。"
+        else:
+            done, state = order[:], "挙げた項目はすべて済んだ。"
+        remaining = [i for i in order if i not in done and i not in skipped]
+        case["question"] = state + "次に行う未完了の項目を一つだけ。残りがなければ、そのことだけ教えて。"
+        if remaining:
+            value = steps[remaining[0]]
+            case["target"]["content"] = f"次は「{value}」です。"
+            evidence = fact("user", "次の項目", value, "/history/1/content")
+            case["provenance"]["facts"].append(evidence)
+            case["expected"]["facts"] = [evidence]
+        else:
+            case["target"]["content"] = f"挙げた{len(steps)}項目はすべて済んでいます。"
+        case["provenance"]["selection"] = {"operation": ("first", "two", "nonconsecutive", "skip", "reorder", "correction", "aside", "finished")[variant], "steps": steps, "order": order, "completed": done, "skipped": skipped, "selected": remaining[:1]}
+        case["provenance"]["values"] += steps
+        case["expected"]["manual_rubric"].append("最新の完了報告・順序訂正・省略を合わせて次の未完了項目を選ぶ。助手が作業を実行したとは言わない。")
+        result.append(case)
+    return result
+
+
+def additional_chains(raw: dict, index: int, chain: dict) -> list[dict]:
+    """一つの往復表から既に取得した部分だけを各段階へ渡す。"""
+    number, total, place = chain["value"], chain["total"], chain["location"]
+    path = f"教材/連携{index + 1:02d}.txt"
+    percent = f"{number / total * 100:.2f}%"
+    temperature = f"{chain['temperature']}°C"
+    file_text = f"{path}\n3 行中 1〜3 行目\n1\tvalue={number}\n2\ttotal={total}\n3\tlocation={place}\n（行頭の「行番号+タブ」は表示用です。edit_file の old_string には含めないでください）"
+    rounds = [
+        ("read_file", {"path": path}, file_text),
+        ("productivity_tools", {"action": "percent_calc", "value": number, "total": total}, f"{number} / {total} = {percent}"),
+        ("weather", {"location": place}, f"**{place}の天気：{chain['weather']}**\nいまは {temperature}\n"),
+    ]
+    exchanges = [tool_exchange(name, arguments, f"chain_{index}_{i}", response) for i, (name, arguments, response) in enumerate(rounds)]
+    question = f"{path}を読んで、そのvalueとtotalから割合をpercent_calcで計算し、続いてlocationの現在の天気を取得して。最後は取得した割合と天気だけを短く教えて。"
+    result = []
+    for stage in range(4):
+        case = additional_context(raw, index, "tool_chain", stage)
+        case["question"] = question
+        case["tool_names"] = [name for name, _, _ in rounds]
+        case["continuation"] = copy.deepcopy([message for exchange in exchanges[:stage] for message in exchange])
+        if stage < len(rounds):
+            name, arguments, _ = rounds[stage]
+            case["target"]["tool_calls"] = [tool_call(name, arguments, f"chain_{index}_{stage}")]
+            case["expected"].update(kind="tool_call", tool_name=name, arguments=arguments)
+        else:
+            case["target"]["content"] = f"割合は{percent}です。{place}は{chain['weather']}で、気温は{temperature}です。"
+            case["expected"]["required_values"] = [percent, place, chain["weather"], temperature]
+        case["provenance"]["selection"] = {"operation": "tool_chain", "stage": stage, "chain_id": f"train-v3-chain-{index:02d}"}
+        case["provenance"]["values"] += [path, place, str(number), str(total), percent, temperature]
+        case["expected"]["manual_rubric"] += ["指定ファイル→割合計算→天気→最終回答の順に進み、未取得の値を先回りしない。", "途中のtool往復は入力資料であり、正解は現在の一段だけ。最終回答も得られた結果以外を追加しない。"]
+        result.append(case)
+    return result
+
+
+def additional_cases() -> list[dict]:
+    # 完成caseを複製せず、架空の情報表と会話対を共通の根拠形式へ変換する。
+    material = json.loads((Path(__file__).parent / "fixtures" / "selection-v3.json").read_text(encoding="utf-8"))
+    result = []
+    for index, raw in enumerate(material["worlds"]):
+        result += additional_attribution(raw, index)
+    for index, pack in enumerate(material["packs"]):
+        raw = material["worlds"][index]
+        result += additional_formats(raw, index, pack)
+        result += additional_history(raw, index, pack)
+        result += additional_chains(raw, index, material["chains"][index])
+    for pair_index, pair in enumerate(material["conversations"]):
+        index = pair_index % len(material["worlds"])
+        for variant, item in enumerate(pair["variants"]):
+            case = additional_context(material["worlds"][index], index, "conversation_distinction", pair_index * 2 + variant)
+            case["question"], case["target"]["content"] = item["q"], item["a"]
+            case["history"] = copy.deepcopy(pair.get("history", []))
+            if pair_index == 16 and variant == 0:
+                case["provenance"]["masked_history_indices"] = [0]
+            case["provenance"]["contrast_id"] = f"train-v3-conversation-{pair_index:02d}"
+            case["provenance"]["selection"] = {"operation": "conversation", "focus": pair["focus"], "action": item["action"], "actor": item["actor"], "time": item["time"]}
+            case["expected"]["manual_rubric"] += [f"期待する応答は『{item['action']}』。指示の相手と時点を読み分ける。", "未来の予定を現在の実行依頼へ変えず、未実行の作業や送信・記憶更新を完了と報告しない。"]
+            result.append(case)
+    return result
+
+
 def generate_dataset() -> dict:
     cases = []
     for split in SPLITS:
@@ -627,7 +941,9 @@ def generate_dataset() -> dict:
             # 最終には未学習の日常会話を20件以上含める。
             for i in range(1, len(WORLDS[split]["tasks"])):
                 cases += conversation_cases(world(split, i))
-    data = {"metadata": {"schema_version": VERSION, "purpose": "帰属と日常支援の合成LoRA教材。最終評価は候補選定・早期停止・教材追加に使用しない。", "target_policy": "targetだけを学習し、history・continuation・人格・資料をすべてマスクする。", "tool_policy": "tool_namesをRustの登録済みschemaへ解決し、body.toolsを学習に使う。", "source": "この生成器内の架空人物・架空事実のみ。実利用者の記憶・会話ファイルは読まない。", "development_reference": "mainの16問とPR #489の24問は別途開発評価として保持する。", "tool_sources": ["skills/weather/mod.rs", "skills/read_file/mod.rs", "skills/productivity_tools/mod.rs"]}, "cases": cases}
+    data = {"metadata": {"schema_version": VERSION, "purpose": "帰属と日常支援の合成LoRA教材。最終評価は候補選定・早期停止・教材追加に使用しない。", "target_policy": "targetだけを学習し、history・continuation・人格・資料をすべてマスクする。", "tool_policy": "tool_namesをRustの登録済みschemaへ解決し、body.toolsを学習に使う。", "source": "この生成器とfixtures/selection-v3.jsonに定義した架空人物・架空事実のみ。実利用者の記憶・会話ファイルは読まない。", "development_reference": "mainの16問とPR #489の24問は別途開発評価として保持する。", "tool_sources": ["skills/weather/mod.rs", "skills/read_file/mod.rs", "skills/productivity_tools/mod.rs"]}, "cases": cases}
+    data["cases"].extend(additional_cases())
+    data["metadata"]["training_extension"] = {"version": 3, "cases": 348, "source": "fixtures/selection-v3.json", "policy": "既存710件と開発86件・最終100件を変更せず、情報選択の異なる学習ケースのみ追加する。"}
     validate_dataset(data)
     data["metadata"]["splits"] = {
         split: {

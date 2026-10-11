@@ -158,12 +158,12 @@ class 適用検査(unittest.TestCase):
             self.assertTrue(saved["passed"])
             self.assertEqual(saved["runs"][1]["results"][0]["raw_response"], response(0.02))
 
-    def test_検査だけが詳細ログを指定し通常評価の引数を変えない(self):
+    def test_適用検査の詳細ログ指定は呼出元の設定を書き換えない(self):
         with self.environment() as (args, _, _, _):
-            self.assertNotIn("--verbosity", probe.runner.server_arguments(args, 12345, "検査用"))
-            args.verbosity = 5
-            command = probe.runner.server_arguments(args, 12345, "検査用")
-            self.assertEqual(command[command.index("--verbosity") + 1], "5")
+            args.verbosity = 0
+            document = probe.run(args)
+            self.assertTrue(document["passed"])
+            self.assertEqual(args.verbosity, 0)
 
     def test_ゼロ差とlogprob欠落とGPU未使用を結果JSONでも不合格にする(self):
         for options in ({"delta": 0}, {"missing": True}, {"gpu_offload": False}):

@@ -38,8 +38,12 @@ def isolated_training(case_count=3, **changes):
         base.mkdir()
         (base / "model.safetensors").write_bytes(b"test")
         source = root / "input.json"
+        evidence = "私はウサギを飼っています。"
         source.write_text(json.dumps({"cases": [
-            {"id": f"case-{index}", "split": "train"} for index in range(case_count)
+            {"id": f"case-{index}", "split": "train", "memories": [evidence],
+             "expected": {"facts": [{"source": "/memories/0", "value": "ウサギ"}]},
+             "body": {"messages": [{"role": "user", "content": f"{evidence}\nペットは？"}]}}
+            for index in range(case_count)
         ]}))
         template = root / "template.jinja"
         template.write_text("test")
@@ -172,6 +176,49 @@ class 学習条件の検査(unittest.TestCase):
 
 
 class 準備失敗の記録(unittest.TestCase):
+    def test_根拠やbodyの欠落はトークナイザとgpuとモデルより前に止める(self):
+        for failure in ("根拠の脱落", "bodyの欠落"):
+            for prepare_only in (False, True):
+                with self.subTest(failure=failure, prepare_only=prepare_only), \
+                     isolated_training(prepare_only=prepare_only, limit=1) as fixture:
+                    data = json.loads(fixture.args.input.read_text(encoding="utf-8"))
+                    # limit外のdevも含め、読み込んだ教材全体の根拠を先に検査する。
+                    case = data["cases"][-1]
+                    case["split"] = "dev"
+                    if failure == "根拠の脱落":
+                        # 正解の語が別主体として残っていても、元の根拠の代わりにはならない。
+                        case["body"]["messages"][0]["content"] = "キャラクターの好きな動物はウサギです。"
+                    else:
+                        del case["body"]
+                    write_json(fixture.args.input, data)
+                    with self.assertRaisesRegex(ValueError, case["id"]):
+                        run(fixture.args)
+                    fixture.tokenizer.from_pretrained.assert_not_called()
+                    fixture.loader.from_pretrained.assert_not_called()
+                    self.assertEqual(fixture.torch.mock_calls, [])
+                    fixture.peft.get_peft_model.assert_not_called()
+                    fixture.peft.PeftModel.from_pretrained.assert_not_called()
+                    manifest = json.loads((fixture.args.output / "manifest.json").read_text(encoding="utf-8"))
+                    self.assertEqual(manifest["status"], "学習失敗・中断")
+                    self.assertEqual(manifest["phase"], "本番入力の正解根拠の確認")
+                    self.assertEqual(manifest["steps"], 0)
+                    self.assertIn(case["id"], manifest["error"])
+                    self.assertEqual(manifest["input_sha256"], digest(fixture.args.input))
+                    self.assertNotIn("evidence_validation", manifest)
+                    self.assertFalse((fixture.args.output / "prepared.json").exists())
+                    self.assertFalse((fixture.args.output / "adapter").exists())
+
+    def test_正解の根拠を保持した教材は検査済みを記録して準備へ進む(self):
+        with isolated_training(prepare_only=True, limit=1) as fixture:
+            run(fixture.args)
+            fixture.tokenizer.from_pretrained.assert_called_once()
+            fixture.loader.from_pretrained.assert_not_called()
+            self.assertEqual(fixture.torch.mock_calls, [])
+            manifest = json.loads((fixture.args.output / "manifest.json").read_text(encoding="utf-8"))
+            self.assertEqual(manifest["evidence_validation"], {"status": "検査済み", "cases": 3})
+            self.assertEqual(manifest["cases"], 1)
+            self.assertTrue((fixture.args.output / "prepared.json").exists())
+
     def test_トークナイザとgpuとモデル読込の失敗をmanifestへ残す(self):
         for failure, phase in (
             ("tokenizer", "トークナイザと学習範囲の確認"),
