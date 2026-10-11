@@ -79,7 +79,6 @@ test("メイン画面とバックエンドの未設定既定を可愛いへ揃�
   const main = readFileSync(new URL("../../ui/app/main.js", import.meta.url), "utf8");
   const commands = readFileSync(new URL("../../src-tauri/src/commands.rs", import.meta.url), "utf8");
   assert.match(html, /data-ui-theme="pastel"/);
-  assert.equal(commands.match(/"uiTheme": state\.config\.get\("PICOAGENT_UI_THEME", "pastel"\)/g)?.length, 2);
   assert.doesNotMatch(commands, /config\.get\("PICOAGENT_UI_THEME", "glass"\)/);
   const root = { dataset: { uiTheme: "pastel" } };
   const context = vm.createContext({ document: { documentElement: root } });

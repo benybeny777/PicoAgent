@@ -56,9 +56,7 @@ test("タイトルバーは見えているシーンへ吸着し、隠しても�
 
 test("タイトルバーの常に表示は保存値を起動・設定反映の両方で当てる", () => {
   const main = read("ui/app/main.js");
-  const commands = read("src-tauri/src/commands.rs");
   assert.match(main, /chrome\.setPinned\(info\.titleBarPinned === true\)/);
   assert.match(main, /if \(ui\.titleBarPinned != null\) chrome\.setPinned\(ui\.titleBarPinned === true\)/);
   assert.match(main, /bridge\.saveUiPref\("PICOAGENT_TITLE_BAR_PINNED", pinned\)/);
-  assert.equal(commands.match(/"titleBarPinned": state\.config\.get_bool\("PICOAGENT_TITLE_BAR_PINNED", false\)/g)?.length, 2);
 });

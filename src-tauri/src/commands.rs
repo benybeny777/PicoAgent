@@ -3,7 +3,7 @@
 use std::io::{Read, Seek, SeekFrom};
 use std::sync::{
     atomic::{AtomicU64, Ordering},
-    Arc, Mutex,
+    Arc, Mutex, OnceLock,
 };
 
 use serde_json::{json, Map, Value};
@@ -1177,7 +1177,7 @@ const STARTUP_PROVIDER_PROBE_TIMEOUT: std::time::Duration = std::time::Duration:
 const SETTINGS_PROVIDER_PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
 /// 画面機能が不正な数値を既定値や前回値へ置き換えないための共通情報。
-fn numeric_ui_settings(config: &Config) -> Map<String, Value> {
+fn numeric_ui_settings(config: &Config, saved: &Map<String, Value>) -> Map<String, Value> {
     use crate::config::ints;
     let mut payload = Map::new();
     for (name, setting) in [
@@ -1197,13 +1197,78 @@ fn numeric_ui_settings(config: &Config) -> Map<String, Value> {
     }
     payload.insert(
         "invalidNumbers".into(),
-        json!(config.invalid_int_settings()),
+        json!(Config::invalid_int_settings_in(saved)),
     );
     payload.insert(
         "numberSettings".into(),
         json!(crate::config::number_settings_schema()),
     );
     payload
+}
+
+/// 起動時と保存後に同じ意味で渡す画面設定。保存値の複製と項目の組み立てを共用する。
+fn ui_settings(
+    config: &Config,
+    saved: &Map<String, Value>,
+    character_id: &str,
+) -> Result<Map<String, Value>, String> {
+    let mut payload = numeric_ui_settings(config, saved);
+    payload.extend(stream_ui_settings(config, character_id));
+    payload.extend(
+        [
+            (
+                "rendererOverrides",
+                json!(crate::renderer_setting::load(saved)?),
+            ),
+            ("theme", json!(config.get("PICOAGENT_THEME", "system"))),
+            ("uiTheme", json!(config.get("PICOAGENT_UI_THEME", "pastel"))),
+            (
+                "titleBarPinned",
+                json!(config.get_bool("PICOAGENT_TITLE_BAR_PINNED", false)),
+            ),
+            (
+                "chatterEnabled",
+                json!(config.get_bool("PICOAGENT_CHATTER_ENABLED", false)),
+            ),
+            (
+                "relationshipMemoryEnabled",
+                json!(config.get_bool("PICOAGENT_RELATIONSHIP_MEMORY_ENABLED", true)),
+            ),
+            ("layout", json!(crate::layout::current(config))),
+            (
+                "gazeTrackingEnabled",
+                json!(config.get_bool("PICOAGENT_GAZE_TRACKING_ENABLED", false)),
+            ),
+            (
+                "ttsEnabled",
+                json!(config.get_bool("PICOAGENT_TTS_ENABLED", false)),
+            ),
+            (
+                "quickActions",
+                json!(config.get("PICOAGENT_QUICK_ACTIONS", "")),
+            ),
+        ]
+        .into_iter()
+        .map(|(key, value)| (key.to_string(), value)),
+    );
+    Ok(payload)
+}
+
+/// 起動・設定保存・キャラ登録で共用する、現在のキャラに対応した配信外観。
+fn stream_ui_settings(
+    config: &Config,
+    character_id: &str,
+) -> impl Iterator<Item = (String, Value)> {
+    let stream = crate::stream_profile::resolve(config, character_id);
+    [
+        ("streamBackground", stream.background),
+        ("streamBackgroundImage", stream.background_image),
+        ("streamDisplay", stream.display),
+        ("streamDisplayImage", stream.display_image),
+        ("streamCaptionColor", stream.caption_color),
+    ]
+    .into_iter()
+    .map(|(key, value)| (key.to_string(), Value::String(value)))
 }
 
 async fn probe_with_timeout(
@@ -1308,52 +1373,38 @@ pub async fn pet_init(app: AppHandle, state: State<'_, AppState>) -> Result<Valu
             }
         };
     let bond_label = relationship.bond_label();
-    let stream = crate::stream_profile::resolve(&state.config, &character_id);
     let (up, provider_error) =
         provider_status(current_up(&state, STARTUP_PROVIDER_PROBE_TIMEOUT).await);
+    let saved = state.config.get_all();
+    let settings = ui_settings(&state.config, &saved, &character_id)?;
     let mut info = json!({
         "betaBuild": cfg!(feature = "beta-full"),
         "model": model,
         "providerId": state.config.get("PICOAGENT_PROVIDER", "local"),
         "up": up,
         "providerError": provider_error,
-        "theme": state.config.get("PICOAGENT_THEME", "system"),
-        "uiTheme": state.config.get("PICOAGENT_UI_THEME", "pastel"),
-        "titleBarPinned": state.config.get_bool("PICOAGENT_TITLE_BAR_PINNED", false),
         "characterId": character_id,
-        "characterOverrides": state.config.get_all().get("PICOAGENT_CHARACTER_OVERRIDES").cloned().unwrap_or_else(|| json!({})),
+        "characterOverrides": saved.get("PICOAGENT_CHARACTER_OVERRIDES").cloned().unwrap_or_else(|| json!({})),
         "live2dSdkOverrides": state.config.get_runtime_value("PICOAGENT_LIVE2D_SDK_OVERRIDES").unwrap_or_else(|| json!({})),
-        "rendererOverrides": crate::renderer_setting::load(&state.config.get_all())?,
         "history": recent_history,
         // 原本を読めなかったキャラクターは保存を止めている。黙っていると利用者は
         // 保存されていると思ったまま会話を続け、再起動でその分がまるごと消える。
         "historySaveBlocked": crate::history::saving_blocked(&character_id),
-        "quickActions": state.config.get("PICOAGENT_QUICK_ACTIONS", ""),
-        "layout": crate::layout::current(&state.config),
         // 画面構成（シーン）の保存値。利用者が動かしたソースだけの差分で、既定配置は画面側が持つ。
         "scenes": crate::scene::load(&state.config),
-        "gazeTrackingEnabled": state.config.get_bool("PICOAGENT_GAZE_TRACKING_ENABLED", false),
         // 生存通知の間隔はしきい値から決める（固定値だと設定を縮めたとき通知が間に合わない）。
         "bootProgressIntervalMs": crate::boot_screen::progress_interval_ms(
             crate::boot_screen::timeout_ms(&app)?,
         ),
-        "streamBackground": stream.background,
-        "streamBackgroundImage": stream.background_image,
-        "streamDisplay": stream.display,
-        "streamDisplayImage": stream.display_image,
-        "streamCaptionColor": stream.caption_color,
-        "ttsEnabled": state.config.get_bool("PICOAGENT_TTS_ENABLED", false),
-        "chatterEnabled": state.config.get_bool("PICOAGENT_CHATTER_ENABLED", false),
         "onboardingDone": state.config.get_bool("PICOAGENT_ONBOARDING_DONE", false),
         "companionMode": relationship_mode,
-        "relationshipMemoryEnabled": state.config.get_bool("PICOAGENT_RELATIONSHIP_MEMORY_ENABLED", true),
         "relationship": relationship,
         "relationshipError": relationship_error,
         "bondLabel": bond_label,
     });
     info.as_object_mut()
         .expect("初期情報はオブジェクト")
-        .extend(numeric_ui_settings(&state.config));
+        .extend(settings);
     crate::notice::flush(&app);
     Ok(info)
 }
@@ -1738,15 +1789,9 @@ pub fn pet_set_character_profile(
             ))
         },
     )?;
-    let stream = crate::stream_profile::resolve(&state.config, &character_id);
-    Ok(json!({
-        "ok": true,
-        "streamBackground": stream.background,
-        "streamBackgroundImage": stream.background_image,
-        "streamDisplay": stream.display,
-        "streamDisplayImage": stream.display_image,
-        "streamCaptionColor": stream.caption_color,
-    }))
+    let mut result: Map<String, Value> = stream_ui_settings(&state.config, &character_id).collect();
+    result.insert("ok".to_string(), json!(true));
+    Ok(Value::Object(result))
 }
 
 /// 配信背景または配信内ディスプレイへ使う画像を、アプリ管理領域へ取り込む。
@@ -2181,7 +2226,7 @@ pub fn redacted_log_tail(app: &AppHandle, max_lines: usize, max_bytes: u64) -> O
     let state = app.try_state::<AppState>()?;
     let stored = state.config.get_all();
     let schema_keys = secret_keys();
-    let secrets = collect_secret_values(&state.config, &stored, &schema_keys);
+    let secrets = collect_secret_values(&state.config, &stored, schema_keys);
     let tail = crate::log_paths::read_tail(app, "app.log", max_lines, max_bytes);
     Some(crate::diagnostics::redact_secrets(&tail, &secrets))
 }
@@ -2219,7 +2264,7 @@ pub fn settings_export_diagnostics(
     let path = dir.join(format!("diagnostics.{}.txt", now.format("%Y-%m-%d.%H%M%S")));
     let config = state.config.get_all();
     let schema_keys = secret_keys();
-    let secret_values = collect_secret_values(&state.config, &config, &schema_keys);
+    let secret_values = collect_secret_values(&state.config, &config, schema_keys);
     let log_tail = crate::log_paths::read_tail(
         &app,
         "app.log",
@@ -2233,7 +2278,7 @@ pub fn settings_export_diagnostics(
         arch: std::env::consts::ARCH,
         beta_build: cfg!(feature = "beta-full"),
         config: &config,
-        secret_keys: &schema_keys,
+        secret_keys: schema_keys,
         log_tail: &log_tail,
         secret_values: &secret_values,
     });
@@ -3260,28 +3305,31 @@ fn aivis_lip_sync_timeline(query: &Value) -> Vec<Value> {
     timeline
 }
 
-/// 設定スキーマ上で type="password" になっている＝シークレット扱いのキー集合。
 /// スキーマで `password` 型として申告されたシークレットキー一覧。
 ///
 /// これだけでは足りない。設定画面が直接組み立てる項目（`PICOAGENT_API_KEY` など）は
 /// どのスキーマにも載らないため、暗号化の要否は `is_secret_setting()` で判定する。
-fn secret_keys() -> std::collections::HashSet<String> {
-    let mut keys = std::collections::HashSet::new();
-    for provider in providers::all() {
-        for field in provider.config_schema() {
-            if field.r#type == "password" {
-                keys.insert(field.key);
+fn secret_keys() -> &'static std::collections::HashSet<String> {
+    // 登録済みスキーマは起動中に変わらない。秘密値自体は保持せず、キー名だけ共有する。
+    static KEYS: OnceLock<std::collections::HashSet<String>> = OnceLock::new();
+    KEYS.get_or_init(|| {
+        let mut keys = std::collections::HashSet::new();
+        for provider in providers::all() {
+            for field in provider.config_schema() {
+                if field.r#type == "password" {
+                    keys.insert(field.key);
+                }
             }
         }
-    }
-    for tool in tools::all() {
-        for field in tool.config_schema() {
-            if field.r#type == "password" {
-                keys.insert(field.key);
+        for tool in tools::all() {
+            for field in tool.config_schema() {
+                if field.r#type == "password" {
+                    keys.insert(field.key);
+                }
             }
         }
-    }
-    keys
+        keys
+    })
 }
 
 /// この設定キーを暗号化して保存すべきか。
@@ -3380,7 +3428,7 @@ pub(crate) fn encrypt_existing_secrets(app: &AppHandle, config: &Config) {
     let mut patch = Map::new();
     let mut failures = Vec::new();
     for (key, value) in &all {
-        if !is_secret_setting(&schema_keys, key) {
+        if !is_secret_setting(schema_keys, key) {
             continue;
         }
         if let Some(text) = value.as_str() {
@@ -3760,7 +3808,7 @@ pub async fn settings_save(
                         .map_err(anyhow::Error::msg)?;
                     let mut encrypted = Vec::new();
                     for (key, value) in checked_patch.iter() {
-                        if !is_secret_setting(&schema_keys, key) {
+                        if !is_secret_setting(schema_keys, key) {
                             continue;
                         }
                         if let Some(text) = value.as_str() {
@@ -3814,7 +3862,7 @@ pub async fn settings_save(
             }
         }
         for (key, value) in &prepared_patch {
-            if is_secret_setting(&schema_keys, key) && value.as_str() == Some("") {
+            if is_secret_setting(schema_keys, key) && value.as_str() == Some("") {
                 crate::secret::forget(key);
             }
         }
@@ -3910,28 +3958,8 @@ pub async fn settings_save(
         // 軽い見た目・雑談設定は常に即反映。キャラ切替・プロバイダ/モデルは再起動側で
         // 反映するため、再起動が必要なときは characterId / pet:model を送らない。
         let active_character = state.config.get("PICOAGENT_CHARACTER", "mugi");
-        let stream = crate::stream_profile::resolve(&state.config, &active_character);
-        let mut ui = json!({
-            "rendererOverrides": crate::renderer_setting::load(&state.config.get_all())?,
-            "theme": state.config.get("PICOAGENT_THEME", "system"),
-            "uiTheme": state.config.get("PICOAGENT_UI_THEME", "pastel"),
-            "titleBarPinned": state.config.get_bool("PICOAGENT_TITLE_BAR_PINNED", false),
-            "chatterEnabled": state.config.get_bool("PICOAGENT_CHATTER_ENABLED", false),
-            "relationshipMemoryEnabled": state.config.get_bool("PICOAGENT_RELATIONSHIP_MEMORY_ENABLED", true),
-            "layout": crate::layout::current(&state.config),
-            "gazeTrackingEnabled": state.config.get_bool("PICOAGENT_GAZE_TRACKING_ENABLED", false),
-            "streamBackground": stream.background,
-            "streamBackgroundImage": stream.background_image,
-            "streamDisplay": stream.display,
-            "streamDisplayImage": stream.display_image,
-            "streamCaptionColor": stream.caption_color,
-            "ttsEnabled": state.config.get_bool("PICOAGENT_TTS_ENABLED", false),
-        });
-        // 以前は起動時の pet_init でしか渡しておらず、クイック操作の変更が再起動まで反映されなかった。
-        ui.as_object_mut()
-            .expect("画面情報はオブジェクト")
-            .extend(numeric_ui_settings(&state.config));
-        ui["quickActions"] = json!(state.config.get("PICOAGENT_QUICK_ACTIONS", ""));
+        let saved = state.config.get_all();
+        let mut ui = Value::Object(ui_settings(&state.config, &saved, &active_character)?);
         if !requires_restart {
             if let Err(error) = win.emit("pet:model", format!("{} / {}", provider.label(), model)) {
                 crate::log_paths::append_app_log(
@@ -3940,15 +3968,11 @@ pub async fn settings_save(
                 );
             }
             ui["characterId"] = json!(state.config.get("PICOAGENT_CHARACTER", "mugi"));
-            ui["characterOverrides"] = state
-                .config
-                .get_all()
+            ui["characterOverrides"] = saved
                 .get("PICOAGENT_CHARACTER_OVERRIDES")
                 .cloned()
                 .unwrap_or_else(|| json!({}));
-            ui["live2dSdkOverrides"] = state
-                .config
-                .get_all()
+            ui["live2dSdkOverrides"] = saved
                 .get("PICOAGENT_LIVE2D_SDK_OVERRIDES")
                 .cloned()
                 .unwrap_or_else(|| json!({}));
@@ -5815,6 +5839,79 @@ fn settings_tab(tab: Option<&str>) -> Option<&str> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn 共通画面設定は保留中の音声を変えず取得済み保存値で描画と診断を返す() {
+        let directory = tempfile::tempdir().unwrap();
+        let config = super::Config::new();
+        config.load(directory.path().join("config.json")).unwrap();
+        let defaults = super::ui_settings(&config, &config.get_all(), "mugi").unwrap();
+        assert_eq!(defaults["uiTheme"], "pastel");
+        assert_eq!(defaults["titleBarPinned"], false);
+        assert_eq!(defaults["quickActions"], "");
+        config.set("PICOAGENT_UI_THEME", "glass");
+        config.set("PICOAGENT_TITLE_BAR_PINNED", "true");
+        config.set("PICOAGENT_QUICK_ACTIONS", "今日の予定");
+        config.set("PICOAGENT_TTS_ENABLED", "true");
+        config.set("PICOAGENT_BUBBLE_FONT_PX", "18");
+        config.set("PICOAGENT_HTTP_TIMEOUT_SECS", "不正な数量");
+        config.set_value(
+            crate::renderer_setting::CONFIG_KEY,
+            serde_json::json!({"mugi": "image"}),
+        );
+        config.set_value(
+            "PICOAGENT_STREAM_PROFILES",
+            serde_json::json!({"mugi": {"background": "gaming", "display": "clock"}}),
+        );
+        config
+            .set_all_checked_deferred(
+                serde_json::Map::from_iter([(
+                    "PICOAGENT_TTS_ENABLED".to_string(),
+                    serde_json::json!(false),
+                )]),
+                &Default::default(),
+                &["PICOAGENT_TTS_ENABLED"],
+                |_, _| Ok(()),
+            )
+            .unwrap();
+        let mut saved = config.get_all();
+        // 応答用に取った後の更新が、同じ応答内の描画設定・数量診断へ混ざらない。
+        config.set_value(crate::renderer_setting::CONFIG_KEY, serde_json::json!({}));
+        config.set("PICOAGENT_HTTP_TIMEOUT_SECS", "20");
+        let payload = super::ui_settings(&config, &saved, "mugi").unwrap();
+        assert_eq!(payload["uiTheme"], "glass");
+        assert_eq!(payload["titleBarPinned"], true);
+        assert_eq!(payload["quickActions"], "今日の予定");
+        assert_eq!(payload["ttsEnabled"], true);
+        assert_eq!(payload["fontPx"], 18);
+        assert_eq!(
+            payload["rendererOverrides"],
+            serde_json::json!({"mugi": "image"})
+        );
+        assert_eq!(payload["streamBackground"], "gaming");
+        assert_eq!(payload["streamDisplay"], "clock");
+        assert!(payload["invalidNumbers"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|error| error["key"] == "PICOAGENT_HTTP_TIMEOUT_SECS"));
+        for name in ["characterId", "model", "history", "providerId"] {
+            assert!(
+                !payload.contains_key(name),
+                "反映条件を呼出側で管理する項目: {name}"
+            );
+        }
+        saved.insert(
+            crate::renderer_setting::CONFIG_KEY.to_string(),
+            serde_json::json!(false),
+        );
+        assert!(super::ui_settings(&config, &saved, "mugi").is_err());
+        config.activate_saved_values();
+        assert_eq!(
+            super::ui_settings(&config, &config.get_all(), "mugi").unwrap()["ttsEnabled"],
+            false
+        );
+    }
+
     #[test]
     fn 再初期化の差分判定は空値の環境変数への復帰も検出する() {
         let key = "TEST_CONFIG_RUNTIME_9022";

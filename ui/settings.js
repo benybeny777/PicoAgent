@@ -231,6 +231,17 @@ function settingsChangeRequest(current, saved, revisions) {
   return { patch, baseRevisions };
 }
 
+/** 保存が確定したキーだけ原本と版へ反映し、他操作の最新値や未保存の草稿を混ぜない。 */
+function acceptSavedSettings(patch, revisions) {
+  if (savedSnapshot) Object.assign(savedSnapshot, cloneSettings(patch));
+  Object.assign(data.values, cloneSettings(patch));
+  // 応答に全キーの版があっても、未編集の原本とその読込時の版は一緒に保持する。
+  for (const key of Object.keys(patch)) {
+    const revision = revisions?.[key];
+    if (typeof revision === "string") data.valueRevisions[key] = revision;
+  }
+}
+
 function updateDirtyStateNow() {
   if (renderingSettings || !savedSnapshot || !resetChangesBtn) return;
   let current;
@@ -254,33 +265,17 @@ function updateDirtyStateNow() {
     data.valueRevisions,
   ).patch));
   const dirty = changedKeys.size > 0;
-  for (const [key, wrapper] of inputWrappers) {
-    const currentValue = current[key];
-    const savedValue = savedSnapshot[key];
-    wrapper.classList.toggle("changed", stableStringify(comparisonValue(currentValue)) !== stableStringify(comparisonValue(savedValue)));
+  const compositeWrappers = [
+    ["PICOAGENT_CHARACTER_OVERRIDES", characterPersona?.closest(".field")],
+    ["PICOAGENT_TTS_CHARACTER_OVERRIDES", characterSpeaker?.closest(".field")],
+    ["PICOAGENT_LIVE2D_SDK_OVERRIDES", characterLive2dSdkField],
+    ["PICOAGENT_RENDERER_OVERRIDES", characterRendererField],
+    ["PICOAGENT_ALARMS", form.querySelector(".alarm-editor")?.closest(".card-config")],
+    ["PICOAGENT_SCHEDULED_TASKS", form.querySelector(".schedule-editor")?.closest(".card-config")],
+  ];
+  for (const [key, wrapper] of [...inputWrappers, ...compositeWrappers]) {
+    wrapper?.classList.toggle("changed", changedKeys.has(key));
   }
-  characterPersona?.closest(".field")?.classList.toggle(
-    "changed",
-    stableStringify(current.PICOAGENT_CHARACTER_OVERRIDES) !== stableStringify(savedSnapshot.PICOAGENT_CHARACTER_OVERRIDES)
-  );
-  characterSpeaker?.closest(".field")?.classList.toggle(
-    "changed",
-    stableStringify(current.PICOAGENT_TTS_CHARACTER_OVERRIDES) !== stableStringify(savedSnapshot.PICOAGENT_TTS_CHARACTER_OVERRIDES)
-  );
-  characterLive2dSdkField?.classList.toggle(
-    "changed",
-    stableStringify(current.PICOAGENT_LIVE2D_SDK_OVERRIDES) !== stableStringify(savedSnapshot.PICOAGENT_LIVE2D_SDK_OVERRIDES)
-  );
-  characterRendererField?.classList.toggle("changed",
-    stableStringify(current.PICOAGENT_RENDERER_OVERRIDES) !== stableStringify(savedSnapshot.PICOAGENT_RENDERER_OVERRIDES));
-  form.querySelector(".alarm-editor")?.closest(".card-config")?.classList.toggle(
-    "changed",
-    stableStringify(current.PICOAGENT_ALARMS) !== stableStringify(savedSnapshot.PICOAGENT_ALARMS)
-  );
-  form.querySelector(".schedule-editor")?.closest(".card-config")?.classList.toggle(
-    "changed",
-    stableStringify(current.PICOAGENT_SCHEDULED_TASKS) !== stableStringify(savedSnapshot.PICOAGENT_SCHEDULED_TASKS)
-  );
   // 折りたたんだ「詳細設定」の中を変更しても、閉じている間は .changed の色が見えない。
   // どこを触ったか分からないまま保存することになるので、見出し側にも印を出す。
   for (const group of form.querySelectorAll(".advanced-group")) {
@@ -3838,9 +3833,7 @@ async function render() {
           card.remove();
           // 原本は削除後の保存値へ揃える。別キャラの未保存選択は選択欄に保持し、
           // 次の保存で正しい版との比較に使う。実行中キャラは保留中の保存値と区別する。
-          if (savedSnapshot) savedSnapshot.PICOAGENT_CHARACTER = savedCharacter;
-          data.values.PICOAGENT_CHARACTER = savedCharacter;
-          data.valueRevisions.PICOAGENT_CHARACTER = revision;
+          acceptSavedSettings({ PICOAGENT_CHARACTER: savedCharacter }, result.valueRevisions);
           data.pendingRestart = result.pendingRestart || null;
           if (wasSelected) {
             characterSelect.value = savedCharacter;
@@ -4567,14 +4560,7 @@ saveBtn.addEventListener("click", async () => {
       return;
     }
     clearNumberErrors();
-    savedSnapshot = cloneSettings(current);
-    data.values = cloneSettings(current);
-    // 未編集の値は読込時のままなので、その版も保持する。別操作の最新の版だけを
-    // 取り込むと、次回は古い画面の値で新しい原本を競合なしに上書きしてしまう。
-    for (const key of Object.keys(request.patch)) {
-      const revision = res.valueRevisions?.[key];
-      if (typeof revision === "string") data.valueRevisions[key] = revision;
-    }
+    acceptSavedSettings(request.patch, res.valueRevisions);
     if (res.requiresRestart) {
       data.pendingRestart = { restartEngine: res.restartEngine, restartAivis: res.restartAivis };
     }

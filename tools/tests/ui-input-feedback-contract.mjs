@@ -177,18 +177,6 @@ test("キャラ切替が途中で失敗しても旧キャラの欄と草稿を�
   }
 });
 
-test("設定競合は草稿を捨てず最新値へ載せ直す", () => {
-  const saveFlow = settings.slice(
-    settings.indexOf('saveBtn.addEventListener("click"'),
-    settings.indexOf('resetChangesBtn?.addEventListener("click"'),
-  );
-  assert.match(saveFlow, /const draft = cloneSettings\(request\.patch\)/);
-  assert.match(saveFlow, /const latest = await window\.picoagent\.settings\.load\(\)/);
-  assert.match(saveFlow, /data\.values = \{ \.\.\.cloneSettings\(latest\.values\), \.\.\.draft \}/);
-  assert.match(saveFlow, /savedSnapshot = latestSnapshot/);
-  assert.match(saveFlow, /入力内容を確認して、もう一度保存してください/);
-});
-
 test("変更判定のcollectはキャラ草稿を書き換えない", () => {
   const collect = settings.slice(settings.indexOf("function collect()"), settings.indexOf("// 再起動の確認画面"));
   assert.doesNotMatch(collect, /saveCurrentCharacter/);
