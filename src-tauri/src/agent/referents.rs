@@ -6,13 +6,24 @@ pub(super) struct QuestionBinding {
     pub quotations: Vec<QuoteBinding>,
 }
 
-/// 位置は質問原文の文字単位で、開始引用符を含み終了引用符の直後まで。
-#[derive(serde::Serialize, Debug, PartialEq)]
+/// 引用は開始・終了の引用符を含む原文のまま持つ。
+#[derive(Debug, PartialEq)]
 pub(super) struct QuoteBinding {
-    start: usize,
-    end: usize,
     speaker: String,
-    recipient: String,
+    recipient: Option<String>,
+    quote: String,
+}
+
+impl QuoteBinding {
+    /// 小型モデルが文字位置やJSONを解釈しなくて済むよう、引用内の人称の参照先を一文で示す。
+    pub(super) fn describe(&self) -> String {
+        let mut text = format!("引用{}の中の「私」は{}", self.quote, self.speaker);
+        if let Some(recipient) = &self.recipient {
+            text.push_str(&format!("、「あなた」は{recipient}"));
+        }
+        text.push_str("を指します。");
+        text
+    }
 }
 
 fn explicit_quote_relations(question: &str) -> Vec<QuoteBinding> {
@@ -20,17 +31,17 @@ fn explicit_quote_relations(question: &str) -> Vec<QuoteBinding> {
     let mut opened = None;
     let mut nested = false;
     let mut bindings = Vec::new();
-    for (position, (byte, character)) in question.char_indices().enumerate() {
+    for (byte, character) in question.char_indices() {
         let depth = state.depth();
         let code = state.in_code();
         state.enter(character);
         if depth == 0 && state.depth() == 1 && !code && !state.in_code() {
-            opened = Some((byte, position));
+            opened = Some(byte);
             nested = false;
         } else if state.depth() > 1 {
             nested = true;
         } else if depth == 1 && state.depth() == 0 {
-            let Some((start_byte, start)) = opened.take() else {
+            let Some(start_byte) = opened.take() else {
                 continue;
             };
             if nested {
@@ -42,10 +53,15 @@ fn explicit_quote_relations(question: &str) -> Vec<QuoteBinding> {
                 .next()
                 .unwrap_or("")
                 .trim();
-            let Some(participants) = prefix.strip_suffix('に') else {
-                continue;
-            };
-            let Some((speaker, recipient)) = participants.split_once('が') else {
+            // 「AがBに『…』」と、相手を省いた「Aが『…』」だけを扱う。
+            let (speaker, recipient) = if let Some(participants) = prefix.strip_suffix('に') {
+                let Some((speaker, recipient)) = participants.split_once('が') else {
+                    continue;
+                };
+                (speaker, Some(recipient))
+            } else if let Some(speaker) = prefix.strip_suffix('が') {
+                (speaker, None)
+            } else {
                 continue;
             };
             // 複雑な節や匿名の人物を、確定した引用関係へ推測で補わない。
@@ -59,7 +75,7 @@ fn explicit_quote_relations(question: &str) -> Vec<QuoteBinding> {
                         .any(|prefix| value.starts_with(prefix))
                     && !["誰", "誰か", "ある人", "相手", "彼", "彼女", "自分"].contains(&value)
             };
-            if !named(speaker) || !named(recipient) {
+            if !named(speaker) || !recipient.is_none_or(named) {
                 continue;
             }
             let suffix = question
@@ -75,10 +91,12 @@ fn explicit_quote_relations(question: &str) -> Vec<QuoteBinding> {
             }
             // 関係の注釈だけを生成し、引用内容の事実や答えはコードで作らない。
             bindings.push(QuoteBinding {
-                start,
-                end: position + 1,
                 speaker: bind(speaker).resolved,
-                recipient: bind(recipient).resolved,
+                recipient: recipient.map(|recipient| bind(recipient).resolved),
+                quote: question
+                    .get(start_byte..byte + character.len_utf8())
+                    .expect("文字境界の引用")
+                    .to_string(),
             });
         }
     }
@@ -209,49 +227,55 @@ pub(super) fn bind(question: &str) -> QuestionBinding {
 mod tests {
     #[test]
     fn 明示した引用関係は人物値と位置だけを注釈し原文を変えない() {
-        for (question, speaker, recipient) in [
+        for (question, speaker, recipient, described) in [
             (
                 "あおいがけんに「あなたは麦茶が好き」と言いました。このあなたは誰？",
                 "あおい",
-                "けん",
+                Some("けん"),
+                "引用「あなたは麦茶が好き」の中の「私」はあおい、「あなた」はけんを指します。",
             ),
             (
                 "ゆうがむぎに『私は緑茶が好き』と言った。引用の私は誰？",
                 "ゆう",
-                "むぎ",
+                Some("むぎ"),
+                "引用『私は緑茶が好き』の中の「私」はゆう、「あなた」はむぎを指します。",
             ),
             (
                 "私があなたに「私は緑茶が好き」と言いました。",
                 "利用者",
-                "選択中キャラクター",
+                Some("選択中キャラクター"),
+                "引用「私は緑茶が好き」の中の「私」は利用者、「あなた」は選択中キャラクターを指します。",
             ),
             (
                 "田中君が山田君に「あなたの趣味は？」と言った。",
                 "田中君",
-                "山田君",
+                Some("山田君"),
+                "引用「あなたの趣味は？」の中の「私」は田中君、「あなた」は山田君を指します。",
             ),
             (
                 "友人のあおいがはるかに「あなたの趣味は？」と言った。",
                 "友人のあおい",
-                "はるか",
+                Some("はるか"),
+                "引用「あなたの趣味は？」の中の「私」は友人のあおい、「あなた」ははるかを指します。",
+            ),
+            (
+                "友人のあおいが『私は紅茶が好き』と言いました。この『私』は誰で、何が好き？",
+                "友人のあおい",
+                None,
+                "引用『私は紅茶が好き』の中の「私」は友人のあおいを指します。",
             ),
         ] {
             let binding = super::bind(question);
             assert_eq!(binding.quotations.len(), 1, "{question}");
             let quote = &binding.quotations[0];
             assert_eq!(quote.speaker, speaker);
-            assert_eq!(quote.recipient, recipient);
-            let original: String = question
-                .chars()
-                .skip(quote.start)
-                .take(quote.end - quote.start)
-                .collect();
+            assert_eq!(quote.recipient.as_deref(), recipient);
+            assert_eq!(quote.describe(), described);
+            let original = &quote.quote;
             assert!(original.starts_with(['「', '『']));
             assert!(original.ends_with(['」', '』']));
-            assert_eq!(binding.resolved.matches(&original).count(), 1);
-            let json = serde_json::to_value(&binding.quotations).unwrap();
-            assert_eq!(json[0].as_object().unwrap().len(), 4);
-            assert!(json.to_string().find("麦茶").is_none());
+            assert_eq!(question.matches(original.as_str()).count(), 1);
+            assert_eq!(binding.resolved.matches(original.as_str()).count(), 1);
         }
     }
 
@@ -261,10 +285,13 @@ mod tests {
         let binding = super::bind(question);
         assert_eq!(binding.quotations.len(), 2);
         assert_eq!(binding.quotations[0].speaker, "あおい");
-        assert_eq!(binding.quotations[0].recipient, "けん");
+        assert_eq!(binding.quotations[0].recipient.as_deref(), Some("けん"));
         assert_eq!(binding.quotations[1].speaker, "ゆう");
-        assert_eq!(binding.quotations[1].recipient, "むぎ");
-        assert!(binding.quotations[0].end < binding.quotations[1].start);
+        assert_eq!(binding.quotations[1].recipient.as_deref(), Some("むぎ"));
+        assert!(
+            question.find(&binding.quotations[0].quote).unwrap()
+                < question.find(&binding.quotations[1].quote).unwrap()
+        );
         assert!(binding.resolved.ends_with("利用者の飲み物と比べて"));
     }
 

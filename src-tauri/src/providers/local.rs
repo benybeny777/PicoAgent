@@ -806,14 +806,11 @@ mod tests {
                 original.content
             )));
         }
-        // 共通fixtureの引用注釈は、原文区間の後でもJSON全体を無加工で保持する。
-        let annotations = |message: &Message| -> serde_json::Value {
-            serde_json::from_str(message.content.lines().last().unwrap()).unwrap()
-        };
-        let actual = annotations(normalized.last().unwrap());
-        assert_eq!(actual, annotations(after.last().unwrap()));
-        assert_eq!(actual[0]["speaker"], "あおい");
-        assert_eq!(actual[0]["recipient"], "けん");
+        // 共通fixtureの引用注釈は、原文区間の後でも無加工で保持する。
+        let annotation = |message: &Message| message.content.lines().last().unwrap().to_string();
+        let actual = annotation(normalized.last().unwrap());
+        assert_eq!(actual, annotation(after.last().unwrap()));
+        assert!(actual.contains("「私」はあおい、「あなた」はけん"));
     }
 
     type TimingReports = std::sync::Arc<std::sync::Mutex<Vec<super::TimingReport>>>;

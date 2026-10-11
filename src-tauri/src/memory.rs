@@ -609,6 +609,20 @@ fn memory_subject(text: &str) -> MemorySubject {
     }
 }
 
+// 送信用の写しだけ一人称の主語を「利用者」へ置く。キャラも「私」で話すため、
+// 一人称のままでは小型モデルが記録をキャラ自身の好みとして読む。保存原文は変えない。
+fn user_subject_text(text: &str) -> String {
+    let text = text.trim();
+    ["わたし", "ぼく", "自分", "私", "僕", "俺"]
+        .into_iter()
+        .find_map(|pronoun| {
+            let rest = text.strip_prefix(pronoun)?;
+            rest.starts_with(['は', 'の'])
+                .then(|| format!("利用者{rest}"))
+        })
+        .unwrap_or_else(|| text.to_string())
+}
+
 fn format_memory_context<'a>(
     items: impl IntoIterator<Item = &'a MemoryItem>,
     unresolved: usize,
@@ -622,7 +636,11 @@ fn format_memory_context<'a>(
                 MemorySubject::Instruction => "利用者の継続指示",
                 MemorySubject::Unresolved => return None,
             };
-            Some(format!("- [{owner}] [{}] {}", item.category, item.text))
+            Some(format!(
+                "- [{owner}] [{}] {}",
+                item.category,
+                user_subject_text(&item.text)
+            ))
         })
         .take(MAX_CONTEXT_ITEMS)
         .collect();
@@ -767,7 +785,7 @@ mod tests {
             || Ok(MemoryStore::default()),
             |_| Ok(()),
         );
-        assert!(result.unwrap().unwrap().contains("私はRustが好きです"));
+        assert!(result.unwrap().unwrap().contains("利用者はRustが好きです"));
     }
 
     #[test]
@@ -863,7 +881,11 @@ mod tests {
                 }],
             };
             let context = context_from_store(&store);
-            assert_eq!(context.contains(text), category.is_some(), "{text}");
+            assert_eq!(
+                context.contains(&super::user_subject_text(text)),
+                category.is_some(),
+                "{text}"
+            );
         }
     }
 
@@ -1019,7 +1041,8 @@ mod tests {
         };
         let before = serde_json::to_string(&store).unwrap();
         let context = context_from_store(&store);
-        assert!(context.contains("[利用者の情報] [好み] 私は緑茶が好き"));
+        assert!(context.contains("[利用者の情報] [好み] 利用者は緑茶が好き"));
+        assert!(!context.contains("私は"), "一人称の主語を送信へ残した");
         assert!(context.contains("[利用者の継続指示] [継続指示] 今後は結論から話してほしい"));
         for excluded in ["あなたの名前はむぎ", "太郎", "紅茶", "- [好み] 緑茶が好き"]
         {
@@ -1029,6 +1052,21 @@ mod tests {
             );
         }
         assert_eq!(serde_json::to_string(&store).unwrap(), before);
+    }
+
+    #[test]
+    fn 送信用の記憶だけ先頭の一人称主語を利用者へ置き換える() {
+        for (original, sent) in [
+            ("私は緑茶が好きです", "利用者は緑茶が好きです"),
+            ("私の趣味は写真撮影です", "利用者の趣味は写真撮影です"),
+            ("僕の名前はゆうです", "利用者の名前はゆうです"),
+            ("わたしはカレーが好き", "利用者はカレーが好き"),
+            ("利用者は緑茶が好き", "利用者は緑茶が好き"),
+            ("今後は結論から話してほしい", "今後は結論から話してほしい"),
+            ("私立高校に通っています", "私立高校に通っています"),
+        ] {
+            assert_eq!(super::user_subject_text(original), sent, "{original}");
+        }
     }
 
     #[test]
@@ -1077,7 +1115,7 @@ mod tests {
         };
         let context = context_from_store(&store);
         assert!(context.contains("長期メモリ"));
-        assert!(context.contains("[好み] 私はRustをよく使う"));
+        assert!(context.contains("[好み] 利用者はRustをよく使う"));
     }
 
     #[test]

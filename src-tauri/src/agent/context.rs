@@ -21,10 +21,11 @@ fn reference_request(materials: &[&str], question: &str) -> String {
         )
     };
     if !binding.quotations.is_empty() {
-        resolved.push_str(&format!(
-            "\n\n質問原文の引用関係（start/endは引用符を含む文字位置。speakerは引用の話し手、recipientは引用の相手。引用内の一人称はspeaker、二人称はrecipientを参照）:\n{}",
-            serde_json::json!(binding.quotations)
-        ));
+        resolved.push_str("\n\n引用の人物:");
+        for quotation in &binding.quotations {
+            resolved.push('\n');
+            resolved.push_str(&quotation.describe());
+        }
     }
     format!(
         "--- 非公開参考資料開始 ---\n利用者・案件の参考情報（キャラクターの人格ではない）\n{}\n--- 非公開参考資料終了 ---\n\n{QUESTION_BEGIN}\n{question}\n{QUESTION_END}{resolved}",
@@ -738,11 +739,8 @@ mod tests {
                 assert!(last
                     .content
                     .contains(&format!("{QUESTION_BEGIN}\n{question}\n{QUESTION_END}")));
-                let actual: serde_json::Value =
-                    serde_json::from_str(last.content.lines().last().unwrap()).unwrap();
-                assert_eq!(actual[0]["speaker"], "あおい");
-                assert_eq!(actual[0]["recipient"], "けん");
-                assert!(!actual.to_string().contains("麦茶"));
+                let actual = last.content.lines().last().unwrap();
+                assert!(actual.contains("の中の「私」はあおい、「あなた」はけんを指します。"));
             } else {
                 assert!(equal(&request, &public));
             }
@@ -1004,13 +1002,10 @@ mod tests {
                 assert_eq!(question, original_section);
             } else {
                 assert!(question.starts_with(&original_section));
-                let annotation: serde_json::Value =
-                    serde_json::from_str(question.lines().last().unwrap()).unwrap();
-                assert_eq!(annotation, serde_json::json!(binding.quotations));
-                assert_eq!(annotation[0]["speaker"], "あおい");
-                assert_eq!(annotation[0]["recipient"], "けん");
+                let annotation = question.lines().last().unwrap();
+                assert_eq!(annotation, binding.quotations[0].describe());
+                assert!(annotation.contains("「私」はあおい、「あなた」はけん"));
                 assert!(binding.directive.is_empty());
-                assert!(!annotation.to_string().contains("麦茶"));
             }
             assert_eq!(request.images, original.images);
         }
