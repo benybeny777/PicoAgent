@@ -92,7 +92,138 @@ struct SettingsRestart {
     character: bool,
 }
 
+#[derive(Clone, Copy)]
+enum SettingKind {
+    Text(&'static str),
+    Bool(bool),
+    Raw,
+}
+
+#[derive(Clone, Copy)]
+enum RestartTarget {
+    Engine,
+    Aivis,
+    Character,
+}
+
+// 再初期化の判定と、保存後も旧実行値を保持するキーは同じ表を正本にする。
+const RESTART_SETTINGS: &[(&str, SettingKind, RestartTarget)] = &[
+    (
+        "PICOAGENT_PROVIDER",
+        SettingKind::Text("local"),
+        RestartTarget::Engine,
+    ),
+    (
+        "PICOAGENT_LOCAL_MODEL_PRESET",
+        SettingKind::Text("auto"),
+        RestartTarget::Engine,
+    ),
+    (
+        "PICOAGENT_MODEL",
+        SettingKind::Text(""),
+        RestartTarget::Engine,
+    ),
+    (
+        "PICOAGENT_MODEL_URL",
+        SettingKind::Text(""),
+        RestartTarget::Engine,
+    ),
+    (
+        "PICOAGENT_LOCAL_PORT",
+        SettingKind::Text("11435"),
+        RestartTarget::Engine,
+    ),
+    (
+        "PICOAGENT_LOCAL_CTX",
+        SettingKind::Text("32768"),
+        RestartTarget::Engine,
+    ),
+    (
+        "PICOAGENT_LOCAL_NGL",
+        SettingKind::Text("999"),
+        RestartTarget::Engine,
+    ),
+    (
+        "PICOAGENT_LOCAL_GPU_DEVICE",
+        SettingKind::Text(""),
+        RestartTarget::Engine,
+    ),
+    (
+        "PICOAGENT_LOCAL_VISION_ENABLED",
+        SettingKind::Bool(false),
+        RestartTarget::Engine,
+    ),
+    (
+        "PICOAGENT_TTS_ENABLED",
+        SettingKind::Bool(false),
+        RestartTarget::Aivis,
+    ),
+    (
+        "PICOAGENT_TTS_DEVICE",
+        SettingKind::Text("auto"),
+        RestartTarget::Aivis,
+    ),
+    (
+        "PICOAGENT_TTS_PORT",
+        SettingKind::Text("11436"),
+        RestartTarget::Aivis,
+    ),
+    (
+        "PICOAGENT_TTS_ENDPOINT",
+        SettingKind::Text(""),
+        RestartTarget::Aivis,
+    ),
+    (
+        "PICOAGENT_CHARACTER",
+        SettingKind::Text("mugi"),
+        RestartTarget::Character,
+    ),
+    (
+        "PICOAGENT_LIVE2D_SDK_OVERRIDES",
+        SettingKind::Raw,
+        RestartTarget::Character,
+    ),
+];
+
+fn setting_changed(
+    config: &Config,
+    patch: &Map<String, Value>,
+    key: &str,
+    kind: SettingKind,
+) -> bool {
+    let Some(next) = patch.get(key) else {
+        return false;
+    };
+    match kind {
+        SettingKind::Text(fallback) => {
+            config.get(key, fallback) != Config::resolve_string(key, Some(next), fallback)
+        }
+        SettingKind::Bool(fallback) => next
+            .as_bool()
+            .is_some_and(|next| config.get_bool(key, fallback) != next),
+        SettingKind::Raw => config.get_runtime_value(key).as_ref() != Some(next),
+    }
+}
+
 impl SettingsRestart {
+    fn changes(config: &Config, patch: &Map<String, Value>) -> Self {
+        let mut requested = Self::default();
+        for &(key, kind, target) in RESTART_SETTINGS {
+            if setting_changed(config, patch, key, kind) {
+                match target {
+                    RestartTarget::Engine => requested.engine = true,
+                    RestartTarget::Aivis => requested.aivis = true,
+                    RestartTarget::Character => requested.character = true,
+                }
+            }
+        }
+        requested
+    }
+
+    fn ui_value(self) -> Option<Value> {
+        self.required()
+            .then(|| json!({"restartEngine": self.engine, "restartAivis": self.aivis}))
+    }
     fn include(&mut self, next: Self) -> Self {
         self.engine |= next.engine;
         self.aivis |= next.aivis;
@@ -1191,7 +1322,7 @@ pub async fn pet_init(app: AppHandle, state: State<'_, AppState>) -> Result<Valu
         "titleBarPinned": state.config.get_bool("PICOAGENT_TITLE_BAR_PINNED", false),
         "characterId": character_id,
         "characterOverrides": state.config.get_all().get("PICOAGENT_CHARACTER_OVERRIDES").cloned().unwrap_or_else(|| json!({})),
-        "live2dSdkOverrides": state.config.get_all().get("PICOAGENT_LIVE2D_SDK_OVERRIDES").cloned().unwrap_or_else(|| json!({})),
+        "live2dSdkOverrides": state.config.get_runtime_value("PICOAGENT_LIVE2D_SDK_OVERRIDES").unwrap_or_else(|| json!({})),
         "rendererOverrides": crate::renderer_setting::load(&state.config.get_all())?,
         "history": recent_history,
         // 原本を読めなかったキャラクターは保存を止めている。黙っていると利用者は
@@ -1456,7 +1587,7 @@ pub async fn settings_components_install(
     if enable_tts_after_component_install(&ids, enable_tts) {
         let mut patch = Map::new();
         patch.insert("PICOAGENT_TTS_ENABLED".to_string(), json!(true));
-        state.config.set_all(patch).map_err(|error| {
+        state.config.set_all_and_activate(patch).map_err(|error| {
             crate::log_paths::append_app_log(
                 &app,
                 &format!("音声読み上げ設定を有効にできませんでした: {error:#}"),
@@ -1949,35 +2080,44 @@ pub fn settings_character_install_mmd(
 #[tauri::command]
 pub fn settings_character_remove(app: AppHandle, id: String) -> Result<Value, String> {
     let id = id.trim().to_string();
-    // 削除したキャラを選んだままだと起動時に読み込めないので、選択を既定へ戻す。
-    let state = app.state::<AppState>();
-    let was_selected = state.config.get("PICOAGENT_CHARACTER", "mugi") == id;
-    if was_selected {
-        state
-            .config
-            .set_string("PICOAGENT_CHARACTER", "mugi".to_string())
-            .map_err(|error| format!("選択中キャラクターを戻せません: {error}"))?;
+    if cfg!(debug_assertions)
+        && std::env::var("PICO_PREVIEW_CHARACTER").is_ok_and(|preview| preview == id)
+    {
+        return Err("プレビューで固定中のキャラクターは削除できません。プレビューを終了してから削除してください。".into());
     }
-    if let Err(error) = crate::user_characters::remove(&app, &id) {
-        // 削除処理中に別経路が選択キャラを変えていたら、その新しい選択を古いIDで
-        // 上書きしない。自分が設定した既定値のままの場合だけ元へ戻す。
-        if was_selected && state.config.get("PICOAGENT_CHARACTER", "mugi") == "mugi" {
-            state
-                .config
-                .set_string("PICOAGENT_CHARACTER", id.clone())
-                .map_err(|restore_error| {
-                    format!(
-                        "キャラクターを削除できず、選択状態も復元できませんでした: 削除={error:#} / 復元={restore_error}"
-                    )
-                })?;
-        }
-        return Err(format!("{error:#}"));
+    let state = app.state::<AppState>();
+    // 保存済みの次回選択と実行中の選択の両方から、削除対象だけを取り除く。
+    // 保存・削除・失敗時の復元を直列化し、途中の別操作を巻き戻さない。
+    let mut restart_guard = state.settings_restart.lock().unwrap();
+    let removes_loaded_character = state.character.lock().unwrap().id == id;
+    state
+        .config
+        .replace_string_for_operation("PICOAGENT_CHARACTER", &id, "mugi", || {
+            crate::user_characters::remove(&app, &id)
+        })
+        .map_err(|error| format!("{error:#}"))?;
+    if removes_loaded_character {
+        restart_guard.character = true;
     }
     crate::log_paths::append_app_log(&app, &format!("キャラクター {id} をゴミ箱へ移動しました。"));
     let active_character = state.config.get("PICOAGENT_CHARACTER", "mugi");
+    let saved = state.config.get_all();
+    let saved_character = Config::resolve_string(
+        "PICOAGENT_CHARACTER",
+        saved.get("PICOAGENT_CHARACTER"),
+        "mugi",
+    );
+    let mut value_revisions = Config::revisions_for(&saved);
+    value_revisions.retain(|key, _| key == "PICOAGENT_CHARACTER");
+    value_revisions
+        .entry("PICOAGENT_CHARACTER".to_string())
+        .or_insert_with(|| json!("missing"));
     Ok(json!({
         "ok": true,
         "activeCharacter": active_character,
+        "savedCharacter": saved_character,
+        "valueRevisions": value_revisions,
+        "pendingRestart": restart_guard.ui_value(),
     }))
 }
 
@@ -3346,6 +3486,7 @@ pub async fn settings_load(
         "valueRevisions": value_revisions,
         "unavailableSecrets": unavailable_secrets,
         "active": { "providerId": provider_id, "model": model },
+        "pendingRestart": state.settings_restart.lock().unwrap().ui_value(),
         "defaults": { "systemPrompt": agent::prompt::DEFAULT_SYSTEM_PROMPT },
         "providers": provider_list,
         "defaultLocalModelPreset": crate::providers::local::DEFAULT_LOCAL_MODEL_PRESET,
@@ -3508,204 +3649,191 @@ pub async fn settings_save(
             return Err("記憶検索の実行先はGPU優先またはCPUを選んでください".to_string());
         }
     }
-    let renderer_guard = patch
-        .contains_key(crate::renderer_setting::CONFIG_KEY)
-        .then(|| crate::store::lock_state(crate::renderer_setting::CONFIG_KEY));
-    let schedule_guard = patch
-        .contains_key(crate::scheduler::CONFIG_KEY)
-        .then(|| crate::store::lock_state(crate::scheduler::CONFIG_KEY));
-    let alarm_guard = patch
-        .contains_key(crate::alarm::CONFIG_KEY)
-        .then(|| crate::store::lock_state(crate::alarm::CONFIG_KEY));
-    if let Some(value) = patch.get(crate::scene::CONFIG_KEY).cloned() {
-        patch.insert(
-            crate::scene::CONFIG_KEY.to_string(),
-            crate::scene::normalize_checked(&value)?,
-        );
-    }
-    if let Some(value) = patch.get("PICOAGENT_STREAM_PROFILES").cloned() {
-        patch.insert(
-            "PICOAGENT_STREAM_PROFILES".to_string(),
-            crate::stream_profile::normalize_checked(&value)?,
-        );
-    }
-    let changed_text = |key: &str, fallback: &str| {
-        patch
-            .get(key)
-            .and_then(Value::as_str)
-            .map(|next| {
-                // 数値・ポート等の空欄は UI 上「既定値を使う」の意味。空文字と
-                // 未保存を別変更とみなすと、初回の設定保存だけで不要な再起動が走る。
-                let current = state.config.get(key, fallback);
-                let current = if current.trim().is_empty() && !fallback.is_empty() {
-                    fallback
-                } else {
-                    current.as_str()
-                };
-                let next = if next.trim().is_empty() && !fallback.is_empty() {
-                    fallback
-                } else {
-                    next
-                };
-                current != next
-            })
-            .unwrap_or(false)
-    };
-    let changed_bool = |key: &str, fallback: bool| {
-        patch
-            .get(key)
-            .and_then(Value::as_bool)
-            .map(|next| state.config.get_bool(key, fallback) != next)
-            .unwrap_or(false)
-    };
-    let changed_value = |key: &str| {
-        patch
-            .get(key)
-            .map(|next| state.config.get_all().get(key) != Some(next))
-            .unwrap_or(false)
-    };
-    // 差分に対象キーがある場合だけ実行中状態を更新する。
-    let system_context_changed = changed_text("PICOAGENT_SYSTEM_PROMPT", "")
-        || changed_text("PICOAGENT_RELATIONSHIP", "assistant")
-        || changed_value("PICOAGENT_RELATIONSHIP_OVERRIDES")
-        || changed_text("PICOAGENT_RELATIONSHIP_CUSTOM", "");
-    let memory_setting_changed = changed_bool("PICOAGENT_MEMORY_ENABLED", true)
-        || changed_text("PICOAGENT_MEMORY_MAX_ITEMS", "80");
-    // 最大件数は検索プロセスの状態に関係しないため、モデルの再読込みを起こさない。
-    let memory_search_changed = changed_bool("PICOAGENT_MEMORY_ENABLED", true)
-        || changed_text("PICOAGENT_MEMORY_DEVICE", "gpu");
-    let tts_runtime_changed = changed_bool("PICOAGENT_TTS_ENABLED", false)
-        || changed_text("PICOAGENT_TTS_DEVICE", "auto")
-        || changed_text("PICOAGENT_TTS_PORT", "11436")
-        || changed_text("PICOAGENT_TTS_ENDPOINT", "");
-    let provider_changed = changed_text("PICOAGENT_PROVIDER", "local");
-    let local_engine_changed = changed_text("PICOAGENT_LOCAL_MODEL_PRESET", "auto")
-        || changed_text("PICOAGENT_MODEL", "")
-        || changed_text("PICOAGENT_MODEL_URL", "")
-        || changed_text("PICOAGENT_LOCAL_PORT", "11435")
-        || changed_text("PICOAGENT_LOCAL_CTX", "32768")
-        || changed_text("PICOAGENT_LOCAL_NGL", "999")
-        || changed_text("PICOAGENT_LOCAL_GPU_DEVICE", "")
-        || changed_bool("PICOAGENT_LOCAL_VISION_ENABLED", false);
-    let character_changed = changed_text("PICOAGENT_CHARACTER", "mugi");
-    let live2d_sdk_changed = changed_value("PICOAGENT_LIVE2D_SDK_OVERRIDES");
-    let layout_changed = changed_text("PICOAGENT_LAYOUT", crate::layout::DEFAULT);
-    let companion_mode_changed = changed_text("PICOAGENT_COMPANION_MODE", "both");
-    let relationship_memory_changed = changed_bool("PICOAGENT_RELATIONSHIP_MEMORY_ENABLED", true);
-
-    // 設定本体を書き換える前に、現在の形式と寸法を保存する。書き換え後では
-    // 新しい形式へ切り替わったものとして、古い寸法を誤った形式へ記録してしまう。
-    if layout_changed {
-        crate::layout::remember_current_size(&app)
-            .map_err(|e| log_command_error(&app, "切替前の表示サイズ保存に失敗しました", e))?;
-    }
-
-    // シークレット保護と候補全体の検証は、競合検査に成功した後、設定の原子的保存
-    // ロック内で行う。競合却下なのにキーチェーンだけ変える経路を作らない。
-    let schema_keys = secret_keys();
-    let (prepared_patch, restart) = {
-        let mut restart = state.settings_restart.lock().unwrap();
-        let _layout_sizes_guard = if layout_changed {
-            Some(crate::store::lock_state(crate::layout::SIZES_KEY))
-        } else {
-            None
-        };
-        if layout_changed {
-            let sizes = state
-                .config
-                .get_all()
-                .get(crate::layout::SIZES_KEY)
-                .cloned()
-                .unwrap_or_else(|| Value::Object(Map::new()));
-            patch.insert(crate::layout::SIZES_KEY.to_string(), sizes);
-        }
-
-        let mut locked_invalid = Vec::new();
-        let save_result = state.config.set_all_checked_with(
-            patch,
-            &base_revisions.unwrap_or_default(),
-            |latest, checked_patch| {
-                // 他の保存を待つ間に変わった値も、秘密値保護などの副作用より前に再検証する。
-                let (_, invalid) =
-                    validate_numeric_settings_patch(&state.config, checked_patch.clone());
-                if !invalid.is_empty() {
-                    locked_invalid = invalid;
-                    anyhow::bail!("最新の設定では数値を保存できません。");
-                }
-                crate::renderer_setting::validate_patch(checked_patch)
-                    .map_err(anyhow::Error::msg)?;
-                preserve_unreadable_secrets(checked_patch, latest).map_err(anyhow::Error::msg)?;
-                crate::scheduler::reconcile_settings_patch(latest, checked_patch)
-                    .map_err(anyhow::Error::msg)?;
-                let mut candidate = latest.clone();
-                candidate.extend(checked_patch.clone());
-                crate::renderer_setting::load(&candidate).map_err(anyhow::Error::msg)?;
-                validate_multi_ai_settings(&state.config, &candidate)
-                    .map_err(anyhow::Error::msg)?;
-                let mut encrypted = Vec::new();
-                for (key, value) in checked_patch.iter() {
-                    if !is_secret_setting(&schema_keys, key) {
-                        continue;
-                    }
-                    if let Some(text) = value.as_str() {
-                        if !text.is_empty() && !crate::secret::is_encrypted(text) {
-                            encrypted.push((
-                                key.clone(),
-                                crate::secret::encrypt(key, text).map_err(|error| {
-                                    anyhow::anyhow!("シークレットを安全に保存できません: {error}")
-                                })?,
-                            ));
-                        }
-                    }
-                }
-                for (key, value) in encrypted {
-                    checked_patch.insert(key, Value::String(value));
-                }
-                Ok(())
-            },
-        );
-        let (conflicts, prepared) = match save_result {
-            Err(_) if !locked_invalid.is_empty() => {
-                return Ok(json!({"conflicts":[],"invalid":locked_invalid}))
-            }
-            Err(error) => return Err(log_command_error(&app, "設定保存に失敗しました", error)),
-            Ok(saved) => saved,
-        };
-        if !conflicts.is_empty() {
-            return Ok(json!({
-                "ok": false,
-                "conflicts": conflicts,
-                "valueRevisions": state.config.value_revisions(),
-            }));
-        }
-        let restart = restart.include(SettingsRestart {
-            engine: provider_changed || local_engine_changed,
-            aivis: tts_runtime_changed,
-            character: character_changed || live2d_sdk_changed,
-        });
-        (prepared, restart)
-    };
-    let saved_revisions = Config::revisions_for(&prepared_patch);
-    for setting in crate::config::ints::INT_SETTINGS {
-        if prepared_patch.contains_key(setting.key) && state.config.int_or_auto(setting).is_ok() {
-            crate::notice::emit(
-                &app,
-                crate::notice::Notice::recovered(
-                    &format!("numeric-setting:{}", setting.key),
-                    "数値設定を復旧しました",
-                    "設定を正常に読み取れます。",
-                ),
+    let (
+        saved_revisions,
+        restart,
+        memory_search_changed,
+        memory_setting_changed,
+        system_context_changed,
+        companion_mode_changed,
+        relationship_memory_changed,
+        layout_changed,
+    ) = {
+        // 再初期化→character→通知ストアの順と揃え、通知発火との循環待ちを作らない。
+        let mut restart_guard = state.settings_restart.lock().unwrap();
+        let renderer_guard = patch
+            .contains_key(crate::renderer_setting::CONFIG_KEY)
+            .then(|| crate::store::lock_state(crate::renderer_setting::CONFIG_KEY));
+        let schedule_guard = patch
+            .contains_key(crate::scheduler::CONFIG_KEY)
+            .then(|| crate::store::lock_state(crate::scheduler::CONFIG_KEY));
+        let alarm_guard = patch
+            .contains_key(crate::alarm::CONFIG_KEY)
+            .then(|| crate::store::lock_state(crate::alarm::CONFIG_KEY));
+        if let Some(value) = patch.get(crate::scene::CONFIG_KEY).cloned() {
+            patch.insert(
+                crate::scene::CONFIG_KEY.to_string(),
+                crate::scene::normalize_checked(&value)?,
             );
         }
-    }
-    for (key, value) in &prepared_patch {
-        if is_secret_setting(&schema_keys, key) && value.as_str() == Some("") {
-            crate::secret::forget(key);
+        if let Some(value) = patch.get("PICOAGENT_STREAM_PROFILES").cloned() {
+            patch.insert(
+                "PICOAGENT_STREAM_PROFILES".to_string(),
+                crate::stream_profile::normalize_checked(&value)?,
+            );
         }
-    }
-    drop(alarm_guard);
-    drop(schedule_guard);
-    drop(renderer_guard);
+        let changed_text = |key: &str, fallback: &'static str| {
+            setting_changed(&state.config, &patch, key, SettingKind::Text(fallback))
+        };
+        let changed_bool = |key: &str, fallback: bool| {
+            setting_changed(&state.config, &patch, key, SettingKind::Bool(fallback))
+        };
+        let changed_value =
+            |key: &str| setting_changed(&state.config, &patch, key, SettingKind::Raw);
+        // 差分に対象キーがある場合だけ実行中状態を更新する。
+        let system_context_changed = changed_text("PICOAGENT_SYSTEM_PROMPT", "")
+            || changed_text("PICOAGENT_RELATIONSHIP", "assistant")
+            || changed_value("PICOAGENT_RELATIONSHIP_OVERRIDES")
+            || changed_text("PICOAGENT_RELATIONSHIP_CUSTOM", "");
+        let memory_setting_changed = changed_bool("PICOAGENT_MEMORY_ENABLED", true)
+            || changed_text("PICOAGENT_MEMORY_MAX_ITEMS", "80");
+        // 最大件数は検索プロセスの状態に関係しないため、モデルの再読込みを起こさない。
+        let memory_search_changed = changed_bool("PICOAGENT_MEMORY_ENABLED", true)
+            || changed_text("PICOAGENT_MEMORY_DEVICE", "gpu");
+        let requested_restart = SettingsRestart::changes(&state.config, &patch);
+        let layout_changed = changed_text("PICOAGENT_LAYOUT", crate::layout::DEFAULT);
+        let companion_mode_changed = changed_text("PICOAGENT_COMPANION_MODE", "both");
+        let relationship_memory_changed =
+            changed_bool("PICOAGENT_RELATIONSHIP_MEMORY_ENABLED", true);
+
+        // 設定本体を書き換える前に、現在の形式と寸法を保存する。書き換え後では
+        // 新しい形式へ切り替わったものとして、古い寸法を誤った形式へ記録してしまう。
+        if layout_changed {
+            crate::layout::remember_current_size(&app)
+                .map_err(|e| log_command_error(&app, "切替前の表示サイズ保存に失敗しました", e))?;
+        }
+
+        // シークレット保護と候補全体の検証は、競合検査に成功した後、設定の原子的保存
+        // ロック内で行う。競合却下なのにキーチェーンだけ変える経路を作らない。
+        let schema_keys = secret_keys();
+        let (prepared_patch, restart) = {
+            let _layout_sizes_guard = if layout_changed {
+                Some(crate::store::lock_state(crate::layout::SIZES_KEY))
+            } else {
+                None
+            };
+            if layout_changed {
+                let sizes = state
+                    .config
+                    .get_all()
+                    .get(crate::layout::SIZES_KEY)
+                    .cloned()
+                    .unwrap_or_else(|| Value::Object(Map::new()));
+                patch.insert(crate::layout::SIZES_KEY.to_string(), sizes);
+            }
+
+            let mut locked_invalid = Vec::new();
+            let deferred_keys: Vec<&str> =
+                RESTART_SETTINGS.iter().map(|(key, _, _)| *key).collect();
+            let save_result = state.config.set_all_checked_deferred(
+                patch,
+                &base_revisions.unwrap_or_default(),
+                &deferred_keys,
+                |latest, checked_patch| {
+                    // 他の保存を待つ間に変わった値も、秘密値保護などの副作用より前に再検証する。
+                    let (_, invalid) =
+                        validate_numeric_settings_patch(&state.config, checked_patch.clone());
+                    if !invalid.is_empty() {
+                        locked_invalid = invalid;
+                        anyhow::bail!("最新の設定では数値を保存できません。");
+                    }
+                    crate::renderer_setting::validate_patch(checked_patch)
+                        .map_err(anyhow::Error::msg)?;
+                    preserve_unreadable_secrets(checked_patch, latest)
+                        .map_err(anyhow::Error::msg)?;
+                    crate::scheduler::reconcile_settings_patch(latest, checked_patch)
+                        .map_err(anyhow::Error::msg)?;
+                    let mut candidate = latest.clone();
+                    candidate.extend(checked_patch.clone());
+                    crate::renderer_setting::load(&candidate).map_err(anyhow::Error::msg)?;
+                    validate_multi_ai_settings(&state.config, &candidate)
+                        .map_err(anyhow::Error::msg)?;
+                    let mut encrypted = Vec::new();
+                    for (key, value) in checked_patch.iter() {
+                        if !is_secret_setting(&schema_keys, key) {
+                            continue;
+                        }
+                        if let Some(text) = value.as_str() {
+                            if !text.is_empty() && !crate::secret::is_encrypted(text) {
+                                encrypted.push((
+                                    key.clone(),
+                                    crate::secret::encrypt(key, text).map_err(|error| {
+                                        anyhow::anyhow!(
+                                            "シークレットを安全に保存できません: {error}"
+                                        )
+                                    })?,
+                                ));
+                            }
+                        }
+                    }
+                    for (key, value) in encrypted {
+                        checked_patch.insert(key, Value::String(value));
+                    }
+                    Ok(())
+                },
+            );
+            let (conflicts, prepared) = match save_result {
+                Err(_) if !locked_invalid.is_empty() => {
+                    return Ok(json!({"conflicts":[],"invalid":locked_invalid}))
+                }
+                Err(error) => return Err(log_command_error(&app, "設定保存に失敗しました", error)),
+                Ok(saved) => saved,
+            };
+            if !conflicts.is_empty() {
+                return Ok(json!({
+                    "ok": false,
+                    "conflicts": conflicts,
+                    "valueRevisions": state.config.value_revisions(),
+                }));
+            }
+            let restart = restart_guard.include(requested_restart);
+            (prepared, restart)
+        };
+        let saved_revisions = Config::revisions_for(&prepared_patch);
+        for setting in crate::config::ints::INT_SETTINGS {
+            if prepared_patch.contains_key(setting.key) && state.config.int_or_auto(setting).is_ok()
+            {
+                crate::notice::emit(
+                    &app,
+                    crate::notice::Notice::recovered(
+                        &format!("numeric-setting:{}", setting.key),
+                        "数値設定を復旧しました",
+                        "設定を正常に読み取れます。",
+                    ),
+                );
+            }
+        }
+        for (key, value) in &prepared_patch {
+            if is_secret_setting(&schema_keys, key) && value.as_str() == Some("") {
+                crate::secret::forget(key);
+            }
+        }
+        drop(alarm_guard);
+        drop(schedule_guard);
+        drop(renderer_guard);
+        drop(restart_guard);
+
+        (
+            saved_revisions,
+            restart,
+            memory_search_changed,
+            memory_setting_changed,
+            system_context_changed,
+            companion_mode_changed,
+            relationship_memory_changed,
+            layout_changed,
+        )
+    };
 
     if memory_search_changed {
         crate::memory_embedding::reset()
@@ -4058,6 +4186,7 @@ pub fn restart_app(
         |restart| {
             crate::log_paths::append_app_log(&app, "設定反映のため再初期化します。");
             crate::remember_window_position(&app)?;
+            state.config.activate_saved_values();
 
             let pid = state.config.get("PICOAGENT_PROVIDER", "local");
             {
@@ -5686,6 +5815,101 @@ fn settings_tab(tab: Option<&str>) -> Option<&str> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn 再初期化の差分判定は空値の環境変数への復帰も検出する() {
+        let key = "TEST_CONFIG_RUNTIME_9022";
+        let previous = std::env::var_os(key);
+        std::env::set_var(key, "12436");
+        let config = super::Config::new();
+        config.set(key, "11436");
+        let results = [
+            serde_json::json!(""),
+            serde_json::Value::Null,
+            serde_json::json!("11436"),
+        ]
+        .map(|next| {
+            super::setting_changed(
+                &config,
+                &serde_json::Map::from_iter([(key.to_string(), next)]),
+                key,
+                super::SettingKind::Text("11436"),
+            )
+        });
+        match previous {
+            Some(value) => std::env::set_var(key, value),
+            None => std::env::remove_var(key),
+        }
+        assert_eq!(results, [true, true, false]);
+    }
+
+    #[test]
+    fn 再起動を延期した音声とモデルの保存は実行中の設定を変えない() {
+        let directory = tempfile::tempdir().unwrap();
+        let state = super::AppState::new();
+        state
+            .config
+            .load(directory.path().join("config.json"))
+            .unwrap();
+        let old = serde_json::json!({
+            "PICOAGENT_TTS_ENABLED": true, "PICOAGENT_TTS_PORT": "11436",
+            "PICOAGENT_LOCAL_PORT": "11435", "PICOAGENT_CHARACTER": "mugi",
+            "PICOAGENT_LIVE2D_SDK_OVERRIDES": {"mugi": "4"}
+        })
+        .as_object()
+        .unwrap()
+        .clone();
+        state.config.set_all(old.clone()).unwrap();
+        let patch = serde_json::json!({
+            "PICOAGENT_TTS_ENABLED": false, "PICOAGENT_TTS_PORT": "12436",
+            "PICOAGENT_LOCAL_PORT": "12435", "PICOAGENT_CHARACTER": "hina",
+            "PICOAGENT_LIVE2D_SDK_OVERRIDES": {"mugi": "5"}
+        })
+        .as_object()
+        .unwrap()
+        .clone();
+        let mut pending = super::SettingsRestart::changes(&state.config, &patch);
+        assert!(pending.engine && pending.aivis && pending.character);
+        let keys: Vec<_> = super::RESTART_SETTINGS
+            .iter()
+            .map(|(key, _, _)| *key)
+            .collect();
+        state
+            .config
+            .set_all_checked_deferred(patch.clone(), &Default::default(), &keys, |_, _| Ok(()))
+            .unwrap();
+        assert_eq!(state.config.get_all(), patch);
+        assert!(state.config.get_bool("PICOAGENT_TTS_ENABLED", false));
+        assert_eq!(
+            state.config.int(&crate::config::ints::TTS_PORT).unwrap(),
+            11436
+        );
+        assert_eq!(
+            state.config.int(&crate::config::ints::LOCAL_PORT).unwrap(),
+            11435
+        );
+        for (key, value) in old {
+            assert_eq!(state.config.get_runtime_value(&key), Some(value));
+        }
+        let started: Result<(), ()> = pending.apply(Default::default(), |_| {
+            state.config.activate_saved_values();
+            Ok(())
+        });
+        started.unwrap();
+        assert!(!state.config.get_bool("PICOAGENT_TTS_ENABLED", true));
+        assert_eq!(
+            state.config.int(&crate::config::ints::TTS_PORT).unwrap(),
+            12436
+        );
+        assert_eq!(
+            state.config.int(&crate::config::ints::LOCAL_PORT).unwrap(),
+            12435
+        );
+        for (key, value) in patch {
+            assert_eq!(state.config.get_runtime_value(&key), Some(value));
+        }
+        assert!(!pending.required());
+    }
+
     #[test]
     fn 再起動延期後の保存は全要求を保持し開始失敗でも再試行できる() {
         for first in [

@@ -22,16 +22,27 @@ static WEATHER_WORD: LazyLock<Regex> = LazyLock::new(|| {
         .expect("天気を表す語の正規表現")
 });
 static REQUEST_END: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?:(?:を)?(?:教えて|おしえて|見せて)(?:ください|下さい)?|(?:が)?知りたい|(?:を)?お願い(?:します)?|ですか)$")
+    Regex::new(r"(?:(?:を)?(?:教えて|おしえて|見せて)(?:ください|下さい)?(?:ね|よ)?|(?:が)?知りたい|(?:を)?お願い(?:します)?|(?:は|が)?どう(?:ですか)?|ですか)$")
         .expect("天気の依頼末尾の正規表現")
 });
+const LOCATION_PARTICLES: [&str; 5] = ["って", "の", "は", "が", "を"];
 const TIME_WORDS: &str = "明後日|明日|あした|今日|きょう|現在|いま|今|この";
 static TIME_PREFIX: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(&format!(r"^(?:(?:{TIME_WORDS})(?:の|[、,，\s]+))+"))
         .expect("天気の日時の接頭辞の正規表現")
 });
 static TIME_SUFFIX: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(&format!(r"(?:^|の)(?:{TIME_WORDS})$")).expect("天気の日時の接尾辞の正規表現")
+    Regex::new(&format!(
+        r"(?:^|{})(?:{TIME_WORDS})$",
+        LOCATION_PARTICLES.join("|")
+    ))
+    .expect("天気の日時の接尾辞の正規表現")
+});
+static QUESTION_BEFORE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(&format!(
+        r"(?:(?:{TIME_WORDS})(?:の|[、,，\s]+)?)?(?:どんな|どういう)$"
+    ))
+    .expect("天気の前に置く疑問の正規表現")
 });
 
 fn is_direct_query(text: &str) -> bool {
@@ -135,7 +146,12 @@ fn extract_location(text: &str) -> Option<String> {
     // 地名の内側には触れない。「今治市」「明日香村」や、助詞を含む「ののいち」も
     // 原文のまま検索する。日時は「今日の」「今、」など区切りがある場合だけ外す。
     let before = trim_edges(&text[..weather.start()]);
-    let before = before.strip_suffix('の').unwrap_or(before).trim();
+    let before = QUESTION_BEFORE.replace(before, "");
+    let before = LOCATION_PARTICLES
+        .into_iter()
+        .find_map(|particle| before.strip_suffix(particle))
+        .unwrap_or(&before)
+        .trim();
     let before = TIME_PREFIX.replace(before, "");
     let before = TIME_SUFFIX.replace(&before, "");
     let before = trim_edges(&before);
@@ -144,7 +160,7 @@ fn extract_location(text: &str) -> Option<String> {
     }
     // 「天気は横浜」のように地点が後ろにある場合も、天気語に接する助詞だけを外す。
     let after = trim_edges(&text[weather.end()..]);
-    let after = ["って", "の", "は", "が", "を"]
+    let after = LOCATION_PARTICLES
         .into_iter()
         .find_map(|particle| after.strip_prefix(particle))
         .unwrap_or(after);
@@ -726,14 +742,27 @@ mod tests {
             ("今日のNew Yorkの天気", "New York"),
             ("今、東京の天気を教えて", "東京"),
             ("東京の明日の気温を教えて", "東京"),
+            ("東京は天気？", "東京"),
+            ("東京って天気は？", "東京"),
+            ("東京は今どんな天気？", "東京"),
+            ("東京は明日の天気を教えて", "東京"),
+            ("東京の天気について教えて", "東京"),
             ("天気は横浜", "横浜"),
             ("天気ははままつ", "はままつ"),
             ("津の天気", "津"),
         ] {
             assert_eq!(extract_location(text).as_deref(), Some(location), "{text}");
         }
-        for text in ["今日の天気", "今の天気", "明日の天気は？", "天気を教えて"]
-        {
+        for text in [
+            "今日の天気",
+            "今の天気",
+            "明日の天気は？",
+            "天気を教えて",
+            "天気教えてね",
+            "天気を教えてよ！",
+            "今日の天気はどう？",
+            "明日の天気はどうですか",
+        ] {
             assert_eq!(extract_location(text), None, "{text}");
         }
     }
