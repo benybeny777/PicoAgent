@@ -1,5 +1,7 @@
 # PicoAgent 開発・配布ガイド
 
+日本語など非ASCII文字を含むPowerShellスクリプト（`.ps1`）はUTF-8 BOM付きで保存する。Windows PowerShell 5.1はBOMなしのUTF-8を別の文字コードとして読み、文字化けや構文エラーを起こすため、5.1で使う入口は同じ実行環境の構文解析でも検証する。開発用スクリプトのPowerShell 7要件は変えない。`cargo xtask verify`内の`tools/tests/powershell-encoding-contract.mjs`で追跡中のPS1のBOM欠損・不正なUTF-8と5.1用入口の構文を検出する。作業用の`temp/`にも同じ保存規則を適用する。関係者版の初期設定素材は元ファイルを変更せず、出力先にBOM付きの`seed-voices.ps1`を生成してインストーラへ組み込む。
+
 ## 標準の長期メモリ検索
 
 `memory.rs`が記憶原本と会話文脈、`memory_embedding.rs`が専用プロセスの直列通信・再利用・終了、`memory_embedding_install.rs`が固定資産と専用仮想環境の管理導入を担当する。Pythonの導入と検索スクリプトは`src-tauri/resources/embedding-memory/`に置き、`include_str!`で本体へ含める。重みとwheelは通常ビルドへ同梱・取得せず、長期メモリ有効時の初回起動で公式から導入する。

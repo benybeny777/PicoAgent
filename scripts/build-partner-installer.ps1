@@ -1,4 +1,4 @@
-#Requires -Version 7
+﻿#Requires -Version 7
 # 許諾済み関係者向けのMMD・音声同梱版インストーラを生成する（Windows専用）。
 # 正規入口はリポジトリ直下の「関係者版インストーラをビルド.bat」。公開アルファ版は cargo xtask build-beta を使う。
 [CmdletBinding()]
@@ -75,6 +75,13 @@ $version = (Get-Content -Raw -Encoding UTF8 -LiteralPath 'src-tauri\tauri.conf.j
 #    公開用の設定・許可キャラ一覧は変更しない。
 $outputRoot = Join-Path $root $OutputDir
 New-Item -ItemType Directory -Force -Path $outputRoot | Out-Null
+# Windows PowerShell 5.1で実行する配布用コピーはBOM付きにし、元の素材は変更しない。
+$packagedSeedScript = Join-Path $outputRoot 'seed-voices.ps1'
+if ([System.IO.Path]::GetFullPath($seedScript).Equals([System.IO.Path]::GetFullPath($packagedSeedScript), [System.StringComparison]::OrdinalIgnoreCase)) {
+    throw '初期設定の素材と出力先は別のフォルダーを指定してください。'
+}
+$seedText = [System.IO.File]::ReadAllText($seedScript, [System.Text.UTF8Encoding]::new($false, $true))
+[System.IO.File]::WriteAllText($packagedSeedScript, $seedText, [System.Text.UTF8Encoding]::new($true))
 $hookPath = Join-Path $outputRoot 'installer-partner.nsh'
 $configPath = Join-Path $outputRoot 'tauri.partner.conf.json'
 $hook = [System.Collections.Generic.List[string]]::new()
@@ -94,7 +101,7 @@ foreach ($uuid in $voiceModels) {
 $hook.Add('  SetOverwrite on')
 $hook.Add('  InitPluginsDir')
 $hook.Add('  SetOutPath "$PLUGINSDIR"')
-$hook.Add("  File `"$seedScript`"")
+$hook.Add("  File `"$packagedSeedScript`"")
 $hook.Add('  nsExec::ExecToLog `powershell -NoProfile -ExecutionPolicy Bypass -File "$PLUGINSDIR\seed-voices.ps1" -ConfigPath "$APPDATA\PicoAgent\config.json"`')
 $hook.Add('  Pop $0')
 $hook.Add('  StrCmp $0 "0" +3')
