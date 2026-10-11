@@ -801,19 +801,15 @@ mod tests {
             (&normalized[1], &raw[2]),
             (normalized.last().unwrap(), raw.last().unwrap()),
         ] {
-            assert!(request.content.contains(&format!(
+            assert!(request.content.ends_with(&format!(
                 "--- 今回の利用者の質問開始 ---\n{}\n--- 今回の利用者の質問終了 ---",
-                original.content
+                crate::agent::context::sent_question(&original.content)
             )));
         }
-        // 共通fixtureの引用注釈は、原文区間の後でもJSON全体を無加工で保持する。
-        let annotations = |message: &Message| -> serde_json::Value {
-            serde_json::from_str(message.content.lines().last().unwrap()).unwrap()
-        };
-        let actual = annotations(normalized.last().unwrap());
-        assert_eq!(actual, annotations(after.last().unwrap()));
-        assert_eq!(actual[0]["speaker"], "あおい");
-        assert_eq!(actual[0]["recipient"], "けん");
+        // 共通fixtureの引用注釈は、local変換後も無加工で保持する。
+        let last = &normalized.last().unwrap().content;
+        assert_eq!(last, &after.last().unwrap().content);
+        assert!(last.contains("（＝けん）"));
     }
 
     type TimingReports = std::sync::Arc<std::sync::Mutex<Vec<super::TimingReport>>>;
