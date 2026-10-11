@@ -4,7 +4,7 @@
 
 ## 現在の状態
 
-- PR [#490](https://github.com/benybeny777/PicoAgent/pull/490) は通知の誤登録・導入再試行・描画復帰の修正をDraftで保持する。JavaScript611件と切り出したRust4件は成功。最終Rust検証はディスク空き容量とWindowsリンクの問題で未完了。利用者の許可後、指定した旧キャッシュ2ファイルの削除は成功したが、空き容量は約0.5GBのまま。追加の削除は行っていない。再開はPR本文の手順と検証境界を参照する。作業ブランチは `codex/bugcheck-timers-install-rendering`。マージしない。
+- PR [#490](https://github.com/benybeny777/PicoAgent/pull/490) は通知の誤登録・導入再試行・描画復帰を修正した。利用者の容量確保後にローカル検証を再開し、`cargo check` と `cargo xtask verify` が成功（177項目、本体951件成功・実機依存2件除外、xtask109件、JavaScript614件）。WindowsのPDB制限には検証プロセスだけ `_LINK_=/DEBUG:NONE` を適用した。不要になった失敗ビルドと一時物を回収し、テストの途中終了で一時フォルダーが残る箇所も修正。実WebView2・実導入・音声の未確認事項はPR本文と `docs/TASKS.md` を参照する。作業ブランチは `codex/bugcheck-timers-install-rendering`。利用者の「prにして」に従いマージしない。
 - 最終確認日: 2026-10-12
 - PR #389〜#394 は利用者のマージ指示を受けて順に `main` へ取り込んだ。配信の既定構図・チャット・タイトルバー、全キャラ確認画面、配置編集の境界、ダウンロード済みMMD・Live2Dモデルの登録候補表示を含む。統合後の `cargo xtask verify` は128件成功、`cargo audit` は脆弱性0件（既存警告7件）。Windows WebView2の残る目視項目は `docs/TASKS.md` を参照する。
 - 配信MMDの構図は描画器で修正し、#387 の描画方式別の初期配置補正は撤去した。利用者の `PICOAGENT_SCENES` に保存済みのさくらみこ711px配置は移行・上書き・削除していない。新しい胸上構図で位置が合わない場合は、右クリック「キャラを自動配置へ戻す」でそのキャラ・形式だけ既定配置へ戻せる。

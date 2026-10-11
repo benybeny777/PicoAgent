@@ -33,6 +33,7 @@ serde = { version = "1", features = ["derive"] }
 # preserve_order: JSONを読み書きするときにキーの並びを保つ（`character.json` の名前変更など、
 # 利用者が作ったファイルを再保存しても並べ替えで差分を出さないため）。
 serde_json = { version = "1", features = ["preserve_order"] }
+regex = "1"
 toml = "1.1.4"
 reqwest = { version = "0.13", default-features = false, features = ["json", "multipart", "query", "form", "rustls", "stream"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "process", "time", "net", "io-util"] }
