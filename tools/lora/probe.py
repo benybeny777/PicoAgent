@@ -2,7 +2,8 @@
 
 runnerと同じファイル引数を受け、--adapterを必須にする。trainの先頭1件
 （--limitで最大8件）だけを、CPU基底・CPUアダプタ・GPU基底・GPUアダプタの
-順に実行する。temperature=0、seed=1、max_tokens=4、top_logprobs=5は固定。
+順に実行する。temperature=0、seed=1、max_tokens=1、top_logprobs=5は固定。
+生成はASCIIのaに制約するが、比較するのは制約前のraw確率だけ。
 この検査は品質評価でも製品の追加推論でもない。
 """
 
@@ -20,7 +21,9 @@ import runner
 
 MIN_LOGPROB_DELTA = 1e-5
 MAX_CASES = 8
-MAX_TOKENS = 4
+MAX_TOKENS = 1
+PROBE_TEXT = "a"
+PROBE_GRAMMAR = 'root ::= "a"'
 RUNS = (("cpu-base", 0, False), ("cpu-adapter", 0, True),
         ("gpu-base", 99, False), ("gpu-adapter", 99, True))
 
@@ -35,47 +38,68 @@ class ProbeClient:
         if endpoint != "/v1/chat/completions" or not isinstance(body, dict):
             raise ValueError("LoRA適用検査ではchat completionsだけを使います")
         # evaluate_caseが返すrequestも実送信条件を記録する。同関数はbodyを複製済み。
-        body.update(temperature=0, seed=1, max_tokens=MAX_TOKENS, stream=False,
-                    cache_prompt=False, logprobs=True, top_logprobs=5,
-                    post_sampling_probs=False, verbose=True, return_tokens=True)
+        set_probe_parameters(body)
         return self.client.json(endpoint, body, timeout=timeout)
 
 
+def set_probe_parameters(body):
+    body.update(temperature=0, seed=1, max_tokens=MAX_TOKENS, stream=False,
+                cache_prompt=False, logprobs=True, top_logprobs=5,
+                post_sampling_probs=False, verbose=True, return_tokens=True, grammar=PROBE_GRAMMAR)
+
+
+def probe_case(client, case, args):
+    """制約前後の入力を検証してから、生成1位置目のraw確率を取得する。"""
+    body = case["body"]
+    if body.get("tools") or any(key in body for key in ("grammar", "json_schema", "response_format")):
+        raise ValueError("固定ASCII制約の適用検査にはツール・出力制約なしのtrain入力が必要です")
+    controlled = copy.deepcopy(case)
+    controlled["body"] = runner.generation_body(case, 1, MAX_TOKENS)
+    set_probe_parameters(controlled["body"])
+    evidence = {
+        "original": runner.inspect_case(client, case, args),
+        "controlled": runner.inspect_case(client, controlled, args),
+    }
+    verified_prompt({"prompt_evidence": evidence})
+    result = runner.evaluate_case(ProbeClient(client), case, 1, args)
+    result["prompt_evidence"] = evidence
+    return result
+
+
+def verified_prompt(result):
+    evidence = result.get("prompt_evidence", {})
+    values = []
+    for key in ("original", "controlled"):
+        record = evidence.get(key, {})
+        prompt, tokens = record.get("prompt"), record.get("tokens")
+        if not isinstance(prompt, str) or not prompt or not isinstance(tokens, list) or not tokens or any(type(token) is not int or token < 0 for token in tokens):
+            raise ValueError("制約前後の本番promptとtoken列の検査記録がありません")
+        values.append((prompt, tokens))
+    if values[0] != values[1]:
+        raise ValueError("ASCII制約によって本番promptまたはtoken列が変わりました")
+    return values[0]
+
+
 def first_position(result):
-    """最初に記録された確率の生成位置を、実token列から検証する。"""
-    if not isinstance(result.get("content"), str) or not result["content"].strip():
-        raise ValueError("空の回答はLoRA適用の確認に使えません")
+    """UTF-8除外がない固定ASCIIの1tokenを確認し、常に生成位置0だけを使う。"""
+    if result.get("content") != PROBE_TEXT:
+        raise ValueError("固定ASCIIの1文字が生成されていません")
     choices = result.get("raw_response", {}).get("choices")
     if not isinstance(choices, list) or len(choices) != 1:
         raise ValueError("単一の回答choiceがありません")
     logprobs = choices[0].get("logprobs")
     content = logprobs.get("content") if isinstance(logprobs, dict) else None
-    if not isinstance(content, list) or not 1 <= len(content) <= MAX_TOKENS or not isinstance(content[0], dict):
-        raise ValueError("生成tokenのlogprobがありません")
+    if not isinstance(content, list) or len(content) != 1 or not isinstance(content[0], dict):
+        raise ValueError("生成1token分のlogprobがありません")
     first = content[0]
-    # b11429は未完UTF-8のtokenを確率列に追加しない。生成1tokenでは列自体が
-    # 欠落しうるため4tokenまで生成し、最初に記録された位置の条件が一致するか確認する。
-    # 正本: d81235049 server-context.cpp:1978-2036 / server-task.cpp:433-436。
     tokens = result.get("raw_response", {}).get("__verbose", {}).get("tokens")
-    if not isinstance(tokens, list) or not 1 <= len(tokens) <= MAX_TOKENS or any(type(token) is not int or token < 0 for token in tokens):
-        raise ValueError("比較位置を確認する実生成token ID列がありません")
     selected_id = first.get("id")
-    if type(selected_id) is not int:
-        raise ValueError("最初のlogprobにtoken IDがありません")
-    positions = [index for index, token in enumerate(tokens) if token == selected_id]
-    if len(positions) != 1:
-        raise ValueError("最初のlogprobの生成位置を一意に確認できません")
-    position = positions[0]
+    if type(selected_id) is not int or selected_id < 0 or tokens != [selected_id] or any(type(token) is not int for token in tokens):
+        raise ValueError("生成1位置目の実token IDを確認できません")
     raw_bytes = first.get("bytes")
-    if not isinstance(raw_bytes, list) or not raw_bytes or any(type(v) is not int or not 0 <= v <= 255 for v in raw_bytes):
-        raise ValueError("最初に記録されたUTF-8のbytesがありません")
-    try:
-        decoded = bytes(raw_bytes).decode("utf-8", errors="strict")
-    except UnicodeDecodeError as exc:
-        raise ValueError("最初に記録された文字が未完のUTF-8です") from exc
-    if not decoded:
-        raise ValueError("最初に記録された文字が空です")
-    return first, {"index": position, "prefix_token_ids": tokens[:position],
+    if raw_bytes != list(PROBE_TEXT.encode("ascii")) or any(type(value) is not int for value in raw_bytes):
+        raise ValueError("生成1位置目のbytesが固定ASCIIと一致しません")
+    return first, {"index": 0, "prefix_token_ids": [],
                    "selected_token_id": selected_id, "emitted_bytes": raw_bytes}
 
 
@@ -107,6 +131,11 @@ def compare(base, adapted):
     """CPUとGPUの差でなく、同じバックエンド内で同じ候補tokenを比較する。"""
     if base.get("request") != adapted.get("request"):
         raise ValueError("基底とアダプタの生成要求が一致しません")
+    request = base.get("request", {})
+    if request.get("post_sampling_probs") is not False or request.get("grammar") != PROBE_GRAMMAR or request.get("max_tokens") != 1:
+        raise ValueError("固定ASCII 1tokenの制約前raw確率という比較条件がありません")
+    if verified_prompt(base) != verified_prompt(adapted):
+        raise ValueError("基底とアダプタの本番promptまたはtoken列が一致しません")
     first, base_position = first_position(base)
     second, adapter_position = first_position(adapted)
     if base_position["index"] != adapter_position["index"] or base_position["prefix_token_ids"] != adapter_position["prefix_token_ids"]:
@@ -122,10 +151,12 @@ def compare(base, adapted):
                             "base_logprob": left[key]["logprob"],
                             "adapter_logprob": right[key]["logprob"], "delta": delta})
     maximum = max(abs(item["delta"]) for item in differences)
-    return {"passed": maximum > MIN_LOGPROB_DELTA, "max_abs_logprob_delta": maximum,
+    return {"passed": maximum > MIN_LOGPROB_DELTA,
+            "outcome": "effect_detected" if maximum > MIN_LOGPROB_DELTA else "no_effect_detected",
+            "max_abs_logprob_delta": maximum,
             "threshold": MIN_LOGPROB_DELTA, "common_candidates": differences,
             "base_position": base_position, "adapter_position": adapter_position,
-            "reason": "同じ候補tokenに閾値を超える非ゼロ差があります" if maximum > MIN_LOGPROB_DELTA else "候補tokenの差がゼロまたは閾値以下です"}
+            "reason": "同じ候補tokenに閾値を超える非ゼロ差があります" if maximum > MIN_LOGPROB_DELTA else "この入力の候補差は閾値以下です。アダプタ全体の無効を証明するものではありません"}
 
 
 def backend_evidence(log_path, gpu_layers):
@@ -154,7 +185,7 @@ def parse_args(argv=None):
     if args.adapter is None:
         parser.error("LoRA適用検査では--adapterが必須です")
     if args.split != "train" or args.seeds != [1] or args.max_tokens != MAX_TOKENS or args.gpu_layers != 0:
-        parser.error("split=train、seed=1、max_tokens=4、GPU切替順は固定です")
+        parser.error("split=train、seed=1、max_tokens=1、GPU切替順は固定です")
     if not 1 <= args.limit <= MAX_CASES:
         parser.error(f"--limitは1〜{MAX_CASES}にしてください")
     return args
@@ -178,10 +209,10 @@ def run(args):
                        "top_logprobs": 5, "cache_prompt": False, "stream": False,
                        "context": args.context, "min_logprob_delta": MIN_LOGPROB_DELTA,
                        "verbose": True, "return_tokens": True, "post_sampling_probs": False,
-                       "server_verbosity": 5},
+                       "server_verbosity": 5, "grammar": PROBE_GRAMMAR, "compared_generation_index": 0},
         "api_evidence": {"llama_cpp_commit": "d81235049384534c167caea52b85a694f6103d14",
-                         "reason": "未完UTF-8では確率列が更新されないため4tokenまで生成し、最初の記録位置と先行token列を一致させて比較する。",
-                         "sources": ["tools/server/server-context.cpp:1978-2036", "tools/server/server-task.cpp:433-461", "common/log.h:24"]},
+                         "reason": "native /completionも未完UTF-8で同じ確率欠落が起きる。固定ASCII 1文字へsamplingを制約し、post_sampling_probs=falseで同一promptの位置0のraw logits由来softmaxを取得する。制約前後と基底/adapterのprompt全文・token列一致を要求する。",
+                         "sources": ["tools/server/server-context.cpp:1978-2013", "tools/server/server-context.cpp:2097-2150", "tools/server/server-context.cpp:5415-5424", "tools/server/server-common.cpp:1591-1640", "tools/server/server-task.cpp:359-360", "common/sampling.cpp:157-164"]},
         "boundary": "少量学習アダプタの非ゼロ適用だけを確認する。学習品質・性能・製品採用の判定ではない。",
         "runs": [], "comparisons": [], "passed": False,
     }
@@ -203,7 +234,7 @@ def run(args):
                 with runner.local_server(settings, logs[label]) as (client, server):
                     record["server"] = server
                     for case in cases:
-                        result = runner.evaluate_case(ProbeClient(client), case, 1, settings)
+                        result = probe_case(client, case, settings)
                         result["case_id"] = case["id"]
                         record["results"].append(result)
                         runner.save_result(output, document)
@@ -220,7 +251,7 @@ def run(args):
         for backend in ("cpu", "gpu"):
             base, adapted = by_label[f"{backend}-base"], by_label[f"{backend}-adapter"]
             for case in cases:
-                verdict = {"backend": backend, "case_id": case["id"], "passed": False}
+                verdict = {"backend": backend, "case_id": case["id"], "passed": None, "outcome": "inconclusive"}
                 try:
                     if any(item["status"] != "completed" or not item.get("backend", {}).get("passed") for item in (base, adapted)):
                         raise ValueError("サーバの正常実行またはバックエンドを確認できません")
@@ -231,7 +262,8 @@ def run(args):
                     verdict["reason"] = f"{type(exc).__name__}: {exc}"
                 document["comparisons"].append(verdict)
         document["passed"] = bool(document["comparisons"]) and all(item["passed"] for item in document["comparisons"])
-        document["status"] = "completed" if document["passed"] else "failed"
+        document["status"] = ("inconclusive" if any(item["outcome"] == "inconclusive" for item in document["comparisons"])
+                              else "completed" if document["passed"] else "failed")
         return document
     except BaseException as exc:
         document.update(status="interrupted" if isinstance(exc, KeyboardInterrupt) else "failed",
@@ -253,9 +285,10 @@ def main(argv=None):
         return 130
     except Exception as exc:
         print(f"LoRA適用検査に失敗しました: {exc}", file=sys.stderr)
-        return 1
-    print(f"LoRA適用検査: {'合格' if result['passed'] else '不合格'} / {args.output}")
-    return 0 if result["passed"] else 1
+        return 2
+    label = "判定不能" if result["status"] == "inconclusive" else "非ゼロ差を確認" if result["passed"] else "閾値を超える差は未検出"
+    print(f"LoRA適用検査: {label} / {args.output}")
+    return 2 if result["status"] == "inconclusive" else 0 if result["passed"] else 1
 
 
 if __name__ == "__main__":

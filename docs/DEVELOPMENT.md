@@ -42,6 +42,10 @@ Remove-Item Env:LORA_FIXTURE_INPUT, Env:LORA_FIXTURE_OUTPUT
 
 `runner.py`は`--server <実行ファイル> --model <ベースGGUF> --template <本番Jinja> --input <本番body付きJSON> --output <新規結果JSON> --gpu-layers <0|99>`を必須とする。0はCPU、99はGPUで、必要なら`--device`へ製品で使うデバイスを指定する。`--adapter <LoRA GGUF>`の省略時はベースのみ。`evaluate`はtemperature 0.6、seed 1・2・3、キャッシュなし、最大生成256tokenを既定とし、`--seeds`・`--max-tokens`・`--split`・`--limit`で対象を明示できる。全入力を照合する`inspect`には`--split`・`--limit`を付けない。
 
+`probe.py`は同じファイル引数と必須の`--adapter`を受け、trainの先頭1件（`--limit`で最大8件）をCPU基底・CPUアダプタ・GPU基底・GPUアダプタで確認する。ツール・既存の出力制約がない入力を使い、生成だけを固定grammar `root ::= "a"`のASCII 1文字へ制約する。temperature 0、seed 1、max_tokens 1、post_sampling_probs false、候補5件を固定し、元の本番bodyと制約後のテンプレート全文・token列、および基底/adapter間の同一性を検査してから、先行tokenなしの生成位置0のraw確率だけを比較する。固定b11429は未完UTF-8の生成位置を確率列から除外し、native `/completion`も同じバッファを使うため、後続位置への移動やAPI切替では代替しない。許容文字の変更・再試行も行わない。
+
+適用検査の`effect_detected`は共通候補のlogprobに1e-5を超える差を確認した状態。`no_effect_detected`は取得済みの同位置の差が閾値以下で、アダプタ全体の無効を証明しない。確率欠落・入力や位置の不一致・バックエンド未確認は`inconclusive`（判定不能）とし、差ゼロと分ける。終了コードは順に0・1・2、中断は130。比較結果・制約前後の入力・生応答を新規JSONへ残す。このASCII出力は計測用であり、回答品質の評価には使わない。
+
 `benchmark.py`はrunnerと同じサーバ引数に加え、`--adapter <LoRA GGUF> --case-ids <devのIDをカンマ区切りで1〜8件>`を必須とする。基底・アダプタそれぞれでキャッシュ無／有を分け、各入力を準備1回と測定3回、同じseedで生成する。TTFTはSSEで最初の可視文字を受け取るまでの時間とし、全体時間・サーバtimings・実際のcache_n・生成token数・生回答とcase別median/p95を保存する。3回のp95は最大値になるため参考値として扱う。短答や誤答による高速化を自動合格にせず、意味と生成量を照合する。JSON/SSEとも総応答時間を制限し、未完のSSE・指標欠落を成功扱いにしない。
 
 `tool_chain.py`の固定入力は`fixtures/tool-chain-eval.json`。学習・dev選定・最終評価へ混ぜない独立評価で、読込→割合計算→計算結果で地点を選ぶ天気取得→回答の2文脈と、読込失敗後に追加呼出せず回答する1文脈を持つ。上記のRust出力テストへこのfixtureを渡して本番bodyを作り、次のように実行する。
@@ -64,7 +68,9 @@ runnerは自分で起動した127.0.0.1の専用サーバだけを使い、正�
 
 保存済みLoRAから追加学習する場合は、`--initial-adapter <adapterディレクトリ> --initial-manifest <前runのmanifest.json>`を対で指定する。同じベース重みのSHA-256、rank・alpha・対象層などの学習構造、manifestに記録された保存完了先を照合してから既存重みを読み込む。不一致・欠損を新規初期化で補わず停止する。これは重みを引き継ぐ新しいrunであり、optimizer・乱数状態の中断再開ではない。前runのmanifest・設定・重みのSHA-256を新manifestへ記録し、出力先を分けて旧成果を保持する。
 
-Python 3.12を基準に隔離環境を使い、対応GPUと依存の固定版を確認してから学習する。モデル取得・学習を伴わない検査は`python -B -m unittest discover -s tools/lora -p 'test_*.py'`。本番トークナイザの検査だけは`LORA_TEST_MODEL`へ既存のHF資産ディレクトリを明示し、transformersが導入済みの隔離Pythonで実行する。環境・教材ハッシュ・学習条件・測定結果・採否は該当PR本文と出力manifestへ残す。
+Python 3.12を基準に隔離環境を使い、対応GPUと依存の固定版を確認してから学習する。通常の`cargo xtask verify`は`tools/tests/lora-python.mjs`経由でLoRAのPython回帰を実行する。Python探索・起動は音声学習検査と共通の`tools/test-python.mjs`へ集約し、LoRAは3.12以上、既存音声学習は3.10以上を要求する。PATHまたは`LEARNING_TEST_PYTHON`で既存の実行ファイルを指定し、`-B -S`で標準ライブラリだけを使う。Torch等の取得やGPU起動は行わず、`LORA_TEST_MODEL`は引き継がないため、本番トークナイザの3検査はskipとしてverifyの出力へ記録する。入口だけの検査は`node --test tools/tests/lora-python.mjs`。
+
+本番トークナイザの3検査も含めるときは、`LORA_TEST_MODEL`へ既存のHF資産ディレクトリを明示し、transformers導入済みの隔離Pythonで別途`python -B -m unittest discover -s tools/lora -p 'test_*.py'`を実行する。環境・教材ハッシュ・学習条件・測定結果・採否は該当PR本文と出力manifestへ残す。
 
 ## Windows各版のビルドとアップロード
 
