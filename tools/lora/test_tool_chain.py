@@ -62,6 +62,17 @@ def execute(case, values, **changes):
 
 
 class 連続ツール(unittest.TestCase):
+    def test_各生成段へ共通profileを渡し同じ要求を記録する(self):
+        case = mock_body(raw_fixture()["cases"][0])
+        for profile in chain.runner.GENERATION_PROFILES:
+            with self.subTest(profile=profile):
+                client, args, result, events = execute(case, responses(case), generation_profile=profile)
+                chain.run_chain(client, case, 1, args, result, events.append)
+                for request, event in zip(client.json.call_args_list, events):
+                    self.assertEqual(request.args[1], event["request"])
+                    for key, value in chain.runner.generation_settings(profile).items():
+                        self.assertEqual(event["request"][key], value)
+
     def test_モデルの実呼出とidをそのまま次の生成へ渡す(self):
         case = mock_body(raw_fixture()["cases"][0])
         before = copy.deepcopy(case)
@@ -175,18 +186,32 @@ class 連続ツール(unittest.TestCase):
                     with self.assertRaises(chain.ChainError):
                         chain.load_input(path)
 
-    def test_十八runの保存と例外時のサーバ所有者終了を確認する(self):
-        for failure in (False, True):
-            with self.subTest(failure=failure), isolated_directory() as folder:
+    def test_既定と明示fixtureの全run保存と例外時のサーバ所有者終了を確認する(self):
+        for selection, failure, explicit_fixture in (("both", False, False), ("both", False, True),
+                                                     ("both", True, False), ("base", False, False),
+                                                     ("base", False, True), ("adapter", False, False)):
+            with self.subTest(selection=selection, failure=failure, explicit_fixture=explicit_fixture), isolated_directory() as folder:
                 folder = Path(folder)
                 source = raw_fixture()
+                fixture_path = chain.FIXTURE
+                if explicit_fixture:
+                    source["cases"] = source["cases"][:1]
+                    fixture_path = folder / "fixture.json"
+                    fixture_path.write_text(json.dumps(source), encoding="utf-8")
                 source["cases"] = [mock_body(case) for case in source["cases"]]
                 input_path = folder / "body.json"
                 input_path.write_text(json.dumps(source), encoding="utf-8")
                 args = SimpleNamespace(input=input_path, output=folder / "result.json", adapter=input_path,
                                        server=input_path, model=input_path, template=input_path, gpu_layers=0,
                                        context=4096, max_tokens=256, max_generations=6, chain_timeout=20,
-                                       request_timeout=2, snapshot_seconds=30)
+                                       request_timeout=2, snapshot_seconds=30, fixture=fixture_path,
+                                       generation_profile="official", variants=selection)
+                variants = list(chain.VARIANTS) if selection == "both" else [selection]
+                unused_log = folder / "result.adapter.server.log"
+                if selection == "base":
+                    args.adapter = folder / "存在しないadapter.gguf" if explicit_fixture else None
+                    # baseだけの検査は、指定されていてもadapterとそのログへ触れない。
+                    unused_log.write_text("別の検査が残したログ", encoding="utf-8")
                 closed, adapters = [], []
                 @contextmanager
                 def owner(settings, log):
@@ -207,12 +232,21 @@ class 連続ツール(unittest.TestCase):
                             chain.run(args)
                     else:
                         document = chain.run(args)
-                        self.assertEqual(len(document["results"]), 18)
+                        self.assertEqual(len(document["results"]), len(variants) * len(source["cases"]) * 3)
+                        self.assertEqual(document["expected_runs"], len(document["results"]))
+                        self.assertEqual(document["fixture"], chain.runner.file_record(fixture_path))
+                        self.assertEqual(document["parameters"]["generation_profile"], "official")
+                        self.assertEqual(document["parameters"]["variants"], variants)
+                        self.assertEqual(list(document["servers"]), variants)
+                        self.assertEqual(set(row["variant"] for row in document["results"]), set(variants))
                         self.assertEqual(document["status"], "completed")
-                        self.assertEqual(adapters, [None, input_path])
+                        self.assertEqual(adapters, [input_path if variant == "adapter" else None for variant in variants])
+                        self.assertEqual("adapter" in document["files"], "adapter" in variants)
+                        if selection == "base":
+                            self.assertEqual(unused_log.read_text(encoding="utf-8"), "別の検査が残したログ")
                     with self.assertRaisesRegex(chain.ChainError, "上書き"):
                         chain.run(args)
-                self.assertEqual(len(closed), 1 if failure else 2)
+                self.assertEqual(len(closed), 1 if failure else len(variants))
                 document = json.loads(args.output.read_text(encoding="utf-8"))
                 self.assertEqual(document["status"], "failed" if failure else "completed")
                 events = [json.loads(line) for line in Path(document["events"]).read_text(encoding="utf-8").splitlines()]
@@ -220,6 +254,46 @@ class 連続ツール(unittest.TestCase):
                 if failure:
                     self.assertEqual(events[-1]["status"], "failed")
                     self.assertEqual(events[-2]["event"], "generation")
+
+    def test_adapter対象だけにadapterを要求し読込や起動より前に拒否する(self):
+        from contextlib import redirect_stderr
+
+        required = [item for name in ("server", "model", "template", "input", "output")
+                    for item in ("--" + name, name)] + ["--gpu-layers", "0"]
+        self.assertEqual(chain.parser().parse_args(required).variants, "both")
+        self.assertIsNone(chain.parser().parse_args([*required, "--variants", "base"]).adapter)
+        for selection in ("adapter", "both"):
+            args = chain.parser().parse_args([*required, "--variants", selection])
+            with self.subTest(selection=selection), mock.patch.object(chain, "load_input") as load, \
+                 mock.patch.object(chain.runner, "local_server") as owner:
+                with self.assertRaisesRegex(chain.ChainError, "--adapter"):
+                    chain.run(args)
+                load.assert_not_called()
+                owner.assert_not_called()
+        with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            chain.parser().parse_args([*required, "--variants", "typo"])
+
+    def test_明示fixtureでも欠損と本文改変を拒否する(self):
+        with isolated_directory() as folder:
+            folder = Path(folder)
+            fixture = raw_fixture()
+            fixture["cases"] = fixture["cases"][:2]
+            fixture_path = folder / "fixture.json"
+            fixture_path.write_text(json.dumps(fixture), encoding="utf-8")
+            source = copy.deepcopy(fixture)
+            source["cases"] = [mock_body(case) for case in source["cases"]]
+            path = folder / "body.json"
+            path.write_text(json.dumps(source), encoding="utf-8")
+            chain.load_input(path, fixture_path)
+            for failure in ("欠損", "本文改変"):
+                invalid = copy.deepcopy(source)
+                if failure == "欠損":
+                    invalid["cases"].pop()
+                else:
+                    invalid["cases"][0]["question"] = "差し替えた入力"
+                path.write_text(json.dumps(invalid), encoding="utf-8")
+                with self.assertRaises(chain.ChainError):
+                    chain.load_input(path, fixture_path)
 
 
 if __name__ == "__main__":

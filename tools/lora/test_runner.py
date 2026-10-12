@@ -30,6 +30,12 @@ if mode == "起動待機":
     time.sleep(60)
 if mode == "即終了":
     raise SystemExit(7)
+if mode in ("NVIDIA", "Intel", "複数GPU"):
+    names = ["Intel(R) Graphics"] if mode == "Intel" else ["NVIDIA GeForce RTX 5060 Laptop GPU"]
+    if mode == "複数GPU":
+        names.append("Intel(R) Graphics")
+    for index, name in enumerate(names):
+        print(f"llama_prepare_model_devices: using device Vulkan{index} ({name}) (unknown id) - 100 MiB free", flush=True)
 
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *args):
@@ -83,6 +89,80 @@ HTTPServer(("127.0.0.1", port), Handler).serve_forever()
 
 
 class RunnerTests(unittest.TestCase):
+    def test_実GPU名の一致だけで推論を許可し違うGPUと証拠欠落は回収する(self):
+        for startup in ("NVIDIA", "Intel", "通常", "複数GPU"):
+            with self.subTest(startup=startup), self.environment(startup=startup, seeds="1") as (args, _, created):
+                args.gpu_layers = 99
+                args.expected_device_name = "NVIDIA GeForce RTX 5060 Laptop GPU"
+                with mock.patch.object(runner, "evaluate_case", wraps=runner.evaluate_case) as evaluate:
+                    if startup == "NVIDIA":
+                        result = runner.run(args)
+                        self.assertEqual(evaluate.call_count, 1)
+                        evidence = result["server"]["device_name_evidence"]
+                        self.assertTrue(evidence["passed"])
+                        self.assertEqual(evidence["devices"][0]["name"], args.expected_device_name)
+                    else:
+                        with self.assertRaisesRegex(ValueError, "GPU名"):
+                            runner.run(args)
+                        evaluate.assert_not_called()
+                        result = json.loads(args.output.read_text(encoding="utf-8"))
+                        self.assertEqual(result["status"], "failed")
+                        self.assertEqual(result["results"], [])
+                self.assertEqual(len(created), 1)
+                self.assertIsNotNone(created[0][0].returncode)
+
+    def test_CPUへのGPU名指定と空の実GPU名は起動前に拒否する(self):
+        for layers, expected in ((0, "NVIDIA"), (99, " ")):
+            with self.subTest(layers=layers), self.environment() as (args, _, created):
+                args.gpu_layers, args.expected_device_name = layers, expected
+                with self.assertRaisesRegex(ValueError, "GPU99"):
+                    runner.run(args)
+                self.assertEqual(created, [])
+
+    def test_生成profileは既定互換を保ち指定値だけを独立して上書きする(self):
+        case = {"body": {"messages": [{"role": "user", "content": "質問"}],
+                         "temperature": 0.8, "top_k": 30, "top_p": 0.9,
+                         "repeat_penalty": 1.2, "tools": []}}
+        before = copy.deepcopy(case)
+        expected = {"current": (0.6, 30, 1.2), "official": (0.1, 50, 1.05), "greedy": (0, 50, 1.05)}
+        for profile, values in expected.items():
+            with self.subTest(profile=profile):
+                body = runner.generation_body(case, 2, 128, profile)
+                self.assertEqual(tuple(body[key] for key in ("temperature", "top_k", "repeat_penalty")), values)
+                self.assertEqual(body["top_p"], 0.9)
+                self.assertEqual(body["seed"], 2)
+                self.assertEqual(body["max_tokens"], 128)
+                self.assertFalse(body["cache_prompt"])
+                self.assertFalse(body["stream"])
+                body["messages"].clear()
+                self.assertEqual(case, before)
+        self.assertEqual(runner.generation_body(case, 2, 128), runner.generation_body(case, 2, 128, "current"))
+        settings = runner.generation_settings("official")
+        settings["temperature"] = 9
+        self.assertEqual(runner.generation_settings("official")["temperature"], 0.1)
+        with self.assertRaisesRegex(ValueError, "不明な生成profile"):
+            runner.generation_body(case, 1, 128, "typo")
+
+    def test_全profileを要求と結果メタ情報へ同じ条件で保存する(self):
+        for profile in runner.GENERATION_PROFILES:
+            with self.subTest(profile=profile), self.environment(seeds="1") as (args, _, _):
+                args.generation_profile = profile
+                result = runner.run(args)
+                saved = json.loads(args.output.read_text(encoding="utf-8"))
+                self.assertEqual(saved["parameters"]["generation_profile"], profile)
+                for key, value in runner.generation_settings(profile).items():
+                    self.assertEqual(saved["parameters"][key], value)
+                    self.assertEqual(result["results"][0]["request"][key], value)
+
+    def test_入力検査は生成profileを受け取らず本番bodyだけを検査する(self):
+        from contextlib import redirect_stderr
+        import io
+
+        required = [item for name in ("server", "model", "template", "input", "output")
+                    for item in ("--" + name, name)]
+        with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            runner.parser().parse_args(["inspect", *required, "--gpu-layers", "0", "--generation-profile", "official"])
+
     def test_起動詳細度は既定5で明示値を優先し引数を重複させない(self):
         args = runner.parser().parse_args([
             "evaluate", "--server", "server.exe", "--model", "model.gguf",
@@ -153,6 +233,7 @@ class RunnerTests(unittest.TestCase):
             with mock.patch.dict(os.environ, {"HF_TOKEN": "漏らしてはいけない", "LLAMA_ARG_MODEL_URL": "外部URL"}):
                 result = runner.run(args)
             self.assertEqual(result["status"], "completed")
+            self.assertEqual(result["parameters"]["generation_profile"], "current")
             self.assertEqual([item["seed"] for item in result["results"]], [1, 2])
             for item in result["results"]:
                 self.assertEqual(item["request"]["tools"], cases[0]["body"]["tools"])

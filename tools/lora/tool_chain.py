@@ -46,12 +46,12 @@ def unique_object(pairs):
     return value
 
 
-def load_input(path):
+def load_input(path, fixture_path=FIXTURE):
     source, cases = runner.load_cases(path)
-    fixture = json.loads(FIXTURE.read_text(encoding="utf-8"))
+    fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
     require({key: value for key, value in source.items() if key != "cases"}
             == {key: value for key, value in fixture.items() if key != "cases"}, "fixture のメタ情報が変わっています")
-    require(len(cases) == 3, "fixture は固定の3シナリオです")
+    require(len(cases) == len(fixture["cases"]), "fixture と入力のシナリオ数が違います")
     for case, raw in zip(cases, fixture["cases"]):
         require({key: value for key, value in case.items() if key != "body"} == raw,
                 "本番body以外のfixtureが変わっています")
@@ -96,7 +96,8 @@ def run_chain(client, case, seed, args, result, record):
         event = {"event": "generation", "run_id": result["run_id"], "turn": turn,
                  "case_id": case["id"], "variant": result["variant"], "seed": seed,
                  "status": "running", "expected_stage": completed + 1,
-                 "request": runner.generation_body(conversation, seed, args.max_tokens)}
+                 "request": runner.generation_body(conversation, seed, args.max_tokens,
+                                                   getattr(args, "generation_profile", "current"))}
         try:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
@@ -161,21 +162,27 @@ def run_chain(client, case, seed, args, result, record):
 
 
 def run(args):
-    require(args.adapter is not None, "基底と比較するadapterを明示してください")
-    source, cases = load_input(args.input)
+    selection = getattr(args, "variants", "both")
+    require(selection in (*VARIANTS, "both"), "--variants はbase、adapter、bothから指定してください")
+    variants = VARIANTS if selection == "both" else (selection,)
+    require("adapter" not in variants or args.adapter is not None,
+            "adapterまたはbothの検査には--adapterを指定してください")
+    fixture_path = getattr(args, "fixture", FIXTURE)
+    source, cases = load_input(args.input, fixture_path)
     output = args.output.resolve()
     journal_path = output.with_name(output.stem + ".events.jsonl")
-    logs = {variant: output.with_name(output.stem + f".{variant}.server.log") for variant in VARIANTS}
+    logs = {variant: output.with_name(output.stem + f".{variant}.server.log") for variant in variants}
     require(not any(path.exists() for path in (output, journal_path, *logs.values(), output.with_name(output.name + ".pending"))),
             "結果またはログは上書きしません。新規出力名を指定してください")
+    file_names = ("server", "model", "template", "input") + (("adapter",) if "adapter" in variants else ())
     document = {"schema_version": 1, "status": "running", "boundary": BOUNDARY,
                 "started_at": runner.utc_now(), "human_judgment": None,
-                "files": {name: runner.file_record(getattr(args, name)) for name in ("server", "model", "adapter", "template", "input")},
-                "fixture": runner.file_record(FIXTURE), "events": str(journal_path),
-                "parameters": {"seeds": list(SEEDS), "temperature": 0.6, "cache_prompt": False,
+                "files": {name: runner.file_record(getattr(args, name)) for name in file_names},
+                "fixture": runner.file_record(fixture_path), "events": str(journal_path),
+                "parameters": {"variants": list(variants), "seeds": list(SEEDS), **runner.generation_parameters(args), "cache_prompt": False,
                                "gpu_layers": args.gpu_layers, "context": args.context, "max_tokens": args.max_tokens,
                                "max_generations": args.max_generations, "chain_timeout": args.chain_timeout},
-                "expected_runs": 18, "servers": {}, "results": []}
+                "expected_runs": len(variants) * len(cases) * len(SEEDS), "servers": {}, "results": []}
     output.parent.mkdir(parents=True, exist_ok=True)
     with output.open("x", encoding="utf-8") as handle:
         json.dump(document, handle, ensure_ascii=False, indent=2)
@@ -187,7 +194,7 @@ def run(args):
                 sequence += 1
                 runner.append_result(journal, {"sequence": sequence, **event})
             next_snapshot = time.monotonic() + args.snapshot_seconds
-            for variant in VARIANTS:
+            for variant in variants:
                 settings = copy.copy(args)
                 settings.adapter = args.adapter if variant == "adapter" else None
                 with runner.local_server(settings, logs[variant]) as (client, server):
@@ -244,7 +251,10 @@ def run(args):
 
 def parser():
     result = argparse.ArgumentParser(description=__doc__)
-    runner.add_server_arguments(result, adapter_required=True)
+    runner.add_server_arguments(result)
+    result.add_argument("--variants", choices=(*VARIANTS, "both"), default="both",
+                        help="検査対象。既定both。adapterまたはbothには--adapterが必要")
+    result.add_argument("--fixture", type=Path, default=FIXTURE, help="入力と照合するraw fixture。既定は開発用3シナリオ")
     result.add_argument("--max-generations", type=int, choices=range(1, 7), default=6, help="1シナリオの生成上限。最大6")
     result.add_argument("--chain-timeout", type=runner.positive_number, default=600, help="1シナリオの総時間上限秒数")
     return result

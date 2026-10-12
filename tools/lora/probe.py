@@ -184,14 +184,16 @@ def parse_args(argv=None):
                               "--seeds", "1", "--max-tokens", str(MAX_TOKENS), "--limit", "1", *values])
     if args.adapter is None:
         parser.error("LoRA適用検査では--adapterが必須です")
-    if args.split != "train" or args.seeds != [1] or args.max_tokens != MAX_TOKENS or args.gpu_layers != 0:
-        parser.error("split=train、seed=1、max_tokens=1、GPU切替順は固定です")
+    if args.split != "train" or args.seeds != [1] or args.max_tokens != MAX_TOKENS or args.gpu_layers != 0 or args.generation_profile != "current":
+        parser.error("split=train、seed=1、max_tokens=1、GPU切替順は固定です。品質比較用の生成profileは指定できません")
     if not 1 <= args.limit <= MAX_CASES:
         parser.error(f"--limitは1〜{MAX_CASES}にしてください")
     return args
 
 
 def run(args):
+    if getattr(args, "generation_profile", "current") != "current":
+        raise ValueError("適用検査は固定条件です。品質比較用の生成profileは指定できません")
     if args.adapter is None or args.split != "train" or not 1 <= args.limit <= MAX_CASES:
         raise ValueError("アダプタと1〜8件のtrain教材を指定してください")
     output = args.output.resolve()
@@ -224,6 +226,8 @@ def run(args):
         for label, gpu_layers, has_adapter in RUNS:
             settings = copy.copy(args)
             settings.gpu_layers = gpu_layers
+            if gpu_layers == 0:
+                settings.expected_device_name = None
             settings.adapter = args.adapter if has_adapter else None
             settings.max_tokens = MAX_TOKENS
             settings.verbosity = 5

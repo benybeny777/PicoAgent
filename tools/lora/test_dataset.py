@@ -1,7 +1,9 @@
 """教材の分割、根拠、誤答の扱いとツール引数を独立に検査する。"""
 
 import copy
+import hashlib
 import json
+import re
 import unittest
 from collections import Counter, defaultdict
 from pathlib import Path
@@ -367,6 +369,140 @@ class 教材検査(unittest.TestCase):
             bad["target"]["tool_calls"][0]["function"]["arguments"] = json.dumps(args)
             with self.assertRaisesRegex(ValueError, error):
                 dataset.validate_tool_arguments({"cases": [bad]})
+
+
+class 製品判定用追加教材検査(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.base = dataset.generate_dataset()
+        cls.extended = dataset.generate_dataset("product-gate")
+        cls.cases = [c for c in cls.extended["cases"] if c["provenance"].get("extension") == "product-gate"]
+
+    def test_追加は明示指定だけで既存全ケースと固定材料を変えない(self):
+        self.assertEqual(dataset.digest(self.base), "1b45ee2ed76d6c930a4406f1224264d66bc5c506e18b6f28846b338214faa71c")
+        self.assertEqual(self.extended["cases"][:1244], self.base["cases"])
+        self.assertEqual({k: v["count"] for k, v in self.extended["metadata"]["splits"].items()}, {"train": 1362, "dev": 86, "final": 100})
+        for name, expected in (("selection-v3.json", "26f1d5cc408df3dce09ef688acceacfb42f333d537786be22011cf95ccc899ed"), ("casual-challenge.json", "3a6fa14e6a5d413cacc2aed5e30ae9cc725ac9e4973c504c50b75f7d4d451a33")):
+            path = Path(dataset.__file__).parent / "fixtures" / name
+            self.assertEqual(hashlib.sha256(path.read_bytes()).hexdigest(), expected)
+        with self.assertRaisesRegex(ValueError, "未対応"):
+            dataset.generate_dataset("unknown")
+
+    def test_三百四件は学習専用で新人物と三つの一人称を持つ(self):
+        self.assertEqual(Counter(c["category"] for c in self.cases), {"gate_ownership": 48, "gate_quote": 48, "gate_knowledge": 64, "gate_correction": 32, "gate_conversation": 48, "gate_tool_branch": 64})
+        self.assertTrue(all(c["split"] == "train" for c in self.cases))
+        old_names = {name for c in self.base["cases"] for name in c["provenance"]["entities"].values()}
+        names = {name for c in self.cases for name in c["provenance"]["entities"].values()}
+        self.assertFalse(names & old_names)
+        self.assertEqual({c["provenance"]["first_person"] for c in self.cases}, {"私", "僕", "わたし"})
+        self.assertEqual({c["provenance"]["profile_format"] for c in self.cases}, {"fields", "prose", "bullets", "long"})
+        for case in self.cases:
+            text = dataset.canonical({key: case[key] for key in ("question", "target", "history")})
+            self.assertNotRegex(text, r"\{(?:first|user|character|speaker|recipient|[a-z_]+)\}")
+
+    def test_既知と未記載と未定は同じ質問で根拠だけを変える(self):
+        groups = defaultdict(list)
+        for case in self.cases:
+            key = case["provenance"].get("contrast_id", "")
+            if key.endswith(("start_status", "frequency_status")):
+                groups[key].append(case)
+        self.assertEqual(len(groups), 16)
+        for cases in groups.values():
+            self.assertEqual(len(cases), 3)
+            self.assertEqual(len({c["question"] for c in cases}), 1)
+            self.assertEqual(len({c["target"]["content"] for c in cases}), 3)
+            known, missing, undecided = cases
+            self.assertEqual(known["expected"]["facts"][0]["status"], "known")
+            self.assertFalse(known["expected"]["unknown"])
+            self.assertTrue(missing["expected"]["unknown"])
+            self.assertIn("分かりません", missing["target"]["content"])
+            self.assertNotIn("決めていません", missing["target"]["content"])
+            self.assertFalse(undecided["expected"]["unknown"])
+            self.assertEqual(undecided["expected"]["facts"][0]["status"], "explicit_none")
+            self.assertIn("決めていません", undecided["target"]["content"])
+
+    def test_引用の相手の入替と否定を本人や利用者へ移さない(self):
+        roles = {"quoted_me": "speaker", "quoted_you": "recipient", "quote_reversed_roles": "speaker"}
+        for case in self.cases:
+            operation = case["provenance"]["selection"]["operation"]
+            if operation in roles:
+                entry = case["expected"]["facts"][0]
+                self.assertEqual(entry["owner"], roles[operation])
+                self.assertEqual(entry["status"], "reported")
+                self.assertIn(case["provenance"]["entities"][roles[operation]], case["target"]["content"])
+            elif operation == "quote_negation":
+                denied, accepted = case["expected"]["facts"]
+                self.assertEqual(denied["kind"], "否定した飲み物")
+                self.assertIn(denied["value"] + "を否定", case["target"]["content"])
+                self.assertIn(accepted["value"] + "が好きだと述べ", case["target"]["content"])
+            elif operation == "quote_missing_listener":
+                self.assertEqual(case["expected"]["unknown"], [{"owner": "recipient", "kind": "引用の相手"}])
+
+    def test_訂正は新しい主体の値だけを更新し過去の誤答を教師にしない(self):
+        for case in self.cases:
+            if case["category"] != "gate_correction":
+                continue
+            operation = case["provenance"]["selection"]["operation"]
+            answer = case["target"]["content"]
+            if operation.startswith("assistant_wrong"):
+                self.assertEqual(case["provenance"]["masked_history_indices"], [1])
+                self.assertNotEqual(answer, case["history"][1]["content"])
+            else:
+                previous = [e for e in case["provenance"]["facts"] if e["status"] == "superseded"]
+                self.assertEqual(len(previous), 1)
+                self.assertEqual(previous[0]["owner"], "user")
+                self.assertNotIn(previous[0]["value"], answer)
+                current = case["expected"]["facts"][0]
+                self.assertEqual((current["owner"], current["source"]), ("user", "/question"))
+                self.assertIn(current["value"], answer)
+
+    def test_会話二十四対は返答の対象や時点や同意の有無を変える(self):
+        groups = defaultdict(list)
+        for case in self.cases:
+            if case["category"] == "gate_conversation":
+                groups[case["provenance"]["contrast_id"]].append(case)
+        self.assertEqual(len(groups), 24)
+        for pair in groups.values():
+            self.assertEqual(len(pair), 2)
+            self.assertEqual(pair[0]["history"], pair[1]["history"])
+            self.assertNotEqual(pair[0]["question"], pair[1]["question"])
+            self.assertNotEqual(pair[0]["target"], pair[1]["target"])
+            self.assertNotEqual(pair[0]["provenance"]["selection"]["intent"], pair[1]["provenance"]["selection"]["intent"])
+
+    def test_分岐は表示行番号でなくファイルの値と計算結果を使う(self):
+        groups = defaultdict(list)
+        for case in self.cases:
+            if case["category"] == "gate_tool_branch":
+                choice = case["provenance"]["selection"]
+                groups[(choice["chain"], choice["variant"])].append(case)
+        self.assertEqual(len(groups), 16)
+        expected_branches = [[1, 0], [0, 1], [0, 1], [1, 0], [0, 1], [0, 1], [0, 1], [1, 0]]
+        for (chain, variant), cases in groups.items():
+            self.assertEqual(len(cases), 4)
+            whole = cases[-1]["continuation"]
+            read_call = whole[0]["tool_calls"][0]["arguments"]
+            numbered = re.findall(r"(?m)^(\d+)\t(.*)$", whole[1]["content"])
+            self.assertEqual([int(number) for number, _ in numbered], list(range(read_call["offset"], read_call["offset"] + read_call["limit"])))
+            fields = dict(re.findall(r"(?m)^\d+\t(value|total) = (\d+)$", whole[1]["content"]))
+            args = whole[2]["tool_calls"][0]["arguments"]
+            self.assertEqual((args["value"], args["total"]), (int(fields["value"]), int(fields["total"])))
+            self.assertNotIn(args["value"], [int(number) for number, _ in numbered])
+            self.assertIn(f"{args['value'] / args['total'] * 100:.2f}%", whole[3]["content"])
+            selection = cases[-1]["provenance"]["selection"]
+            branch = expected_branches[int(chain[-2:])][variant]
+            self.assertEqual(selection["selected_branch"], branch)
+            self.assertEqual(whole[4]["tool_calls"][0]["arguments"]["location"], selection["locations"][branch])
+            for stage, case in enumerate(cases):
+                self.assertEqual(case["continuation"], whole[:2 * stage])
+                if stage < 3:
+                    current = case["target"]["tool_calls"][0]["function"]
+                    source_call = whole[stage * 2]["tool_calls"][0]
+                    self.assertEqual(current["name"], source_call["name"])
+                    self.assertEqual(json.loads(current["arguments"]), source_call["arguments"])
+            self.assertNotIn("tool_calls", cases[-1]["target"])
+            self.assertEqual(cases[-1]["expected"]["kind"], "exact")
+            for entry in cases[-1]["expected"]["facts"]:
+                self.assertTrue(entry["source"].startswith("/continuation/"))
 
 
 if __name__ == "__main__":

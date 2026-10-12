@@ -10,6 +10,7 @@ import json
 import math
 import os
 from pathlib import Path
+import re
 import secrets
 import socket
 import subprocess
@@ -23,6 +24,26 @@ from urllib import error
 # 原子的配置のWindows共有違反対策は、配布スクリプトの共通実装を使う。
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from scripts.voice_training_common import atomic_move
+
+
+# currentは従来の要求を維持する。指定しない項目は本番bodyとサーバの既定を使う。
+# officialは固定した公式モデルカードの3指定、greedyはその温度だけを0へ変える。
+GENERATION_PROFILES = {
+    "current": {"temperature": 0.6},
+    "official": {"temperature": 0.1, "top_k": 50, "repeat_penalty": 1.05},
+}
+GENERATION_PROFILES["greedy"] = {**GENERATION_PROFILES["official"], "temperature": 0}
+
+
+def generation_settings(profile="current"):
+    if profile not in GENERATION_PROFILES:
+        raise ValueError(f"不明な生成profileです: {profile}")
+    return GENERATION_PROFILES[profile].copy()
+
+
+def generation_parameters(args):
+    profile = getattr(args, "generation_profile", "current")
+    return {"generation_profile": profile, **generation_settings(profile)}
 
 
 def utc_now():
@@ -193,8 +214,28 @@ def stop_process(process):
         process.wait()
 
 
+def device_name_evidence(log_path, expected):
+    """列挙番号ではなく、固定llama.cppがモデルへ選んだ実GPU名を照合する。"""
+    lines = [line for line in log_path.read_text(encoding="utf-8", errors="replace").splitlines()
+             if "llama_prepare_model_devices: using device " in line]
+    devices = []
+    for line in lines:
+        match = re.search(r"llama_prepare_model_devices: using device (\S+) \((.*)\) \(([^()]*)\) - ", line)
+        if match is None:
+            raise ValueError("実際に選択したGPU名のログ証拠を解釈できません")
+        devices.append({"device": match[1], "name": match[2], "id": match[3]})
+    if not devices:
+        raise ValueError(f"実際に選択したGPU名のログ証拠がありません。期待値: {expected}")
+    if any(device["name"] != expected for device in devices):
+        raise ValueError(f"実際に選択したGPU名が一致しません。期待値: {expected} / 実際: {[device['name'] for device in devices]}")
+    return {"expected_name": expected, "devices": devices, "passed": True}
+
+
 @contextmanager
 def local_server(args, log_path):
+    expected_device = getattr(args, "expected_device_name", None)
+    if expected_device is not None and (args.gpu_layers != 99 or not expected_device.strip()):
+        raise ValueError("--expected-device-nameはGPU99時だけ指定でき、空の名前は使えません")
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as port_socket:
         port_socket.bind(("127.0.0.1", 0))
         port = port_socket.getsockname()[1]
@@ -227,11 +268,14 @@ def local_server(args, log_path):
                 except (error.URLError, TimeoutError, ConnectionError):
                     pass
                 time.sleep(min(0.1, max(0, deadline - time.monotonic())))
-            yield client, {
+            server = {
                 "pid": process.pid, "port": port, "props": props,
                 "arguments": ["<実行ごとの認証キー>" if item == api_key else item for item in command],
                 "log": str(log_path),
             }
+            if expected_device is not None:
+                server["device_name_evidence"] = device_name_evidence(log_path, expected_device)
+            yield client, server
         finally:
             stop_process(process)
 
@@ -266,14 +310,15 @@ def load_cases(path, split=None, limit=None):
     return document, selected
 
 
-def generation_body(case, seed, max_tokens):
+def generation_body(case, seed, max_tokens, profile="current"):
     body = copy.deepcopy(case["body"])
-    body.update(temperature=0.6, seed=seed, stream=False, cache_prompt=False, max_tokens=max_tokens)
+    body.update(generation_settings(profile))
+    body.update(seed=seed, stream=False, cache_prompt=False, max_tokens=max_tokens)
     return body
 
 
 def evaluate_case(client, case, seed, args):
-    body = generation_body(case, seed, args.max_tokens)
+    body = generation_body(case, seed, args.max_tokens, getattr(args, "generation_profile", "current"))
     started = time.perf_counter()
     response = client.json("/v1/chat/completions", body, timeout=args.request_timeout)
     elapsed = time.perf_counter() - started
@@ -311,6 +356,7 @@ def inspect_case(client, case, args):
 
 
 def run(args):
+    profile = getattr(args, "generation_profile", "current")
     output = args.output.resolve()
     log_path = output.with_name(output.stem + ".server.log")
     journal_path = output.with_name(output.stem + ".results.jsonl")
@@ -327,7 +373,8 @@ def run(args):
         "started_at": utc_now(), "files": files,
         "input_metadata": {key: value for key, value in source.items() if key != "cases"},
         "parameters": {"seeds": args.seeds if args.command == "evaluate" else [],
-                       "temperature": 0.6, "cache_prompt": False, "stream": False,
+                       **(generation_parameters(args) if args.command == "evaluate" else {}),
+                       "cache_prompt": False, "stream": False,
                        "max_tokens": args.max_tokens, "gpu_layers": args.gpu_layers,
                        "context": args.context, "split": args.split, "limit": args.limit},
         "expected_results": len(planned),
@@ -348,7 +395,7 @@ def run(args):
                         for seed in seeds:
                             result = {"case_id": case["id"], "seed": seed, "status": "running",
                                       "expected": case.get("expected"), "target": case.get("target"),
-                                      "request": generation_body(case, seed, args.max_tokens)
+                                      "request": generation_body(case, seed, args.max_tokens, profile)
                                       if args.command == "evaluate" else copy.deepcopy(case["body"]),
                                       "case_metadata": {key: value for key, value in case.items() if key != "body"}}
                             document["results"].append(result)
@@ -420,7 +467,7 @@ def seeds_value(value):
     return values
 
 
-def add_server_arguments(command, *, adapter_required=False):
+def add_server_arguments(command, *, adapter_required=False, include_generation_profile=True):
     for field, help_text in (("server", "起動するllama-server実行ファイル"), ("model", "ベースGGUF"),
                              ("template", "本番Jinjaテンプレート"), ("input", "Rustがbodyを追加したcases JSON"),
                              ("output", "新規作成する結果JSON")):
@@ -429,8 +476,12 @@ def add_server_arguments(command, *, adapter_required=False):
                          help="比較するLoRA GGUF" + ("。必須" if adapter_required else "。省略時はベースのみ"))
     command.add_argument("--gpu-layers", type=int, choices=(0, 99), required=True, help="0はCPU、99はGPU")
     command.add_argument("--device", help="明示する製品GPUデバイス名")
+    command.add_argument("--expected-device-name", help="GPU99時だけ、起動ログの実GPU名を完全一致で検査。不一致・証拠不足なら推論前に停止")
     command.add_argument("--context", type=positive_integer, default=4096, help="文脈長。既定4096")
     command.add_argument("--max-tokens", type=positive_integer, default=256, help="最大生成token数。既定256")
+    if include_generation_profile:
+        command.add_argument("--generation-profile", choices=tuple(GENERATION_PROFILES), default="current",
+                             help="生成設定。既定currentは従来の温度0.6、officialは公式指定、greedyは温度0。明示しない項目は本番bodyとサーバの既定を維持")
     command.add_argument("--startup-timeout", type=positive_number, default=180, help="起動の上限秒数")
     command.add_argument("--request-timeout", type=positive_number, default=120, help="API応答の総時間上限秒数")
     command.add_argument("--snapshot-seconds", type=positive_number, default=30, help="全JSONの保存間隔。結果は各件JSONLへ追記")
@@ -442,7 +493,7 @@ def parser():
     for name, description in (("evaluate", "本番入力で回答を生成し、未採点の結果を保存する"),
                               ("inspect", "本番テンプレートの入力文字列とtoken IDを保存する")):
         command = commands.add_parser(name, help=description, description=description)
-        add_server_arguments(command)
+        add_server_arguments(command, include_generation_profile=name == "evaluate")
         command.add_argument("--seeds", type=seeds_value, default=[1, 2, 3], help="推論seed。既定1,2,3")
         command.add_argument("--limit", type=positive_integer, help="対象ケースの先頭件数")
         command.add_argument("--split", help="対象splitの完全一致名")

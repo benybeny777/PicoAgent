@@ -31,6 +31,8 @@
 
 学習教材は主体と好み、日常会話、形式指定、不足確認、訂正と継続、ツール利用を含む。`fixtures/selection-v3.json`は追加教材の架空人物・複数属性・手順・会話対・ツール結果の材料を持ち、完成caseの組み立てと根拠検査は`dataset.py`へ集約する。人格は項目形式・散文・箇条書き・長文、一人称は私・僕・わたしを使う。連続ツールは一つの往復表から各段の入力と正解を作り、過去の呼出と結果を学習対象へ混ぜない。教材追加時も既存の学習・開発・最終評価ケースの固定SHAを検査し、最終評価の回答を見て教材を選ばない。
 
+生成の既定は学習1058件・開発86件・最終評価100件。`--extension product-gate`を指定すると、主体・引用・訂正・未記載と明示的な未定・会話の意図・計算結果で分岐する連続ツールの304件を学習へ追加し、学習は1362件になる。`fixtures/product-gate.json`は独立した架空の材料と対になる設問を持ち、共通の組み立て・往復表からの各段生成・根拠検査は`dataset.py`を使う。既存の全ケース、開発・最終評価、別管理の日常会話20件は変更しない。
+
 Rustでbodyを作った後は`dataset.validate_tool_arguments`で実schemaとの一致、`dataset.validate_exported_evidence`で回答の必要根拠が送信本文に残ることを検査する。後者は`expected.facts`のsourceが指す本文を照合し、別人物の同じ値だけで合格にしない。元の教材で正解を裏付けられても、主体未解決の記憶などが本番処理で除外される場合があるため、token一致だけでこの検査を代用しない。学習入口もGPU読込前に根拠保持を検査する。
 
 ```powershell
@@ -40,7 +42,9 @@ cargo test --manifest-path src-tauri/Cargo.toml --lib agent::context::fixtures::
 Remove-Item Env:LORA_FIXTURE_INPUT, Env:LORA_FIXTURE_OUTPUT
 ```
 
-`runner.py`は`--server <実行ファイル> --model <ベースGGUF> --template <本番Jinja> --input <本番body付きJSON> --output <新規結果JSON> --gpu-layers <0|99>`を必須とする。0はCPU、99はGPUで、必要なら`--device`へ製品で使うデバイスを指定する。`--adapter <LoRA GGUF>`の省略時はベースのみ。`evaluate`はtemperature 0.6、seed 1・2・3、キャッシュなし、最大生成256tokenを既定とし、`--seeds`・`--max-tokens`・`--split`・`--limit`で対象を明示できる。全入力を照合する`inspect`には`--split`・`--limit`を付けない。
+`runner.py`は`--server <実行ファイル> --model <ベースGGUF> --template <本番Jinja> --input <本番body付きJSON> --output <新規結果JSON> --gpu-layers <0|99>`を必須とする。0はCPU、99はGPU。`--device`へ渡す番号は実行前に`llama-server --list-devices`で実名と対応させる。番号を過去の実行から引き継がず、GPU比較では`--expected-device-name <実GPU名>`も指定する。起動ログの実名が完全一致しなければ、推論前に専用サーバを回収して停止する。CPUと実GPU名指定の併用は拒否する。
+
+`--adapter <LoRA GGUF>`の省略時はベースのみ。`evaluate`はseed 1・2・3、キャッシュなし、最大生成256tokenを既定とし、`--seeds`・`--max-tokens`・`--split`・`--limit`で対象を明示できる。生成設定はrunner内の正本を共有する`--generation-profile current|official|greedy`で選ぶ。currentは従来のtemperature 0.6、officialはLFM2.5-1.2B-JP-202606公式カードのtemperature 0.1・top_k 50・repetition_penalty 1.05（llama.cpp API名はrepeat_penalty）、greedyはofficialのtemperatureだけ0にする。指定外の値は元のbodyとサーバ既定を保持し、公式環境の完全再現とは呼ばない。profileと実要求を結果へ保存し、benchmarkと連続ツールも同じ正本を使う。全入力を照合する`inspect`には`--split`・`--limit`を付けず、生成profileも受け付けない。
 
 `probe.py`は同じファイル引数と必須の`--adapter`を受け、trainの先頭1件（`--limit`で最大8件）をCPU基底・CPUアダプタ・GPU基底・GPUアダプタで確認する。ツール・既存の出力制約がない入力を使い、生成だけを固定grammar `root ::= "a"`のASCII 1文字へ制約する。temperature 0、seed 1、max_tokens 1、post_sampling_probs false、候補5件を固定し、元の本番bodyと制約後のテンプレート全文・token列、および基底/adapter間の同一性を検査してから、先行tokenなしの生成位置0のraw確率だけを比較する。固定b11429は未完UTF-8の生成位置を確率列から除外し、native `/completion`も同じバッファを使うため、後続位置への移動やAPI切替では代替しない。許容文字の変更・再試行も行わない。
 
@@ -48,15 +52,15 @@ Remove-Item Env:LORA_FIXTURE_INPUT, Env:LORA_FIXTURE_OUTPUT
 
 `benchmark.py`はrunnerと同じサーバ引数に加え、`--adapter <LoRA GGUF> --case-ids <devのIDをカンマ区切りで1〜8件>`を必須とする。基底・アダプタそれぞれでキャッシュ無／有を分け、各入力を準備1回と測定3回、同じseedで生成する。TTFTはSSEで最初の可視文字を受け取るまでの時間とし、全体時間・サーバtimings・実際のcache_n・生成token数・生回答とcase別median/p95を保存する。3回のp95は最大値になるため参考値として扱う。短答や誤答による高速化を自動合格にせず、意味と生成量を照合する。JSON/SSEとも総応答時間を制限し、未完のSSE・指標欠落を成功扱いにしない。
 
-`tool_chain.py`の固定入力は`fixtures/tool-chain-eval.json`。学習・dev選定・最終評価へ混ぜない独立評価で、読込→割合計算→計算結果で地点を選ぶ天気取得→回答の2文脈と、読込失敗後に追加呼出せず回答する1文脈を持つ。上記のRust出力テストへこのfixtureを渡して本番bodyを作り、次のように実行する。
+`tool_chain.py`の既定入力は`fixtures/tool-chain-eval.json`。読込→割合計算→計算結果で地点を選ぶ天気取得→回答の2文脈と、読込失敗後に追加呼出せず回答する1文脈を持つ。この3文脈はPR #498で結果を検討済みの開発評価として扱う。未使用の採用判定は`fixtures/tool-chain-acceptance-v1.json`の6文脈を用い、候補を固定した後にだけ回答を生成する。最終結果で教材を調整して同じ集合を再受験しない。上記のRust出力テストへfixtureを渡して本番bodyを作り、次のように実行する。
 
 ```powershell
 python -B tools/lora/tool_chain.py --server '<llama-server実行ファイル>' --model '<基底GGUF>' --template src-tauri/src/providers/templates/lfm25-jp-history.jinja --input '<本番body付き連続ツールJSON>' --output '<新規結果JSON>' --adapter '<比較するLoRA GGUF>' --gpu-layers 99
 ```
 
-共通runnerの引数・専用サーバ・生成・保存・終了処理を使い、基底とadapterで同じbody・templateを使う。CPU検査は`--gpu-layers 0`を明示する。3シナリオ×seed 1/2/3×基底/adapterの18 runを、temperature 0.6・cache_prompt falseで実行する。`--max-generations`は既定かつ最大6、`--chain-timeout`は既定600秒で1 runの総時間を制限する。モデルが実際に生成したID・名前・JSON引数を照合してから、その呼出と対応する架空結果を次の生成へ渡す。正解呼出の先置き・置換、実ファイル読込、外部API実行は行わない。
+共通runnerの引数・専用サーバ・生成・保存・終了処理を使い、同じbody・templateで比較する。CPU検査は`--gpu-layers 0`を明示する。`--fixture <raw fixture JSON>`は本番body以外の全内容を照合する正本を選び、`--variants base|adapter|both`は実行する候補を選ぶ（既定both）。baseだけならadapterを読まず、adapter/bothでは`--adapter`が必須。件数はシナリオ数×seed 1/2/3×候補数で決まり、既定は18 run。`--generation-profile`で設定をそろえ、cache_promptはfalseを維持する。`--max-generations`は既定かつ最大6、`--chain-timeout`は既定600秒で1 runの総時間を制限する。モデルが実際に生成したID・名前・JSON引数を照合してから、その呼出と対応する架空結果を次の生成へ渡す。正解呼出の先置き・置換、実ファイル読込、外部API実行は行わない。
 
-順序違い・ID再利用・引数違い・依存呼出の並列化・早期終了・読込失敗後の追加呼出は不合格とする。各生成のbody・生応答・timings・経過時間・架空結果を`*.events.jsonl`へ追記し、全JSONは一定間隔・失敗・終了時に保存する。基底/adapterの専用ログと18 runの停止理由も残し、既存結果は上書きしない。終了コード0は機械検査完了、2は連鎖不合格あり、1は通信・起動等の処理失敗。最終回答の意味・数値説明・人格は機械検査で合格にせず、意味レビューを別記録にする。AI評価と人手評価を区別し、人が評価していない場合は`human_judgment: null`を維持する。実アプリの停止・人格変更・音声の受入や製品採用とは別に扱う。モデルを使わない回帰は`python -B -m unittest discover -s tools/lora -p test_tool_chain.py`で実行する。
+順序違い・ID再利用・引数違い・依存呼出の並列化・早期終了・読込失敗後の追加呼出は不合格とする。各生成のbody・生応答・timings・経過時間・架空結果を`*.events.jsonl`へ追記し、全JSONは一定間隔・失敗・終了時に保存する。実行した候補だけの専用ログと各runの停止理由も残し、既存結果は上書きしない。終了コード0は機械検査完了、2は連鎖不合格あり、1は通信・起動等の処理失敗。最終回答の意味・数値説明・人格は機械検査で合格にせず、意味レビューを別記録にする。AI評価と人手評価を区別し、人が評価していない場合は`human_judgment: null`を維持する。実アプリの停止・人格変更・音声の受入や製品採用とは別に扱う。モデルを使わない回帰は`python -B -m unittest discover -s tools/lora -p test_tool_chain.py`で実行する。
 
 `parity.py --input <本番body付きJSON> --inspection <inspect結果JSON> --base <HF資産ディレクトリ> --template <本番Jinja> --output <新規照合JSON>`で照合する。最終評価の入力も照合できるが、正解はローカルの学習範囲検査だけに使用し、モデルへ送信しない。一致判定は入力とテンプレートのSHA-256、全caseの対応、全文、全token IDのすべてを対象とする。llama.cppがテンプレートからBOSを除きtoken化時に戻す場合は、その単一BOSと全token一致を確認したうえで実効入力全文を比較する。raw本文の差と補正内容も保存し、他の本文差を正規化して隠さない。
 

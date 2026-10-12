@@ -30,6 +30,21 @@ def result(delta=0, content="a"):
 
 
 class 適用検査(unittest.TestCase):
+    def test_品質比較profileで適用検査の固定条件を変更させない(self):
+        from contextlib import redirect_stderr
+        from types import SimpleNamespace
+        import io
+
+        required = [item for name in ("server", "model", "template", "input", "output", "adapter")
+                    for item in ("--" + name, name)]
+        self.assertEqual(probe.parse_args(required).generation_profile, "current")
+        for profile in ("official", "greedy"):
+            with self.subTest(profile=profile), redirect_stderr(io.StringIO()):
+                with self.assertRaises(SystemExit):
+                    probe.parse_args([*required, "--generation-profile", profile])
+                with self.assertRaisesRegex(ValueError, "固定条件"):
+                    probe.run(SimpleNamespace(generation_profile=profile))
+
     def test_同じ本文でも共通tokenの非ゼロ差があれば合格する(self):
         verdict = probe.compare(result(), result(0.02))
         self.assertTrue(verdict["passed"])
@@ -150,6 +165,8 @@ class 適用検査(unittest.TestCase):
                 index = len(started)
                 started.append((settings.gpu_layers, settings.adapter, log))
                 self.assertEqual(settings.verbosity, 5)
+                self.assertEqual(settings.expected_device_name,
+                                 args.expected_device_name if settings.gpu_layers else None)
                 count = 24 if settings.gpu_layers and gpu_offload else 0
                 log.write_text(f"llama_model_load: offloaded {count}/24 layers to GPU\n", encoding="utf-8")
                 client = mock.Mock()
@@ -202,9 +219,11 @@ class 適用検査(unittest.TestCase):
     def test_適用検査の詳細ログ指定は呼出元の設定を書き換えない(self):
         with self.environment() as (args, _, _, _):
             args.verbosity = 0
+            args.expected_device_name = "NVIDIA GeForce RTX 5060 Laptop GPU"
             document = probe.run(args)
             self.assertTrue(document["passed"])
             self.assertEqual(args.verbosity, 0)
+            self.assertEqual(args.expected_device_name, "NVIDIA GeForce RTX 5060 Laptop GPU")
 
     def test_差未検出と確率欠落とGPU未使用とprompt変化を区別する(self):
         for options in ({"delta": 0}, {"missing": True}, {"gpu_offload": False}, {"prompt_changed": True}):
