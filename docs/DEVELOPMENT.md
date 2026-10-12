@@ -23,6 +23,7 @@
 | `python tools/lora/probe.py ...` | 少量学習したアダプタの有無をCPU・GPUで比較し、同じ入力の候補token確率が変わることを検査する。品質評価とは分ける |
 | `python tools/lora/runner.py evaluate ...` | 本番bodyで回答を生成し、seed別の生出力・ツール呼出・timings・経過時間を未採点のまま保存する |
 | `python tools/lora/benchmark.py ...` | 明示したdev入力で基底とアダプタを比較し、SSEの応答開始時間・全体時間・生成量をキャッシュ別に反復測定する |
+| `python tools/lora/tool_chain.py ...` | 実際に生成したツール呼出へ架空結果を返し、基底とアダプタの連続ツール利用を比較する |
 
 本番テンプレートの正本は`src-tauri/src/providers/templates/lfm25-jp-history.jinja`。教材の`body`をPython側で作り直さない。Rustの出力テストは`LORA_FIXTURE_INPUT`と`LORA_FIXTURE_OUTPUT`へ異なる新規入出力先を明示して実行する。
 
@@ -42,6 +43,16 @@ Remove-Item Env:LORA_FIXTURE_INPUT, Env:LORA_FIXTURE_OUTPUT
 `runner.py`は`--server <実行ファイル> --model <ベースGGUF> --template <本番Jinja> --input <本番body付きJSON> --output <新規結果JSON> --gpu-layers <0|99>`を必須とする。0はCPU、99はGPUで、必要なら`--device`へ製品で使うデバイスを指定する。`--adapter <LoRA GGUF>`の省略時はベースのみ。`evaluate`はtemperature 0.6、seed 1・2・3、キャッシュなし、最大生成256tokenを既定とし、`--seeds`・`--max-tokens`・`--split`・`--limit`で対象を明示できる。全入力を照合する`inspect`には`--split`・`--limit`を付けない。
 
 `benchmark.py`はrunnerと同じサーバ引数に加え、`--adapter <LoRA GGUF> --case-ids <devのIDをカンマ区切りで1〜8件>`を必須とする。基底・アダプタそれぞれでキャッシュ無／有を分け、各入力を準備1回と測定3回、同じseedで生成する。TTFTはSSEで最初の可視文字を受け取るまでの時間とし、全体時間・サーバtimings・実際のcache_n・生成token数・生回答とcase別median/p95を保存する。3回のp95は最大値になるため参考値として扱う。短答や誤答による高速化を自動合格にせず、意味と生成量を照合する。JSON/SSEとも総応答時間を制限し、未完のSSE・指標欠落を成功扱いにしない。
+
+`tool_chain.py`の固定入力は`fixtures/tool-chain-eval.json`。学習・dev選定・最終評価へ混ぜない独立評価で、読込→割合計算→計算結果で地点を選ぶ天気取得→回答の2文脈と、読込失敗後に追加呼出せず回答する1文脈を持つ。上記のRust出力テストへこのfixtureを渡して本番bodyを作り、次のように実行する。
+
+```powershell
+python -B tools/lora/tool_chain.py --server '<llama-server実行ファイル>' --model '<基底GGUF>' --template src-tauri/src/providers/templates/lfm25-jp-history.jinja --input '<本番body付き連続ツールJSON>' --output '<新規結果JSON>' --adapter '<比較するLoRA GGUF>' --gpu-layers 99
+```
+
+共通runnerの引数・専用サーバ・生成・保存・終了処理を使い、基底とadapterで同じbody・templateを使う。CPU検査は`--gpu-layers 0`を明示する。3シナリオ×seed 1/2/3×基底/adapterの18 runを、temperature 0.6・cache_prompt falseで実行する。`--max-generations`は既定かつ最大6、`--chain-timeout`は既定600秒で1 runの総時間を制限する。モデルが実際に生成したID・名前・JSON引数を照合してから、その呼出と対応する架空結果を次の生成へ渡す。正解呼出の先置き・置換、実ファイル読込、外部API実行は行わない。
+
+順序違い・ID再利用・引数違い・依存呼出の並列化・早期終了・読込失敗後の追加呼出は不合格とする。各生成のbody・生応答・timings・経過時間・架空結果を`*.events.jsonl`へ追記し、全JSONは一定間隔・失敗・終了時に保存する。基底/adapterの専用ログと18 runの停止理由も残し、既存結果は上書きしない。終了コード0は機械検査完了、2は連鎖不合格あり、1は通信・起動等の処理失敗。最終回答の意味・数値説明・人格は機械検査で合格にせず、意味レビューを別記録にする。AI評価と人手評価を区別し、人が評価していない場合は`human_judgment: null`を維持する。実アプリの停止・人格変更・音声の受入や製品採用とは別に扱う。モデルを使わない回帰は`python -B -m unittest discover -s tools/lora -p test_tool_chain.py`で実行する。
 
 `parity.py --input <本番body付きJSON> --inspection <inspect結果JSON> --base <HF資産ディレクトリ> --template <本番Jinja> --output <新規照合JSON>`で照合する。最終評価の入力も照合できるが、正解はローカルの学習範囲検査だけに使用し、モデルへ送信しない。一致判定は入力とテンプレートのSHA-256、全caseの対応、全文、全token IDのすべてを対象とする。llama.cppがテンプレートからBOSを除きtoken化時に戻す場合は、その単一BOSと全token一致を確認したうえで実効入力全文を比較する。raw本文の差と補正内容も保存し、他の本文差を正規化して隠さない。
 
