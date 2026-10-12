@@ -1,0 +1,56 @@
+{
+  "schema_version": 1,
+  "purpose": "隔離した連続ツール推論の評価専用。学習・dev選定・最終評価へ混ぜない。実アプリの停止、人格変更、音声の受入とは別。",
+  "cases": [
+    {
+      "id": "chain-eval-v1-above",
+      "split": "chain_eval",
+      "character": {"name": "晶穂", "profile": "名前は晶穂。一人称は私。落ち着いた丁寧な日本語で、要点から短く答える。"},
+      "memories": [], "history": [], "continuation": [],
+      "question": "検査専用/薄羽便_947.txtをread_fileで読んでください。そこに書かれた完了数と総数をproductivity_toolsのpercent_calcへ渡して割合を計算し、計算結果がファイル記載の境界以上なら『以上の地点』、未満なら『未満の地点』の現在の天気をweatherで取得してください。各結果を受け取ってから次のツールを1つずつ呼び、最後に割合・選んだ地点・天気・気温を簡潔に報告してください。読込に失敗したら再試行も計算も天気取得もせず、確認できなかったことだけ伝えてください。",
+      "tool_names": ["read_file", "productivity_tools", "weather"],
+      "target": {"role": "assistant", "content": ""},
+      "expected": {"facts": [], "manual_rubric": ["実際のread_file→percent_calc→weather呼出を順に行う", "947/1873の50.56%に基づき薄羽研究区を選び、霧・6.7°Cを報告する", "未取得情報を足さず、一人称を使うなら私を保つ"]},
+      "simulation": {
+        "kind": "success", "fixture_values": ["947", "1873", "50.56%", "6.7°C", "薄羽研究区", "砂灯管理村"],
+        "steps": [
+          {"name": "read_file", "arguments": {"path": "検査専用/薄羽便_947.txt"}, "line_count": 5, "result": "検査専用/薄羽便_947.txt\n5 行中 1〜5 行目\n1\t完了数: 947\n2\t総数: 1873\n3\t境界: 50%\n4\t以上の地点: 薄羽研究区\n5\t未満の地点: 砂灯管理村"},
+          {"name": "productivity_tools", "arguments": {"action": "percent_calc", "value": 947, "total": 1873}, "result": "947 / 1873 = 50.56%"},
+          {"name": "weather", "arguments": {"location": "薄羽研究区"}, "result": "**🌫️ 薄羽研究区の天気：霧**\nいまは 6.7°C\n"}
+        ]
+      }
+    },
+    {
+      "id": "chain-eval-v1-below",
+      "split": "chain_eval",
+      "character": {"name": "舜也", "profile": "名前は舜也。一人称は僕。穏やかで親しみのある日本語で、短く答える。"},
+      "memories": [], "history": [], "continuation": [],
+      "question": "検査専用/銀沙便_683.txtをread_fileで読んで。書かれている完了数と総数をproductivity_toolsのpercent_calcで割合にして、計算結果がファイルの境界以上なら『以上の地点』、境界未満なら『未満の地点』の現在の天気をweatherで調べて。前の結果を受け取ってから次を1つずつ呼び、割合、選んだ地点、天気、気温を短くまとめて。最初の読込が失敗した場合は、再試行や計算、天気取得をしないで、確認できなかったと伝えて。",
+      "tool_names": ["read_file", "productivity_tools", "weather"],
+      "target": {"role": "assistant", "content": ""},
+      "expected": {"facts": [], "manual_rubric": ["実際のread_file→percent_calc→weather呼出を順に行う", "683/2417の28.26%に基づき銀沙観測町を選び、晴れ・14.3°Cを報告する", "未取得情報を足さず、一人称を使うなら僕を保つ"]},
+      "simulation": {
+        "kind": "success", "fixture_values": ["683", "2417", "28.26%", "14.3°C", "霞鐘試験島", "銀沙観測町"],
+        "steps": [
+          {"name": "read_file", "arguments": {"path": "検査専用/銀沙便_683.txt"}, "line_count": 5, "result": "検査専用/銀沙便_683.txt\n5 行中 1〜5 行目\n1\t完了数: 683\n2\t総数: 2417\n3\t境界: 30%\n4\t以上の地点: 霞鐘試験島\n5\t未満の地点: 銀沙観測町"},
+          {"name": "productivity_tools", "arguments": {"action": "percent_calc", "value": 683, "total": 2417}, "result": "683 / 2417 = 28.26%"},
+          {"name": "weather", "arguments": {"location": "銀沙観測町"}, "result": "**☀️ 銀沙観測町の天気：晴れ**\nいまは 14.3°C\n"}
+        ]
+      }
+    },
+    {
+      "id": "chain-eval-v1-read-error",
+      "split": "chain_eval",
+      "character": {"name": "晶穂", "profile": "名前は晶穂。一人称は私。落ち着いた丁寧な日本語で、要点から短く答える。"},
+      "memories": [], "history": [], "continuation": [],
+      "question": "検査専用/凍波便_2591.txtをread_fileで読んでください。成功した場合だけ、記載の完了数と総数をproductivity_toolsのpercent_calcで計算して、その割合によってファイルに記載された地点の現在の天気をweatherで取得し、結果を短く報告してください。読込が失敗した場合は、再試行・別ファイルの読込・計算・天気取得をせず、割合と天気は確認できなかったとだけ伝えてください。",
+      "tool_names": ["read_file", "productivity_tools", "weather"],
+      "target": {"role": "assistant", "content": ""},
+      "expected": {"facts": [], "manual_rubric": ["実際のread_file呼出が失敗した後は、計算・weather・再試行を一切呼ばない", "割合と天気が未確認と分かる短い回答を返し、成功したふりをしない"]},
+      "simulation": {
+        "kind": "read_error", "fixture_values": ["凍波便_2591"],
+        "steps": [{"name": "read_file", "arguments": {"path": "検査専用/凍波便_2591.txt"}, "line_count": 1, "result": "エラー: 許可ルート外のため、このファイルは読み取れません。"}]
+      }
+    }
+  ]
+}

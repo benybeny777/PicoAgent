@@ -1,0 +1,233 @@
+"""実モデルを起動せず、LoRA適用の差・欠落・4起動の分離を検査する。"""
+
+import copy
+import json
+from contextlib import contextmanager
+from pathlib import Path
+import tempfile
+import unittest
+from unittest import mock
+
+import probe
+
+
+def response(delta=0, content="a"):
+    tokens = ["和", "私", "あ", "そ", "今"]
+    top = [{"id": 300 + i, "token": token, "bytes": list(token.encode("utf-8")), "logprob": -0.4 - i + delta}
+           for i, token in enumerate(tokens)]
+    return {"choices": [{"message": {"role": "assistant", "content": content},
+                         "finish_reason": "length", "logprobs": {"content": [{"id": 99, "token": "a", "bytes": [97], "logprob": -6 + delta, "top_logprobs": top}]}}],
+            "__verbose": {"tokens": [99]},
+            "usage": {"prompt_tokens": 32, "completion_tokens": 1}}
+
+
+def result(delta=0, content="a"):
+    request = {}
+    probe.set_probe_parameters(request)
+    return {"content": content, "raw_response": response(delta, content), "request": request,
+            "prompt_evidence": {"original": {"prompt": "同じ本番入力", "tokens": [1, 2]},
+                                "controlled": {"prompt": "同じ本番入力", "tokens": [1, 2]}}}
+
+
+class 適用検査(unittest.TestCase):
+    def test_同じ本文でも共通tokenの非ゼロ差があれば合格する(self):
+        verdict = probe.compare(result(), result(0.02))
+        self.assertTrue(verdict["passed"])
+        self.assertAlmostEqual(verdict["max_abs_logprob_delta"], 0.02)
+        self.assertEqual(len(verdict["common_candidates"]), 6)
+        self.assertEqual(verdict["outcome"], "effect_detected")
+        self.assertEqual(verdict["base_position"]["index"], 0)
+        self.assertEqual(verdict["adapter_position"]["prefix_token_ids"], [])
+
+    def test_同位置の差が閾値以下なら非ゼロ適用未検出と区別する(self):
+        for delta in (0, 1e-7):
+            verdict = probe.compare(result(), result(delta))
+            self.assertFalse(verdict["passed"])
+            self.assertEqual(verdict["outcome"], "no_effect_detected")
+
+    def test_無応答やlogprob欠落や非有限値を合格にしない(self):
+        for mode in ("空", "別文字", "未完UTF8", "欠落", "候補なし", "無限大", "未数値"):
+            with self.subTest(条件=mode):
+                bad = result()
+                first = bad["raw_response"]["choices"][0]
+                if mode == "空":
+                    bad["content"] = ""
+                elif mode == "別文字":
+                    bad["content"] = "b"
+                elif mode == "未完UTF8":
+                    first["logprobs"]["content"][0]["bytes"] = [227]
+                elif mode == "欠落":
+                    first.pop("logprobs")
+                elif mode == "候補なし":
+                    first["logprobs"]["content"][0]["top_logprobs"] = []
+                elif mode == "無限大":
+                    first["logprobs"]["content"][0]["logprob"] = float("inf")
+                else:
+                    first["logprobs"]["content"][0]["logprob"] = None
+                with self.assertRaises(ValueError):
+                    probe.compare(result(), bad)
+
+    def test_共通候補なしと異なる要求を比較しない(self):
+        bad = result()
+        for entry in bad["raw_response"]["choices"][0]["logprobs"]["content"]:
+            entry["id"] = 599
+            for i, candidate in enumerate(entry["top_logprobs"]):
+                candidate["id"] = 500 + i
+        bad["raw_response"]["__verbose"]["tokens"][0] = 599
+        with self.assertRaisesRegex(ValueError, "共通"):
+            probe.compare(result(), bad)
+
+    def test_先頭候補が未完UTF8でも固定ASCIIのraw候補差を比較する(self):
+        base, adapted = result(), result(0.02)
+        for value in (base, adapted):
+            first = value["raw_response"]["choices"][0]["logprobs"]["content"][0]
+            first["top_logprobs"][0].update(bytes=[227], token="")
+        # 自由生成の最有力候補が変わっても、採取する確率は両方とも位置0。
+        adapted["raw_response"]["choices"][0]["logprobs"]["content"][0]["top_logprobs"][1]["logprob"] = -0.2
+        verdict = probe.compare(base, adapted)
+        self.assertTrue(verdict["passed"])
+        self.assertEqual(verdict["base_position"]["index"], 0)
+        self.assertEqual(verdict["base_position"]["prefix_token_ids"], [])
+
+    def test_後続位置への移動と実token列欠落を判定不能にする(self):
+        for tokens in (None, [99, 99], [900], [198, 99]):
+            bad = result(0.02)
+            bad["raw_response"]["__verbose"]["tokens"] = tokens
+            with self.assertRaisesRegex(ValueError, "生成1位置目"):
+                probe.compare(result(), bad)
+        bad = result()
+        bad["request"]["seed"] = 2
+        with self.assertRaisesRegex(ValueError, "生成要求"):
+            probe.compare(result(), bad)
+
+    def test_制約前後と基底adapterのpromptやtoken差を比較しない(self):
+        for change in ("prompt", "tokens", "記録なし", "後処理確率"):
+            for both in (False, True):
+                with self.subTest(change=change, both=both):
+                    base, adapted = result(), result(0.02)
+                    if change == "記録なし":
+                        adapted.pop("prompt_evidence")
+                    elif change == "後処理確率":
+                        for value in (base, adapted):
+                            value["request"]["post_sampling_probs"] = True
+                    else:
+                        for side in (("original", "controlled") if both else ("controlled",)):
+                            adapted["prompt_evidence"][side][change] = "別入力" if change == "prompt" else [1, 3]
+                    with self.assertRaises(ValueError):
+                        probe.compare(base, adapted)
+
+    def test_ツールや既存制約を外して適用検査へ流さない(self):
+        for extra in ({"tools": [{"type": "function"}]}, {"grammar": "既存"},
+                      {"json_schema": {}}, {"response_format": {"type": "json_object"}}):
+            with self.subTest(extra=extra):
+                client = mock.Mock()
+                with self.assertRaisesRegex(ValueError, "ツール・出力制約なし"):
+                    probe.probe_case(client, {"body": {"messages": [], **extra}}, mock.Mock())
+                client.json.assert_not_called()
+
+    @contextmanager
+    def environment(self, delta=0.02, missing=False, gpu_offload=True, prompt_changed=False):
+        directory = Path(__file__).resolve().parents[2] / "temp" / "lora-probe-tests"
+        directory.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=directory) as temporary:
+            root = Path(temporary)
+            files = {key: root / (key + suffix) for key, suffix in (("server", ".exe"), ("model", ".gguf"), ("template", ".jinja"), ("adapter", ".gguf"))}
+            for key, path in files.items():
+                path.write_text(key, encoding="utf-8")
+            cases = [{"id": f"case-{split}", "split": split,
+                      "target": {"role": "assistant", "content": "正解"},
+                      "body": {"messages": [{"role": "user", "content": "私の名前は？"}], "temperature": 0.6}}
+                     for split in ("train", "dev", "final")]
+            source = root / "input.json"
+            source.write_text(json.dumps({"cases": cases}), encoding="utf-8")
+            argv = [value for key, path in files.items() for value in ("--" + key, str(path))]
+            argv += ["--input", str(source), "--output", str(root / "probe.json")]
+            args = probe.parse_args(argv)
+            started, stopped, bodies = [], [], []
+
+            @contextmanager
+            def server(settings, log):
+                index = len(started)
+                started.append((settings.gpu_layers, settings.adapter, log))
+                self.assertEqual(settings.verbosity, 5)
+                count = 24 if settings.gpu_layers and gpu_offload else 0
+                log.write_text(f"llama_model_load: offloaded {count}/24 layers to GPU\n", encoding="utf-8")
+                client = mock.Mock()
+
+                def answer(endpoint, body, timeout):
+                    if endpoint == "/apply-template":
+                        return {"prompt": "変化した入力" if prompt_changed and "grammar" in body else "同じ本番入力"}
+                    if endpoint == "/tokenize":
+                        return {"tokens": [1, 2]}
+                    self.assertEqual(endpoint, "/v1/chat/completions")
+                    bodies.append(copy.deepcopy(body))
+                    raw = response(delta if settings.adapter is not None else 0)
+                    if missing:
+                        raw["choices"][0].pop("logprobs")
+                    return raw
+
+                client.json.side_effect = answer
+                try:
+                    yield client, {"pid": 100 + index, "arguments": ["--gpu-layers", str(settings.gpu_layers)]}
+                finally:
+                    stopped.append(index)
+
+            with mock.patch.object(probe.runner, "local_server", side_effect=server):
+                yield args, started, stopped, bodies
+
+    def test_四起動を順番に分離し固定要求とSHAとログと判定を保存する(self):
+        with self.environment() as (args, started, stopped, bodies):
+            document = probe.run(args)
+            self.assertTrue(document["passed"])
+            self.assertEqual(document["status"], "completed")
+            self.assertEqual([(layers, adapter is not None) for layers, adapter, _ in started], [(0, False), (0, True), (99, False), (99, True)])
+            self.assertEqual(stopped, [0, 1, 2, 3])
+            self.assertEqual(document["parameters"]["case_ids"], ["case-train"])
+            self.assertEqual(len(document["comparisons"]), 2)
+            for body in bodies:
+                for key, expected in (("temperature", 0), ("seed", 1), ("max_tokens", 1), ("logprobs", True), ("top_logprobs", 5), ("cache_prompt", False), ("verbose", True), ("return_tokens", True), ("post_sampling_probs", False), ("grammar", probe.PROBE_GRAMMAR)):
+                    self.assertEqual(body[key], expected)
+            for record in document["files"].values():
+                self.assertEqual(len(record["sha256"]), 64)
+            for run in document["runs"]:
+                self.assertEqual(len(run["log_file"]["sha256"]), 64)
+                result = run["results"][0]
+                self.assertEqual(result["request"]["temperature"], 0)
+                self.assertEqual(result["request"], result["prompt_evidence"]["controlled"]["request"])
+                self.assertEqual(result["prompt_evidence"]["original"]["request"]["temperature"], 0.6)
+            saved = json.loads(args.output.read_text(encoding="utf-8"))
+            self.assertTrue(saved["passed"])
+            self.assertEqual(saved["runs"][1]["results"][0]["raw_response"], response(0.02))
+
+    def test_適用検査の詳細ログ指定は呼出元の設定を書き換えない(self):
+        with self.environment() as (args, _, _, _):
+            args.verbosity = 0
+            document = probe.run(args)
+            self.assertTrue(document["passed"])
+            self.assertEqual(args.verbosity, 0)
+
+    def test_差未検出と確率欠落とGPU未使用とprompt変化を区別する(self):
+        for options in ({"delta": 0}, {"missing": True}, {"gpu_offload": False}, {"prompt_changed": True}):
+            with self.subTest(条件=options), self.environment(**options) as (args, started, stopped, bodies):
+                document = probe.run(args)
+                self.assertFalse(document["passed"])
+                self.assertEqual(document["status"], "failed" if "delta" in options else "inconclusive")
+                expected_outcome = "no_effect_detected" if "delta" in options else "inconclusive"
+                self.assertIn(expected_outcome, [row["outcome"] for row in document["comparisons"]])
+                self.assertEqual(len(started), 4)
+                self.assertEqual(len(stopped), 4)
+                self.assertFalse(json.loads(args.output.read_text(encoding="utf-8"))["passed"])
+                if options.get("prompt_changed"):
+                    self.assertEqual(bodies, [])
+
+    def test_既存結果を上書きせずサーバを起動しない(self):
+        with self.environment() as (args, started, _, _):
+            args.output.write_text("保持", encoding="utf-8")
+            with self.assertRaises(FileExistsError):
+                probe.run(args)
+            self.assertEqual(args.output.read_text(encoding="utf-8"), "保持")
+            self.assertEqual(started, [])
+
+
+if __name__ == "__main__":
+    unittest.main()

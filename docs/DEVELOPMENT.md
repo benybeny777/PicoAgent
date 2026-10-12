@@ -8,6 +8,70 @@
 
 実行時は`bundled/embedding-memory/{venv,model,install.json}`と共通`bundled/python`を使う。固定revision、全モデル資産のサイズとSHA-256/Git blob SHA、実埋め込み処理を確認してから導入完了を記録する。GPU構成変更や不完全配置は管理導入で修復する。記憶ベクトルは`app_data_dir/memory-vectors.json`、診断ログはログフォルダの日付付き`embedding-memory.<YYYY-MM-DD>.log`（他のログと同じ1週間保持）。記憶原本の更新は既存の`store::lock_state`を維持し、Pythonへは毎回のスナップショットだけを渡す。索引は本文を保存せずSHA-256と正規化ベクトルだけを保存し、原本の正本や同期先として使わない。通信失敗後は専用プロセスを破棄し、古い応答を次の質問へ流用しない。
 
+## 開発用の日本語1.2B LoRA学習と評価
+
+`tools/lora/`は、LFM2.5-1.2B-JPの合成教材生成・入力照合・追加学習・比較評価に使う開発専用ツール。利用者の保存済み会話・記憶・秘密値を読まず、製品の既定モデルや設定を書き換えない。学習環境・モデル・途中結果は`temp/<作業名>/`へ隔離する。製品への同梱・自動取得・自動適用は行わず、学習完了も品質合格や製品採用を意味しない。
+
+| 入口 | 役割 |
+|---|---|
+| `python tools/lora/dataset.py --output <教材JSON>` | 架空の人物・事実・指示・ツール往復から教材を生成し、学習・開発・最終評価の分割と根拠を検査する |
+| Rustの`agent::context::fixtures::lora教材を本番入力で出力する`テスト | 教材を本番の文脈・プロバイダ変換へ通し、各caseへ送信`body`を追加する |
+| `python tools/lora/runner.py inspect ...` | 専用llama-serverで本番テンプレートを適用し、入力全文とtoken IDを保存する。回答を生成しない |
+| `python tools/lora/parity.py ...` | 保存したinspect結果と`training.prepare_case`の入力全文・全token IDを照合する。欠落・重複・不一致を非ゼロ終了と結果JSONで報告する |
+| `python tools/lora/training.py --prepare-only ...` | 正解completionだけが学習対象になり、履歴の誤答・利用者入力・ツール結果がlabelsから除外されることを検査する |
+| `python tools/lora/training.py ...` | ローカルHF資産を使ってCUDA GPU上でLoRAだけを更新する。GPU要件を満たさない場合は停止する |
+| `python tools/lora/probe.py ...` | 少量学習したアダプタの有無をCPU・GPUで比較し、同じ入力の候補token確率が変わることを検査する。品質評価とは分ける |
+| `python tools/lora/runner.py evaluate ...` | 本番bodyで回答を生成し、seed別の生出力・ツール呼出・timings・経過時間を未採点のまま保存する |
+| `python tools/lora/benchmark.py ...` | 明示したdev入力で基底とアダプタを比較し、SSEの応答開始時間・全体時間・生成量をキャッシュ別に反復測定する |
+| `python tools/lora/tool_chain.py ...` | 実際に生成したツール呼出へ架空結果を返し、基底とアダプタの連続ツール利用を比較する |
+
+本番テンプレートの正本は`src-tauri/src/providers/templates/lfm25-jp-history.jinja`。教材の`body`をPython側で作り直さない。Rustの出力テストは`LORA_FIXTURE_INPUT`と`LORA_FIXTURE_OUTPUT`へ異なる新規入出力先を明示して実行する。
+
+`tools/lora/fixtures/casual-challenge.json`は20種類の日常場面を集めた、学習と候補選定に使わない追加評価。生成器の最終100件を置き換えず、候補を固定してから別集計する。参照回答の文面一致ではなく、各問の根拠と期待行動で採点する。同じRustの出力テストで本番bodyを作り、使用前に入力照合を通す。
+
+学習教材は主体と好み、日常会話、形式指定、不足確認、訂正と継続、ツール利用を含む。`fixtures/selection-v3.json`は追加教材の架空人物・複数属性・手順・会話対・ツール結果の材料を持ち、完成caseの組み立てと根拠検査は`dataset.py`へ集約する。人格は項目形式・散文・箇条書き・長文、一人称は私・僕・わたしを使う。連続ツールは一つの往復表から各段の入力と正解を作り、過去の呼出と結果を学習対象へ混ぜない。教材追加時も既存の学習・開発・最終評価ケースの固定SHAを検査し、最終評価の回答を見て教材を選ばない。
+
+Rustでbodyを作った後は`dataset.validate_tool_arguments`で実schemaとの一致、`dataset.validate_exported_evidence`で回答の必要根拠が送信本文に残ることを検査する。後者は`expected.facts`のsourceが指す本文を照合し、別人物の同じ値だけで合格にしない。元の教材で正解を裏付けられても、主体未解決の記憶などが本番処理で除外される場合があるため、token一致だけでこの検査を代用しない。学習入口もGPU読込前に根拠保持を検査する。
+
+```powershell
+$env:LORA_FIXTURE_INPUT = '<教材JSONの絶対パス>'
+$env:LORA_FIXTURE_OUTPUT = '<本番body付きJSONの新規絶対パス>'
+cargo test --manifest-path src-tauri/Cargo.toml --lib agent::context::fixtures::lora教材を本番入力で出力する -- --ignored --exact
+Remove-Item Env:LORA_FIXTURE_INPUT, Env:LORA_FIXTURE_OUTPUT
+```
+
+`runner.py`は`--server <実行ファイル> --model <ベースGGUF> --template <本番Jinja> --input <本番body付きJSON> --output <新規結果JSON> --gpu-layers <0|99>`を必須とする。0はCPU、99はGPUで、必要なら`--device`へ製品で使うデバイスを指定する。`--adapter <LoRA GGUF>`の省略時はベースのみ。`evaluate`はtemperature 0.6、seed 1・2・3、キャッシュなし、最大生成256tokenを既定とし、`--seeds`・`--max-tokens`・`--split`・`--limit`で対象を明示できる。全入力を照合する`inspect`には`--split`・`--limit`を付けない。
+
+`probe.py`は同じファイル引数と必須の`--adapter`を受け、trainの先頭1件（`--limit`で最大8件）をCPU基底・CPUアダプタ・GPU基底・GPUアダプタで確認する。ツール・既存の出力制約がない入力を使い、生成だけを固定grammar `root ::= "a"`のASCII 1文字へ制約する。temperature 0、seed 1、max_tokens 1、post_sampling_probs false、候補5件を固定し、元の本番bodyと制約後のテンプレート全文・token列、および基底/adapter間の同一性を検査してから、先行tokenなしの生成位置0のraw確率だけを比較する。固定b11429は未完UTF-8の生成位置を確率列から除外し、native `/completion`も同じバッファを使うため、後続位置への移動やAPI切替では代替しない。許容文字の変更・再試行も行わない。
+
+適用検査の`effect_detected`は共通候補のlogprobに1e-5を超える差を確認した状態。`no_effect_detected`は取得済みの同位置の差が閾値以下で、アダプタ全体の無効を証明しない。確率欠落・入力や位置の不一致・バックエンド未確認は`inconclusive`（判定不能）とし、差ゼロと分ける。終了コードは順に0・1・2、中断は130。比較結果・制約前後の入力・生応答を新規JSONへ残す。このASCII出力は計測用であり、回答品質の評価には使わない。
+
+`benchmark.py`はrunnerと同じサーバ引数に加え、`--adapter <LoRA GGUF> --case-ids <devのIDをカンマ区切りで1〜8件>`を必須とする。基底・アダプタそれぞれでキャッシュ無／有を分け、各入力を準備1回と測定3回、同じseedで生成する。TTFTはSSEで最初の可視文字を受け取るまでの時間とし、全体時間・サーバtimings・実際のcache_n・生成token数・生回答とcase別median/p95を保存する。3回のp95は最大値になるため参考値として扱う。短答や誤答による高速化を自動合格にせず、意味と生成量を照合する。JSON/SSEとも総応答時間を制限し、未完のSSE・指標欠落を成功扱いにしない。
+
+`tool_chain.py`の固定入力は`fixtures/tool-chain-eval.json`。学習・dev選定・最終評価へ混ぜない独立評価で、読込→割合計算→計算結果で地点を選ぶ天気取得→回答の2文脈と、読込失敗後に追加呼出せず回答する1文脈を持つ。上記のRust出力テストへこのfixtureを渡して本番bodyを作り、次のように実行する。
+
+```powershell
+python -B tools/lora/tool_chain.py --server '<llama-server実行ファイル>' --model '<基底GGUF>' --template src-tauri/src/providers/templates/lfm25-jp-history.jinja --input '<本番body付き連続ツールJSON>' --output '<新規結果JSON>' --adapter '<比較するLoRA GGUF>' --gpu-layers 99
+```
+
+共通runnerの引数・専用サーバ・生成・保存・終了処理を使い、基底とadapterで同じbody・templateを使う。CPU検査は`--gpu-layers 0`を明示する。3シナリオ×seed 1/2/3×基底/adapterの18 runを、temperature 0.6・cache_prompt falseで実行する。`--max-generations`は既定かつ最大6、`--chain-timeout`は既定600秒で1 runの総時間を制限する。モデルが実際に生成したID・名前・JSON引数を照合してから、その呼出と対応する架空結果を次の生成へ渡す。正解呼出の先置き・置換、実ファイル読込、外部API実行は行わない。
+
+順序違い・ID再利用・引数違い・依存呼出の並列化・早期終了・読込失敗後の追加呼出は不合格とする。各生成のbody・生応答・timings・経過時間・架空結果を`*.events.jsonl`へ追記し、全JSONは一定間隔・失敗・終了時に保存する。基底/adapterの専用ログと18 runの停止理由も残し、既存結果は上書きしない。終了コード0は機械検査完了、2は連鎖不合格あり、1は通信・起動等の処理失敗。最終回答の意味・数値説明・人格は機械検査で合格にせず、意味レビューを別記録にする。AI評価と人手評価を区別し、人が評価していない場合は`human_judgment: null`を維持する。実アプリの停止・人格変更・音声の受入や製品採用とは別に扱う。モデルを使わない回帰は`python -B -m unittest discover -s tools/lora -p test_tool_chain.py`で実行する。
+
+`parity.py --input <本番body付きJSON> --inspection <inspect結果JSON> --base <HF資産ディレクトリ> --template <本番Jinja> --output <新規照合JSON>`で照合する。最終評価の入力も照合できるが、正解はローカルの学習範囲検査だけに使用し、モデルへ送信しない。一致判定は入力とテンプレートのSHA-256、全caseの対応、全文、全token IDのすべてを対象とする。llama.cppがテンプレートからBOSを除きtoken化時に戻す場合は、その単一BOSと全token一致を確認したうえで実効入力全文を比較する。raw本文の差と補正内容も保存し、他の本文差を正規化して隠さない。
+
+runnerは自分で起動した127.0.0.1の専用サーバだけを使い、正常終了・失敗・timeout・中断の各経路で終了を待つ。結果と同じディレクトリへ専用ログと1件ずつ追記する`*.results.jsonl`を残し、既存結果は上書きしない。全JSONは開始・一定間隔・失敗・終了時に保存し、完了時に追記記録の欠落・重複・順序を検査する。品質は正解語の一致だけで自動合格にせず、主体・根拠・未知情報・捏造・口調・連続ツールを出力全体で判定する。最終評価を教材選別や学習条件の探索に使わない。LoRAの実適用、CPU/GPUの速度、実アプリでの停止・キャラ切替・履歴の受入は、入力照合・学習成功と別に確認する。
+
+固定資産の来歴は`tools/lora/assets.json`、Windowsの依存組合せは`requirements-windows-cu130.txt`。管理下のPython 3.12本体を再利用し、CUDA対応を確かめてから作業専用venvへ導入する。公式causal-conv1dのWindows wheelがないため、PyTorch標準CUDA演算を明示して使う。高速拡張と同じ速度とは扱わず所要時間を測る。変換は固定llama.cppソースの`convert_lora_to_gguf.py --base <HF資産> --outfile <新規GGUF> --outtype f16 <adapterディレクトリ>`を使い、変換用requirementsによるCUDA版TorchのCPU版への置換はしない。
+
+`training.py`には`--input <本番body付きJSON> --base <HF資産> --template <本番Jinja> --output <新規ディレクトリ>`を渡す。既定はrank16、alpha32、dropout0.05、学習率0.0002、2epoch、batch1・勾配累積4。`--prepare-only`で全学習対象の長さと損失対象を先に検査する。`--limit 16 --epochs 1 --max-steps 2 --warmup 0`で少量学習し、GGUF変換と`probe.py`の適用確認を通してから本学習する。長さ超過を切り詰めず停止し、ベース重み・LoRA・勾配のCUDA配置を検査する。epoch完了時のcheckpointと最終adapterを保存し、未完了epochを完了扱いにしない。
+
+保存済みLoRAから追加学習する場合は、`--initial-adapter <adapterディレクトリ> --initial-manifest <前runのmanifest.json>`を対で指定する。同じベース重みのSHA-256、rank・alpha・対象層などの学習構造、manifestに記録された保存完了先を照合してから既存重みを読み込む。不一致・欠損を新規初期化で補わず停止する。これは重みを引き継ぐ新しいrunであり、optimizer・乱数状態の中断再開ではない。前runのmanifest・設定・重みのSHA-256を新manifestへ記録し、出力先を分けて旧成果を保持する。
+
+Python 3.12を基準に隔離環境を使い、対応GPUと依存の固定版を確認してから学習する。通常の`cargo xtask verify`は`tools/tests/lora-python.mjs`経由でLoRAのPython回帰を実行する。Python探索・起動は音声学習検査と共通の`tools/test-python.mjs`へ集約し、LoRAは3.12以上、既存音声学習は3.10以上を要求する。PATHまたは`LEARNING_TEST_PYTHON`で既存の実行ファイルを指定し、`-B -S`で標準ライブラリだけを使う。Torch等の取得やGPU起動は行わず、`LORA_TEST_MODEL`は引き継がないため、本番トークナイザの3検査はskipとしてverifyの出力へ記録する。入口だけの検査は`node --test tools/tests/lora-python.mjs`。
+
+本番トークナイザの3検査も含めるときは、`LORA_TEST_MODEL`へ既存のHF資産ディレクトリを明示し、transformers導入済みの隔離Pythonで別途`python -B -m unittest discover -s tools/lora -p 'test_*.py'`を実行する。環境・教材ハッシュ・学習条件・測定結果・採否は該当PR本文と出力manifestへ残す。
+
 ## Windows各版のビルドとアップロード
 
 PowerShell 7、Rust/Tauri、認証済みの`gh`、各版の許諾済み同梱素材を用意する。新しい数値版を採番してPRをマージした、追跡変更のない最新`origin/main`から実行する。バッチ自身は採番・マージ・任意モデル取得をしない。

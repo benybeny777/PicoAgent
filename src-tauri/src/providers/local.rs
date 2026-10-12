@@ -748,6 +748,16 @@ impl Provider for Local {
 
 inventory::submit! { ProviderReg { make: || Box::new(Local) } }
 
+/// 学習・評価の入力も、本番の要求組み立てをそのまま使う。
+#[cfg(test)]
+pub(crate) fn fixture_chat_body(
+    model: &str,
+    messages: &[Message],
+    tools: &[Value],
+) -> anyhow::Result<Value> {
+    chat_body(model, messages, tools)
+}
+
 #[cfg(test)]
 mod tests {
     #[test]
@@ -1087,7 +1097,10 @@ mod tests {
         use crate::providers::compatible::test_server::Server;
         let cfg = crate::config::Config::new();
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        cfg.set("PICOAGENT_LOCAL_PORT", &listener.local_addr().unwrap().port().to_string());
+        cfg.set(
+            "PICOAGENT_LOCAL_PORT",
+            &listener.local_addr().unwrap().port().to_string(),
+        );
         drop(listener);
         assert!(!super::Local.is_up(&cfg).await.unwrap());
         for status in [200, 503, 401, 500] {

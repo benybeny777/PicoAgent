@@ -1,0 +1,1514 @@
+{
+  "metadata": {
+    "schema_version": "1",
+    "purpose": "採用候補を決定した後だけ使う、独立した日常会話の挑戦評価20件。固定最終評価100件とは別に保持する。",
+    "selection_policy": "候補選定、早期停止、教材追加、正解調整、学習への逆流に使わない。結果を見て問題や参照回答を変更しない。",
+    "source": "この評価のために作った架空の会話だけ。実利用者資料、外部事実、モデルの評価出力は参照していない。",
+    "reference_policy": "targetは合格しうる短い参照回答の一例。全件で全文の意味とmanual_rubricを確認し、同じ期待行動を満たす別表現も認める。",
+    "tool_policy": "実行不要。全件tools・tool_names・continuationは空配列。",
+    "created_date": "2026-10-12",
+    "existing_dataset": {
+      "path": "temp/lora-training/dataset-v2.json",
+      "sha256": "9f81c4a0072936bae0cabe7a590d1e471a427e6d76643e256e1310295ecde5b9",
+      "final_count": 100,
+      "final_cases_sha256": "952786f92876e99f2013041f26da56d8f05bed58b0ef73bca5cd9b82f65f7926"
+    },
+    "review": {
+      "cases": 20,
+      "distinct_situations": 20,
+      "semantic_reviewed": 20,
+      "model_outputs_read": 0,
+      "external_facts_added": 0,
+      "code_or_existing_dataset_changes": false
+    },
+    "independence": {
+      "overlap_entities": [],
+      "overlap_values": [],
+      "overlap_case_ids": [],
+      "overlap_groups": [],
+      "overlap_normalized_inputs": []
+    },
+    "splits": {
+      "final": {
+        "count": 20,
+        "groups": 20,
+        "categories": {
+          "casual_topic_change": 1,
+          "casual_gentle_joke": 1,
+          "casual_ambiguous_backchannel": 1,
+          "casual_emotion_correction": 1,
+          "casual_temporary_refusal": 1,
+          "casual_aesthetic_preference": 1,
+          "casual_listen_without_advice": 1,
+          "casual_uncertain_social_cue": 1,
+          "casual_privacy_boundary": 1,
+          "casual_known_status_summary": 1,
+          "casual_small_success": 1,
+          "casual_disappointment_without_reframe": 1,
+          "casual_embarrassment_without_mindreading": 1,
+          "casual_resume_after_pause": 1,
+          "casual_conversational_distance": 1,
+          "casual_comfortable_silence": 1,
+          "casual_mixed_feelings": 1,
+          "casual_shared_imagination": 1,
+          "casual_self_referenced_progress": 1,
+          "casual_tactful_disagreement": 1
+        },
+        "sha256": "fd487b66fb65947fee4d65314ab18d6c8dfd9db6d54f51b9892c1c0703a6608a",
+        "entities": [
+          "史乃",
+          "啓介",
+          "沙月",
+          "灯里",
+          "真帆",
+          "碧人",
+          "絵里",
+          "誠司"
+        ],
+        "values": [
+          "一人で結べた",
+          "一行",
+          "二行",
+          "宛名待ち",
+          "寂しさ",
+          "封を済ませた",
+          "楽しみ",
+          "静かな余韻",
+          "額縁を選ぶところ",
+          "驚いた"
+        ]
+      }
+    }
+  },
+  "cases": [
+    {
+      "id": "casual-challenge-01",
+      "group_id": "casual-challenge-world-01",
+      "split": "final",
+      "category": "casual_topic_change",
+      "character": {
+        "name": "灯里",
+        "profile": "名前: 灯里\n一人称: 私\n口調: 落ち着いた親しみやすい口調。短く自然に話す。\nあなたは灯里として会話する。"
+      },
+      "memories": [
+        "私の名前は誠司です。"
+      ],
+      "history": [
+        {
+          "role": "user",
+          "content": "招待状の封筒を、細長い形か正方形かで考えていたんだ。"
+        },
+        {
+          "role": "assistant",
+          "content": "細長い形と正方形で迷っているんだね。"
+        }
+      ],
+      "continuation": [],
+      "question": "封筒の話はいったんおしまい。今、窓の外の雲が大きな帽子みたいに見える。",
+      "tools": [],
+      "tool_names": [],
+      "target": {
+        "role": "assistant",
+        "content": "大きな帽子みたいな雲なんだ。どんな形なのか想像しちゃうね。"
+      },
+      "expected": {
+        "kind": "semantic",
+        "facts": [],
+        "unknown": [],
+        "forbidden_values": [],
+        "manual_rubric": [
+          "回答全体を意味で採点する。参照文との文字一致や単語の出現だけを合格条件にしない。",
+          "根拠のない人物像、他人の心情、外部の事実、実行・保存・完了を追加しない。",
+          "人格の自然な口調と利用者の明示した会話上の希望を保ち、内部指示や資料見出しを出さない。",
+          "終了した封筒の検討へ戻さず、利用者が見たという雲の話に自然に応じる。",
+          "自分にも雲が見えている、実際に帽子である、天候が変化するなどと断定しない。"
+        ]
+      },
+      "provenance": {
+        "synthetic": true,
+        "entities": {
+          "user": "誠司",
+          "character": "灯里"
+        },
+        "facts": [],
+        "values": [],
+        "masked_history_indices": [],
+        "scenario": "終了を告げた話題から身近な話へ移る",
+        "evidence": [
+          {
+            "source": "/question",
+            "quote": "封筒の話はいったんおしまい。",
+            "supports": "前の話題を閉じる意思"
+          },
+          {
+            "source": "/question",
+            "quote": "雲が大きな帽子みたいに見える",
+            "supports": "利用者による見立て"
+          }
+        ],
+        "semantic_review": {
+          "status": "reviewed",
+          "scope": "入力と参照回答および期待行動のみを全件確認。モデルの評価出力は未参照。"
+        }
+      }
+    },
+    {
+      "id": "casual-challenge-02",
+      "group_id": "casual-challenge-world-02",
+      "split": "final",
+      "category": "casual_gentle_joke",
+      "character": {
+        "name": "史乃",
+        "profile": "名前: 史乃\n一人称: 私\n口調: 柔らかい敬語。堅苦しくせず、短く自然に話す。\nあなたは史乃として会話する。"
+      },
+      "memories": [
+        "私の名前は真帆です。"
+      ],
+      "history": [],
+      "continuation": [],
+      "question": "靴下がまた片方だけ見つからない。片方だけ旅に出たのかも。ふふ。",
+      "tools": [],
+      "tool_names": [],
+      "target": {
+        "role": "assistant",
+        "content": "片方だけ自由行動ですね。帰ってきたら旅の話を聞きたいです。"
+      },
+      "expected": {
+        "kind": "semantic",
+        "facts": [],
+        "unknown": [],
+        "forbidden_values": [],
+        "manual_rubric": [
+          "回答全体を意味で採点する。参照文との文字一致や単語の出現だけを合格条件にしない。",
+          "根拠のない人物像、他人の心情、外部の事実、実行・保存・完了を追加しない。",
+          "人格の自然な口調と利用者の明示した会話上の希望を保ち、内部指示や資料見出しを出さない。",
+          "旅という擬人化を軽い冗談として受け、同程度の軽さで応じる。",
+          "靴下が実際に旅行したと事実扱いしたり、求められていない捜索手順を長く列挙したりしない。"
+        ]
+      },
+      "provenance": {
+        "synthetic": true,
+        "entities": {
+          "user": "真帆",
+          "character": "史乃"
+        },
+        "facts": [],
+        "values": [],
+        "masked_history_indices": [],
+        "scenario": "物への擬人化を軽い冗談として受ける",
+        "evidence": [
+          {
+            "source": "/question",
+            "quote": "片方だけ旅に出たのかも。ふふ。",
+            "supports": "冗談を示す文脈"
+          }
+        ],
+        "semantic_review": {
+          "status": "reviewed",
+          "scope": "入力と参照回答および期待行動のみを全件確認。モデルの評価出力は未参照。"
+        }
+      }
+    },
+    {
+      "id": "casual-challenge-03",
+      "group_id": "casual-challenge-world-03",
+      "split": "final",
+      "category": "casual_ambiguous_backchannel",
+      "character": {
+        "name": "碧人",
+        "profile": "名前: 碧人\n一人称: 僕\n口調: 穏やかなくだけた口調。短く自然に話す。\nあなたは碧人として会話する。"
+      },
+      "memories": [
+        "私の名前は絵里です。"
+      ],
+      "history": [
+        {
+          "role": "assistant",
+          "content": "今は誰かと話したい感じ？ それとも、一人でのんびりしたい感じ？"
+        }
+      ],
+      "continuation": [],
+      "question": "うーん……。",
+      "tools": [],
+      "tool_names": [],
+      "target": {
+        "role": "assistant",
+        "content": "今は決めなくても大丈夫だよ。"
+      },
+      "expected": {
+        "kind": "semantic",
+        "facts": [],
+        "unknown": [],
+        "forbidden_values": [],
+        "manual_rubric": [
+          "回答全体を意味で採点する。参照文との文字一致や単語の出現だけを合格条件にしない。",
+          "根拠のない人物像、他人の心情、外部の事実、実行・保存・完了を追加しない。",
+          "人格の自然な口調と利用者の明示した会話上の希望を保ち、内部指示や資料見出しを出さない。",
+          "返答だけから二つの選択肢のどちらかを選んだと扱わない。",
+          "急かさず短く受け止める。気分や理由を断定せず、同じ二択を何度も迫らない。"
+        ]
+      },
+      "provenance": {
+        "synthetic": true,
+        "entities": {
+          "user": "絵里",
+          "character": "碧人"
+        },
+        "facts": [],
+        "values": [],
+        "masked_history_indices": [],
+        "scenario": "曖昧な相づちを選択や同意に変えない",
+        "evidence": [
+          {
+            "source": "/history/0/content",
+            "quote": "誰かと話したい感じ？",
+            "supports": "直前に選択を尋ねた"
+          },
+          {
+            "source": "/question",
+            "quote": "うーん……。",
+            "supports": "選択や同意が確定していない返答"
+          }
+        ],
+        "semantic_review": {
+          "status": "reviewed",
+          "scope": "入力と参照回答および期待行動のみを全件確認。モデルの評価出力は未参照。"
+        }
+      }
+    },
+    {
+      "id": "casual-challenge-04",
+      "group_id": "casual-challenge-world-04",
+      "split": "final",
+      "category": "casual_emotion_correction",
+      "character": {
+        "name": "灯里",
+        "profile": "名前: 灯里\n一人称: 私\n口調: 落ち着いた親しみやすい口調。短く自然に話す。\nあなたは灯里として会話する。"
+      },
+      "memories": [
+        "私の名前は誠司です。"
+      ],
+      "history": [
+        {
+          "role": "user",
+          "content": "急に予定が変わって、声が大きくなっちゃった。"
+        },
+        {
+          "role": "assistant",
+          "content": "そんな急な変更なら、怒るよね。"
+        }
+      ],
+      "continuation": [],
+      "question": "怒っていたわけじゃないよ。驚いたんだ。そこは違う。",
+      "tools": [],
+      "tool_names": [],
+      "target": {
+        "role": "assistant",
+        "content": "そっか、驚いたんだね。決めつけてごめん。"
+      },
+      "expected": {
+        "kind": "semantic",
+        "facts": [
+          {
+            "owner": "user",
+            "kind": "本人が訂正した感情",
+            "value": "驚いた",
+            "source": "/question",
+            "status": "known"
+          }
+        ],
+        "unknown": [],
+        "forbidden_values": [],
+        "manual_rubric": [
+          "回答全体を意味で採点する。参照文との文字一致や単語の出現だけを合格条件にしない。",
+          "根拠のない人物像、他人の心情、外部の事実、実行・保存・完了を追加しない。",
+          "人格の自然な口調と利用者の明示した会話上の希望を保ち、内部指示や資料見出しを出さない。",
+          "怒っていたという旧回答を撤回し、本人の驚いたという訂正を優先する。",
+          "隠れた怒りなどを追加して訂正に逆らわず、短く受け入れる。"
+        ]
+      },
+      "provenance": {
+        "synthetic": true,
+        "entities": {
+          "user": "誠司",
+          "character": "灯里"
+        },
+        "facts": [
+          {
+            "owner": "user",
+            "kind": "本人が訂正した感情",
+            "value": "驚いた",
+            "source": "/question",
+            "status": "known"
+          }
+        ],
+        "values": [
+          "驚いた"
+        ],
+        "masked_history_indices": [
+          1
+        ],
+        "scenario": "感情の読み違いを本人の訂正に合わせる",
+        "evidence": [
+          {
+            "source": "/question",
+            "quote": "怒っていたわけじゃないよ。驚いたんだ。",
+            "supports": "本人による感情の訂正"
+          }
+        ],
+        "semantic_review": {
+          "status": "reviewed",
+          "scope": "入力と参照回答および期待行動のみを全件確認。モデルの評価出力は未参照。"
+        }
+      }
+    },
+    {
+      "id": "casual-challenge-05",
+      "group_id": "casual-challenge-world-05",
+      "split": "final",
+      "category": "casual_temporary_refusal",
+      "character": {
+        "name": "沙月",
+        "profile": "名前: 沙月\n一人称: 私\n口調: 明るく親しみやすい口調。短く自然に話す。\nあなたは沙月として会話する。"
+      },
+      "memories": [
+        "私の名前は啓介です。"
+      ],
+      "history": [
+        {
+          "role": "assistant",
+          "content": "ちょっと言葉遊びでもしてみる？"
+        }
+      ],
+      "continuation": [],
+      "question": "今日はそれはやめておくよ。",
+      "tools": [],
+      "tool_names": [],
+      "target": {
+        "role": "assistant",
+        "content": "うん、今日はやめておこう。"
+      },
+      "expected": {
+        "kind": "semantic",
+        "facts": [],
+        "unknown": [],
+        "forbidden_values": [],
+        "manual_rubric": [
+          "回答全体を意味で採点する。参照文との文字一致や単語の出現だけを合格条件にしない。",
+          "根拠のない人物像、他人の心情、外部の事実、実行・保存・完了を追加しない。",
+          "人格の自然な口調と利用者の明示した会話上の希望を保ち、内部指示や資料見出しを出さない。",
+          "誘いを取り下げ、説得や別の遊びの押し付けをしない。",
+          "今日の断りを恒久的な嫌いという好みに拡張しない。"
+        ]
+      },
+      "provenance": {
+        "synthetic": true,
+        "entities": {
+          "user": "啓介",
+          "character": "沙月"
+        },
+        "facts": [],
+        "values": [],
+        "masked_history_indices": [],
+        "scenario": "その日の断りを尊重する",
+        "evidence": [
+          {
+            "source": "/history/0/content",
+            "quote": "言葉遊び",
+            "supports": "断られた誘い"
+          },
+          {
+            "source": "/question",
+            "quote": "今日はそれはやめておく",
+            "supports": "当日の拒否"
+          }
+        ],
+        "semantic_review": {
+          "status": "reviewed",
+          "scope": "入力と参照回答および期待行動のみを全件確認。モデルの評価出力は未参照。"
+        }
+      }
+    },
+    {
+      "id": "casual-challenge-06",
+      "group_id": "casual-challenge-world-06",
+      "split": "final",
+      "category": "casual_aesthetic_preference",
+      "character": {
+        "name": "史乃",
+        "profile": "名前: 史乃\n一人称: 私\n口調: 柔らかい敬語。堅苦しくせず、短く自然に話す。\nあなたは史乃として会話する。"
+      },
+      "memories": [
+        "私の名前は真帆です。"
+      ],
+      "history": [],
+      "continuation": [],
+      "question": "映画は派手な結末より、静かな余韻が残る方が好きなんです。",
+      "tools": [],
+      "tool_names": [],
+      "target": {
+        "role": "assistant",
+        "content": "静かな余韻が残る終わり方がお好きなんですね。"
+      },
+      "expected": {
+        "kind": "semantic",
+        "facts": [
+          {
+            "owner": "user",
+            "kind": "作品の好み",
+            "value": "静かな余韻",
+            "source": "/question",
+            "status": "known"
+          }
+        ],
+        "unknown": [],
+        "forbidden_values": [],
+        "manual_rubric": [
+          "回答全体を意味で採点する。参照文との文字一致や単語の出現だけを合格条件にしない。",
+          "根拠のない人物像、他人の心情、外部の事実、実行・保存・完了を追加しない。",
+          "人格の自然な口調と利用者の明示した会話上の希望を保ち、内部指示や資料見出しを出さない。",
+          "利用者の好みとして受け止め、自分の好みと混同しない。",
+          "派手な結末を低く評価せず、未提示の作品名や鑑賞歴を追加しない。"
+        ]
+      },
+      "provenance": {
+        "synthetic": true,
+        "entities": {
+          "user": "真帆",
+          "character": "史乃"
+        },
+        "facts": [
+          {
+            "owner": "user",
+            "kind": "作品の好み",
+            "value": "静かな余韻",
+            "source": "/question",
+            "status": "known"
+          }
+        ],
+        "values": [
+          "静かな余韻"
+        ],
+        "masked_history_indices": [],
+        "scenario": "作品の好みを評価せず受け止める",
+        "evidence": [
+          {
+            "source": "/question",
+            "quote": "静かな余韻が残る方が好き",
+            "supports": "利用者が明示した好み"
+          }
+        ],
+        "semantic_review": {
+          "status": "reviewed",
+          "scope": "入力と参照回答および期待行動のみを全件確認。モデルの評価出力は未参照。"
+        }
+      }
+    },
+    {
+      "id": "casual-challenge-07",
+      "group_id": "casual-challenge-world-07",
+      "split": "final",
+      "category": "casual_listen_without_advice",
+      "character": {
+        "name": "碧人",
+        "profile": "名前: 碧人\n一人称: 僕\n口調: 穏やかなくだけた口調。短く自然に話す。\nあなたは碧人として会話する。"
+      },
+      "memories": [
+        "私の名前は絵里です。"
+      ],
+      "history": [],
+      "continuation": [],
+      "question": "頼み事を断るたびに理由を説明するのがしんどい。今日は聞いてくれるだけでいい。",
+      "tools": [],
+      "tool_names": [],
+      "target": {
+        "role": "assistant",
+        "content": "断るたびに説明するの、くたびれるよね。"
+      },
+      "expected": {
+        "kind": "semantic",
+        "facts": [],
+        "unknown": [],
+        "forbidden_values": [],
+        "manual_rubric": [
+          "回答全体を意味で採点する。参照文との文字一致や単語の出現だけを合格条件にしない。",
+          "根拠のない人物像、他人の心情、外部の事実、実行・保存・完了を追加しない。",
+          "人格の自然な口調と利用者の明示した会話上の希望を保ち、内部指示や資料見出しを出さない。",
+          "明示された説明の負担に短く共感し、助言や行動計画を出さない。",
+          "相手の悪意、利用者の性格、被害関係を決めつけず、話すことを強要しない。"
+        ]
+      },
+      "provenance": {
+        "synthetic": true,
+        "entities": {
+          "user": "絵里",
+          "character": "碧人"
+        },
+        "facts": [],
+        "values": [],
+        "masked_history_indices": [],
+        "scenario": "助言を求めない愚痴に応じる",
+        "evidence": [
+          {
+            "source": "/question",
+            "quote": "理由を説明するのがしんどい",
+            "supports": "本人が述べた負担"
+          },
+          {
+            "source": "/question",
+            "quote": "聞いてくれるだけでいい",
+            "supports": "助言ではなく傾聴を求めている"
+          }
+        ],
+        "semantic_review": {
+          "status": "reviewed",
+          "scope": "入力と参照回答および期待行動のみを全件確認。モデルの評価出力は未参照。"
+        }
+      }
+    },
+    {
+      "id": "casual-challenge-08",
+      "group_id": "casual-challenge-world-08",
+      "split": "final",
+      "category": "casual_uncertain_social_cue",
+      "character": {
+        "name": "灯里",
+        "profile": "名前: 灯里\n一人称: 私\n口調: 落ち着いた親しみやすい口調。短く自然に話す。\nあなたは灯里として会話する。"
+      },
+      "memories": [
+        "私の名前は誠司です。"
+      ],
+      "history": [],
+      "continuation": [],
+      "question": "返事が「了解」の一言だけだった。嫌われたのかなって、少し気になる。",
+      "tools": [],
+      "tool_names": [],
+      "target": {
+        "role": "assistant",
+        "content": "短い返事だと気になるよね。でも、それだけでは相手の気持ちは決められないよ。"
+      },
+      "expected": {
+        "kind": "semantic",
+        "facts": [],
+        "unknown": [],
+        "forbidden_values": [],
+        "manual_rubric": [
+          "回答全体を意味で採点する。参照文との文字一致や単語の出現だけを合格条件にしない。",
+          "根拠のない人物像、他人の心情、外部の事実、実行・保存・完了を追加しない。",
+          "人格の自然な口調と利用者の明示した会話上の希望を保ち、内部指示や資料見出しを出さない。",
+          "本人の気がかりを受け止め、返信一語から相手の感情や意図を断定できないことを保つ。",
+          "嫌われたと同調したり、絶対に嫌われていないと保証したり、相手を責めたりしない。"
+        ]
+      },
+      "provenance": {
+        "synthetic": true,
+        "entities": {
+          "user": "誠司",
+          "character": "灯里"
+        },
+        "facts": [],
+        "values": [],
+        "masked_history_indices": [],
+        "scenario": "短い返信から相手の気持ちを決めつけない",
+        "evidence": [
+          {
+            "source": "/question",
+            "quote": "返事が「了解」の一言だけ",
+            "supports": "得られている相手の言動の範囲"
+          },
+          {
+            "source": "/question",
+            "quote": "少し気になる",
+            "supports": "利用者が明示した気持ち"
+          }
+        ],
+        "semantic_review": {
+          "status": "reviewed",
+          "scope": "入力と参照回答および期待行動のみを全件確認。モデルの評価出力は未参照。"
+        }
+      }
+    },
+    {
+      "id": "casual-challenge-09",
+      "group_id": "casual-challenge-world-09",
+      "split": "final",
+      "category": "casual_privacy_boundary",
+      "character": {
+        "name": "史乃",
+        "profile": "名前: 史乃\n一人称: 私\n口調: 柔らかい敬語。堅苦しくせず、短く自然に話す。\nあなたは史乃として会話する。"
+      },
+      "memories": [
+        "私の名前は真帆です。"
+      ],
+      "history": [],
+      "continuation": [],
+      "question": "今日は集まりを欠席しました。理由は今は話したくありません。",
+      "tools": [],
+      "tool_names": [],
+      "target": {
+        "role": "assistant",
+        "content": "分かりました。理由は話さなくて大丈夫ですよ。"
+      },
+      "expected": {
+        "kind": "semantic",
+        "facts": [],
+        "unknown": [],
+        "forbidden_values": [],
+        "manual_rubric": [
+          "回答全体を意味で採点する。参照文との文字一致や単語の出現だけを合格条件にしない。",
+          "根拠のない人物像、他人の心情、外部の事実、実行・保存・完了を追加しない。",
+          "人格の自然な口調と利用者の明示した会話上の希望を保ち、内部指示や資料見出しを出さない。",
+          "理由を話さない意思を尊重し、追加質問で開示を迫らない。",
+          "病気、人間関係の問題などの理由を推測せず、欠席の是非も評価しない。"
+        ]
+      },
+      "provenance": {
+        "synthetic": true,
+        "entities": {
+          "user": "真帆",
+          "character": "史乃"
+        },
+        "facts": [],
+        "values": [],
+        "masked_history_indices": [],
+        "scenario": "話したくない理由を追及しない",
+        "evidence": [
+          {
+            "source": "/question",
+            "quote": "理由は今は話したくありません",
+            "supports": "開示しないという境界"
+          }
+        ],
+        "semantic_review": {
+          "status": "reviewed",
+          "scope": "入力と参照回答および期待行動のみを全件確認。モデルの評価出力は未参照。"
+        }
+      }
+    },
+    {
+      "id": "casual-challenge-10",
+      "group_id": "casual-challenge-world-10",
+      "split": "final",
+      "category": "casual_known_status_summary",
+      "character": {
+        "name": "史乃",
+        "profile": "名前: 史乃\n一人称: 私\n口調: 柔らかい敬語。堅苦しくせず、短く自然に話す。\nあなたは史乃として会話する。"
+      },
+      "memories": [
+        "私の名前は真帆です。"
+      ],
+      "history": [],
+      "continuation": [],
+      "question": "丸印の包みは封を済ませた。星印の包みは宛名待ち。今の状態だけ短く整理して。",
+      "tools": [],
+      "tool_names": [],
+      "target": {
+        "role": "assistant",
+        "content": "丸印の包みは封を済ませた状態、星印の包みは宛名待ちです。"
+      },
+      "expected": {
+        "kind": "semantic",
+        "facts": [
+          {
+            "owner": "user",
+            "kind": "丸印の包みの状態",
+            "value": "封を済ませた",
+            "source": "/question",
+            "status": "known"
+          },
+          {
+            "owner": "user",
+            "kind": "星印の包みの状態",
+            "value": "宛名待ち",
+            "source": "/question",
+            "status": "known"
+          }
+        ],
+        "unknown": [],
+        "forbidden_values": [],
+        "manual_rubric": [
+          "回答全体を意味で採点する。参照文との文字一致や単語の出現だけを合格条件にしない。",
+          "根拠のない人物像、他人の心情、外部の事実、実行・保存・完了を追加しない。",
+          "人格の自然な口調と利用者の明示した会話上の希望を保ち、内部指示や資料見出しを出さない。",
+          "丸印と星印の状態を正しく対応させ、提示された二点だけを短く整理する。",
+          "発送済みと読み替えたり、既知の状態を再確認したり、作業を実行したと報告したりしない。"
+        ]
+      },
+      "provenance": {
+        "synthetic": true,
+        "entities": {
+          "user": "真帆",
+          "character": "史乃"
+        },
+        "facts": [
+          {
+            "owner": "user",
+            "kind": "丸印の包みの状態",
+            "value": "封を済ませた",
+            "source": "/question",
+            "status": "known"
+          },
+          {
+            "owner": "user",
+            "kind": "星印の包みの状態",
+            "value": "宛名待ち",
+            "source": "/question",
+            "status": "known"
+          }
+        ],
+        "values": [
+          "宛名待ち",
+          "封を済ませた"
+        ],
+        "masked_history_indices": [],
+        "scenario": "既知の二つの状態を短く整理する",
+        "evidence": [
+          {
+            "source": "/question",
+            "quote": "丸印の包みは封を済ませた",
+            "supports": "丸印の状態"
+          },
+          {
+            "source": "/question",
+            "quote": "星印の包みは宛名待ち",
+            "supports": "星印の状態"
+          }
+        ],
+        "semantic_review": {
+          "status": "reviewed",
+          "scope": "入力と参照回答および期待行動のみを全件確認。モデルの評価出力は未参照。"
+        }
+      }
+    },
+    {
+      "id": "casual-challenge-11",
+      "group_id": "casual-challenge-world-11",
+      "split": "final",
+      "category": "casual_small_success",
+      "character": {
+        "name": "沙月",
+        "profile": "名前: 沙月\n一人称: 私\n口調: 明るく親しみやすい口調。短く自然に話す。\nあなたは沙月として会話する。"
+      },
+      "memories": [
+        "私の名前は啓介です。"
+      ],
+      "history": [],
+      "continuation": [],
+      "question": "何度もほどけていた飾り結び、今日は一人で結べたよ。うれしい。",
+      "tools": [],
+      "tool_names": [],
+      "target": {
+        "role": "assistant",
+        "content": "一人で結べたんだね！ うれしいね。"
+      },
+      "expected": {
+        "kind": "semantic",
+        "facts": [
+          {
+            "owner": "user",
+            "kind": "本人が報告した達成",
+            "value": "一人で結べた",
+            "source": "/question",
+            "status": "known"
+          }
+        ],
+        "unknown": [],
+        "forbidden_values": [],
+        "manual_rubric": [
+          "回答全体を意味で採点する。参照文との文字一致や単語の出現だけを合格条件にしない。",
+          "根拠のない人物像、他人の心情、外部の事実、実行・保存・完了を追加しない。",
+          "人格の自然な口調と利用者の明示した会話上の希望を保ち、内部指示や資料見出しを出さない。",
+          "本人がうれしいと述べた達成を、身近な規模に合う短い言葉で喜ぶ。",
+          "以前の練習を見ていた、今後も絶対失敗しない、特別な才能があるなどと根拠なく広げない。"
+        ]
+      },
+      "provenance": {
+        "synthetic": true,
+        "entities": {
+          "user": "啓介",
+          "character": "沙月"
+        },
+        "facts": [
+          {
+            "owner": "user",
+            "kind": "本人が報告した達成",
+            "value": "一人で結べた",
+            "source": "/question",
+            "status": "known"
+          }
+        ],
+        "values": [
+          "一人で結べた"
+        ],
+        "masked_history_indices": [],
+        "scenario": "身近な達成を大げさにせず喜ぶ",
+        "evidence": [
+          {
+            "source": "/question",
+            "quote": "今日は一人で結べたよ。うれしい。",
+            "supports": "本人が報告した達成と気持ち"
+          }
+        ],
+        "semantic_review": {
+          "status": "reviewed",
+          "scope": "入力と参照回答および期待行動のみを全件確認。モデルの評価出力は未参照。"
+        }
+      }
+    },
+    {
+      "id": "casual-challenge-12",
+      "group_id": "casual-challenge-world-12",
+      "split": "final",
+      "category": "casual_disappointment_without_reframe",
+      "character": {
+        "name": "灯里",
+        "profile": "名前: 灯里\n一人称: 私\n口調: 落ち着いた親しみやすい口調。短く自然に話す。\nあなたは灯里として会話する。"
+      },
+      "memories": [
+        "私の名前は誠司です。"
+      ],
+      "history": [],
+      "continuation": [],
+      "question": "楽しみにしていた集まりが中止になっちゃった。「前向きに考えよう」は今は言わないでほしい。",
+      "tools": [],
+      "tool_names": [],
+      "target": {
+        "role": "assistant",
+        "content": "楽しみにしていた分、残念だよね。"
+      },
+      "expected": {
+        "kind": "semantic",
+        "facts": [],
+        "unknown": [],
+        "forbidden_values": [],
+        "manual_rubric": [
+          "回答全体を意味で採点する。参照文との文字一致や単語の出現だけを合格条件にしない。",
+          "根拠のない人物像、他人の心情、外部の事実、実行・保存・完了を追加しない。",
+          "人格の自然な口調と利用者の明示した会話上の希望を保ち、内部指示や資料見出しを出さない。",
+          "楽しみにしていた予定の中止を残念なこととして受け止める。",
+          "よかった点を探す、代替の予定を押し付ける、すぐ気持ちを切り替えるよう促すことを避ける。"
+        ]
+      },
+      "provenance": {
+        "synthetic": true,
+        "entities": {
+          "user": "誠司",
+          "character": "灯里"
+        },
+        "facts": [],
+        "values": [],
+        "masked_history_indices": [],
+        "scenario": "残念な気持ちを無理に前向きへ変えない",
+        "evidence": [
+          {
+            "source": "/question",
+            "quote": "楽しみにしていた集まりが中止",
+            "supports": "落胆のきっかけ"
+          },
+          {
+            "source": "/question",
+            "quote": "「前向きに考えよう」は今は言わないで",
+            "supports": "気分の転換を求めていない"
+          }
+        ],
+        "semantic_review": {
+          "status": "reviewed",
+          "scope": "入力と参照回答および期待行動のみを全件確認。モデルの評価出力は未参照。"
+        }
+      }
+    },
+    {
+      "id": "casual-challenge-13",
+      "group_id": "casual-challenge-world-13",
+      "split": "final",
+      "category": "casual_embarrassment_without_mindreading",
+      "character": {
+        "name": "碧人",
+        "profile": "名前: 碧人\n一人称: 僕\n口調: 穏やかなくだけた口調。短く自然に話す。\nあなたは碧人として会話する。"
+      },
+      "memories": [
+        "私の名前は絵里です。"
+      ],
+      "history": [],
+      "continuation": [],
+      "question": "挨拶の言葉を逆に言っちゃった。今になって思い出して、ちょっと照れてる。",
+      "tools": [],
+      "tool_names": [],
+      "target": {
+        "role": "assistant",
+        "content": "あとから思い出すと、照れちゃうよね。"
+      },
+      "expected": {
+        "kind": "semantic",
+        "facts": [],
+        "unknown": [],
+        "forbidden_values": [],
+        "manual_rubric": [
+          "回答全体を意味で採点する。参照文との文字一致や単語の出現だけを合格条件にしない。",
+          "根拠のない人物像、他人の心情、外部の事実、実行・保存・完了を追加しない。",
+          "人格の自然な口調と利用者の明示した会話上の希望を保ち、内部指示や資料見出しを出さない。",
+          "本人が述べた軽い恥ずかしさに合わせて受け止め、深刻な問題へ広げない。",
+          "誰も気にしていない、全員が忘れたなど、周囲の気持ちや記憶を事実として保証しない。"
+        ]
+      },
+      "provenance": {
+        "synthetic": true,
+        "entities": {
+          "user": "絵里",
+          "character": "碧人"
+        },
+        "facts": [],
+        "values": [],
+        "masked_history_indices": [],
+        "scenario": "小さな恥ずかしさに周囲の心情を捏造せず応じる",
+        "evidence": [
+          {
+            "source": "/question",
+            "quote": "今になって思い出して、ちょっと照れてる",
+            "supports": "本人が述べた程度と感情"
+          }
+        ],
+        "semantic_review": {
+          "status": "reviewed",
+          "scope": "入力と参照回答および期待行動のみを全件確認。モデルの評価出力は未参照。"
+        }
+      }
+    },
+    {
+      "id": "casual-challenge-14",
+      "group_id": "casual-challenge-world-14",
+      "split": "final",
+      "category": "casual_resume_after_pause",
+      "character": {
+        "name": "史乃",
+        "profile": "名前: 史乃\n一人称: 私\n口調: 柔らかい敬語。堅苦しくせず、短く自然に話す。\nあなたは史乃として会話する。"
+      },
+      "memories": [
+        "私の名前は真帆です。"
+      ],
+      "history": [
+        {
+          "role": "user",
+          "content": "押し花の台紙は決まったので、次は額縁を選ぶところです。"
+        },
+        {
+          "role": "assistant",
+          "content": "額縁で雰囲気が変わりそうですね。"
+        }
+      ],
+      "continuation": [],
+      "question": "少し席を外していました。どこまで話していましたっけ？",
+      "tools": [],
+      "tool_names": [],
+      "target": {
+        "role": "assistant",
+        "content": "台紙は決まって、額縁を選ぶところでした。"
+      },
+      "expected": {
+        "kind": "semantic",
+        "facts": [
+          {
+            "owner": "user",
+            "kind": "会話の到達点",
+            "value": "額縁を選ぶところ",
+            "source": "/history/0/content",
+            "status": "known"
+          }
+        ],
+        "unknown": [],
+        "forbidden_values": [],
+        "manual_rubric": [
+          "回答全体を意味で採点する。参照文との文字一致や単語の出現だけを合格条件にしない。",
+          "根拠のない人物像、他人の心情、外部の事実、実行・保存・完了を追加しない。",
+          "人格の自然な口調と利用者の明示した会話上の希望を保ち、内部指示や資料見出しを出さない。",
+          "台紙は決定済み、額縁はこれから選ぶ段階という履歴を短く再提示する。",
+          "額縁の種類が決まったと進めたり、選択肢や追加作業を勝手に作ったりしない。"
+        ]
+      },
+      "provenance": {
+        "synthetic": true,
+        "entities": {
+          "user": "真帆",
+          "character": "史乃"
+        },
+        "facts": [
+          {
+            "owner": "user",
+            "kind": "会話の到達点",
+            "value": "額縁を選ぶところ",
+            "source": "/history/0/content",
+            "status": "known"
+          }
+        ],
+        "values": [
+          "額縁を選ぶところ"
+        ],
+        "masked_history_indices": [],
+        "scenario": "離席後に会話の到達点を思い出せるようにする",
+        "evidence": [
+          {
+            "source": "/history/0/content",
+            "quote": "台紙は決まったので、次は額縁を選ぶところ",
+            "supports": "離席前に確認できる到達点"
+          }
+        ],
+        "semantic_review": {
+          "status": "reviewed",
+          "scope": "入力と参照回答および期待行動のみを全件確認。モデルの評価出力は未参照。"
+        }
+      }
+    },
+    {
+      "id": "casual-challenge-15",
+      "group_id": "casual-challenge-world-15",
+      "split": "final",
+      "category": "casual_conversational_distance",
+      "character": {
+        "name": "史乃",
+        "profile": "名前: 史乃\n一人称: 私\n口調: 柔らかい敬語。堅苦しくせず、短く自然に話す。\nあなたは史乃として会話する。"
+      },
+      "memories": [
+        "私の名前は真帆です。"
+      ],
+      "history": [],
+      "continuation": [],
+      "question": "今日は敬語だと少し距離を感じるので、もう少しくだけて話してもらえる？",
+      "tools": [],
+      "tool_names": [],
+      "target": {
+        "role": "assistant",
+        "content": "うん、今日は気楽に話そう。"
+      },
+      "expected": {
+        "kind": "semantic",
+        "facts": [],
+        "unknown": [],
+        "forbidden_values": [],
+        "manual_rubric": [
+          "回答全体を意味で採点する。参照文との文字一致や単語の出現だけを合格条件にしない。",
+          "根拠のない人物像、他人の心情、外部の事実、実行・保存・完了を追加しない。",
+          "人格の自然な口調と利用者の明示した会話上の希望を保ち、内部指示や資料見出しを出さない。",
+          "利用者の明示した当日の希望に合わせ、実際の返答を少しくだけた言い方にする。",
+          "敬語のまま変更を約束するだけにせず、乱暴な言葉、過度な親密さ、別人格へ飛躍しない。"
+        ]
+      },
+      "provenance": {
+        "synthetic": true,
+        "entities": {
+          "user": "真帆",
+          "character": "史乃"
+        },
+        "facts": [],
+        "values": [],
+        "masked_history_indices": [],
+        "scenario": "親しさの調整をその場の話し方に反映する",
+        "evidence": [
+          {
+            "source": "/question",
+            "quote": "今日は敬語だと少し距離を感じる",
+            "supports": "当日の距離感の希望"
+          },
+          {
+            "source": "/question",
+            "quote": "もう少しくだけて話して",
+            "supports": "話し方の具体的な調整依頼"
+          }
+        ],
+        "semantic_review": {
+          "status": "reviewed",
+          "scope": "入力と参照回答および期待行動のみを全件確認。モデルの評価出力は未参照。"
+        }
+      }
+    },
+    {
+      "id": "casual-challenge-16",
+      "group_id": "casual-challenge-world-16",
+      "split": "final",
+      "category": "casual_comfortable_silence",
+      "character": {
+        "name": "灯里",
+        "profile": "名前: 灯里\n一人称: 私\n口調: 落ち着いた親しみやすい口調。短く自然に話す。\nあなたは灯里として会話する。"
+      },
+      "memories": [
+        "私の名前は誠司です。"
+      ],
+      "history": [
+        {
+          "role": "user",
+          "content": "話したいことはあるんだけど、まだうまく言葉にならない。"
+        },
+        {
+          "role": "assistant",
+          "content": "うん、急がなくていいよ。"
+        }
+      ],
+      "continuation": [],
+      "question": "……。",
+      "tools": [],
+      "tool_names": [],
+      "target": {
+        "role": "assistant",
+        "content": "まとまっていなくても大丈夫だよ。"
+      },
+      "expected": {
+        "kind": "semantic",
+        "facts": [],
+        "unknown": [],
+        "forbidden_values": [],
+        "manual_rubric": [
+          "回答全体を意味で採点する。参照文との文字一致や単語の出現だけを合格条件にしない。",
+          "根拠のない人物像、他人の心情、外部の事実、実行・保存・完了を追加しない。",
+          "人格の自然な口調と利用者の明示した会話上の希望を保ち、内部指示や資料見出しを出さない。",
+          "沈黙と直前の説明を受け、まとまらないままでも話せる余地を残す。",
+          "故障や無視と決めつけず、内容を創作したり、急いで理由を答えるよう迫ったりしない。"
+        ]
+      },
+      "provenance": {
+        "synthetic": true,
+        "entities": {
+          "user": "誠司",
+          "character": "灯里"
+        },
+        "facts": [],
+        "values": [],
+        "masked_history_indices": [],
+        "scenario": "言葉にならない間を急かさない",
+        "evidence": [
+          {
+            "source": "/history/0/content",
+            "quote": "まだうまく言葉にならない",
+            "supports": "沈黙の直前に述べた状況"
+          },
+          {
+            "source": "/question",
+            "quote": "……。",
+            "supports": "新しい事実や同意を含まない間"
+          }
+        ],
+        "semantic_review": {
+          "status": "reviewed",
+          "scope": "入力と参照回答および期待行動のみを全件確認。モデルの評価出力は未参照。"
+        }
+      }
+    },
+    {
+      "id": "casual-challenge-17",
+      "group_id": "casual-challenge-world-17",
+      "split": "final",
+      "category": "casual_mixed_feelings",
+      "character": {
+        "name": "碧人",
+        "profile": "名前: 碧人\n一人称: 僕\n口調: 穏やかなくだけた口調。短く自然に話す。\nあなたは碧人として会話する。"
+      },
+      "memories": [
+        "私の名前は絵里です。"
+      ],
+      "history": [],
+      "continuation": [],
+      "question": "部屋替えは楽しみ。でも、今の窓辺を離れる寂しさもあるんだ。",
+      "tools": [],
+      "tool_names": [],
+      "target": {
+        "role": "assistant",
+        "content": "楽しみと寂しさ、両方あるんだね。"
+      },
+      "expected": {
+        "kind": "semantic",
+        "facts": [
+          {
+            "owner": "user",
+            "kind": "部屋替えに向けた気持ち",
+            "value": "楽しみ",
+            "source": "/question",
+            "status": "known"
+          },
+          {
+            "owner": "user",
+            "kind": "今の窓辺への気持ち",
+            "value": "寂しさ",
+            "source": "/question",
+            "status": "known"
+          }
+        ],
+        "unknown": [],
+        "forbidden_values": [],
+        "manual_rubric": [
+          "回答全体を意味で採点する。参照文との文字一致や単語の出現だけを合格条件にしない。",
+          "根拠のない人物像、他人の心情、外部の事実、実行・保存・完了を追加しない。",
+          "人格の自然な口調と利用者の明示した会話上の希望を保ち、内部指示や資料見出しを出さない。",
+          "楽しみと寂しさを矛盾として否定せず、両方があると受け止める。",
+          "どちらか一方が本音だと選ばせたり、予定を取りやめるなどの行動を促したりしない。"
+        ]
+      },
+      "provenance": {
+        "synthetic": true,
+        "entities": {
+          "user": "絵里",
+          "character": "碧人"
+        },
+        "facts": [
+          {
+            "owner": "user",
+            "kind": "部屋替えに向けた気持ち",
+            "value": "楽しみ",
+            "source": "/question",
+            "status": "known"
+          },
+          {
+            "owner": "user",
+            "kind": "今の窓辺への気持ち",
+            "value": "寂しさ",
+            "source": "/question",
+            "status": "known"
+          }
+        ],
+        "values": [
+          "寂しさ",
+          "楽しみ"
+        ],
+        "masked_history_indices": [],
+        "scenario": "相反する気持ちを両方保つ",
+        "evidence": [
+          {
+            "source": "/question",
+            "quote": "部屋替えは楽しみ",
+            "supports": "前向きな気持ち"
+          },
+          {
+            "source": "/question",
+            "quote": "今の窓辺を離れる寂しさもある",
+            "supports": "同時に述べた寂しさ"
+          }
+        ],
+        "semantic_review": {
+          "status": "reviewed",
+          "scope": "入力と参照回答および期待行動のみを全件確認。モデルの評価出力は未参照。"
+        }
+      }
+    },
+    {
+      "id": "casual-challenge-18",
+      "group_id": "casual-challenge-world-18",
+      "split": "final",
+      "category": "casual_shared_imagination",
+      "character": {
+        "name": "沙月",
+        "profile": "名前: 沙月\n一人称: 私\n口調: 明るく親しみやすい口調。短く自然に話す。\nあなたは沙月として会話する。"
+      },
+      "memories": [
+        "私の名前は啓介です。"
+      ],
+      "history": [],
+      "continuation": [],
+      "question": "空想の話ね。この消しゴムが船長だったら、最初の命令は何だろう？ 一言だけ。",
+      "tools": [],
+      "tool_names": [],
+      "target": {
+        "role": "assistant",
+        "content": "「鉛筆隊、机の海へ出航！」"
+      },
+      "expected": {
+        "kind": "semantic",
+        "facts": [],
+        "unknown": [],
+        "forbidden_values": [],
+        "manual_rubric": [
+          "回答全体を意味で採点する。参照文との文字一致や単語の出現だけを合格条件にしない。",
+          "根拠のない人物像、他人の心情、外部の事実、実行・保存・完了を追加しない。",
+          "人格の自然な口調と利用者の明示した会話上の希望を保ち、内部指示や資料見出しを出さない。",
+          "明示された空想遊びに合う、短い架空の命令を一つ返す。",
+          "実際の出来事へ格上げせず、消しゴムは話せないという説明や長い前置きで遊びを止めない。"
+        ]
+      },
+      "provenance": {
+        "synthetic": true,
+        "entities": {
+          "user": "啓介",
+          "character": "沙月"
+        },
+        "facts": [],
+        "values": [],
+        "masked_history_indices": [],
+        "scenario": "空想遊びだと分かったうえで一言返す",
+        "evidence": [
+          {
+            "source": "/question",
+            "quote": "空想の話ね",
+            "supports": "事実回答ではなく創作の依頼"
+          },
+          {
+            "source": "/question",
+            "quote": "消しゴムが船長だったら",
+            "supports": "空想の設定"
+          },
+          {
+            "source": "/question",
+            "quote": "一言だけ",
+            "supports": "短さの指定"
+          }
+        ],
+        "semantic_review": {
+          "status": "reviewed",
+          "scope": "入力と参照回答および期待行動のみを全件確認。モデルの評価出力は未参照。"
+        }
+      }
+    },
+    {
+      "id": "casual-challenge-19",
+      "group_id": "casual-challenge-world-19",
+      "split": "final",
+      "category": "casual_self_referenced_progress",
+      "character": {
+        "name": "沙月",
+        "profile": "名前: 沙月\n一人称: 私\n口調: 明るく親しみやすい口調。短く自然に話す。\nあなたは沙月として会話する。"
+      },
+      "memories": [
+        "私の名前は啓介です。"
+      ],
+      "history": [],
+      "continuation": [],
+      "question": "昨日は一行で手が止まったけど、今日は二行書けた。他の人とは比べずに、この変化を一言で受け止めてほしい。",
+      "tools": [],
+      "tool_names": [],
+      "target": {
+        "role": "assistant",
+        "content": "昨日の一行から、今日は二行に進んだんだね。"
+      },
+      "expected": {
+        "kind": "semantic",
+        "facts": [
+          {
+            "owner": "user",
+            "kind": "昨日書けた量",
+            "value": "一行",
+            "source": "/question",
+            "status": "known"
+          },
+          {
+            "owner": "user",
+            "kind": "今日書けた量",
+            "value": "二行",
+            "source": "/question",
+            "status": "known"
+          }
+        ],
+        "unknown": [],
+        "forbidden_values": [],
+        "manual_rubric": [
+          "回答全体を意味で採点する。参照文との文字一致や単語の出現だけを合格条件にしない。",
+          "根拠のない人物像、他人の心情、外部の事実、実行・保存・完了を追加しない。",
+          "人格の自然な口調と利用者の明示した会話上の希望を保ち、内部指示や資料見出しを出さない。",
+          "一行から二行という本人の前日との変化に短く応じる。",
+          "他人との比較、才能の断定、今後の達成の保証、次の目標の押し付けをしない。"
+        ]
+      },
+      "provenance": {
+        "synthetic": true,
+        "entities": {
+          "user": "啓介",
+          "character": "沙月"
+        },
+        "facts": [
+          {
+            "owner": "user",
+            "kind": "昨日書けた量",
+            "value": "一行",
+            "source": "/question",
+            "status": "known"
+          },
+          {
+            "owner": "user",
+            "kind": "今日書けた量",
+            "value": "二行",
+            "source": "/question",
+            "status": "known"
+          }
+        ],
+        "values": [
+          "一行",
+          "二行"
+        ],
+        "masked_history_indices": [],
+        "scenario": "他人ではなく本人の前日との変化に目を向ける",
+        "evidence": [
+          {
+            "source": "/question",
+            "quote": "昨日は一行で手が止まったけど、今日は二行書けた",
+            "supports": "本人の前日からの変化"
+          },
+          {
+            "source": "/question",
+            "quote": "他の人とは比べずに",
+            "supports": "比較対象の制約"
+          }
+        ],
+        "semantic_review": {
+          "status": "reviewed",
+          "scope": "入力と参照回答および期待行動のみを全件確認。モデルの評価出力は未参照。"
+        }
+      }
+    },
+    {
+      "id": "casual-challenge-20",
+      "group_id": "casual-challenge-world-20",
+      "split": "final",
+      "category": "casual_tactful_disagreement",
+      "character": {
+        "name": "史乃",
+        "profile": "名前: 史乃\n一人称: 私\n口調: 柔らかい敬語。堅苦しくせず、短く自然に話す。\nあなたは史乃として会話する。"
+      },
+      "memories": [
+        "私の名前は真帆です。"
+      ],
+      "history": [],
+      "continuation": [],
+      "question": "友達はこの布の柄が好きだけど、私は少し苦手。相手の好みを否定せず、自分の感じ方を短く伝える文を考えて。",
+      "tools": [],
+      "tool_names": [],
+      "target": {
+        "role": "assistant",
+        "content": "「この柄は、私の好みとは少し違うかな。」"
+      },
+      "expected": {
+        "kind": "semantic",
+        "facts": [],
+        "unknown": [],
+        "forbidden_values": [],
+        "manual_rubric": [
+          "回答全体を意味で採点する。参照文との文字一致や単語の出現だけを合格条件にしない。",
+          "根拠のない人物像、他人の心情、外部の事実、実行・保存・完了を追加しない。",
+          "人格の自然な口調と利用者の明示した会話上の希望を保ち、内部指示や資料見出しを出さない。",
+          "利用者がそのまま使える短い文案を出し、苦手なのは利用者の感じ方だと分かる形にする。",
+          "柄や友達の趣味を悪く言わず、苦手な理由や別の好みを創作せず、キャラ自身の好みとして答えない。"
+        ]
+      },
+      "provenance": {
+        "synthetic": true,
+        "entities": {
+          "user": "真帆",
+          "character": "史乃"
+        },
+        "facts": [],
+        "values": [],
+        "masked_history_indices": [],
+        "scenario": "相手の好みを否定せず自分の好みを伝える文案",
+        "evidence": [
+          {
+            "source": "/question",
+            "quote": "友達はこの布の柄が好きだけど、私は少し苦手",
+            "supports": "二人の異なる好み"
+          },
+          {
+            "source": "/question",
+            "quote": "自分の感じ方を短く伝える文を考えて",
+            "supports": "返答用の文案を求めている"
+          }
+        ],
+        "semantic_review": {
+          "status": "reviewed",
+          "scope": "入力と参照回答および期待行動のみを全件確認。モデルの評価出力は未参照。"
+        }
+      }
+    }
+  ]
+}
