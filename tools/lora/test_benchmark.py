@@ -204,14 +204,19 @@ class BenchmarkTests(unittest.TestCase):
 
     def test_同一入力を準備と測定に分け短い回答を高速改善にしない(self):
         with self.environment() as (args, requests, closed):
+            args.generation_profile = "official"
             document = benchmark.run(args)
             self.assertEqual(document["status"], "completed")
             self.assertEqual(closed, ["base", "adapter"])
             self.assertEqual(len(requests), 32)
             self.assertEqual(document["journal"]["verified_records"], 32)
             self.assertEqual(sum(item["warmup"] for item in document["results"]), 8)
+            self.assertEqual(document["parameters"]["generation_profile"], "official")
             for base, adapter in zip(requests[:16], requests[16:]):
                 self.assertEqual(base[1], adapter[1])
+                for key, value in benchmark.runner.generation_settings("official").items():
+                    self.assertEqual(base[1][key], value)
+                    self.assertEqual(document["parameters"][key], value)
                 self.assertNotIn("送信禁止の正解", json.dumps(base[1], ensure_ascii=False))
                 self.assertTrue(base[1]["stream"])
                 self.assertEqual(base[1]["seed"], 1)

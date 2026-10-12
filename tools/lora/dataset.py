@@ -416,6 +416,13 @@ def tool_exchange(name: str, arguments: dict, call_id: str, result: str) -> list
     ]
 
 
+def chain_stages(rounds: list[tuple], prefix: str):
+    """往復表の既取得部分だけを各教師段階へ渡す。過去assistantは教師にしない。"""
+    exchanges = [tool_exchange(name, args, f"{prefix}_{i}", response) for i, (name, args, response) in enumerate(rounds)]
+    for stage in range(len(rounds) + 1):
+        yield stage, copy.deepcopy([message for exchange in exchanges[:stage] for message in exchange])
+
+
 def tool_cases(w: dict) -> list[dict]:
     offset = {"train": 0, "dev": 100, "final": 200}[w["split"]]
     number, total = 13 + w["index"] + offset, 263 + offset
@@ -879,14 +886,13 @@ def additional_chains(raw: dict, index: int, chain: dict) -> list[dict]:
         ("productivity_tools", {"action": "percent_calc", "value": number, "total": total}, f"{number} / {total} = {percent}"),
         ("weather", {"location": place}, f"**{place}の天気：{chain['weather']}**\nいまは {temperature}\n"),
     ]
-    exchanges = [tool_exchange(name, arguments, f"chain_{index}_{i}", response) for i, (name, arguments, response) in enumerate(rounds)]
     question = f"{path}を読んで、そのvalueとtotalから割合をpercent_calcで計算し、続いてlocationの現在の天気を取得して。最後は取得した割合と天気だけを短く教えて。"
     result = []
-    for stage in range(4):
+    for stage, continuation in chain_stages(rounds, f"chain_{index}"):
         case = additional_context(raw, index, "tool_chain", stage)
         case["question"] = question
         case["tool_names"] = [name for name, _, _ in rounds]
-        case["continuation"] = copy.deepcopy([message for exchange in exchanges[:stage] for message in exchange])
+        case["continuation"] = continuation
         if stage < len(rounds):
             name, arguments, _ = rounds[stage]
             case["target"]["tool_calls"] = [tool_call(name, arguments, f"chain_{index}_{stage}")]
@@ -927,7 +933,173 @@ def additional_cases() -> list[dict]:
     return result
 
 
-def generate_dataset() -> dict:
+def render_material(value: object, context: dict):
+    """材料の差分だけを展開し、ケース組立てと根拠台帳の正本を増やさない。"""
+    if isinstance(value, str):
+        return value.format_map(context)
+    if isinstance(value, list):
+        return [render_material(item, context) for item in value]
+    if isinstance(value, dict):
+        return {key: render_material(item, context) for key, item in value.items()}
+    return value
+
+
+def material_case(raw: dict, index: int, variant: int, template: dict) -> dict:
+    case = additional_context(raw, 40 + index, template["category"], variant)
+    context = {**raw, "first": case["provenance"]["first_person"], "ending": case["provenance"]["ending"]}
+    for kind, label in (("飲み物", "drink"), ("食べ物", "food"), ("趣味", "hobby")):
+        context.update({f"{owner}_{label}": value for owner, value in raw["attributes"][kind].items()})
+    row = render_material(template, context)
+    case["id"] = f"train-gate-{index:02d}-{row['name']}"
+    case["group_id"] = f"train-gate-world-{index:02d}"
+    case["provenance"]["extension"] = "product-gate"
+    case["question"] = row["question"][index % len(row["question"])] if isinstance(row["question"], list) else row["question"]
+    case["history"] = copy.deepcopy(row.get("history", []))
+    case["provenance"]["masked_history_indices"] = row.get("masked", [])
+    ledger = case["provenance"]["facts"]
+    for entry in ledger:
+        if [entry["owner"], entry["kind"]] in row.get("supersede", []):
+            entry["status"] = "superseded"
+    expected = select_facts(case, [tuple(request) for request in row.get("requests", [])])
+    for entry in row.get("evidence", []):
+        source = entry["source"]
+        if source == "memory":
+            source = f"/memories/{len(case['memories'])}"
+            case["memories"].append(entry["text"])
+        elif source == "profile":
+            source = "/character/profile"
+            case["character"]["profile"] += "\n" + entry["text"]
+        elif source == "question":
+            source = "/question"
+        item = fact(entry["owner"], entry["kind"], entry["value"], source, entry["status"])
+        ledger.append(item)
+        expected.append(item)
+        case["provenance"]["values"].append(item["value"])
+    case["expected"]["facts"] = copy.deepcopy(expected)
+    case["expected"]["unknown"] = [{"owner": owner, "kind": kind} for owner, kind in row.get("unknown", [])]
+    case["target"]["content"] = row["answer"] if "answer" in row else attribute_answer(case, expected)
+    case["provenance"]["selection"] = {"operation": row["name"], "requests": row.get("requests", []), "intent": row.get("intent", "主体・属性・最新の根拠を区別する")}
+    if "contrast" in row:
+        case["provenance"]["contrast_id"] = f"train-gate-{index:02d}-{row['contrast']}"
+    case["expected"]["manual_rubric"] += ["人物・引用・否定・訂正の適用範囲を読み、明示された事実だけ答える。", "知らないこと、明示的な未定、既知の事実を区別し、訂正されていない根拠は捨てない。", row.get("intent", "指定された一人称を保持し、引用者の一人称を本人へ移さない。")]
+    return case
+
+
+def branching_chain_context(index: int, variant: int, material: dict, total: int | None = None) -> dict:
+    """成功・失敗で共通の資料と呼出表を組み立て、未取得の後続結果を作らない。"""
+    operators = {"ge": (lambda a, b: a >= b, "以上"), "gt": (lambda a, b: a > b, "より大きい"), "le": (lambda a, b: a <= b, "以下"), "lt": (lambda a, b: a < b, "未満"), "eq": (lambda a, b: a == b, "と等しい"), "ne": (lambda a, b: a != b, "と異なる")}
+    predicate, wording = operators[material["operator"]]
+    left, right = material["locations"]
+    number, threshold = material["values"][variant], material["threshold"]
+    total = material["total"] if total is None else total
+    percent = f"{number / total * 100:.2f}%" if total else None
+    branch = (0 if predicate(float(percent[:-1]), threshold) else 1) if percent else None
+    place = material["locations"][branch] if branch is not None else None
+    fields = [f"value = {number}", f"total = {total}"]
+    if material["layout"] % 2:
+        fields.reverse()
+    condition = f"割合が{threshold}%{wording}なら{left}、それ以外は{right}の天気を取得する。"
+    note = f"# 集計番号 {701 + index * 13} は計算に使わない。"
+    lines = [note, *fields, condition] if material["layout"] < 2 else [condition, *fields, note]
+    path = f"教材/判断{index + 1:02d}-{variant + 1}.txt"
+    start = material["line_start"]
+    end = start + len(lines) - 1
+    file_text = f"{path}\n{end} 行中 {start}〜{end} 行目:\n" + "".join(f"{start + i}\t{line}\n" for i, line in enumerate(lines)) + '\n（行頭の「行番号+タブ」は表示用です。edit_file の old_string には含めないでください）'
+    question = f"{path}の{start}行目から{len(lines)}行を読み、valueとtotalをpercent_calcへ渡して。表示の行番号は値ではないよ。返った割合で資料の条件を判定し、該当する一つの地域のweatherを使って。"
+    rounds = [("read_file", {"path": path, "offset": start, "limit": len(lines)}, file_text), ("productivity_tools", {"action": "percent_calc", "value": number, "total": total}, f"{number} / {total} = {percent}" if percent else "")]
+    if place is not None:
+        rounds.append(("weather", {"location": place}, f"**{place}の天気：{material['weather']}**\nいまは {material['temperatures']}°C\n"))
+    return {"path": path, "question": question, "rounds": rounds, "number": number, "total": total,
+            "percent": percent, "branch": branch, "place": place, "variant": variant}
+
+
+def branching_chain_cases(raw: dict, index: int, material: dict, contexts: list[dict]) -> list[dict]:
+    result = []
+    for context in contexts:
+        variant, number, total = context["variant"], context["number"], context["total"]
+        percent, branch, place = context["percent"], context["branch"], context["place"]
+        path, rounds, weather = context["path"], context["rounds"], material["weather"]
+        finish = material["finish"]
+        endings = ["最後は『地域名：天気、割合』の形の一行だけで終了して。", "最後は地域名と天気だけを一文で。割合・気温・次の提案は書かず終えて。", "最後は割合だけを返して終了して。天気の内容や次の作業は書かないで。"]
+        question = context["question"] + endings[finish]
+        for stage, continuation in chain_stages(rounds, f"gate_{index}_{variant}"):
+            template = {"name": f"chain-{variant}-{stage}", "category": "gate_tool_branch", "question": question, "answer": ""}
+            case = material_case(raw, index, 24 + variant * 4 + stage, template)
+            case["tool_names"] = [name for name, _, _ in rounds]
+            case["continuation"] = continuation
+            if stage < len(rounds):
+                name, arguments, _ = rounds[stage]
+                case["target"]["tool_calls"] = [tool_call(name, arguments, f"gate_{index}_{variant}_{stage}")]
+                case["expected"].update(kind="tool_call", tool_name=name, arguments=arguments)
+            else:
+                answers = [f"{place}：{weather}、{percent}", f"{place}は{weather}{case['provenance']['ending']}", percent]
+                case["target"]["content"] = answers[finish]
+                case["expected"].update(kind="exact", text=answers[finish])
+                entries = []
+                if finish != 2:
+                    entries += [fact("tool", "地域", place, "/continuation/5/content"), fact("tool", "天気", weather, "/continuation/5/content")]
+                if finish != 1:
+                    entries.append(fact("tool", "割合", percent, "/continuation/3/content"))
+                case["expected"]["facts"] = copy.deepcopy(entries)
+                case["provenance"]["facts"] += entries
+            case["provenance"]["selection"] = {"operation": "branching_tools", "chain": material["name"], "variant": variant, "stage": stage, "operator": material["operator"], "threshold": material["threshold"], "selected_branch": branch, "value": number, "total": total, "line_start": material["line_start"], "locations": material["locations"], "finish": finish}
+            case["provenance"]["values"] += [path, *material["locations"]]
+            case["expected"]["manual_rubric"] += ["表示の行番号や集計番号をvalue/totalへ入れず、返った割合に条件を適用して一つの取得先を選ぶ。", "取得済みの結果だけを指定形式で答えて終了し、再読込・再計算・別地域の追加取得をしない。"]
+            result.append(case)
+    return result
+
+
+def branching_failure_cases(raw: dict, index: int, material: dict, context: dict, failures: list[dict]) -> list[dict]:
+    """同じ失敗と根拠を固定し、追加質問の許可だけを変えた対を作る。"""
+    result = []
+    for failure in failures:
+        stage = failure["stage"]
+        source = branching_chain_context(index, 0, material, failure["total"]) if "total" in failure else context
+        rounds = source["rounds"][:stage + 1]
+        name, arguments, _ = rounds[-1]
+        rounds[-1] = (name, arguments, failure["error"])
+        # 未取得の後続段を含めず、実際に返った失敗までのprefixだけを共有する。
+        continuation = next(messages for count, messages in chain_stages(rounds, f"gate_error_{index}_{stage}") if count == len(rounds))
+        entries = []
+        if stage == 1:
+            entries.append(fact("tool", "母数", str(source["total"]), "/continuation/1/content"))
+        elif stage == 2:
+            entries += [fact("tool", "割合", source["percent"], "/continuation/3/content"), fact("tool", "地域", source["place"], "/continuation/1/content")]
+        for policy in failure["policies"]:
+            row = render_material(policy, source)
+            template = {"name": f"failure-{stage}-{row['name']}", "category": "gate_tool_failure", "question": source["question"] + row["question"], "answer": row["answer"], "contrast": f"failure-{stage}", "intent": row["intent"]}
+            case = material_case(raw, index, 80 + stage, template)
+            case["tool_names"] = ["read_file", "productivity_tools", "weather"]
+            case["continuation"] = copy.deepcopy(continuation)
+            case["expected"].update(kind="exact", text=case["target"]["content"], facts=copy.deepcopy(entries), unknown=[{"owner": "tool", "kind": kind} for kind in (["割合", "天気"] if stage < 2 else ["天気"])])
+            case["provenance"]["facts"] += copy.deepcopy(entries)
+            case["provenance"]["selection"] = {"operation": "branching_failure", "chain": material["name"], "stage": stage, "policy": row["name"], "total": source["total"], "percent": source["percent"] if stage == 2 else None}
+            case["provenance"]["values"] += [source["path"], *[entry["value"] for entry in entries]]
+            case["expected"]["manual_rubric"] += ["失敗した段で止まり、未取得の結果や原因を推測して補わない。途中の誤った呼出も教師ではない。", "追加質問は利用者が許可した項目を一度だけ。再試行や後続ツールを実行したとは言わない。"]
+            result.append(case)
+    return result
+
+
+def product_gate_cases() -> list[dict]:
+    material = json.loads((Path(__file__).parent / "fixtures/product-gate.json").read_text(encoding="utf-8"))
+    result, failures = [], []
+    for index, raw in enumerate(material["worlds"]):
+        result += [material_case(raw, index, variant, template) for variant, template in enumerate(material["scenarios"])]
+        chain = material["chains"][index]
+        contexts = [branching_chain_context(index, variant, chain) for variant in range(len(chain["values"]))]
+        result += branching_chain_cases(raw, index, chain, contexts)
+        failures += branching_failure_cases(raw, index, chain, contexts[0], material["chain_failures"])
+    for pair_index, pair in enumerate(material["conversations"]):
+        index = pair_index % len(material["worlds"])
+        for variant, item in enumerate(pair["variants"]):
+            template = {**item, "category": "gate_conversation", "name": f"conversation-{pair_index:02d}-{variant}", "history": pair["history"], "contrast": f"conversation-{pair_index:02d}"}
+            result.append(material_case(material["worlds"][index], index, 32 + pair_index * 2 + variant, template))
+    return result + failures
+
+
+def generate_dataset(extension: str | None = None) -> dict:
+    if extension not in (None, "product-gate"):
+        raise ValueError(f"未対応の教材追加です: {extension}")
     cases = []
     for split in SPLITS:
         count = 10 if split == "train" else 1
@@ -944,6 +1116,11 @@ def generate_dataset() -> dict:
     data = {"metadata": {"schema_version": VERSION, "purpose": "帰属と日常支援の合成LoRA教材。最終評価は候補選定・早期停止・教材追加に使用しない。", "target_policy": "targetだけを学習し、history・continuation・人格・資料をすべてマスクする。", "tool_policy": "tool_namesをRustの登録済みschemaへ解決し、body.toolsを学習に使う。", "source": "この生成器とfixtures/selection-v3.jsonに定義した架空人物・架空事実のみ。実利用者の記憶・会話ファイルは読まない。", "development_reference": "mainの16問とPR #489の24問は別途開発評価として保持する。", "tool_sources": ["skills/weather/mod.rs", "skills/read_file/mod.rs", "skills/productivity_tools/mod.rs"]}, "cases": cases}
     data["cases"].extend(additional_cases())
     data["metadata"]["training_extension"] = {"version": 3, "cases": 348, "source": "fixtures/selection-v3.json", "policy": "既存710件と開発86件・最終100件を変更せず、情報選択の異なる学習ケースのみ追加する。"}
+    if extension == "product-gate":
+        additions = product_gate_cases()
+        data["cases"].extend(additions)
+        data["metadata"]["product_gate_extension"] = {"version": 2, "cases": len(additions), "source": "fixtures/product-gate.json", "policy": "旧1058学習・開発86・最終100と最初の追加304件を固定し、失敗型の境界対と分岐連鎖だけ追加する。"}
+        data["metadata"]["source"] += " 追加材料はfixtures/product-gate.jsonの架空事実だけを使う。"
     validate_dataset(data)
     data["metadata"]["splits"] = {
         split: {
@@ -962,8 +1139,9 @@ def generate_dataset() -> dict:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True, help="教材JSONの保存先。既存ファイルは上書きしない。")
+    parser.add_argument("--extension", choices=("product-gate",), help="固定済み教材を変えずに追加する材料。省略時は既存版を生成する。")
     args = parser.parse_args()
-    data = generate_dataset()
+    data = generate_dataset(args.extension)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     with args.output.open("x", encoding="utf-8", newline="\n") as stream:
         json.dump(data, stream, ensure_ascii=False, indent=2)

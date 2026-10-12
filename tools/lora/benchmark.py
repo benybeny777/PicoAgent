@@ -45,8 +45,8 @@ def selected_cases(path, identifiers):
     return source, selected
 
 
-def stream_body(case, max_tokens, cache_prompt):
-    body = runner.generation_body(case, 1, max_tokens)
+def stream_body(case, max_tokens, cache_prompt, profile="current"):
+    body = runner.generation_body(case, 1, max_tokens, profile)
     if body.get("n", 1) != 1:
         raise ValueError("速度測定は単一の回答だけを対象にします")
     body.update(stream=True, stream_options={"include_usage": True}, cache_prompt=cache_prompt, id_slot=0)
@@ -212,6 +212,7 @@ def plan(cases):
 
 
 def run(args):
+    profile = getattr(args, "generation_profile", "current")
     if args.adapter is None:
         raise ValueError("基底との比較に--adapterが必要です")
     source, cases = selected_cases(args.input, args.case_ids)
@@ -228,7 +229,7 @@ def run(args):
                 "input_metadata": {key: value for key, value in source.items() if key != "cases"},
                 "parameters": {"case_ids": args.case_ids, "split": "dev", "gpu_layers": args.gpu_layers,
                                "device": args.device, "context": args.context, "max_tokens": args.max_tokens,
-                               "temperature": 0.6, "seed": 1, "repetitions": REPETITIONS, "warmup_per_group": 1,
+                               **runner.generation_parameters(args), "seed": 1, "repetitions": REPETITIONS, "warmup_per_group": 1,
                                "stream": True, "request_timeout": args.request_timeout},
                 "expected_results": len(runs), "results": [], "servers": {},
                 "journal": {"path": str(journal_path), "verified_records": 0}, "human_judgment": None}
@@ -250,7 +251,7 @@ def run(args):
                                       "target": case.get("target"), "human_judgment": None}
                             document["results"].append(result)
                             try:
-                                measure_stream(client, stream_body(case, args.max_tokens, item["cache_prompt"]), args.request_timeout, result)
+                                measure_stream(client, stream_body(case, args.max_tokens, item["cache_prompt"], profile), args.request_timeout, result)
                                 result["status"] = "completed"
                             except BaseException as exc:
                                 result.update(status="interrupted" if isinstance(exc, KeyboardInterrupt) else "failed",

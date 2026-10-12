@@ -1,0 +1,411 @@
+{
+  "schema_version": 1,
+  "purpose": "候補をdevだけで一つに固定した後に初めて回答を生成する、未見の連続ツール採用判定用。学習・開発選定へ混ぜず、実アプリの副作用や停止の受入とは区別する。",
+  "evaluation_role": "acceptance_holdout",
+  "previous_fixture": {
+    "path": "tools/lora/fixtures/tool-chain-eval.json",
+    "role": "development",
+    "reason": "PR #498で回答と失敗原因を検討済みのため、新しい候補の未見採用判定には使わない。"
+  },
+  "generation_policy": {
+    "allowed_after": "dev基準を満たす候補と重みのSHAを固定した後",
+    "seeds": [
+      1,
+      2,
+      3
+    ],
+    "candidate_runs": 18,
+    "required_passes": 18,
+    "criteria": "各runで機械判定と意味判定の両方に合格する。基底モデルも測定する場合は比較用の18runを別集計にする。",
+    "after_failure": "このfixtureを用いた調整後の再挑戦を未見合格として数えない。次の採用検討では別の未見集合が必要。"
+  },
+  "semantic_rules": [
+    "正解文の字面一致ではなく、主体・値・取得時点・分岐・既知と未確認・明示した回答範囲を確認する。",
+    "数値の同値表記は許容する。指定した項目・行数・明示一人称は守る。正しい固有名による自己参照や一人称の省略は誤りにしない。",
+    "重大な誤帰属、未取得情報の捏造、誤った副作用は一件でも不合格とする。意味採点の担当と根拠を保存し、人手採点とAI採点を区別する。",
+    "シミュレーションの既知結果は、直前の実呼出の名前・引数・順序が一致した場合だけ返す。初期promptに正解のツール履歴を先置きしない。"
+  ],
+  "cases": [
+    {
+      "id": "chain-acceptance-v1-json-inclusive",
+      "split": "chain_acceptance",
+      "character": {
+        "name": "千遥",
+        "profile": "名前は千遥。一人称は私。落ち着いた丁寧な日本語で、必要なことだけを簡潔に答える。"
+      },
+      "memories": [],
+      "history": [],
+      "continuation": [],
+      "question": "受入専用/灯台便_812.jsonをread_fileで全文読んでください。JSONの「今回」の完了数をvalue、総数をtotalとしてproductivity_toolsのpercent_calcで割合を計算してください。返された割合が「境界」以上なら「境界以上」、未満なら「境界未満」の地点をweatherで調べてください。必ず結果を受け取ってから次を一つずつ呼んで、最後は割合・地点・現在の天気・現在の気温だけを一文で報告してください。過去の集計や記録番号は計算に使わないでください。",
+      "tool_names": [
+        "read_file",
+        "productivity_tools",
+        "weather"
+      ],
+      "target": {
+        "role": "assistant",
+        "content": ""
+      },
+      "expected": {
+        "facts": [],
+        "manual_rubric": [
+          "read_file→percent_calc→weatherを実際に一つずつ呼び、156/240の65.00%を計算する。",
+          "65%と境界65は等しいため、以上側の露峰観測港を選ぶ。",
+          "割合65%・露峰観測港・現在は曇り・18.6°Cを一文で報告する。過去集計、体感温度、最高気温、予報を現在値と混同しない。",
+          "未取得の事実、余計な提案、実行していない操作の完了を足さない。一人称を使うなら私を保つ。"
+        ]
+      },
+      "simulation": {
+        "kind": "success",
+        "dimensions": [
+          "JSONの入れ子",
+          "総数が先のキー順",
+          "過去集計と記録番号",
+          "以上の等号境界",
+          "現在と予報の区別"
+        ],
+        "steps": [
+          {
+            "name": "read_file",
+            "arguments": {
+              "path": "受入専用/灯台便_812.json"
+            },
+            "line_count": 8,
+            "result": "受入専用/灯台便_812.json\n8 行中 1〜8 行目:\n1\t{\n2\t  \"記録番号\": 812,\n3\t  \"過去\": {\"総数\": 900, \"完了数\": 899},\n4\t  \"今回\": {\"総数\": 240, \"完了数\": 156},\n5\t  \"境界\": 65,\n6\t  \"境界以上\": \"露峰観測港\",\n7\t  \"境界未満\": \"翡翠観測港\"\n8\t}\n\n（行頭の「行番号+タブ」は表示用です。edit_file の old_string には含めないでください）"
+          },
+          {
+            "name": "productivity_tools",
+            "arguments": {
+              "action": "percent_calc",
+              "value": 156,
+              "total": 240
+            },
+            "result": "156 / 240 = 65.00%"
+          },
+          {
+            "name": "weather",
+            "arguments": {
+              "location": "露峰観測港"
+            },
+            "result": "**☁️ 露峰観測港の天気：曇り**\nいまは 18.6°C（体感 17.8°C）、湿度 63%、風 4km/h、降水 0mm\n\n| 日付 | 天気 | 最高 / 最低 | 降水確率 |\n| --- | --- | --- | --- |\n| 今日 | 晴れ | 22 / 14°C | 10% |"
+          }
+        ]
+      }
+    },
+    {
+      "id": "chain-acceptance-v1-tsv-inclusive",
+      "split": "chain_acceptance",
+      "character": {
+        "name": "瑛斗",
+        "profile": "名前は瑛斗。一人称は僕。穏やかで親しみのある日本語で、必要なことだけを簡潔に答える。"
+      },
+      "memories": [],
+      "history": [],
+      "continuation": [],
+      "question": "受入専用/栞棚_420.tsvをread_fileで読んで。「採用行」の処理済み件数をvalue、総数をtotalにしてproductivity_toolsのpercent_calcを呼んで。計算結果が30%以下ならファイルの「以下の地点」、30%を超えるなら「超過の地点」をweatherで確認して。ツールは前の結果を受け取ってから一つずつ呼んで。最後は「割合：…／地点：…／天気：…／気温：…」の一行だけで、天気と気温は現在の値を使ってね。",
+      "tool_names": [
+        "read_file",
+        "productivity_tools",
+        "weather"
+      ],
+      "target": {
+        "role": "assistant",
+        "content": ""
+      },
+      "expected": {
+        "facts": [],
+        "manual_rubric": [
+          "read_file→percent_calc→weatherを実際に一つずつ呼び、採用行の96/320の30.00%を計算する。保存分や優先度を使わない。",
+          "30%は30%以下なので鈴影観測町を選ぶ。",
+          "指定した四つのラベルを同じ順で一行にし、割合30%・鈴影観測町・雪・-1.4°Cだけを報告する。数値の同値表記と通常の空白差は許容する。",
+          "未取得の事実、余計な提案、実行していない操作の完了を足さない。一人称を使うなら僕を保つ。"
+        ]
+      },
+      "simulation": {
+        "kind": "success",
+        "dimensions": [
+          "TSVの列順変更",
+          "対象外の行",
+          "優先度の数字",
+          "以下の等号境界",
+          "負の現在気温",
+          "一行の指定形式"
+        ],
+        "steps": [
+          {
+            "name": "read_file",
+            "arguments": {
+              "path": "受入専用/栞棚_420.tsv"
+            },
+            "line_count": 4,
+            "result": "受入専用/栞棚_420.tsv\n4 行中 1〜4 行目:\n1\t対象\t総数\t優先度\t処理済み\t備考\n2\t保存分\t160\t9\t144\t今回の対象外\n3\t採用行\t320\t4\t96\t今回使う\n4\t境界は30%。以下の地点は鈴影観測町、超過の地点は藍丘観測町。\n\n（行頭の「行番号+タブ」は表示用です。edit_file の old_string には含めないでください）"
+          },
+          {
+            "name": "productivity_tools",
+            "arguments": {
+              "action": "percent_calc",
+              "value": 96,
+              "total": 320
+            },
+            "result": "96 / 320 = 30.00%"
+          },
+          {
+            "name": "weather",
+            "arguments": {
+              "location": "鈴影観測町"
+            },
+            "result": "**❄️ 鈴影観測町の天気：雪**\nいまは -1.4°C（体感 -3.7°C）、湿度 78%\n\n| 日付 | 天気 | 最高 / 最低 | 降水確率 |\n| --- | --- | --- | --- |\n| 今日 | 曇り | 3.8 / -4.2°C | 70% |"
+          }
+        ]
+      }
+    },
+    {
+      "id": "chain-acceptance-v1-table-below",
+      "split": "chain_acceptance",
+      "character": {
+        "name": "千遥",
+        "profile": "名前は千遥。一人称は私。落ち着いた丁寧な日本語で、必要なことだけを簡潔に答える。"
+      },
+      "memories": [],
+      "history": [],
+      "continuation": [],
+      "question": "受入専用/水琴票_906.mdをread_fileで全文読んでください。表の「検品」の完了数と総数をproductivity_toolsのpercent_calcに渡してください。返された割合がファイルの境界を超える場合だけ「超える場合」の地点、それ以外なら「それ以外」の地点をweatherで調べてください。前の結果を受け取る前に次のツールを呼ばないでください。最後に割合・地点・現在の天気・現在の気温だけを短く報告してください。",
+      "tool_names": [
+        "read_file",
+        "productivity_tools",
+        "weather"
+      ],
+      "target": {
+        "role": "assistant",
+        "content": ""
+      },
+      "expected": {
+        "facts": [],
+        "manual_rubric": [
+          "read_file→percent_calc→weatherを実際に一つずつ呼び、検品の377/875の43.09%を計算する。行番号、受付番号、配送の集計を使わない。",
+          "表示された43.09%は境界43.10%を超えないので鳴瀬試験島を選ぶ。",
+          "割合43.09%・鳴瀬試験島・雨・9.2°Cを報告する。体感温度、降水量などを現在気温と混同しない。",
+          "未取得の事実、余計な提案、実行していない操作の完了を足さない。一人称を使うなら私を保つ。"
+        ]
+      },
+      "simulation": {
+        "kind": "success",
+        "dimensions": [
+          "Markdown表",
+          "対象行の選択",
+          "受付番号の数字",
+          "境界直下",
+          "表示された丸め後の割合"
+        ],
+        "steps": [
+          {
+            "name": "read_file",
+            "arguments": {
+              "path": "受入専用/水琴票_906.md"
+            },
+            "line_count": 8,
+            "result": "受入専用/水琴票_906.md\n8 行中 1〜8 行目:\n1\t# 第906回の一覧\n2\t| 作業 | 受付番号 | 総数 | 完了数 |\n3\t| --- | --- | --- | --- |\n4\t| 配送 | 71 | 120 | 110 |\n5\t| 検品 | 52 | 875 | 377 |\n6\t境界：43.10%\n7\t超える場合：帆澄試験島\n8\tそれ以外：鳴瀬試験島\n\n（行頭の「行番号+タブ」は表示用です。edit_file の old_string には含めないでください）"
+          },
+          {
+            "name": "productivity_tools",
+            "arguments": {
+              "action": "percent_calc",
+              "value": 377,
+              "total": 875
+            },
+            "result": "377 / 875 = 43.09%"
+          },
+          {
+            "name": "weather",
+            "arguments": {
+              "location": "鳴瀬試験島"
+            },
+            "result": "**🌧️ 鳴瀬試験島の天気：雨**\nいまは 9.2°C（体感 7.1°C）、湿度 87%、風 13km/h、降水 2.4mm\n"
+          }
+        ]
+      }
+    },
+    {
+      "id": "chain-acceptance-v1-prose-above",
+      "split": "chain_acceptance",
+      "character": {
+        "name": "瑛斗",
+        "profile": "名前は瑛斗。一人称は僕。穏やかで親しみのある日本語で、必要なことだけを簡潔に答える。"
+      },
+      "memories": [],
+      "history": [],
+      "continuation": [],
+      "question": "受入専用/風標記録_1594.txtをread_fileで読んでから、今回の完了件数をvalue、全件数をtotalとしてproductivity_toolsのpercent_calcで割合を出して。その返り値を使ってファイルの分岐規則どおりに地点を決め、weatherで現在の天気を調べて。呼び出しは一つずつ、前の結果を待ってね。最後は割合・選んだ地点・現在の天気・現在の気温だけを簡潔に答えて。",
+      "tool_names": [
+        "read_file",
+        "productivity_tools",
+        "weather"
+      ],
+      "target": {
+        "role": "assistant",
+        "content": ""
+      },
+      "expected": {
+        "facts": [],
+        "manual_rubric": [
+          "read_file→percent_calc→weatherを実際に一つずつ呼び、今回の7/16の43.75%を計算する。受付番号、目標率、前回集計を使わない。",
+          "43.75%は境界43.74%を超えるため露原管理村を選ぶ。",
+          "割合43.75%・露原管理村・現在は快晴・27.4°Cを報告し、明日の雨を現在の天気と混同しない。",
+          "未取得の事実、余計な提案、実行していない操作の完了を足さない。一人称を使うなら僕を保つ。"
+        ]
+      },
+      "simulation": {
+        "kind": "success",
+        "dimensions": [
+          "文章による集計",
+          "分母が先",
+          "受付番号と目標率と前回値",
+          "境界直上",
+          "現在と翌日の区別"
+        ],
+        "steps": [
+          {
+            "name": "read_file",
+            "arguments": {
+              "path": "受入専用/風標記録_1594.txt"
+            },
+            "line_count": 5,
+            "result": "受入専用/風標記録_1594.txt\n5 行中 1〜5 行目:\n1\t受付は1594番、目標率は90%です。\n2\t今回使う集計は全16件で、そのうち完了したものは7件です。\n3\t注意：前回は全28件のうち完了21件でした。\n4\t今回の分岐境界は43.74%です。\n5\t境界を超えるときは露原管理村、境界以下なら柚羽管理村を選んでください。\n\n（行頭の「行番号+タブ」は表示用です。edit_file の old_string には含めないでください）"
+          },
+          {
+            "name": "productivity_tools",
+            "arguments": {
+              "action": "percent_calc",
+              "value": 7,
+              "total": 16
+            },
+            "result": "7 / 16 = 43.75%"
+          },
+          {
+            "name": "weather",
+            "arguments": {
+              "location": "露原管理村"
+            },
+            "result": "**☀️ 露原管理村の天気：快晴**\nいまは 27.4°C（体感 28.9°C）、湿度 56%\n\n| 日付 | 天気 | 最高 / 最低 | 降水確率 |\n| --- | --- | --- | --- |\n| 明日 | 雨 | 24 / 19°C | 80% |"
+          }
+        ]
+      }
+    },
+    {
+      "id": "chain-acceptance-v1-missing-file",
+      "split": "chain_acceptance",
+      "character": {
+        "name": "千遥",
+        "profile": "名前は千遥。一人称は私。落ち着いた丁寧な日本語で、必要なことだけを簡潔に答える。"
+      },
+      "memories": [],
+      "history": [],
+      "continuation": [],
+      "question": "受入専用/朔葉記録_673.csvをread_fileで読んでください。読めた場合だけ、完了数と総数をproductivity_toolsのpercent_calcで割合にし、記載された分岐で選ぶ地点の現在の天気をweatherで調べてください。結果を受け取ってから一つずつ呼んでください。読込に失敗した場合はそこで終了し、読めなかった理由と、割合・天気が未確認であることを一文だけで伝えてください。再試行、別ファイルの読込、ファイルの作成、計算、天気取得はしないでください。別のファイルを指定する提案や質問も不要です。",
+      "tool_names": [
+        "read_file",
+        "productivity_tools",
+        "weather"
+      ],
+      "target": {
+        "role": "assistant",
+        "content": ""
+      },
+      "expected": {
+        "facts": [],
+        "manual_rubric": [
+          "read_fileを一度だけ呼び、失敗後に計算・weather・再試行・別ファイルの読込・書込みをしない。",
+          "ファイルが見つからず読めなかった理由と、割合・天気が未確認であることを一文で伝える。割合や天気を推測しない。",
+          "別ファイルの指定、作成、再試行、設定変更などを提案・要求せず終了する。",
+          "未取得の事実、余計な提案、実行していない操作の完了を足さない。一人称を使うなら私を保つ。"
+        ]
+      },
+      "simulation": {
+        "kind": "read_error",
+        "dimensions": [
+          "ファイル欠損",
+          "最初の工程で停止",
+          "原因と未確認事項の説明",
+          "不要な復旧提案をしない"
+        ],
+        "steps": [
+          {
+            "name": "read_file",
+            "arguments": {
+              "path": "受入専用/朔葉記録_673.csv"
+            },
+            "line_count": 1,
+            "result": "エラー: 読み取りに失敗しました（指定されたファイルが見つかりません。 (os error 2)）: 受入専用/朔葉記録_673.csv"
+          }
+        ]
+      }
+    },
+    {
+      "id": "chain-acceptance-v1-weather-error",
+      "split": "chain_acceptance",
+      "character": {
+        "name": "瑛斗",
+        "profile": "名前は瑛斗。一人称は僕。穏やかで親しみのある日本語で、必要なことだけを簡潔に答える。"
+      },
+      "memories": [],
+      "history": [],
+      "continuation": [],
+      "question": "受入専用/白帆帳_285.csvをread_fileで読んで、「当日」の完了数をvalue、全件数をtotalにしてproductivity_toolsのpercent_calcを呼んで。計算結果が同じ「当日」行の境界以上なら「以上の地点」、未満なら「未満の地点」をweatherで調べて。各結果を待って一つずつ進めてね。もし天気取得だけが失敗したら、確認済みの割合と選んだ地点は報告して、天気と気温は未確認だと一文で伝えて。再試行、別地点の取得、見込みの天気、対処の提案は要らないよ。",
+      "tool_names": [
+        "read_file",
+        "productivity_tools",
+        "weather"
+      ],
+      "target": {
+        "role": "assistant",
+        "content": ""
+      },
+      "expected": {
+        "facts": [],
+        "manual_rubric": [
+          "read_file→percent_calc→weatherを実際に一つずつ呼び、54/72の75.00%で以上側の雲居観測町を選ぶ。未処理数18を完了数にしない。",
+          "weatherの失敗後は再試行や別地点取得などの追加ツールを呼ばない。",
+          "確認済みの75%・雲居観測町と、天気・気温は未確認であることを一文で報告する。割合まで未確認扱いにせず、晴雨・気温を補完しない。",
+          "障害への対処や別地点の提案を足さず終了する。",
+          "未取得の事実、余計な提案、実行していない操作の完了を足さない。一人称を使うなら僕を保つ。"
+        ]
+      },
+      "simulation": {
+        "kind": "weather_error",
+        "dimensions": [
+          "CSVの列順変更",
+          "未処理数の数字",
+          "天気取得段で失敗",
+          "既知の値と未確認の値を分離",
+          "追加取得や復旧提案をしない"
+        ],
+        "steps": [
+          {
+            "name": "read_file",
+            "arguments": {
+              "path": "受入専用/白帆帳_285.csv"
+            },
+            "line_count": 3,
+            "result": "受入専用/白帆帳_285.csv\n3 行中 1〜3 行目:\n1\t識別子,未処理,全件数,完了数,境界,以上の地点,未満の地点\n2\t前日,9,100,91,80,星畑観測町,水隅観測町\n3\t当日,18,72,54,70,雲居観測町,灯羽観測町\n\n（行頭の「行番号+タブ」は表示用です。edit_file の old_string には含めないでください）"
+          },
+          {
+            "name": "productivity_tools",
+            "arguments": {
+              "action": "percent_calc",
+              "value": 54,
+              "total": 72
+            },
+            "result": "54 / 72 = 75.00%"
+          },
+          {
+            "name": "weather",
+            "arguments": {
+              "location": "雲居観測町"
+            },
+            "result": "エラー: 天気APIへの接続に失敗しました: operation timed out"
+          }
+        ]
+      }
+    }
+  ]
+}

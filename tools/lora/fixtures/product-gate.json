@@ -1,0 +1,1259 @@
+{
+  "version": "product-gate-2",
+  "policy": "旧教材と評価は変更せず、失敗型に対応した対比だけを別人物・別状況で追加する。全て架空の入力と教師。",
+  "chain_failures": [
+    {
+      "stage": 0,
+      "error": "エラー: 許可ルート外のため、このファイルは読み取れません。",
+      "policies": [
+        {"name": "stop", "question": "途中で失敗したら、確認できなかった項目だけ答えて。再試行、別の資料の要求、代案、後続ツールの実行はいらない。", "answer": "割合と天気は確認できていないため分かりません。", "intent": "読込失敗で未確認の割合と天気だけを伝え、代案や質問を足さない。"},
+        {"name": "ask", "question": "読込に失敗したら、確認できなかった項目を伝えて、読み取りが許可された資料の場所を一つだけ質問して。自動で再試行したり後続ツールを使ったりしないで。", "answer": "割合と天気は確認できていないため分かりません。読み取りが許可されている資料の場所を教えてください。", "intent": "未確認の割合と天気を伝え、明示許可された資料の場所だけ質問する。"}
+      ]
+    },
+    {
+      "stage": 1,
+      "total": 0,
+      "error": "エラー: total は 0 以外を指定してください。",
+      "policies": [
+        {"name": "stop", "question": "計算でエラーが返ったら、その原因と確認できなかった項目だけを答えて。値を補正したり、質問や代案を足したり、天気を取得したりしないで。", "answer": "母数が0なので計算できず、割合と天気は分かりません。", "intent": "読めた母数0を根拠に計算失敗を説明し、割合や天気を捏造しない。追加質問をしない。"},
+        {"name": "ask", "question": "計算でエラーが返ったら、その原因と確認できなかった項目を答えて、修正に必要な母数だけを一度質問して。値を勝手に補って再計算したり、天気を取得したりしないで。", "answer": "母数が0なので計算できず、割合と天気は分かりません。正しい母数を教えてください。", "intent": "母数0の失敗と未確認範囲を説明し、許可された母数の確認だけを行う。"}
+      ]
+    },
+    {
+      "stage": 2,
+      "error": "エラー: 天気APIへの接続に失敗しました: 接続タイムアウト",
+      "policies": [
+        {"name": "stop", "question": "天気取得に失敗したら、確認済みの割合と取得先の地域、それから天気が不明なことだけ答えて。追加質問、再試行、気温の推測はしないで。", "answer": "割合は{percent}です。{place}の天気は分かりません。", "intent": "取得済みの割合と対象地域を保ち、失敗した天気と気温を補わず終了する。"},
+        {"name": "ask", "question": "天気取得に失敗したら、確認済みの割合と取得先の地域、天気が不明なことを伝え、再試行してよいか一度だけ質問して。回答を待つ間は呼出を追加しないで。", "answer": "割合は{percent}です。{place}の天気は分かりません。天気取得を再試行してもよいですか。", "intent": "確認済みの割合と地域を保ち、明示許可された再試行の質問だけを行う。許可前に実行しない。"}
+      ]
+    }
+  ],
+  "worlds": [
+    {
+      "character": "知佳",
+      "user": "晴之",
+      "speaker": "智花",
+      "recipient": "佳央",
+      "attributes": {
+        "飲み物": {
+          "user": "カリン茶",
+          "character": "ナツメ茶"
+        },
+        "食べ物": {
+          "user": "蓮根の挟み揚げ",
+          "character": "サバの味噌煮"
+        },
+        "趣味": {
+          "user": "革小物作り",
+          "character": "砂絵"
+        }
+      },
+      "pet": "グッピー",
+      "animal_preference": "ロップイヤー",
+      "replacement_drink": "アンズソーダ",
+      "start_time": "午前八時四十五分",
+      "frequency": "二週に一度"
+    },
+    {
+      "character": "千紘",
+      "user": "瑛太",
+      "speaker": "沙織",
+      "recipient": "未央",
+      "attributes": {
+        "飲み物": {
+          "user": "焙煎ハス茶",
+          "character": "クマザサ茶"
+        },
+        "食べ物": {
+          "user": "ズッキーニのマリネ",
+          "character": "豆のキッシュ"
+        },
+        "趣味": {
+          "user": "点描画",
+          "character": "凧作り"
+        }
+      },
+      "pet": "セキセイインコ",
+      "animal_preference": "コリドラス",
+      "replacement_drink": "クランベリードリンク",
+      "start_time": "午前九時三十五分",
+      "frequency": "十日に一回"
+    },
+    {
+      "character": "菫",
+      "user": "信也",
+      "speaker": "紘人",
+      "recipient": "圭介",
+      "attributes": {
+        "飲み物": {
+          "user": "ほおずきソーダ",
+          "character": "赤しそドリンク"
+        },
+        "食べ物": {
+          "user": "山菜そば",
+          "character": "白身魚の包み焼き"
+        },
+        "趣味": {
+          "user": "石磨き",
+          "character": "糸紡ぎ"
+        }
+      },
+      "pet": "パンダマウス",
+      "animal_preference": "ウーパールーパー",
+      "replacement_drink": "カカオハスクティー",
+      "start_time": "午前十一時二十五分",
+      "frequency": "週に四回"
+    },
+    {
+      "character": "紫乃",
+      "user": "遥斗",
+      "speaker": "怜奈",
+      "recipient": "真帆",
+      "attributes": {
+        "飲み物": {
+          "user": "グァバネクター",
+          "character": "パッションフルーツソーダ"
+        },
+        "食べ物": {
+          "user": "カボチャのニョッキ",
+          "character": "雑穀リゾット"
+        },
+        "趣味": {
+          "user": "写経",
+          "character": "竹細工"
+        }
+      },
+      "pet": "ロップイヤー",
+      "animal_preference": "ボタンインコ",
+      "replacement_drink": "アロエドリンク",
+      "start_time": "午後一時五十五分",
+      "frequency": "六日に一度"
+    },
+    {
+      "character": "真白",
+      "user": "航平",
+      "speaker": "恵悟",
+      "recipient": "芳乃",
+      "attributes": {
+        "飲み物": {
+          "user": "杏仁ドリンク",
+          "character": "あずき茶"
+        },
+        "食べ物": {
+          "user": "春巻き",
+          "character": "蒸しナス"
+        },
+        "趣味": {
+          "user": "石鹸作り",
+          "character": "ガラス絵"
+        }
+      },
+      "pet": "コリドラス",
+      "animal_preference": "アカヒレ",
+      "replacement_drink": "桑の葉茶",
+      "start_time": "午後二時四十五分",
+      "frequency": "月に二回"
+    },
+    {
+      "character": "琴乃",
+      "user": "結菜",
+      "speaker": "朋花",
+      "recipient": "和彦",
+      "attributes": {
+        "飲み物": {
+          "user": "甜茶",
+          "character": "タンポポ茶"
+        },
+        "食べ物": {
+          "user": "大根もち",
+          "character": "ひよこ豆のスープ"
+        },
+        "趣味": {
+          "user": "金継ぎ",
+          "character": "籠編み"
+        }
+      },
+      "pet": "ウーパールーパー",
+      "animal_preference": "グッピー",
+      "replacement_drink": "ルバーブソーダ",
+      "start_time": "午後四時三十五分",
+      "frequency": "八日に一度"
+    },
+    {
+      "character": "碧",
+      "user": "麻衣",
+      "speaker": "英理",
+      "recipient": "理玖",
+      "attributes": {
+        "飲み物": {
+          "user": "ヨモギ茶",
+          "character": "ドクダミ茶"
+        },
+        "食べ物": {
+          "user": "ニラまんじゅう",
+          "character": "きのこのパイ"
+        },
+        "趣味": {
+          "user": "茶器集め",
+          "character": "盆石"
+        }
+      },
+      "pet": "ボタンインコ",
+      "animal_preference": "セキセイインコ",
+      "replacement_drink": "はっさくネクター",
+      "start_time": "午後六時二十五分",
+      "frequency": "三週に一度"
+    },
+    {
+      "character": "椿",
+      "user": "夏実",
+      "speaker": "保人",
+      "recipient": "千絵",
+      "attributes": {
+        "飲み物": {
+          "user": "エルダーフラワーソーダ",
+          "character": "レモングラス茶"
+        },
+        "食べ物": {
+          "user": "根菜のポトフ",
+          "character": "米粉クレープ"
+        },
+        "趣味": {
+          "user": "紙すき",
+          "character": "木版刷り"
+        }
+      },
+      "pet": "アカヒレ",
+      "animal_preference": "パンダマウス",
+      "replacement_drink": "ビワ茶",
+      "start_time": "午後八時十五分",
+      "frequency": "週に五回"
+    }
+  ],
+  "scenarios": [
+    {
+      "name": "user_food",
+      "category": "gate_ownership",
+      "question": [
+        "私の食の好みだけ、ひとこと教えて。",
+        "{user}という私が好む料理は何だった？",
+        "食べ物を確認したい。私について残っている内容は？"
+      ],
+      "requests": [
+        [
+          "user",
+          "食べ物"
+        ]
+      ]
+    },
+    {
+      "name": "character_food",
+      "category": "gate_ownership",
+      "question": [
+        "{character}自身は、食べ物なら何が好き？",
+        "私の好みはいったん置いて、君の好きな料理を聞かせて。",
+        "キャラのあなたが好む食べ物だけ答えて。"
+      ],
+      "requests": [
+        [
+          "character",
+          "食べ物"
+        ]
+      ]
+    },
+    {
+      "name": "user_drink",
+      "category": "gate_ownership",
+      "question": [
+        "飲み物なら、私の好みは何だったかな。",
+        "{user}が好きだと伝えた飲み物を一つ挙げて。",
+        "覚えている私の飲み物の好みを短く。"
+      ],
+      "requests": [
+        [
+          "user",
+          "飲み物"
+        ]
+      ]
+    },
+    {
+      "name": "character_drink",
+      "category": "gate_ownership",
+      "question": [
+        "君のほうの好きな飲み物を聞いているよ。",
+        "{character}として、飲み物の好みを教えて。",
+        "飲み物については、あなた自身はどう？"
+      ],
+      "requests": [
+        [
+          "character",
+          "飲み物"
+        ]
+      ]
+    },
+    {
+      "name": "user_hobby",
+      "category": "gate_ownership",
+      "question": [
+        "私が趣味として話していたことは何？",
+        "{user}の趣味が分かれば、その内容だけ。",
+        "私の趣味の記録を一つ確認させて。"
+      ],
+      "requests": [
+        [
+          "user",
+          "趣味"
+        ]
+      ]
+    },
+    {
+      "name": "two_owners",
+      "category": "gate_ownership",
+      "question": [
+        "飲み物の好みを、あなた、私の順で聞かせて。",
+        "君と私の飲み物はどう違う？誰のものかも分けて。",
+        "飲み物について、{character}本人の好みと{user}の好みを並べて。"
+      ],
+      "requests": [
+        [
+          "character",
+          "飲み物"
+        ],
+        [
+          "user",
+          "飲み物"
+        ]
+      ]
+    },
+    {
+      "name": "quoted_me",
+      "category": "gate_quote",
+      "question": "{speaker}は「私は{user_drink}を好んで飲む」と話しました。今の引用の「私」を名前で答え、発言内容も短く伝えて。",
+      "answer": "{speaker}さんが、{user_drink}を好んで飲むと話しています。",
+      "evidence": [
+        {
+          "owner": "speaker",
+          "kind": "引用の飲み物",
+          "value": "{user_drink}",
+          "source": "question",
+          "status": "reported"
+        }
+      ]
+    },
+    {
+      "name": "quoted_you",
+      "category": "gate_quote",
+      "question": "{speaker}が{recipient}に「あなたは{character_drink}が好きだったね」と声をかけました。「あなた」は誰への呼びかけ？何が好きだと言われた？",
+      "answer": "「あなた」は{recipient}さんです。{character_drink}が好きだと言われています。",
+      "evidence": [
+        {
+          "owner": "recipient",
+          "kind": "引用の飲み物",
+          "value": "{character_drink}",
+          "source": "question",
+          "status": "reported"
+        }
+      ]
+    },
+    {
+      "name": "quote_and_user",
+      "category": "gate_quote",
+      "question": "{speaker}は「私は{replacement_drink}が好き」と話しました。話している人の好みと、以前私が伝えた飲み物を分けて答えて。",
+      "answer": "{speaker}さんは{replacement_drink}が好きだと話しています。{user}さんの好みは{user_drink}{ending}",
+      "requests": [
+        [
+          "user",
+          "飲み物"
+        ]
+      ],
+      "evidence": [
+        {
+          "owner": "speaker",
+          "kind": "引用の飲み物",
+          "value": "{replacement_drink}",
+          "source": "question",
+          "status": "reported"
+        }
+      ]
+    },
+    {
+      "name": "quote_negation",
+      "category": "gate_quote",
+      "question": "{speaker}の言葉は「{user_drink}ではなく、{replacement_drink}が好きです」。どちらを否定して、何が好きだと言っている？",
+      "answer": "{speaker}さんは{user_drink}を否定し、{replacement_drink}が好きだと述べています。",
+      "evidence": [
+        {
+          "owner": "speaker",
+          "kind": "否定した飲み物",
+          "value": "{user_drink}",
+          "source": "question",
+          "status": "reported"
+        },
+        {
+          "owner": "speaker",
+          "kind": "引用の飲み物",
+          "value": "{replacement_drink}",
+          "source": "question",
+          "status": "reported"
+        }
+      ]
+    },
+    {
+      "name": "quote_missing_listener",
+      "category": "gate_quote",
+      "question": "{speaker}の「あなたは{character_drink}が好きだね」という言葉だけがあります。聞き手の名前はこの文章から特定できる？",
+      "answer": "この文章だけでは、聞き手の名前は分かりません。",
+      "unknown": [
+        [
+          "recipient",
+          "引用の相手"
+        ]
+      ]
+    },
+    {
+      "name": "quote_reversed_roles",
+      "category": "gate_quote",
+      "question": "{recipient}から{speaker}へ「あなたの好きな飲み物は{replacement_drink}だったね」と話しています。この「あなた」が指す人と内容を教えて。",
+      "answer": "「あなた」は{speaker}さんです。{replacement_drink}が好きだと述べられています。",
+      "evidence": [
+        {
+          "owner": "speaker",
+          "kind": "引用の飲み物",
+          "value": "{replacement_drink}",
+          "source": "question",
+          "status": "reported"
+        }
+      ]
+    },
+    {
+      "name": "start_known",
+      "category": "gate_knowledge",
+      "question": "前に話した道具の手入れ、私は何時に始める予定だった？",
+      "answer": "{user}さんが始めるのは{start_time}{ending}",
+      "evidence": [
+        {
+          "owner": "user",
+          "kind": "開始時刻",
+          "value": "{start_time}",
+          "source": "memory",
+          "status": "known",
+          "text": "私は道具の手入れを{start_time}に始めます。"
+        }
+      ],
+      "contrast": "start_status"
+    },
+    {
+      "name": "start_missing",
+      "category": "gate_knowledge",
+      "question": "前に話した道具の手入れ、私は何時に始める予定だった？",
+      "answer": "今ある情報では、手入れを始める時刻は分かりません。",
+      "unknown": [
+        [
+          "user",
+          "開始時刻"
+        ]
+      ],
+      "contrast": "start_status"
+    },
+    {
+      "name": "start_undecided",
+      "category": "gate_knowledge",
+      "question": "前に話した道具の手入れ、私は何時に始める予定だった？",
+      "answer": "{user}さんは、手入れを始める時刻をまだ決めていません。",
+      "evidence": [
+        {
+          "owner": "user",
+          "kind": "開始時刻",
+          "value": "まだ決めていません",
+          "source": "memory",
+          "status": "explicit_none",
+          "text": "私は道具の手入れを始める時刻をまだ決めていません。"
+        }
+      ],
+      "contrast": "start_status"
+    },
+    {
+      "name": "frequency_known",
+      "category": "gate_knowledge",
+      "question": "あなたは好きな飲み物をどれくらいの間隔で飲む？",
+      "answer": "{first}が飲む間隔は{frequency}{ending}",
+      "evidence": [
+        {
+          "owner": "character",
+          "kind": "飲む間隔",
+          "value": "{frequency}",
+          "source": "profile",
+          "status": "known",
+          "text": "{character}は好きな飲み物を{frequency}飲む。"
+        }
+      ],
+      "contrast": "frequency_status"
+    },
+    {
+      "name": "frequency_missing",
+      "category": "gate_knowledge",
+      "question": "あなたは好きな飲み物をどれくらいの間隔で飲む？",
+      "answer": "今ある情報では、{first}が飲む間隔は分かりません。",
+      "unknown": [
+        [
+          "character",
+          "飲む間隔"
+        ]
+      ],
+      "contrast": "frequency_status"
+    },
+    {
+      "name": "frequency_undecided",
+      "category": "gate_knowledge",
+      "question": "あなたは好きな飲み物をどれくらいの間隔で飲む？",
+      "answer": "{first}は、飲む間隔を決めていません。",
+      "evidence": [
+        {
+          "owner": "character",
+          "kind": "飲む間隔",
+          "value": "決めていません",
+          "source": "profile",
+          "status": "explicit_none",
+          "text": "{character}は好きな飲み物を飲む間隔を決めていません。"
+        }
+      ],
+      "contrast": "frequency_status"
+    },
+    {
+      "name": "assistant_wrong_food",
+      "category": "gate_correction",
+      "question": "直前の返答が私の話と違う気がする。私の食べ物の好みを、残っている記録でもう一度教えて。",
+      "requests": [
+        [
+          "user",
+          "食べ物"
+        ]
+      ],
+      "history": [
+        {
+          "role": "user",
+          "content": "私の好きな食べ物、何だった？"
+        },
+        {
+          "role": "assistant",
+          "content": "{user}さんは{character_food}が好きです。"
+        }
+      ],
+      "masked": [
+        1
+      ]
+    },
+    {
+      "name": "user_updates_drink",
+      "category": "gate_correction",
+      "question": "飲み物の好みを更新するね。以前の{user_drink}から、今は{replacement_drink}が好きになった。現在の好みだけ答えて。",
+      "answer": "今の{user}さんの好きな飲み物は{replacement_drink}{ending}",
+      "supersede": [
+        [
+          "user",
+          "飲み物"
+        ]
+      ],
+      "evidence": [
+        {
+          "owner": "user",
+          "kind": "飲み物",
+          "value": "{replacement_drink}",
+          "source": "question",
+          "status": "known"
+        }
+      ]
+    },
+    {
+      "name": "assistant_wrong_self",
+      "category": "gate_correction",
+      "question": "前には私と同じだと言っていたけど、あなた自身の今の飲み物の好みは？",
+      "requests": [
+        [
+          "character",
+          "飲み物"
+        ]
+      ],
+      "history": [
+        {
+          "role": "user",
+          "content": "君自身の好きな飲み物は？"
+        },
+        {
+          "role": "assistant",
+          "content": "{first}も{user_drink}が好きです。"
+        }
+      ],
+      "masked": [
+        1
+      ]
+    },
+    {
+      "name": "user_repairs_drink",
+      "category": "gate_correction",
+      "question": "私が{user_drink}好きだという記録は言い間違いです。正しくは{replacement_drink}が好きです。修正した内容だけ確認して。",
+      "answer": "{user}さんが好きなのは{replacement_drink}{ending}",
+      "supersede": [
+        [
+          "user",
+          "飲み物"
+        ]
+      ],
+      "evidence": [
+        {
+          "owner": "user",
+          "kind": "飲み物",
+          "value": "{replacement_drink}",
+          "source": "question",
+          "status": "known"
+        }
+      ]
+    },
+    {
+      "name": "missing_not_undecided",
+      "category": "gate_knowledge",
+      "question": "私はどの曜日に道具の手入れをする予定だった？決めていないとは言っていないので、記録から分かる範囲だけ答えて。",
+      "answer": "今ある情報では、手入れをする曜日は分かりません。",
+      "unknown": [
+        [
+          "user",
+          "作業の曜日"
+        ]
+      ]
+    },
+    {
+      "name": "other_unknown_is_not_self",
+      "category": "gate_knowledge",
+      "question": "{speaker}は「私の好みはまだここでは話していない」と言っていました。それはさておき、あなた自身の好きな食べ物は？",
+      "requests": [
+        [
+          "character",
+          "食べ物"
+        ]
+      ]
+    }
+  ],
+  "conversations": [
+    {
+      "name": "small_disappointment",
+      "history": [
+        {
+          "role": "user",
+          "content": "折った紙飾りが少しゆがんだ。気になるけど、今はそのまま飾るつもり。"
+        }
+      ],
+      "variants": [
+        {
+          "question": "直し方は要らないよ。この気持ちだけ受け止めて。",
+          "answer": "少し気になるけれど、そのまま飾りたいんだね。",
+          "intent": "共感して変更を勧めない"
+        },
+        {
+          "question": "気持ちの話は省いて、どうすると決めたかだけ確認して。",
+          "answer": "紙飾りはそのまま飾る予定だね。",
+          "intent": "決定を短く確認"
+        }
+      ]
+    },
+    {
+      "name": "joke_or_fact",
+      "history": [],
+      "variants": [
+        {
+          "question": "片方の靴下が隠れんぼしてる気分。これは冗談だよ。軽く返して。",
+          "answer": "なかなか上手な隠れ方だね。",
+          "intent": "冗談へ軽く応じる"
+        },
+        {
+          "question": "片方の靴下が見つからない。冗談抜きで、私が何を探しているかだけ言って。",
+          "answer": "片方の靴下だね。",
+          "intent": "対象だけを特定"
+        }
+      ]
+    },
+    {
+      "name": "ask_or_decline",
+      "history": [
+        {
+          "role": "user",
+          "content": "候補は、窓辺に置くか、棚の上に置くかの二つ。まだ決めていない。"
+        }
+      ],
+      "variants": [
+        {
+          "question": "今は私が考えるから、意見は保留して。",
+          "answer": "分かりました。今は意見を控えます。",
+          "intent": "選択を保留"
+        },
+        {
+          "question": "決めつけずに、私が選ぶための確認を一つして。",
+          "answer": "置き場所は、明るさと手の届きやすさのどちらを優先したいですか。",
+          "intent": "価値基準を一つ確認"
+        }
+      ]
+    },
+    {
+      "name": "understood_or_agreed",
+      "history": [
+        {
+          "role": "assistant",
+          "content": "紙袋をまとめて一つの箱に入れる案があります。"
+        }
+      ],
+      "variants": [
+        {
+          "question": "説明の意味は分かった。でも採用するとは言っていないよ。",
+          "answer": "意味は分かったけれど、採用はまだ決めていないんだね。",
+          "intent": "理解と同意を分ける"
+        },
+        {
+          "question": "説明の意味は分かった。その案を採用する。方針だけ言い直して。",
+          "answer": "紙袋を一つの箱にまとめる方針だね。",
+          "intent": "同意した方針を確認"
+        }
+      ]
+    },
+    {
+      "name": "quote_not_instruction",
+      "history": [],
+      "variants": [
+        {
+          "question": "知人から「黙っていて」と届いた。これを別の柔らかい言い方に直して。",
+          "answer": "「今は少し静かにしてもらえると助かります。」",
+          "intent": "引用を言い換える"
+        },
+        {
+          "question": "あなたへのお願いです。今は詳しい返答を控えて、了承だけ。",
+          "answer": "分かりました。",
+          "intent": "直接の制限に従う"
+        }
+      ]
+    },
+    {
+      "name": "today_or_next_week",
+      "history": [],
+      "variants": [
+        {
+          "question": "今週は素材集めだけで、組み立ては来週。二つの時点を一文で。",
+          "answer": "素材集めは今週、組み立ては来週ですね。",
+          "intent": "時点を保存"
+        },
+        {
+          "question": "組み立ては今週中で、素材の追加は来週。二つの時点を一文で。",
+          "answer": "組み立ては今週、素材の追加は来週ですね。",
+          "intent": "入れ替わった時点を保存"
+        }
+      ]
+    },
+    {
+      "name": "affirmation_scope",
+      "history": [
+        {
+          "role": "assistant",
+          "content": "箱を閉じてから、ラベルを貼る順番でどうでしょう。"
+        }
+      ],
+      "variants": [
+        {
+          "question": "順番はそれでいい。箱はまだ閉じていないことも含めて確認して。",
+          "answer": "箱を閉じてからラベルを貼る順番で、箱はまだ閉じていないんだね。",
+          "intent": "了承を完了にしない"
+        },
+        {
+          "question": "その順番で、箱を閉じるところまでは済んだ。残り一つだけ教えて。",
+          "answer": "ラベルを貼ることだね。",
+          "intent": "確認済みの続き"
+        }
+      ]
+    },
+    {
+      "name": "short_for_whom",
+      "history": [
+        {
+          "role": "user",
+          "content": "相手には「受け取った部品の数は合っています。確認ありがとうございました。」と伝えたい。"
+        }
+      ],
+      "variants": [
+        {
+          "question": "相手に渡す文だけ、もっと短くして。",
+          "answer": "「部品の数は合っています。確認ありがとうございます。」",
+          "intent": "文案を短くする"
+        },
+        {
+          "question": "相手への文はそのまま。あなたは内容の要点だけ短く答えて。",
+          "answer": "部品数の一致と、確認へのお礼だね。",
+          "intent": "文案を編集せず要点を答える"
+        }
+      ]
+    },
+    {
+      "name": "refuse_topic",
+      "history": [],
+      "variants": [
+        {
+          "question": "今日は成績の話はしたくない。別のことも勧めず、この話を閉じよう。",
+          "answer": "了解。成績の話はここまでにしよう。",
+          "intent": "話題を閉じる"
+        },
+        {
+          "question": "今日は成績の話はしたくない、という断り文を一文だけ作って。",
+          "answer": "「今日は成績の話を控えさせてください。」",
+          "intent": "断り文を作る"
+        }
+      ]
+    },
+    {
+      "name": "mixed_feeling",
+      "history": [],
+      "variants": [
+        {
+          "question": "仕上がって嬉しいけど、終わって寂しくもある。どちらか一つに決めなくていいよ。",
+          "answer": "嬉しさと寂しさ、両方あるんだね。",
+          "intent": "両方の感情を受け止める"
+        },
+        {
+          "question": "仕上がって嬉しい。寂しいわけではないから、その気持ちだけ受け取って。",
+          "answer": "仕上がって嬉しいんだね。",
+          "intent": "否定された感情を加えない"
+        }
+      ]
+    },
+    {
+      "name": "who_requested_pause",
+      "history": [],
+      "variants": [
+        {
+          "question": "隣の人は休憩するけど、私はカードを仕分ける。私の予定だけ確認して。",
+          "answer": "あなたはカードを仕分ける予定ですね。",
+          "intent": "話者の行動を選ぶ"
+        },
+        {
+          "question": "私は休憩するけど、隣の人はカードを仕分ける。私の予定だけ確認して。",
+          "answer": "あなたは休憩する予定ですね。",
+          "intent": "同じ主語の交換に追従"
+        }
+      ]
+    },
+    {
+      "name": "preference_not_allergy",
+      "history": [],
+      "variants": [
+        {
+          "question": "甘い香りは苦手だから、香りの話は広げないで。",
+          "answer": "分かった。香りの話はここまでにしよう。",
+          "intent": "好みの境界を尊重"
+        },
+        {
+          "question": "甘い香りが苦手、という私の好みを一文で言い直して。理由は足さないで。",
+          "answer": "あなたは甘い香りが苦手なんだね。",
+          "intent": "好みだけを要約"
+        }
+      ]
+    },
+    {
+      "name": "recognize_correction",
+      "history": [
+        {
+          "role": "assistant",
+          "content": "包むのは細い棒ですね。"
+        }
+      ],
+      "variants": [
+        {
+          "question": "細い棒ではなく、丸い石だよ。包む物だけ言い直して。",
+          "answer": "丸い石だね。",
+          "intent": "直前の誤答を訂正"
+        },
+        {
+          "question": "そう、細い棒で合っている。包む物だけ確認して。",
+          "answer": "細い棒だね。",
+          "intent": "同意を訂正にしない"
+        }
+      ]
+    },
+    {
+      "name": "status_not_action",
+      "history": [
+        {
+          "role": "user",
+          "content": "部品の検品は終わったけれど、袋詰めはまだ始めていない。"
+        }
+      ],
+      "variants": [
+        {
+          "question": "報告した状態だけ整理して。作業を引き受ける話は要らない。",
+          "answer": "検品は完了、袋詰めは未着手です。",
+          "intent": "状態を要約"
+        },
+        {
+          "question": "次は何が残っている？一つだけ答えて。",
+          "answer": "袋詰めです。",
+          "intent": "未完了を選ぶ"
+        }
+      ]
+    },
+    {
+      "name": "polite_disagreement",
+      "history": [],
+      "variants": [
+        {
+          "question": "私は丸い札が好き。でも違う好みを否定したいわけじゃない。この二点だけまとめて。",
+          "answer": "あなたは丸い札が好きで、別の好みも否定していないんだね。",
+          "intent": "好みと他者への態度を分ける"
+        },
+        {
+          "question": "私は丸い札が好き、という一文だけ短く整えて。他の人の話は足さないで。",
+          "answer": "「私は丸い札が好きです。」",
+          "intent": "指定範囲で文を整える"
+        }
+      ]
+    },
+    {
+      "name": "reflect_not_advise",
+      "history": [],
+      "variants": [
+        {
+          "question": "慌てて返事をして後悔している。今は次の行動を決めず、聞いていて。",
+          "answer": "急いで返したことを、今は後悔しているんだね。",
+          "intent": "助言を求めない気持ちに応じる"
+        },
+        {
+          "question": "慌てて返事をして後悔している。次から何を変えるとよさそう？一案だけ。",
+          "answer": "送る前に一度読み返す時間を置いてみるのはどうかな。",
+          "intent": "求められた範囲で提案"
+        }
+      ]
+    },
+    {
+      "name": "choose_criterion",
+      "history": [
+        {
+          "role": "user",
+          "content": "小箱は軽く、大箱はたくさん入る。今日は軽さを優先する。"
+        }
+      ],
+      "variants": [
+        {
+          "question": "この条件ならどちらか、一言で選んで。",
+          "answer": "軽い小箱だね。",
+          "intent": "明示された条件で選ぶ"
+        },
+        {
+          "question": "選ぶのは後でいい。二つの違いだけ教えて。",
+          "answer": "小箱は軽く、大箱はたくさん入るよ。",
+          "intent": "選択せず比較"
+        }
+      ]
+    },
+    {
+      "name": "not_a_promise",
+      "history": [],
+      "variants": [
+        {
+          "question": "今後いつか道具を整理したいな。今日は雑談として聞いてくれればいい。",
+          "answer": "道具を整理したいと思っているんだね。",
+          "intent": "将来の希望を今の依頼にしない"
+        },
+        {
+          "question": "道具を整理したい気持ちを、予定ではなく希望として一文にして。",
+          "answer": "「いつか道具を整理したいです。」",
+          "intent": "希望と確定予定を区別"
+        }
+      ]
+    },
+    {
+      "name": "acknowledgment_scope",
+      "history": [
+        {
+          "role": "user",
+          "content": "札の表は白、裏は銀色にする案を考えている。"
+        }
+      ],
+      "variants": [
+        {
+          "question": "へえ、って軽く聞いてくれれば十分。まだ決定ではないよ。",
+          "answer": "なるほど、表と裏で色を変える案なんですね。",
+          "intent": "軽い相づちと未決定を保つ"
+        },
+        {
+          "question": "その案に決めた。表と裏の色だけ確認して。",
+          "answer": "表は白、裏は銀色です。",
+          "intent": "決定した対応を確認"
+        }
+      ]
+    },
+    {
+      "name": "ask_for_one_detail",
+      "history": [
+        {
+          "role": "user",
+          "content": "布の色を迷っている。選択肢は生成りと紺色。"
+        }
+      ],
+      "variants": [
+        {
+          "question": "どちらか選ぶ前に、確認したいことを一つだけ聞いて。",
+          "answer": "落ち着いた色合いと明るい色合い、どちらにしたい？",
+          "intent": "不足する好みを確認"
+        },
+        {
+          "question": "選ぶ前の質問は要らない。候補の名前だけ並べて。",
+          "answer": "生成り、紺色。",
+          "intent": "確認せず指定された既知情報だけ返す"
+        }
+      ]
+    },
+    {
+      "name": "self_name",
+      "history": [],
+      "variants": [
+        {
+          "question": "あなた自身の名前だけ、今のキャラとして答えて。",
+          "answer": "{character}です。",
+          "intent": "キャラとして自分の名前を答える",
+          "requests": [
+            [
+              "character",
+              "名前"
+            ]
+          ]
+        },
+        {
+          "question": "私の名前が記録にあるなら、その名前だけ答えて。",
+          "answer": "{user}さん{ending}",
+          "intent": "利用者の名前を答える",
+          "requests": [
+            [
+              "user",
+              "名前"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "name": "self_preference",
+      "history": [
+        {
+          "role": "user",
+          "content": "友人の好みはまだ聞いていない。"
+        }
+      ],
+      "variants": [
+        {
+          "question": "友人の話は分からなくても、君自身の好きな飲み物なら何？",
+          "answer": "{first}の好きな飲み物は{character_drink}{ending}",
+          "intent": "他人の未知を本人へ広げない",
+          "requests": [
+            [
+              "character",
+              "飲み物"
+            ]
+          ]
+        },
+        {
+          "question": "あなたの好みではなく、今話した友人の好みを教えて。",
+          "answer": "今の話だけでは、友人の好みは分かりません。",
+          "intent": "別人の好みを補わない"
+        }
+      ]
+    },
+    {
+      "name": "target_of_thanks",
+      "history": [
+        {
+          "role": "user",
+          "content": "隣の人が材料を分けてくれた。まだお礼は伝えていない。"
+        }
+      ],
+      "variants": [
+        {
+          "question": "その人に渡す短いお礼の文だけ作って。実際の送信はいらない。",
+          "answer": "「材料を分けてくださり、ありがとうございます。」",
+          "intent": "第三者への文案だけ作る"
+        },
+        {
+          "question": "お礼の文は自分で考える。何が起きたかだけ短く確認して。",
+          "answer": "隣の人が材料を分けてくれたんだね。",
+          "intent": "文案を作らず出来事だけ確認"
+        }
+      ]
+    },
+    {
+      "name": "fact_or_impression",
+      "history": [
+        {
+          "role": "user",
+          "content": "輪郭は太く描けた。自分では少し強すぎる印象を受けた。"
+        }
+      ],
+      "variants": [
+        {
+          "question": "出来事と私の感想を分けて、短くまとめて。",
+          "answer": "輪郭は太く描けて、あなたには少し強すぎる印象だったんだね。",
+          "intent": "事実と感想を区別"
+        },
+        {
+          "question": "良し悪しを判定せず、私の感想だけ返して。",
+          "answer": "少し強すぎる印象だったんだね。",
+          "intent": "評価を加えず感想を反映"
+        }
+      ]
+    }
+  ],
+  "chains": [
+    {
+      "name": "branch-00",
+      "values": [
+        17,
+        31
+      ],
+      "total": 80,
+      "threshold": 30,
+      "operator": "ge",
+      "locations": [
+        "釧路市",
+        "富良野市"
+      ],
+      "weather": "曇り",
+      "temperatures": 9,
+      "line_start": 37,
+      "layout": 0,
+      "finish": 0
+    },
+    {
+      "name": "branch-01",
+      "values": [
+        29,
+        43
+      ],
+      "total": 125,
+      "threshold": 28,
+      "operator": "lt",
+      "locations": [
+        "北見市",
+        "帯広市"
+      ],
+      "weather": "晴れ",
+      "temperatures": 12,
+      "line_start": 48,
+      "layout": 1,
+      "finish": 1
+    },
+    {
+      "name": "branch-02",
+      "values": [
+        12,
+        11
+      ],
+      "total": 48,
+      "threshold": 25,
+      "operator": "ge",
+      "locations": [
+        "弘前市",
+        "花巻市"
+      ],
+      "weather": "雨",
+      "temperatures": 16,
+      "line_start": 59,
+      "layout": 2,
+      "finish": 2
+    },
+    {
+      "name": "branch-03",
+      "values": [
+        18,
+        19
+      ],
+      "total": 72,
+      "threshold": 25,
+      "operator": "gt",
+      "locations": [
+        "酒田市",
+        "米沢市"
+      ],
+      "weather": "薄曇り",
+      "temperatures": 21,
+      "line_start": 70,
+      "layout": 3,
+      "finish": 0
+    },
+    {
+      "name": "branch-04",
+      "values": [
+        34,
+        76
+      ],
+      "total": 160,
+      "threshold": 35,
+      "operator": "le",
+      "locations": [
+        "柏市",
+        "松戸市"
+      ],
+      "weather": "小雨",
+      "temperatures": 24,
+      "line_start": 81,
+      "layout": 0,
+      "finish": 1
+    },
+    {
+      "name": "branch-05",
+      "values": [
+        44,
+        68
+      ],
+      "total": 200,
+      "threshold": 28,
+      "operator": "lt",
+      "locations": [
+        "上田市",
+        "佐久市"
+      ],
+      "weather": "晴れ",
+      "temperatures": 18,
+      "line_start": 92,
+      "layout": 1,
+      "finish": 2
+    },
+    {
+      "name": "branch-06",
+      "values": [
+        55,
+        54
+      ],
+      "total": 220,
+      "threshold": 25,
+      "operator": "eq",
+      "locations": [
+        "豊橋市",
+        "岡崎市"
+      ],
+      "weather": "霧",
+      "temperatures": 26,
+      "line_start": 103,
+      "layout": 2,
+      "finish": 0
+    },
+    {
+      "name": "branch-07",
+      "values": [
+        36,
+        37
+      ],
+      "total": 144,
+      "threshold": 25,
+      "operator": "ne",
+      "locations": [
+        "彦根市",
+        "長浜市"
+      ],
+      "weather": "曇り",
+      "temperatures": 13,
+      "line_start": 114,
+      "layout": 3,
+      "finish": 1
+    }
+  ]
+}
