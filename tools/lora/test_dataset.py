@@ -377,19 +377,22 @@ class 製品判定用追加教材検査(unittest.TestCase):
         cls.base = dataset.generate_dataset()
         cls.extended = dataset.generate_dataset("product-gate")
         cls.cases = [c for c in cls.extended["cases"] if c["provenance"].get("extension") == "product-gate"]
+        cls.failures = [c for c in cls.cases if c["category"] == "gate_tool_failure"]
 
     def test_追加は明示指定だけで既存全ケースと固定材料を変えない(self):
         self.assertEqual(dataset.digest(self.base), "1b45ee2ed76d6c930a4406f1224264d66bc5c506e18b6f28846b338214faa71c")
         self.assertEqual(self.extended["cases"][:1244], self.base["cases"])
-        self.assertEqual({k: v["count"] for k, v in self.extended["metadata"]["splits"].items()}, {"train": 1362, "dev": 86, "final": 100})
+        self.assertEqual({k: v["count"] for k, v in self.extended["metadata"]["splits"].items()}, {"train": 1410, "dev": 86, "final": 100})
+        original = json.dumps(self.cases[:304], ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        self.assertEqual(hashlib.sha256(original).hexdigest(), "d98dad4b4b9db088c8b800ae0187ec268f50151d1e21b2129f33ae0bda977614")
         for name, expected in (("selection-v3.json", "26f1d5cc408df3dce09ef688acceacfb42f333d537786be22011cf95ccc899ed"), ("casual-challenge.json", "3a6fa14e6a5d413cacc2aed5e30ae9cc725ac9e4973c504c50b75f7d4d451a33")):
             path = Path(dataset.__file__).parent / "fixtures" / name
             self.assertEqual(hashlib.sha256(path.read_bytes()).hexdigest(), expected)
         with self.assertRaisesRegex(ValueError, "未対応"):
             dataset.generate_dataset("unknown")
 
-    def test_三百四件は学習専用で新人物と三つの一人称を持つ(self):
-        self.assertEqual(Counter(c["category"] for c in self.cases), {"gate_ownership": 48, "gate_quote": 48, "gate_knowledge": 64, "gate_correction": 32, "gate_conversation": 48, "gate_tool_branch": 64})
+    def test_三百五十二件は学習専用で新人物と三つの一人称を持つ(self):
+        self.assertEqual(Counter(c["category"] for c in self.cases), {"gate_ownership": 48, "gate_quote": 48, "gate_knowledge": 64, "gate_correction": 32, "gate_conversation": 48, "gate_tool_branch": 64, "gate_tool_failure": 48})
         self.assertTrue(all(c["split"] == "train" for c in self.cases))
         old_names = {name for c in self.base["cases"] for name in c["provenance"]["entities"].values()}
         names = {name for c in self.cases for name in c["provenance"]["entities"].values()}
@@ -503,6 +506,122 @@ class 製品判定用追加教材検査(unittest.TestCase):
             self.assertEqual(cases[-1]["expected"]["kind"], "exact")
             for entry in cases[-1]["expected"]["facts"]:
                 self.assertTrue(entry["source"].startswith("/continuation/"))
+
+    def test_失敗四十八件は同じ二十四文脈で停止と一度の確認を対比する(self):
+        groups = defaultdict(list)
+        coverage = Counter()
+        for case in self.failures:
+            choice = case["provenance"]["selection"]
+            self.assertEqual(choice["operation"], "branching_failure")
+            coverage[(choice["chain"], choice["stage"], choice["policy"])] += 1
+            groups[case["provenance"]["contrast_id"]].append(case)
+            self.assertEqual(set(case["target"]), {"role", "content"})
+            self.assertEqual(case["target"]["role"], "assistant")
+            self.assertEqual(case["expected"]["kind"], "exact")
+            self.assertEqual(case["expected"]["text"], case["target"]["content"])
+            self.assertIn("分かりません", case["target"]["content"])
+            unknown = {(e["owner"], e["kind"]) for e in case["expected"]["unknown"]}
+            self.assertEqual(unknown, {("tool", "天気")} | ({("tool", "割合")} if choice["stage"] < 2 else set()))
+            if choice["stage"] < 2:
+                self.assertIsNone(choice["percent"])
+                self.assertNotRegex(case["target"]["content"], r"\d+(?:\.\d+)?%")
+            self.assertNotRegex(case["target"]["content"], r"\d+(?:\.\d+)?\s*(?:°C|℃|度)")
+        chains = {chain for chain, _, _ in coverage}
+        self.assertEqual(len(chains), 8)
+        self.assertEqual(coverage, Counter({(chain, stage, policy): 1 for chain in chains for stage in range(3) for policy in ("stop", "ask")}))
+        self.assertEqual(len(groups), 24)
+        for pair in groups.values():
+            self.assertEqual(len(pair), 2)
+            by_policy = {c["provenance"]["selection"]["policy"]: c for c in pair}
+            stop, ask = by_policy["stop"], by_policy["ask"]
+            for key in ("history", "continuation", "character", "memories", "tool_names"):
+                self.assertEqual(stop[key], ask[key])
+            self.assertEqual(stop["group_id"], ask["group_id"])
+            self.assertEqual(stop["provenance"]["selection"]["stage"], ask["provenance"]["selection"]["stage"])
+            self.assertNotEqual(stop["question"], ask["question"])
+            self.assertNotEqual(stop["target"], ask["target"])
+            stopped = stop["target"]["content"]
+            self.assertNotRegex(stopped, r"教えて|よいですか|[?？]")
+            self.assertTrue(ask["target"]["content"].startswith(stopped))
+            request = ask["target"]["content"][len(stopped):]
+            self.assertEqual(len(re.findall(r"教えてください|よいですか", request)), 1)
+            self.assertIn(("場所", "母数", "再試行")[stop["provenance"]["selection"]["stage"]], request)
+
+    def test_連鎖は最後の失敗で止まり実際の読込値と取得済み割合だけを使う(self):
+        # 分岐の正解は既存の固定行列検査で照合済みの成功連鎖を参照する。
+        successful = [c for c in self.cases if c["category"] == "gate_tool_branch" and c["provenance"]["selection"]["stage"] == 3]
+        for case in self.failures:
+            choice = case["provenance"]["selection"]
+            if choice["policy"] != "stop":
+                continue
+            with self.subTest(case=case["id"]):
+                stage, messages = choice["stage"], case["continuation"]
+                self.assertEqual(len(messages), 2 * (stage + 1))
+                calls, responses = messages[::2], messages[1::2]
+                self.assertEqual([m["role"] for m in calls], ["assistant"] * (stage + 1))
+                self.assertEqual([m["role"] for m in responses], ["tool"] * (stage + 1))
+                self.assertTrue(all(len(m["tool_calls"]) == 1 for m in calls))
+                tools = [m["tool_calls"][0] for m in calls]
+                self.assertEqual([t["name"] for t in tools], ["read_file", "productivity_tools", "weather"][:stage + 1])
+                self.assertEqual(len({t["id"] for t in tools}), stage + 1)
+                for call, response in zip(tools, responses):
+                    self.assertEqual((response["tool_call_id"], response["name"]), (call["id"], call["name"]))
+                self.assertEqual([i for i, r in enumerate(responses) if r["content"].startswith("エラー:")], [stage])
+                read_args = tools[0]["arguments"]
+                self.assertEqual(set(read_args), {"path", "offset", "limit"})
+                self.assertTrue(read_args["path"].startswith("教材/"))
+                self.assertIn(read_args["path"], case["question"])
+                self.assertGreater(read_args["offset"], 0)
+                self.assertGreater(read_args["limit"], 0)
+                if stage == 0:
+                    continue
+                lines = re.findall(r"(?m)^(\d+)\t(.*)$", responses[0]["content"])
+                self.assertEqual([int(n) for n, _ in lines], list(range(read_args["offset"], read_args["offset"] + read_args["limit"])))
+                fields = {k: int(v) for k, v in re.findall(r"(?m)^\d+\t(value|total)\s*=\s*(\d+)\s*$", responses[0]["content"])}
+                self.assertEqual(set(fields), {"value", "total"})
+                self.assertEqual(tools[1]["arguments"], {"action": "percent_calc", **fields})
+                self.assertEqual(choice["total"], fields["total"])
+                if stage == 1:
+                    self.assertEqual(fields["total"], 0)
+                    self.assertEqual(responses[-1]["content"], "エラー: total は 0 以外を指定してください。")
+                    continue
+                self.assertGreater(fields["total"], 0)
+                percent = f"{fields['value'] / fields['total'] * 100:.2f}%"
+                self.assertEqual(responses[1]["content"], f"{fields['value']} / {fields['total']} = {percent}")
+                self.assertEqual(choice["percent"], percent)
+                self.assertIn(percent, case["target"]["content"])
+                reference = [c for c in successful if c["provenance"]["selection"]["chain"] == choice["chain"] and c["continuation"][2]["tool_calls"][0]["arguments"] == tools[1]["arguments"]]
+                self.assertEqual(len(reference), 1)
+                self.assertEqual(tools[2]["arguments"], reference[0]["continuation"][4]["tool_calls"][0]["arguments"])
+                self.assertIn(tools[2]["arguments"]["location"], case["target"]["content"])
+                self.assertIn(tools[2]["arguments"]["location"], responses[0]["content"])
+                weather = re.search(r"の天気：(.+)\*\*", reference[0]["continuation"][5]["content"]).group(1)
+                self.assertNotIn(weather, case["target"]["content"])
+                ratio = [e for e in case["expected"]["facts"] if e["kind"] == "割合"]
+                self.assertEqual([(e["owner"], e["value"], e["source"], e["status"]) for e in ratio], [("tool", percent, "/continuation/3/content", "known")])
+                places = [e for e in case["expected"]["facts"] if e["kind"] == "地域"]
+                self.assertEqual([(e["owner"], e["value"], e["source"], e["status"]) for e in places], [("tool", tools[2]["arguments"]["location"], "/continuation/1/content", "known")])
+                self.assertFalse(any(e["kind"] in ("天気", "気温") for e in case["expected"]["facts"]))
+
+    def test_失敗で未知の天気や割合を既知に変えても形式合わせでは通らない(self):
+        samples = {c["provenance"]["selection"]["stage"]: c for c in self.failures if c["provenance"]["selection"]["policy"] == "stop"}
+        self.assertEqual(set(samples), {0, 1, 2})
+        for stage, case in samples.items():
+            dataset.validate_dataset({"cases": [case]})
+            for unknown in case["expected"]["unknown"]:
+                with self.subTest(stage=stage, kind=unknown["kind"]):
+                    changed = copy.deepcopy(case)
+                    value = "晴れ" if unknown["kind"] == "天気" else "99.99%"
+                    source = f"/continuation/{len(changed['continuation']) - 1}/content"
+                    self.assertNotIn(value, dataset.pointer(changed, source))
+                    invented = {**unknown, "value": value, "source": source, "status": "known"}
+                    changed["expected"]["unknown"].remove(unknown)
+                    changed["expected"]["facts"].append(invented)
+                    changed["provenance"]["facts"].append(copy.deepcopy(invented))
+                    changed["target"]["content"] += f"{unknown['kind']}は{value}です。"
+                    changed["expected"]["text"] = changed["target"]["content"]
+                    with self.assertRaisesRegex(ValueError, "正解の根拠が入力にありません"):
+                        dataset.validate_dataset({"cases": [changed]})
 
 
 if __name__ == "__main__":
