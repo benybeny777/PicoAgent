@@ -60,6 +60,8 @@ python -B tools/lora/tool_chain.py --server '<llama-server実行ファイル>' -
 
 共通runnerの引数・専用サーバ・生成・保存・終了処理を使い、同じbody・templateで比較する。CPU検査は`--gpu-layers 0`を明示する。`--fixture <raw fixture JSON>`は本番body以外の全内容を照合する正本を選び、`--variants base|adapter|both`は実行する候補を選ぶ（既定both）。baseだけならadapterを読まず、adapter/bothでは`--adapter`が必須。件数はシナリオ数×seed 1/2/3×候補数で決まり、既定は18 run。`--generation-profile`で設定をそろえ、cache_promptはfalseを維持する。`--max-generations`は既定かつ最大6、`--chain-timeout`は既定600秒で1 runの総時間を制限する。モデルが実際に生成したID・名前・JSON引数を照合してから、その呼出と対応する架空結果を次の生成へ渡す。正解呼出の先置き・置換、実ファイル読込、外部API実行は行わない。
 
+既定の`tool-chain-eval.json`の3文脈は、既に回答を確認した開発用評価として扱う。未使用の採用判定には`tool-chain-acceptance-v1.json`の6文脈を`--fixture`と対応する本番bodyで指定し、開発品質・退行・既知連鎖の合格後にだけ実行する。既知の9 run（3文脈×3seed）を、未使用の18 run（6文脈×3seed）の代わりにしない。
+
 順序違い・ID再利用・引数違い・依存呼出の並列化・早期終了・読込失敗後の追加呼出は不合格とする。各生成のbody・生応答・timings・経過時間・架空結果を`*.events.jsonl`へ追記し、全JSONは一定間隔・失敗・終了時に保存する。実行した候補だけの専用ログと各runの停止理由も残し、既存結果は上書きしない。終了コード0は機械検査完了、2は連鎖不合格あり、1は通信・起動等の処理失敗。最終回答の意味・数値説明・人格は機械検査で合格にせず、意味レビューを別記録にする。AI評価と人手評価を区別し、人が評価していない場合は`human_judgment: null`を維持する。実アプリの停止・人格変更・音声の受入や製品採用とは別に扱う。モデルを使わない回帰は`python -B -m unittest discover -s tools/lora -p test_tool_chain.py`で実行する。
 
 `parity.py --input <本番body付きJSON> --inspection <inspect結果JSON> --base <HF資産ディレクトリ> --template <本番Jinja> --output <新規照合JSON>`で照合する。最終評価の入力も照合できるが、正解はローカルの学習範囲検査だけに使用し、モデルへ送信しない。一致判定は入力とテンプレートのSHA-256、全caseの対応、全文、全token IDのすべてを対象とする。llama.cppがテンプレートからBOSを除きtoken化時に戻す場合は、その単一BOSと全token一致を確認したうえで実効入力全文を比較する。raw本文の差と補正内容も保存し、他の本文差を正規化して隠さない。
