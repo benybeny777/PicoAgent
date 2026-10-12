@@ -5,7 +5,7 @@
 ## 現在の状態
 
 - 最終確認日: 2026-10-12
-- 日本語1.2Bの製品化判定を継続中。`codex/lora-product-gate`、worktreeは`C:/Users/benyb/.codex/worktrees/lfm-jp-lora/20_PicoAgent`。利用者は見切り基準を先に決めてそこまで検証することと、まず非量子化1.2Bを比較することを承認した。PR本文の事前基準を正本とし、既定モデル・利用者設定は候補の検証だけでは変更しない。前回資産は`temp/lora-training/`、今回の記録は`temp/lora-product-gate/`。最終評価の出力を見た後に教材へ戻さない。
+- 日本語1.2Bの製品化判定はDraft PR #499で継続中。ただし2026-10-12の利用者指示によりゲームを優先し、GPU学習・推論は停止。PCを重くしない保存済みログと文書の整理だけ許可されている。GPUが空いても自動再開せず、利用者の再開指示を待つ。`codex/lora-product-gate`、worktreeは`C:/Users/benyb/.codex/worktrees/lfm-jp-lora/20_PicoAgent`。第1学習は20/341 stepで中断しcheckpoint未保存。旧v2から新runにする必要があり、残予算は再現を含む2実行・5071秒。PR本文の判定基準・教材の不足・再開条件を正本とする。前回資産は`temp/lora-training/`、今回の停止記録・残予算は`temp/lora-product-gate/train-v3-user-stop.json`と`training-budget.json`。既定モデル・利用者設定は候補比較で変更せず、最終評価の出力を見た後に教材へ戻さない。
 - PR #389〜#394 は利用者のマージ指示を受けて順に `main` へ取り込んだ。配信の既定構図・チャット・タイトルバー、全キャラ確認画面、配置編集の境界、ダウンロード済みMMD・Live2Dモデルの登録候補表示を含む。統合後の `cargo xtask verify` は128件成功、`cargo audit` は脆弱性0件（既存警告7件）。Windows WebView2の残る目視項目は `docs/TASKS.md` を参照する。
 - 配信MMDの構図は描画器で修正し、#387 の描画方式別の初期配置補正は撤去した。利用者の `PICOAGENT_SCENES` に保存済みのさくらみこ711px配置は移行・上書き・削除していない。新しい胸上構図で位置が合わない場合は、右クリック「キャラを自動配置へ戻す」でそのキャラ・形式だけ既定配置へ戻せる。
 - 利用者の許可を受けGemma 4 E2B画像資産（約0.99GB）を導入済み。共通の `local-vision` へ配置し、通常チャットのローカル画像認識を実機確認した。画像入力設定は有効。再取得は不要。
