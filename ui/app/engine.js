@@ -25,7 +25,7 @@ export function createEngine({ status, onChange, onReady }) {
     } else if (phase === "verify") {
       status.setSticky("ローカルモデルを確認中… ※数分かかることがあります", "pending");
     } else if (phase === "starting") {
-      status.setSticky("ローカルAIを起動中…", "pending");
+      status.setSticky("ローカルAIのモデルを読み込み中…", "pending");
     } else if (phase === "idle") {
       status.setSticky("ローカルAIの起動を待っています…", "pending");
     } else if (phase === "error") {
@@ -77,19 +77,29 @@ export function createEngine({ status, onChange, onReady }) {
         : "ローカルAIを準備中です。完了すると送信できます", 3000);
     },
     /** 準備が済むか、明示的な失敗になるまで待つ（送信できない通常画面を先に見せないため）。 */
-    async waitUntilSettled(onPoll) {
+    async waitUntilSettled(onPoll, { includeMemory = false } = {}) {
       for (;;) {
         let state;
         try { state = await bridge.engineStatus(); }
         catch (error) {
           logApp("warn", "エンジン状態取得に失敗しました", errorDetail(error));
-          const failed = { phase: "error", message: "ローカルAIの準備状態を確認できませんでした" };
+          const message = "起動時のモデル準備状態を確認できませんでした";
+          const failed = { phase: "error", message, startupError: message };
           apply(failed);
           return failed;
         }
         apply(state);
         onPoll?.(state);
-        if (state && (state.phase === "ready" || state.phase === "error")) return state;
+        if (required && state?.phase === "error") return state;
+        const engineReady = !required || state?.phase === "ready";
+        const memory = state?.memoryEmbedding;
+        if (engineReady && includeMemory && memory?.phase === "error") {
+          return { ...state, startupError: memory.message || "長期メモリ検索の準備に失敗しました" };
+        }
+        if (engineReady && (!includeMemory || ["ready", "disabled"].includes(memory?.phase))) return state;
+        if (engineReady && includeMemory) {
+          status.set(memory?.message || "長期メモリ検索のモデルを準備中…", "boot");
+        }
         await new Promise(resolve => setTimeout(resolve, 1000));
       }
     },

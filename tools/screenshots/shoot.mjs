@@ -154,7 +154,7 @@ window.__TAURI__ = {
     if (name === "engine_status") {
       const ready = Date.now() >= window.__engineReadyAt;
       if (ready && !window.__startupMarks.engineReadyAt) window.__startupMarks.engineReadyAt = Date.now();
-      return Promise.resolve({ phase: ready ? "ready" : "starting" });
+      return Promise.resolve({ phase: ready ? "ready" : "starting", memoryEmbedding: { phase: "disabled" } });
     }
     if (name === "aivis_status") return Promise.resolve({ enabled: true, up: Date.now() >= window.__bootReadyAt });
     if (name === "pet_prepare_voice_model") return new Promise(resolve => setTimeout(() => {

@@ -604,17 +604,24 @@ async function loadSceneDefinitions() {
       logApp("warn", "動的あいさつの取得に失敗しました", errorDetail(error));
     }
     startupGreeting = greeting;
-    if (engine.required && info.onboardingDone) {
-      // 送信できない通常画面を先に見せず、準備完了か明示的な失敗になるまで起動画面で進捗を伝える。
-      const state = await engine.waitUntilSettled(state => {
-        if (!state || state.phase === "idle") status.set("ローカルAIを確認中…", "boot");
-      });
-      if (state?.phase === "error") startupError = state.message || "ローカルAIの準備に失敗しました";
-    } else if (engine.required) {
-      // 初回セットアップ中は待たせない（数GBの取得が終わるまで案内を出さないと何分も待たせる）。
-      engine.waitUntilSettled().catch(error => logApp("error", "ローカルAIの起動確認に失敗しました", errorDetail(error)));
+    // 固定の起動文言を外し、取得・照合・モデルロードの進捗をそのまま見せる。
+    status.clear("boot");
+    const state = await engine.waitUntilSettled(null, { includeMemory: true });
+    if (state?.startupError) startupError = state.startupError;
+    else if (engine.required && state?.phase === "error") startupError = state.message || "ローカルAIの準備に失敗しました";
+    status.clear("boot");
+    if (!startupError && !info.onboardingDone) {
+      try {
+        const installedVoice = await onboarding.installVoice();
+        if (installedVoice?.error) voiceError = installedVoice.error;
+        const voiceState = await bridge.aivisStatus();
+        voice.setEnabled(voiceState.enabled === true);
+      } catch (error) {
+        logApp("error", "初回音声の導入状態を確認できませんでした", errorDetail(error));
+        voiceError = "音声の導入状態を確認できませんでした。設定の診断を確認してください";
+      }
     }
-    if (!startupError && info.onboardingDone && info.ttsEnabled !== false) {
+    if (!startupError && voice.enabled) {
       if (voice.enabled) {
         status.set("声を準備中…", "boot");
         try {
@@ -653,7 +660,6 @@ async function loadSceneDefinitions() {
   if (!info.onboardingDone) {
     voice.stop();
     onboarding.show();
-    onboarding.installVoice().catch(error => logApp("warn", "音声読み上げの自動準備を開始できませんでした", errorDetail(error)));
   } else {
     mic.scheduleContinuous();
   }

@@ -4316,10 +4316,20 @@ pub fn restart_app(
 #[tauri::command]
 pub async fn engine_status(app: tauri::AppHandle) -> Result<Value, String> {
     use tauri::Manager;
-    match app.try_state::<crate::engine::EngineState>() {
-        Some(e) => Ok(e.status.lock().unwrap().clone()),
-        None => Ok(json!({ "phase": "idle" })),
-    }
+    let mut status = match app.try_state::<crate::engine::EngineState>() {
+        Some(e) => e.status.lock().unwrap().clone(),
+        None => json!({ "phase": "idle" }),
+    };
+    status["memoryEmbedding"] = if app
+        .state::<AppState>()
+        .config
+        .get_bool("PICOAGENT_MEMORY_ENABLED", true)
+    {
+        crate::memory_embedding::status()
+    } else {
+        json!({ "phase": "disabled" })
+    };
+    Ok(status)
 }
 
 /// バイト数を人が読めるサイズ文字列にする（モデル一覧表示用）。
