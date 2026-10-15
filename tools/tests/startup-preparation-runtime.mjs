@@ -7,7 +7,7 @@ import test from "node:test";
 const source = (await readFile(new URL("../../ui/app/engine.js", import.meta.url), "utf8"))
   .replace(/^import .*;\r?\n/gm, "")
   .replace("export function createEngine", "function createEngine");
-const main = await readFile(new URL("../../ui/app/main.js", import.meta.url), "utf8");
+const main = (await readFile(new URL("../../ui/app/main.js", import.meta.url), "utf8")).replace(/\r\n/g, "\n");
 const preparation = main.slice(main.indexOf('    status.clear("boot");\n    const state ='), main.indexOf('\n  } catch (error) {\n    logApp("error", "キャラクター読込に失敗しました"'));
 assert.ok(preparation.includes("await engine.waitUntilSettled"));
 
