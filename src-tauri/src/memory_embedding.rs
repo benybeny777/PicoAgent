@@ -380,6 +380,8 @@ pub fn prepare(app: AppHandle) {
     use tauri::Manager;
     // 起動前に数えておき、直後の会話が準備の開始前にロックを取って二重に準備を始めないようにする。
     PREPARING.fetch_add(1, Ordering::SeqCst);
+    // 非同期処理の開始前から準備中にし、再初期化が前回のreadyを拾わないようにする。
+    set_status("prepare", "長期メモリ検索のモデルを準備中…", "");
     struct Prepared;
     impl Drop for Prepared {
         fn drop(&mut self) {

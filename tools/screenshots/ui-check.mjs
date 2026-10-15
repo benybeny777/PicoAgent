@@ -85,7 +85,7 @@ window.__TAURI__ = {
       localStorage.setItem("test.renderer-config", JSON.stringify(window.__rendererConfig));
       return Promise.resolve({ rendererOverrides: window.__rendererConfig });
     }
-    if (name === "engine_status") return Promise.resolve({ phase: "ready" });
+    if (name === "engine_status") return Promise.resolve({ phase: "ready", memoryEmbedding: { phase: "disabled" } });
     if (name === "aivis_status") return Promise.resolve({ enabled: false });
     if (name === "pet_speak") return Promise.resolve({ enabled: false });
     if (name === "pet_send") return new Promise(resolve => setTimeout(() => resolve({ reply: "了解だよ。**太字**と [リンク](https://example.com) も出せるよ。" }), 200));
@@ -123,7 +123,7 @@ const report = [];
 const fail = (label, detail) => { failures.push(`${label}: ${detail}`); console.error(`NG ${label}: ${detail}`); };
 const ok = label => console.log(`OK ${label}`);
 
-async function openApp({ layout, width, height, characterId, providerId, scenes, onboardingDone, history, uiTheme, beforeNavigate, diagnostic = false }) {
+async function openApp({ layout, width, height, characterId, providerId, scenes, onboardingDone, history, uiTheme, beforeNavigate, diagnostic = false, booting = false }) {
   // 窓とモニターは別の寸法。キャラ拡大時の窓拡張も実ブリッジと同じく検査する。
   const context = await browser.newContext({ viewport: { width, height }, screen: { width: 1920, height: 1080 }, deviceScaleFactor: 1 });
   const page = await context.newPage();
@@ -134,6 +134,7 @@ async function openApp({ layout, width, height, characterId, providerId, scenes,
   await page.addInitScript(mockScript({ layout, characterId, providerId, scenes, onboardingDone, history, uiTheme }));
   await beforeNavigate?.(page);
   await page.goto(base);
+  if (booting) return { context, page, errors };
   await page.waitForFunction(() => !document.getElementById("petApp").classList.contains("is-booting"), null, { timeout: 30000 });
   if (!diagnostic) await page.waitForFunction(() => {
     const canvas = document.querySelector("[data-source=character] canvas");
@@ -225,7 +226,59 @@ const characters = process.env.UI_CHECK_CHARACTERS === "all"
   : (process.env.UI_CHECK_CHARACTERS || "mugi,rin,photoreal-prototype").split(",");
 const layoutIds = (process.env.UI_CHECK_LAYOUTS || "pet,mascot,stream").split(",");
 
+async function verifyStartupPreparation() {
+  const output = path.join(root, "temp", "startup-preparation-review");
+  fs.mkdirSync(output, { recursive: true });
+  for (const onboardingDone of [false, true]) {
+    const name = onboardingDone ? "通常起動" : "初回起動";
+    const { page, context, errors } = await openApp({
+      layout: "pet", width: 680, height: 430, characterId: "mugi", onboardingDone, booting: true,
+      beforeNavigate: page => page.addInitScript(() => {
+        window.__startupState = { phase: "download", percent: 37, memoryEmbedding: { phase: "prepare", message: "記憶モデルをロード中" } };
+        const invoke = window.__TAURI__.core.invoke;
+        window.__TAURI__.core.invoke = async (name, args) => {
+          if (name === "engine_status") return window.__startupState;
+          if (name === "aivis_status") return { enabled: true, up: true };
+          if (name === "settings_components_status") return [{ id: "aivis", ready: true, available: true }];
+          if (name === "pet_prepare_voice_model") return new Promise(resolve => {
+            window.__releaseStartupVoice = () => resolve({ enabled: true, ready: true });
+          });
+          const result = await invoke(name, args);
+          if (name === "pet_init") result.ttsEnabled = true;
+          return result;
+        };
+      }),
+    });
+    try {
+      for (const [phase, text] of [["download", "37%"], ["starting", "モデルを読み込み中"], ["memory", "記憶モデルをロード中"], ["voice", "声を準備中"]]) {
+        if (phase !== "download") await page.evaluate(phase => {
+          window.__startupState.phase = phase === "starting" ? "starting" : "ready";
+          if (phase === "voice") window.__startupState.memoryEmbedding.phase = "ready";
+        }, phase);
+        await page.waitForFunction(text => document.querySelector(".boot-status")?.textContent.includes(text), text);
+        const held = await page.evaluate(() => ({
+          booting: document.getElementById("petApp").classList.contains("is-booting"),
+          hidden: getComputedStyle(document.getElementById("stage")).visibility === "hidden",
+          finished: window.__calls.some(call => ["pet_finish_boot", "pet_reveal_main"].includes(call.name)),
+        }));
+        if (!held.booting || !held.hidden || held.finished) throw new Error(`${name}/${phase}: 準備前に通常画面へ進みました`);
+        await page.screenshot({ path: path.join(output, `${onboardingDone ? "normal" : "first"}-${phase}.png`) });
+      }
+      await page.waitForFunction(() => typeof window.__releaseStartupVoice === "function");
+      await page.evaluate(() => window.__releaseStartupVoice());
+      await page.waitForFunction(() => !document.getElementById("petApp").classList.contains("is-booting"));
+      if (errors.length) throw new Error(errors.join("\n"));
+      ok(`${name}: 取得・AIロード・記憶モデル・音声の準備まで通常画面を隠し、進捗を表示`);
+    } finally {
+      await context.close();
+    }
+  }
+}
+
 try {
+if (process.env.UI_CHECK_STARTUP_ONLY === "1") {
+  await verifyStartupPreparation();
+} else {
 if (process.env.PICOAGENT_UI_QUANTITY_ONLY !== "1") {
 if (process.env.UI_CHECK_DIAGNOSTIC_ONLY !== "1") {
 for (const characterId of characters) {
@@ -760,6 +813,7 @@ for (const layout of ["pet", "mascot", "stream"]) {
   } finally { await context.close(); }
 }
 
+}
 fs.writeFileSync(path.join(outDir, "report.json"), JSON.stringify({ report, failures }, null, 2));
 if (failures.length) {
   console.error(`\n${failures.length} 件の失敗`);

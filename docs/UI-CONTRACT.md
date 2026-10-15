@@ -75,7 +75,7 @@
 | `pet_emotion` | なし | 感情状態 |
 | `pet_quit` | なし | なし |
 | `pet_log` | `level`, `message`, `detail` | なし。`app.log` へ書く |
-| `engine_status` | なし | 同梱推論エンジンの状態 `{ phase, percent?, receivedBytes?, totalBytes?, message? }` |
+| `engine_status` | なし | 同梱推論エンジンの状態 `{ phase, percent?, receivedBytes?, totalBytes?, message?, memoryEmbedding }`。`memoryEmbedding` は記憶検索の状態 `{ phase, message?, device? }`。無効時は `phase: disabled`。起動時は両方の準備を待つ |
 
 通常送信・画像送信・自発雑談の `stale: true` は、受付時のキャラID・会話世代が現在と一致しなくなった旧処理の結果を示す。空の返信や失敗の代替返信として扱わず、画面の返答・履歴・音声へ反映せず破棄する。固定文へも切り替えない。目覚ましはターン取得後のキャラを使い、生成中の世代違いによる旧返答は破棄して同じ発火ジョブを現在のキャラで再取得する。画面のrevisionだけが変わった成功でも `consumed=true` は保持する。再取得は1秒から20秒まで待ちを増やす。初回OFFは中止し、自動消費後の一度きりジョブは削除・明示解除で止める。繰り返しの無効化も中止する。
 
@@ -147,7 +147,7 @@
 | `pet:agent_activity` | `{ phase, tools, failedTools?, labels?, success? }` | 実行中タスクの行を組み立てる |
 | `pet:stream_chunk` | 文字列 | 生成途中の本文 |
 | `pet:stream_reset` | なし | 途中本文を捨てる（ツール実行を挟んだ再生成） |
-| `engine:status` | `engine_status` と同じ | 送信可否と状態行 |
+| `engine:status` | `engine_status` のエンジン状態部分（`memoryEmbedding` を除く） | 送信可否と状態行 |
 | `component:progress` | `{ id, downloaded, total }` | 追加機能の取得進捗 |
 | `settings:navigate` | タブID | 設定画面のタブ移動 |
 | `character-maker:state` / `character-maker:progress` | 作成状態 | 設定画面のキャラ作成 |

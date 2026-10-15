@@ -189,7 +189,7 @@ window.__TAURI__ = {
         ? ["claude", "claude:opus", "claude:sonnet", "codex", "codex:future-model"] : [];
     }
     if (name === "settings_check_update") return { status: "available", downloadReady: true, message: "1.1.0を利用できます。" };
-    if (name === "engine_status") return { phase: "ready" };
+    if (name === "engine_status") return { phase: "ready", memoryEmbedding: { phase: "disabled" } };
     // 学習セクションは全タブ構築時に一覧を読む。空オブジェクトではなくAPIの正規形を返す。
     if (name === "settings_character_learning_list") return { supported: true, runtimeInstalled: true, activeId: null, jobs: [] };
     if (name === "aivis_status") return { enabled: true, up: true };

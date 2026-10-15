@@ -59,8 +59,9 @@ test("廃止した画面のコードとCSSを残さない", () => {
 
 test("音声読み上げは選ばせず初回に自動導入し、成功時に読み上げを有効にする", () => {
   assert.match(onboarding, /async function installVoice\(\)/);
-  // 案内の表示を待たせない（await しない）。
-  assert.match(main, /onboarding\.show\(\);\s*\n\s*onboarding\.installVoice\(\)\.catch\(/);
+  // 初回も導入完了を待ち、未準備の通常画面を先に出さない。
+  assert.match(main, /await onboarding\.installVoice\(\)/);
+  assert.ok(main.indexOf("await onboarding.installVoice()") < main.indexOf("await boot.release(status)"));
   // 導入できた時点で読み上げを有効にする（第2引数 true）。
   assert.match(onboarding, /installComponents\(\["aivis"\], true\)/);
   // 取得済み・取得不能では走らせない。

@@ -24,9 +24,9 @@ const startupEnd = main.indexOf("\n})().catch(error => {", startupStart);
 assert.ok(startupStart >= 0 && startupEnd > startupStart, "起動シーケンスを抽出できません");
 const startup = main.slice(startupStart, startupEnd);
 
-test("セットアップ済みのlocal選択はAIと音声の準備完了まで起動画面を維持する", () => {
+test("初回もAI・記憶検索・音声の準備完了まで起動画面を維持する", () => {
   assert.match(engine, /required = \(info\.providerId \|\| "local"\) === "local";/);
-  assert.match(startup, /if \(engine\.required && info\.onboardingDone\) \{[\s\S]*?const state = await engine\.waitUntilSettled\(/);
+  assert.match(startup, /status\.clear\("boot"\);\s*const state = await engine\.waitUntilSettled\(null, \{ includeMemory: true \}\);/);
   assert.match(startup, /status\.set\("声を準備中…", "boot"\);[\s\S]*?await voice\.prepareModel\(\);\s*\n\s*if \(startupGreeting\) preparedGreeting = await voice\.prepare\(startupGreeting\);/);
   // 初期化前・ローカルAIの準備前は送信させない。
   assert.match(engine, /if \(!initialized\) return "初期化完了後に送信できます";/);
@@ -38,10 +38,12 @@ test("起動した管理エンジンの疎通失敗は子を回収してから�
   assert.match(polling, /Err\(error\) => \{\s*terminate_managed_child\(&app\);\s*set_status\([\s\S]*?return;/);
 });
 
-test("初回セットアップはローカルAIの取得完了を待たない", () => {
-  // 初回案内はローカルAIを使わない。数GBの取得を待たせると、初回だけ何分も案内へ入れないため、監視だけ始めて画面を返す。
-  assert.match(startup, /\} else if \(engine\.required\) \{[\s\S]*?engine\.waitUntilSettled\(\)\.catch/);
-  assert.match(startup, /if \(!startupError && info\.onboardingDone && info\.ttsEnabled !== false\) \{/);
+test("初回音声の導入は通常画面へ戻す前に待ち、案内は準備後に出す", () => {
+  assert.doesNotMatch(startup, /engine\.required && info\.onboardingDone|engine\.waitUntilSettled\(\)\.catch/);
+  assert.ok(startup.indexOf("await onboarding.installVoice()") < startup.indexOf("await voice.prepareModel()"));
+  assert.ok(startup.indexOf("await voice.prepareModel()") < startup.indexOf("await boot.release(status)"));
+  assert.ok(startup.indexOf("await boot.release(status)") < startup.indexOf("onboarding.show()"));
+  assert.match(commands, /status\["memoryEmbedding"\][\s\S]*?memory_embedding::status\(\)/);
 });
 
 test("準備完了後に配信画面へ切り替え、起動音声はその後に再生する", () => {
@@ -62,8 +64,8 @@ test("準備完了後に配信画面へ切り替え、起動音声はその後�
 });
 
 test("ローカルAIがエラーなら音声準備へ進まず元のエラーを保つ", () => {
-  assert.match(startup, /if \(state\?\.phase === "error"\) startupError = state\.message/);
-  assert.match(startup, /if \(!startupError && info\.onboardingDone && info\.ttsEnabled !== false\) \{[\s\S]*?prepareModel/);
+  assert.match(startup, /if \(engine\.required && state\?\.phase === "error"\) startupError = state\.message/);
+  assert.match(startup, /if \(!startupError && voice\.enabled\) \{[\s\S]*?prepareModel/);
 });
 
 test("長いダウンロード中は進捗通知を続け通常画面で停止する", () => {

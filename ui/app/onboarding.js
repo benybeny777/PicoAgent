@@ -51,7 +51,7 @@ export function createOnboarding({ dialog, status, openExternalUrl, onComplete, 
     else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
   });
 
-  /** 声はこの製品の中心なので、選択式にせず初回に自動で導入する（案内の表示は待たせない）。 */
+  /** 初回の音声導入も起動画面で待ち、通常画面へ未準備の声を持ち越さない。 */
   async function installVoice() {
     const statuses = await bridge.componentStatus();
     const aivis = statuses.find(item => item.id === "aivis");
@@ -74,9 +74,11 @@ export function createOnboarding({ dialog, status, openExternalUrl, onComplete, 
       status.flash("音声読み上げを準備しました", 3000);
     } catch (error) {
       logApp("warn", "音声読み上げを自動で準備できませんでした", errorDetail(error));
-      status.flash(navigator.onLine
+      const message = navigator.onLine
         ? "音声読み上げを準備できませんでした。設定の「追加機能・更新」から入れ直せます"
-        : "オフラインのため音声読み上げの準備を見送りました", 8000);
+        : "オフラインのため音声読み上げの準備を見送りました";
+      status.flash(message, 8000);
+      return { error: message };
     } finally {
       release?.();
     }
