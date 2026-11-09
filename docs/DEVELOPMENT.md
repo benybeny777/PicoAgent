@@ -42,7 +42,7 @@ cargo test --manifest-path src-tauri/Cargo.toml --lib agent::context::fixtures::
 Remove-Item Env:LORA_FIXTURE_INPUT, Env:LORA_FIXTURE_OUTPUT
 ```
 
-`runner.py`は`--server <実行ファイル> --model <ベースGGUF> --template <本番Jinja> --input <本番body付きJSON> --output <新規結果JSON> --gpu-layers <0|99>`を必須とする。0はCPU、99はGPU。`--device`へ渡す番号は実行前に`llama-server --list-devices`で実名と対応させる。番号を過去の実行から引き継がず、GPU比較では`--expected-device-name <実GPU名>`も指定する。起動ログの実名が完全一致しなければ、推論前に専用サーバを回収して停止する。CPUと実GPU名指定の併用は拒否する。
+`runner.py`は`--server <実行ファイル> --model <ベースGGUF> --input <本番body付きJSON> --output <新規結果JSON> --gpu-layers <0|99>`を必須とする。テンプレートは`--template <本番Jinja>`で指定する。候補GGUFにチャットテンプレートが入っていることを確認済みなら、`evaluate`で代わりに`--embedded-template`を指定できる。この場合はllama-serverのテンプレート選択に委ね、結果にその指定とGGUFのSHA-256を記録する。LoRAの入力照合や学習は本番Jinjaを明示する。0はCPU、99はGPU。`--device`へ渡す番号は実行前に`llama-server --list-devices`で実名と対応させる。番号を過去の実行から引き継がず、GPU比較では`--expected-device-name <実GPU名>`も指定する。起動ログの実名が完全一致しなければ、推論前に専用サーバを回収して停止する。CPUと実GPU名指定の併用は拒否する。
 
 `--adapter <LoRA GGUF>`の省略時はベースのみ。`evaluate`はseed 1・2・3、キャッシュなし、最大生成256tokenを既定とし、`--seeds`・`--max-tokens`・`--split`・`--limit`で対象を明示できる。生成設定はrunner内の正本を共有する`--generation-profile current|official|greedy`で選ぶ。currentは従来のtemperature 0.6、officialはLFM2.5-1.2B-JP-202606公式カードのtemperature 0.1・top_k 50・repetition_penalty 1.05（llama.cpp API名はrepeat_penalty）、greedyはofficialのtemperatureだけ0にする。指定外の値は元のbodyとサーバ既定を保持し、公式環境の完全再現とは呼ばない。profileと実要求を結果へ保存し、benchmarkと連続ツールも同じ正本を使う。全入力を照合する`inspect`には`--split`・`--limit`を付けず、生成profileも受け付けない。
 
