@@ -184,8 +184,10 @@ def server_arguments(args, port, api_key):
                "--host", "127.0.0.1", "--port", str(port),
                "--ctx-size", str(args.context), "--gpu-layers", str(args.gpu_layers),
                "--parallel", "1", "--cache-ram", "0", "--fit", "off",
-               "--jinja", "--chat-template-file", str(args.template.resolve()),
+               "--jinja",
                "--api-key", api_key, "--no-webui", "--no-agent", "--perf"]
+    if args.template is not None:
+        command += ["--chat-template-file", str(args.template.resolve())]
     if args.adapter is not None:
         command += ["--lora", str(args.adapter.resolve())]
     # b11429は既定の詳細度3ではdeviceとoffloadの証跡が残らない。
@@ -365,7 +367,8 @@ def run(args):
     source, cases = load_cases(args.input, args.split, args.limit)
     seeds = args.seeds if args.command == "evaluate" else [None]
     planned = [(case["id"], seed) for case in cases for seed in seeds]
-    files = {name: file_record(getattr(args, name)) for name in ("server", "model", "template", "input")}
+    files = {name: file_record(getattr(args, name)) for name in ("server", "model", "input")}
+    files["template"] = file_record(args.template) if args.template is not None else {"source": "gguf"}
     if args.adapter is not None:
         files["adapter"] = file_record(args.adapter)
     document = {
@@ -467,11 +470,19 @@ def seeds_value(value):
     return values
 
 
-def add_server_arguments(command, *, adapter_required=False, include_generation_profile=True):
+def add_server_arguments(command, *, adapter_required=False, include_generation_profile=True,
+                         allow_embedded_template=False):
     for field, help_text in (("server", "起動するllama-server実行ファイル"), ("model", "ベースGGUF"),
-                             ("template", "本番Jinjaテンプレート"), ("input", "Rustがbodyを追加したcases JSON"),
+                             ("input", "Rustがbodyを追加したcases JSON"),
                              ("output", "新規作成する結果JSON")):
         command.add_argument("--" + field, type=Path, required=True, help=help_text)
+    template = command
+    if allow_embedded_template:
+        template = command.add_mutually_exclusive_group(required=True)
+        template.add_argument("--embedded-template", action="store_true",
+                              help="候補GGUF内蔵のチャットテンプレートを使う")
+    template.add_argument("--template", type=Path, required=not allow_embedded_template,
+                          help="本番Jinjaテンプレート")
     command.add_argument("--adapter", type=Path, required=adapter_required,
                          help="比較するLoRA GGUF" + ("。必須" if adapter_required else "。省略時はベースのみ"))
     command.add_argument("--gpu-layers", type=int, choices=(0, 99), required=True, help="0はCPU、99はGPU")
@@ -493,7 +504,8 @@ def parser():
     for name, description in (("evaluate", "本番入力で回答を生成し、未採点の結果を保存する"),
                               ("inspect", "本番テンプレートの入力文字列とtoken IDを保存する")):
         command = commands.add_parser(name, help=description, description=description)
-        add_server_arguments(command, include_generation_profile=name == "evaluate")
+        add_server_arguments(command, include_generation_profile=name == "evaluate",
+                             allow_embedded_template=name == "evaluate")
         command.add_argument("--seeds", type=seeds_value, default=[1, 2, 3], help="推論seed。既定1,2,3")
         command.add_argument("--limit", type=positive_integer, help="対象ケースの先頭件数")
         command.add_argument("--split", help="対象splitの完全一致名")

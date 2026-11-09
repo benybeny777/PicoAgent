@@ -178,6 +178,26 @@ class RunnerTests(unittest.TestCase):
                 self.assertEqual(command.count("--verbosity"), 1)
                 self.assertEqual(command[command.index("--verbosity") + 1], str(expected))
 
+    def test_生成評価だけが内蔵テンプレートを明示選択できる(self):
+        from contextlib import redirect_stderr
+        import io
+
+        required = ["--server", "server.exe", "--model", "model.gguf", "--input", "cases.json",
+                    "--output", "result.json", "--gpu-layers", "0"]
+        parser = runner.parser()
+        args = parser.parse_args(["evaluate", *required, "--embedded-template"])
+        self.assertNotIn("--chat-template-file", runner.server_arguments(args, 12345, "test-key"))
+        for options in (["evaluate"], ["evaluate", "--embedded-template", "--template", "template.jinja"],
+                        ["inspect", "--embedded-template"]):
+            with self.subTest(指定=options), redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+                parser.parse_args([*options, *required])
+
+        with self.environment(seeds="1") as (args, _, _):
+            args.template = None
+            result = runner.run(args)
+            self.assertEqual(result["files"]["template"], {"source": "gguf"})
+            self.assertIn("sha256", result["files"]["model"])
+
     @contextmanager
     def environment(self, mode="evaluate", questions=("質問",), startup="通常", seeds="1,2"):
         directory = Path(__file__).resolve().parents[2] / "temp" / "lora-runner-tests"
