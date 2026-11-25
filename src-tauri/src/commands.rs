@@ -144,6 +144,16 @@ const RESTART_SETTINGS: &[(&str, SettingKind, RestartTarget)] = &[
         RestartTarget::Engine,
     ),
     (
+        "PICOAGENT_LOCAL_THREADS",
+        SettingKind::Text("0"),
+        RestartTarget::Engine,
+    ),
+    (
+        "PICOAGENT_LOCAL_THREADS_BATCH",
+        SettingKind::Text("0"),
+        RestartTarget::Engine,
+    ),
+    (
         "PICOAGENT_LOCAL_GPU_DEVICE",
         SettingKind::Text(""),
         RestartTarget::Engine,
@@ -6635,6 +6645,18 @@ mod tests {
             .contains("PICOAGENT_LOCAL_CTX"));
         cfg.set("PICOAGENT_LOCAL_CTX", &i64::MAX.to_string());
         assert_eq!(super::conversation_token_budget(&cfg).unwrap(), 24_000);
+    }
+
+    #[test]
+    fn cpuスレッド数の変更はエンジンだけの再起動を要求する() {
+        let config = crate::config::Config::new();
+        for key in ["PICOAGENT_LOCAL_THREADS", "PICOAGENT_LOCAL_THREADS_BATCH"] {
+            config.set(key, "0");
+            let patch = serde_json::json!({key: "6"}).as_object().unwrap().clone();
+            let restart = super::SettingsRestart::changes(&config, &patch);
+            assert!(restart.engine);
+            assert!(!restart.aivis && !restart.character);
+        }
     }
 
     #[test]

@@ -190,6 +190,12 @@ def server_arguments(args, port, api_key):
         command += ["--chat-template-file", str(args.template.resolve())]
     if args.adapter is not None:
         command += ["--lora", str(args.adapter.resolve())]
+    for name in ("threads", "threads_batch"):
+        value = getattr(args, name, None)
+        if value is not None:
+            if type(value) is not int or not 1 <= value <= 1024:
+                raise ValueError("CPUスレッド数は1〜1024の整数で指定してください")
+            command += ["--" + name.replace("_", "-"), str(value)]
     # b11429は既定の詳細度3ではdeviceとoffloadの証跡が残らない。
     verbosity = getattr(args, "verbosity", None)
     command += ["--verbosity", str(5 if verbosity is None else verbosity)]
@@ -379,6 +385,7 @@ def run(args):
                        **(generation_parameters(args) if args.command == "evaluate" else {}),
                        "cache_prompt": False, "stream": False,
                        "max_tokens": args.max_tokens, "gpu_layers": args.gpu_layers,
+                       "threads": getattr(args, "threads", None), "threads_batch": getattr(args, "threads_batch", None),
                        "context": args.context, "split": args.split, "limit": args.limit},
         "expected_results": len(planned),
         "journal": {"path": str(journal_path), "verified_records": 0},
@@ -487,6 +494,8 @@ def add_server_arguments(command, *, adapter_required=False, include_generation_
                          help="比較するLoRA GGUF" + ("。必須" if adapter_required else "。省略時はベースのみ"))
     command.add_argument("--gpu-layers", type=int, choices=(0, 99), required=True, help="0はCPU、99はGPU")
     command.add_argument("--device", help="明示する製品GPUデバイス名")
+    command.add_argument("--threads", type=positive_integer, help="CPUの生成用スレッド数。省略時はエンジンの自動設定")
+    command.add_argument("--threads-batch", type=positive_integer, help="CPUの入力処理用スレッド数。省略時はエンジンの既定")
     command.add_argument("--expected-device-name", help="GPU99時だけ、起動ログの実GPU名を完全一致で検査。不一致・証拠不足なら推論前に停止")
     command.add_argument("--context", type=positive_integer, default=4096, help="文脈長。既定4096")
     command.add_argument("--max-tokens", type=positive_integer, default=256, help="最大生成token数。既定256")

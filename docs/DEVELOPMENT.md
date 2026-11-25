@@ -22,7 +22,7 @@
 | `python tools/lora/training.py ...` | ローカルHF資産を使ってCUDA GPU上でLoRAだけを更新する。GPU要件を満たさない場合は停止する |
 | `python tools/lora/probe.py ...` | 少量学習したアダプタの有無をCPU・GPUで比較し、同じ入力の候補token確率が変わることを検査する。品質評価とは分ける |
 | `python tools/lora/runner.py evaluate ...` | 本番bodyで回答を生成し、seed別の生出力・ツール呼出・timings・経過時間を未採点のまま保存する |
-| `python tools/lora/benchmark.py ...` | 明示したdev入力で基底とアダプタを比較し、SSEの応答開始時間・全体時間・生成量をキャッシュ別に反復測定する |
+| `python tools/lora/benchmark.py ...` | 明示したdev入力で基底モデルを測定し、指定時はアダプタとも比較する。SSEの応答開始時間・全体時間・生成量をキャッシュ別に反復測定する |
 | `python tools/lora/tool_chain.py ...` | 実際に生成したツール呼出へ架空結果を返し、基底とアダプタの連続ツール利用を比較する |
 
 本番テンプレートの正本は`src-tauri/src/providers/templates/lfm25-jp-history.jinja`。教材の`body`をPython側で作り直さない。Rustの出力テストは`LORA_FIXTURE_INPUT`と`LORA_FIXTURE_OUTPUT`へ異なる新規入出力先を明示して実行する。
@@ -50,7 +50,7 @@ Remove-Item Env:LORA_FIXTURE_INPUT, Env:LORA_FIXTURE_OUTPUT
 
 適用検査の`effect_detected`は共通候補のlogprobに1e-5を超える差を確認した状態。`no_effect_detected`は取得済みの同位置の差が閾値以下で、アダプタ全体の無効を証明しない。確率欠落・入力や位置の不一致・バックエンド未確認は`inconclusive`（判定不能）とし、差ゼロと分ける。終了コードは順に0・1・2、中断は130。比較結果・制約前後の入力・生応答を新規JSONへ残す。このASCII出力は計測用であり、回答品質の評価には使わない。
 
-`benchmark.py`はrunnerと同じサーバ引数に加え、`--adapter <LoRA GGUF> --case-ids <devのIDをカンマ区切りで1〜8件>`を必須とする。基底・アダプタそれぞれでキャッシュ無／有を分け、各入力を準備1回と測定3回、同じseedで生成する。TTFTはSSEで最初の可視文字を受け取るまでの時間とし、全体時間・サーバtimings・実際のcache_n・生成token数・生回答とcase別median/p95を保存する。3回のp95は最大値になるため参考値として扱う。短答や誤答による高速化を自動合格にせず、意味と生成量を照合する。JSON/SSEとも総応答時間を制限し、未完のSSE・指標欠落を成功扱いにしない。
+`benchmark.py`はrunnerと同じサーバ引数に加え、`--case-ids <devのIDをカンマ区切りで1〜8件>`を必須とする。`--adapter <LoRA GGUF>`を指定すると基底・アダプタを比較し、省略すると基底だけを測定する。runnerとbenchmarkの`--threads`・`--threads-batch`でCPUの生成用・入力処理用スレッド数を個別指定できる（1〜1,024、省略時はエンジンの既定）。異なる設定を別の出力名で測定し、benchmarkは指定値と実際の起動引数を記録する。各モデルでキャッシュ無／有を分け、各入力を準備1回と測定3回、同じseedで生成する。TTFTはSSEで最初の可視文字を受け取るまでの時間とし、全体時間・サーバtimings・実際のcache_n・生成token数・生回答とcase別median/p95を保存する。3回のp95は最大値になるため参考値として扱う。短答や誤答による高速化を自動合格にせず、意味と生成量を照合する。JSON/SSEとも総応答時間を制限し、未完のSSE・指標欠落を成功扱いにしない。
 
 `tool_chain.py`の既定入力は`fixtures/tool-chain-eval.json`。読込→割合計算→計算結果で地点を選ぶ天気取得→回答の2文脈と、読込失敗後に追加呼出せず回答する1文脈を持つ。この3文脈はPR #498で結果を検討済みの開発評価として扱う。未使用の採用判定は`fixtures/tool-chain-acceptance-v1.json`の6文脈を用い、候補を固定した後にだけ回答を生成する。最終結果で教材を調整して同じ集合を再受験しない。上記のRust出力テストへfixtureを渡して本番bodyを作り、次のように実行する。
 

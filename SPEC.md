@@ -244,6 +244,7 @@ inventory::submit! { ProviderReg { make: || Box::new(MyProvider) } }
 
 - **取得**: エンジン本体（`llama-server` + ggml DLL）はリポジトリに含めず、`cargo xtask setup engine`（`bundled::fetch_engine`）で `src-tauri/resources/bundled/engine/` に取得する。llama.cpp 安定版 v0.6.0 が対応付けた `b11429` を正本とし、Windows・Ubuntu は Vulkan、macOS は Metal の資産名と固定SHA-256を GitHub digest と実体の両方へ照合する。配置後は `picoagent-engine.json` へタグ・資産名・SHA-256を残し、一致しない既存配置は取り直す。`LLAMACPP_ASSET` で資産を変えるときは `LLAMACPP_SHA256` も必須。`tauri.conf.json` の `bundle.resources` で同梱する。
 - **起動**（既定が `local` のとき `engine::ensure_and_start` を非同期実行）:
+  - CPUの生成用・入力処理用スレッド数を個別に指定できる。各値が0の場合はその引数を渡さずllama.cppの自動設定を維持する。保存時は管理エンジンを再起動して反映する。機種・モデル・入力長ごとに実測し、全論理コア数や特定PCの測定値を全機種へ強制しない。GPU使用時もCPU側の処理へ適用するが、GPUへ収まる計算をCPUへ移す指定ではない。
   1. **モデル選定**: `PICOAGENT_LOCAL_MODEL_PRESET` が未設定か `auto` なら、ツール履歴補正を適用する LFM2.5 1.2B JP-202606 Q4_K_M（約0.731GB）を選んで `PICOAGENT_MODEL` と一緒に `config.json` へ保存する。保存できなければ理由を画面へ出して起動を止める。利用者が明示保存したプリセットは変えない。LFM2.5 1.2B JPは一般候補へ公開する。LLM-jp-4 8B Thinkingは思考文の非表示と連続ツール利用が未確認のため、互換用に残すだけで新規候補に出さない。`custom` だけは `PICOAGENT_MODEL_URL` を直接使う。同じ工程で `PICOAGENT_LOCAL_CTX` も、保存値と環境変数が無い場合だけ既定32,768を保存する（既存の保存値は上書きしない）。
 
   - **LFM2.5 1.2B日本語版のツール履歴**: 公式JP-202606の埋込テンプレートはassistant.tool_callsを描画しないため、管理プリセットのサイズ・SHA-256が一致した実体に限り、公式形式を維持して呼出名・引数の直列化を補った同梱Jinjaを適用する。テンプレートはソースへ組み込み、起動引数で渡す。custom、他モデル、外部サーバには適用しない。同定不一致は理由付きエラーとして起動を止め、標準形式へ黙って切り替えない。ツール結果ID、本文、会話順を保持し、天気取得・別ツールによる計算・次ターンの追加計算・履歴回顧を実推論で検査する。利用者の採用指示により初回選択の既定とするが、人物・記憶・引用の帰属を含む会話品質の受入とは分けて扱う。既存の明示選択は変更しない。

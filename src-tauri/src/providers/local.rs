@@ -600,6 +600,8 @@ impl Provider for Local {
                 "false",
             ),
             Field::int(&crate::config::ints::LOCAL_NGL),
+            Field::int(&crate::config::ints::LOCAL_THREADS),
+            Field::int(&crate::config::ints::LOCAL_THREADS_BATCH),
             Field::new(
                 "PICOAGENT_LOCAL_GPU_DEVICE",
                 "使用 GPU（空=既定先頭 / 複数 GPU は Vulkan1 等を指定）",

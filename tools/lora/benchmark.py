@@ -1,4 +1,4 @@
-"""明示したdev入力で基底とLoRAのSSE応答時間を測る。品質の自動採点は行わない。"""
+"""明示したdev入力で基底モデルまたはLoRAのSSE応答時間を測る。品質の自動採点は行わない。"""
 
 from __future__ import annotations
 
@@ -170,7 +170,7 @@ def distribution(values):
             "p95": values[math.ceil(len(values) * 0.95) - 1] if values else None}
 
 
-def summarize(results):
+def summarize(results, compare_adapter=True):
     groups = {}
     for result in results:
         if result["warmup"] or result["status"] != "completed":
@@ -193,6 +193,8 @@ def summarize(results):
         adapter = groups.get((case_id, "adapter", cache_prompt), [])
         counts = {name: [sample["generated_tokens"] for sample in samples]
                   for name, samples in (("base", base), ("adapter", adapter))}
+        if not compare_adapter:
+            continue
         comparisons.append({"case_id": case_id, "cache_prompt": cache_prompt, "generated_token_counts": counts,
                             "same_generated_counts": len(base) == len(adapter) == REPETITIONS and counts["base"] == counts["adapter"],
                             "quality_judgment": None, "speed_improvement_judgment": None,
@@ -201,8 +203,8 @@ def summarize(results):
             "groups": summaries, "comparisons": comparisons}
 
 
-def plan(cases):
-    for variant in ("base", "adapter"):
+def plan(cases, variants=("base", "adapter")):
+    for variant in variants:
         for case in cases:
             for cache_prompt in (False, True):
                 for repetition in range(REPETITIONS + 1):
@@ -213,22 +215,22 @@ def plan(cases):
 
 def run(args):
     profile = getattr(args, "generation_profile", "current")
-    if args.adapter is None:
-        raise ValueError("基底との比較に--adapterが必要です")
+    variants = ("base", "adapter") if args.adapter is not None else ("base",)
     source, cases = selected_cases(args.input, args.case_ids)
     lookup = {case["id"]: case for case in cases}
-    runs = list(plan(cases))
+    runs = list(plan(cases, variants))
     planned = [item["run_id"] for item in runs]
     output = args.output.resolve()
     journal_path = output.with_name(output.stem + ".results.jsonl")
-    logs = {variant: output.with_name(output.stem + f".{variant}.server.log") for variant in ("base", "adapter")}
+    logs = {variant: output.with_name(output.stem + f".{variant}.server.log") for variant in variants}
     if any(path.exists() for path in (output, journal_path, *logs.values(), output.with_name(output.name + ".pending"))):
         raise FileExistsError(f"結果またはログが既にあります。新しい出力名を指定してください: {output}")
     document = {"schema_version": 1, "mode": "benchmark", "status": "running", "started_at": runner.utc_now(),
-                "files": {name: runner.file_record(getattr(args, name)) for name in ("server", "model", "adapter", "template", "input")},
+                "files": {name: runner.file_record(getattr(args, name)) for name in ("server", "model", "adapter", "template", "input") if getattr(args, name) is not None},
                 "input_metadata": {key: value for key, value in source.items() if key != "cases"},
                 "parameters": {"case_ids": args.case_ids, "split": "dev", "gpu_layers": args.gpu_layers,
                                "device": args.device, "context": args.context, "max_tokens": args.max_tokens,
+                               "threads": getattr(args, "threads", None), "threads_batch": getattr(args, "threads_batch", None),
                                **runner.generation_parameters(args), "seed": 1, "repetitions": REPETITIONS, "warmup_per_group": 1,
                                "stream": True, "request_timeout": args.request_timeout},
                 "expected_results": len(runs), "results": [], "servers": {},
@@ -290,14 +292,14 @@ def run(args):
                 document["journal"]["error"] = f"{type(journal_error).__name__}: {journal_error}"
         raise
     finally:
-        document["summary"] = summarize(document["results"])
+        document["summary"] = summarize(document["results"], compare_adapter=args.adapter is not None)
         document["finished_at"] = runner.utc_now()
         runner.save_result(output, document)
 
 
 def parser():
     result = argparse.ArgumentParser(description=__doc__)
-    runner.add_server_arguments(result, adapter_required=True)
+    runner.add_server_arguments(result, adapter_required=False)
     result.add_argument("--case-ids", type=case_ids, required=True, help="測定するdevのcase IDをカンマ区切りで1〜8件")
     return result
 
