@@ -191,6 +191,20 @@ class BenchmarkTests(unittest.TestCase):
             with mock.patch.object(benchmark.runner, "local_server", side_effect=server), redirect_stdout(io.StringIO()):
                 yield args, requests, closed
 
+    def test_アダプタなしでも基底のキャッシュ別反復を測定して架空の比較を作らない(self):
+        with self.environment() as (args, requests, closed):
+            args.adapter = None
+            args.threads, args.threads_batch = 6, 10
+            document = benchmark.run(args)
+            self.assertEqual(document["status"], "completed")
+            self.assertEqual(len(requests), 16)
+            self.assertEqual(closed, ["base"])
+            self.assertNotIn("adapter", document["files"])
+            self.assertEqual(document["parameters"]["threads"], 6)
+            self.assertEqual(document["parameters"]["threads_batch"], 10)
+            self.assertEqual(document["summary"]["comparisons"], [])
+            self.assertTrue(all(group["complete"] for group in document["summary"]["groups"]))
+
     def test_明示devだけを選びfinal欠落重複を拒否する(self):
         with self.environment() as (args, _, _):
             for identifiers in (["final-A"], ["missing"], ["dev-A", "dev-A"], []):

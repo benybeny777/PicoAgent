@@ -634,7 +634,9 @@ fn spawn_server(
     let gpu_device = state.config.get("PICOAGENT_LOCAL_GPU_DEVICE", "");
     let candidate_gpu_device = gpu_device_for_candidate(candidate.label, &gpu_device);
 
+    let thread_arguments = cpu_thread_arguments(&state.config).map_err(anyhow::Error::msg)?;
     let mut cmd = crate::tools::process::command_sync(server);
+    cmd.args(&thread_arguments);
     cmd.arg("-m")
         .arg(model)
         .arg("--host")
@@ -683,13 +685,14 @@ fn spawn_server(
         .open(&log_path)?;
     writeln!(
         log,
-        "\n==== llama-server 起動: backend={} model={} port={} ctx={} ngl={} device={} ====",
+        "\n==== llama-server 起動: backend={} model={} port={} ctx={} ngl={} device={} cpu_threads={:?} ====",
         candidate.label,
         model.display(),
         port,
         ctx,
         ngl,
-        candidate_gpu_device.unwrap_or("(default)")
+        candidate_gpu_device.unwrap_or("(default)"),
+        thread_arguments
     )?;
     let err_log = log.try_clone()?;
     cmd.stdin(Stdio::null())
@@ -757,12 +760,28 @@ fn start_generation_is_current(engine: &EngineState, generation: u64) -> bool {
     !engine.stopping.load(Ordering::SeqCst) && *engine.start_generation.borrow() == generation
 }
 
+/// 0は自動設定として省略し、不正な値をエンジンへ渡さない。
+fn cpu_thread_arguments(config: &crate::config::Config) -> Result<Vec<String>, String> {
+    let mut arguments = Vec::new();
+    for (setting, flag) in [
+        (&crate::config::ints::LOCAL_THREADS, "--threads"),
+        (&crate::config::ints::LOCAL_THREADS_BATCH, "--threads-batch"),
+    ] {
+        let value = config.int(setting)?;
+        if value != 0 {
+            arguments.extend([flag.to_string(), value.to_string()]);
+        }
+    }
+    Ok(arguments)
+}
+
 async fn ensure_and_start_inner(app: AppHandle, start_generation: u64) {
     // 不正設定がある場合は、資産の移行・取得や既存サーバへの接続より前に止める。
     let config = &app.state::<AppState>().config;
     let validated = config.int(&crate::config::ints::LOCAL_NGL).and_then(|ngl| {
         local::port(config)?;
         local::context_length(config)?;
+        cpu_thread_arguments(config)?;
         Ok(ngl.to_string())
     });
     let configured_ngl = match validated {
@@ -1055,6 +1074,30 @@ pub fn clear_stopping(app: &AppHandle) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn cpuスレッド設定は自動値を省略し明示値だけを渡して不正値は拒否する() {
+        let config = crate::config::Config::new();
+        for (threads, batch, expected) in [
+            ("0", "0", vec![]),
+            ("6", "0", vec!["--threads", "6"]),
+            ("0", "10", vec!["--threads-batch", "10"]),
+            ("6", "10", vec!["--threads", "6", "--threads-batch", "10"]),
+        ] {
+            config.set("PICOAGENT_LOCAL_THREADS", threads);
+            config.set("PICOAGENT_LOCAL_THREADS_BATCH", batch);
+            assert_eq!(super::cpu_thread_arguments(&config).unwrap(), expected);
+        }
+        for key in ["PICOAGENT_LOCAL_THREADS", "PICOAGENT_LOCAL_THREADS_BATCH"] {
+            for value in ["-1", "1025", "abc", "1.5"] {
+                config.set(key, value);
+                assert!(super::cpu_thread_arguments(&config)
+                    .unwrap_err()
+                    .contains(key));
+            }
+            config.set(key, "0");
+        }
+    }
+
     use super::{
         decimal_gb, existing_backend_candidates, gpu_device_for_candidate, migration_file_names,
         model_file_matches, parse_meminfo_total_bytes, parse_nvidia_memory_bytes,

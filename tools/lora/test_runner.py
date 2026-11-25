@@ -89,6 +89,23 @@ HTTPServer(("127.0.0.1", port), Handler).serve_forever()
 
 
 class RunnerTests(unittest.TestCase):
+    def test_CPUスレッド数は省略時に自動設定を維持し不正値を起動前に拒否する(self):
+        args = runner.parser().parse_args([
+            "evaluate", "--server", "server.exe", "--model", "model.gguf",
+            "--template", "template.jinja", "--input", "cases.json",
+            "--output", "result.json", "--gpu-layers", "0",
+        ])
+        self.assertNotIn("--threads", runner.server_arguments(args, 12345, "test-key"))
+        for name, flag in (("threads", "--threads"), ("threads_batch", "--threads-batch")):
+            setattr(args, name, 6)
+            command = runner.server_arguments(args, 12345, "test-key")
+            self.assertEqual(command[command.index(flag) + 1], "6")
+            for value in (0, -1, 1025, True, 1.5):
+                setattr(args, name, value)
+                with self.assertRaisesRegex(ValueError, "CPUスレッド数"):
+                    runner.server_arguments(args, 12345, "test-key")
+            setattr(args, name, None)
+
     def test_実GPU名の一致だけで推論を許可し違うGPUと証拠欠落は回収する(self):
         for startup in ("NVIDIA", "Intel", "通常", "複数GPU"):
             with self.subTest(startup=startup), self.environment(startup=startup, seeds="1") as (args, _, created):

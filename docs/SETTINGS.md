@@ -78,6 +78,8 @@
 | `PICOAGENT_LOCAL_VISION_ENABLED` | `false` | local | Gemma 4 E2B（small）の共通画像入力。通常チャットの画像添付とスキルで共有し、ゲーム設定には依存しない。`setup local-vision`で追加資産を明示導入する。保存時にエンジンを再起動して反映し、通常起動で追加取得しない |
 | `PICOAGENT_LOCAL_CTX` | `32768` | local | コンテキスト長。保存値と環境変数が未設定の場合だけ選択プリセットの値を保存する。下限32,768を満たさない保存値や環境値は理由つきで拒否し、自動で引き上げない。旧既定8,192などを保存している場合は設定を32,768以上へ修正する。全スキル定義だけで約16,000トークンあるため狭い値は使わない |
 | `PICOAGENT_LOCAL_NGL` | `999` | local | GPU へオフロードするレイヤ数（`999`=全レイヤ優先 / `0`=CPU 固定） |
+| `PICOAGENT_LOCAL_THREADS` | `0` | local | CPUの生成用スレッド数（0=llama.cppの自動設定、1〜1,024=明示指定）。保存時に管理エンジンを再起動して反映。コア数を増やせば速くなるとは限らないため、同じモデル・入力で実測する |
+| `PICOAGENT_LOCAL_THREADS_BATCH` | `0` | local | CPUの入力処理用スレッド数（0=llama.cppの既定で生成用に追従、1〜1,024=明示指定）。生成用とは別に調整し、保存時に管理エンジンを再起動して反映 |
 | `PICOAGENT_LOCAL_GPU_DEVICE` | （空=既定先頭） | local | 使用 GPU の指定（複数 GPU 環境向け、例 `Vulkan1`）。保存名は同じバックエンド候補だけへ渡し、CUDA等の別候補は各方式の既定先頭デバイスで起動する |
 | `OLLAMA_HOST` | `http://127.0.0.1:11434` | ollama | Ollama 接続先 |
 | `PICOAGENT_GAME_ENABLED` | `false` | game_play | Windowsのゲームプレイスキルを有効にする |
@@ -317,6 +319,8 @@
 | `PICOAGENT_LOCAL_CTX` | `32768` | `32768` | `9223372036854775807` | トークン | 不可 |
 | `PICOAGENT_LOCAL_NGL` | `999` | `0` | `9223372036854775807` | レイヤ | 不可 |
 | `PICOAGENT_LOCAL_PORT` | `11435` | `1` | `65535` | — | 不可 |
+| `PICOAGENT_LOCAL_THREADS` | `0` | `0` | `1024` | スレッド | 不可 |
+| `PICOAGENT_LOCAL_THREADS_BATCH` | `0` | `0` | `1024` | スレッド | 不可 |
 | `PICOAGENT_MARKET_TIMEOUT_SECS` | `15` | `3` | `60` | 秒 | 不可 |
 | `PICOAGENT_MASTODON_TIMEOUT_SECS` | `20` | `3` | `60` | 秒 | 不可 |
 | `PICOAGENT_MEMORY_MAX_ITEMS` | `80` | `10` | `200` | 件 | 不可 |
